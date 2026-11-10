@@ -1,6 +1,8 @@
 //! Retry logic with exponential backoff and jitter.
 //!
 //! Provides automatic retry for transient failures with configurable backoff.
+//! Server-directed waits (`Retry-After`) are honored only within
+//! [`MAX_RETRY_AFTER`]; see [`RetryAfterBudget`].
 
 use std::time::Duration;
 
@@ -11,6 +13,149 @@ const DEFAULT_MAX_ATTEMPTS: u32 = 5;
 const DEFAULT_INITIAL_DELAY_MS: u32 = 1000;
 const DEFAULT_MAX_DELAY_MS: u32 = 30000;
 const DEFAULT_JITTER_FACTOR: f32 = 0.5;
+
+/// Longest a retried call waits on server-directed delays (`Retry-After`), in
+/// total.
+///
+/// The wait blocks the calling thread, and a server can ask for anything: an
+/// over-quota gateway once sent `Retry-After` of a day. A minute covers
+/// ordinary rate limits (a few seconds each) across a whole retry policy. A
+/// `Retry-After` that does not fit in what is left of it ends the loop at once
+/// with the server's error: retrying before the server's time would only be
+/// refused again, and sleeping past the budget is what this bound prevents.
+/// Policy backoff (no `Retry-After`) is not charged against it.
+pub const MAX_RETRY_AFTER: Duration = Duration::from_secs(60);
+
+/// What remains of [`MAX_RETRY_AFTER`] during one retried call.
+///
+/// Create one per call (not per attempt) and [`spend`](Self::spend) every
+/// server-directed wait through it before sleeping.
+///
+/// # Examples
+///
+/// ```
+/// use std::time::Duration;
+/// use xybrid_core::http::RetryAfterBudget;
+///
+/// let mut budget = RetryAfterBudget::new();
+/// assert!(budget.spend(Duration::from_secs(1)));
+/// // A day does not fit: give up instead of sleeping.
+/// assert!(!budget.spend(Duration::from_secs(86_400)));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetryAfterBudget {
+    remaining: Duration,
+}
+
+impl RetryAfterBudget {
+    /// A full budget of [`MAX_RETRY_AFTER`].
+    pub const fn new() -> Self {
+        Self {
+            remaining: MAX_RETRY_AFTER,
+        }
+    }
+
+    /// A budget of `limit`, for a call with a tighter deadline of its own.
+    ///
+    /// Never more than [`MAX_RETRY_AFTER`]: a larger `limit` gives the full
+    /// budget.
+    pub fn with_limit(limit: Duration) -> Self {
+        Self {
+            remaining: limit.min(MAX_RETRY_AFTER),
+        }
+    }
+
+    /// Charge `wait` to the budget if it fits, returning whether the caller
+    /// may sleep it.
+    ///
+    /// `false` leaves the budget unchanged and means "give up now": the
+    /// server asked for longer than this call will wait.
+    pub fn spend(&mut self, wait: Duration) -> bool {
+        match self.remaining.checked_sub(wait) {
+            Some(left) => {
+                self.remaining = left;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Server-directed waiting this call may still do.
+    pub fn remaining(&self) -> Duration {
+        self.remaining
+    }
+}
+
+impl Default for RetryAfterBudget {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Read an HTTP `Retry-After` value as the wait it asks for, as of `now`.
+///
+/// Both forms RFC 9110 allows are read: delay-seconds (`"120"`) and an
+/// HTTP-date (`"Wed, 21 Oct 2015 07:28:00 GMT"`, the time until then; a date
+/// already past is no wait). The result is always whole seconds, rounded up,
+/// so [`Duration::as_secs`] loses nothing. Two out-of-spec forms are read
+/// too, because guessing a default for them could wait far less (or more)
+/// than the server asked: a delay too large for `u64` saturates, and a
+/// fractional delay (`"1.5"`) rounds up.
+///
+/// Returns `None` for anything else, so the caller applies its own default.
+///
+/// # Examples
+///
+/// ```
+/// use std::time::{Duration, SystemTime};
+/// use xybrid_core::http::parse_retry_after;
+///
+/// let now = SystemTime::now();
+/// assert_eq!(parse_retry_after("120", now), Some(Duration::from_secs(120)));
+/// assert_eq!(
+///     parse_retry_after("Thu, 01 Jan 1970 00:00:00 GMT", now),
+///     Some(Duration::ZERO)
+/// );
+/// assert_eq!(parse_retry_after("soon", now), None);
+/// ```
+pub fn parse_retry_after(value: &str, now: std::time::SystemTime) -> Option<Duration> {
+    let value = value.trim();
+    if let Some(secs) = parse_delay_seconds(value) {
+        return Some(Duration::from_secs(secs));
+    }
+
+    use chrono::{DateTime, NaiveDateTime, Utc};
+    let date = DateTime::parse_from_rfc2822(value)
+        .map(|date| date.with_timezone(&Utc))
+        .or_else(|_| {
+            NaiveDateTime::parse_from_str(value, "%a, %d %b %Y %H:%M:%S GMT")
+                .map(|date| date.and_utc())
+        })
+        .ok()?;
+    // Negative (a date already past) is no wait at all.
+    let ahead = date
+        .signed_duration_since(DateTime::<Utc>::from(now))
+        .to_std()
+        .unwrap_or_default();
+    let secs = ahead
+        .as_secs()
+        .saturating_add(u64::from(ahead.subsec_nanos() > 0));
+    Some(Duration::from_secs(secs))
+}
+
+/// Delay-seconds, plus the out-of-spec forms [`parse_retry_after`] accepts:
+/// digits that overflow `u64` saturate, and a fraction rounds up.
+fn parse_delay_seconds(value: &str) -> Option<u64> {
+    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+    let all_digits = |s: &str| s.bytes().all(|b| b.is_ascii_digit());
+    if whole.is_empty() || !all_digits(whole) || !all_digits(fraction) {
+        return None;
+    }
+    // All ASCII digits, so the only possible parse error is overflow.
+    let whole = whole.parse::<u64>().unwrap_or(u64::MAX);
+    let round_up = fraction.bytes().any(|b| b != b'0');
+    Some(whole.saturating_add(u64::from(round_up)))
+}
 
 /// Configuration for retry behavior.
 #[derive(Debug, Clone)]
@@ -106,7 +251,8 @@ pub enum RetryResult<T, E> {
     Success(T),
     /// Operation failed with a non-retryable error.
     Failure(E),
-    /// All retry attempts exhausted.
+    /// All retry attempts exhausted, or the server asked to wait longer than
+    /// the [`RetryAfterBudget`] allows.
     Exhausted {
         /// The last error encountered.
         last_error: E,
@@ -136,7 +282,8 @@ pub trait RetryableError {
     /// Returns true if the error is transient and the operation should be retried.
     ///
     /// Retryable errors include:
-    /// - 429 (Rate Limited)
+    /// - 429 (Rate Limited), but not a spent quota such as OpenAI's
+    ///   `insufficient_quota`, which waiting does not restore
     /// - 502 (Bad Gateway)
     /// - 503 (Service Unavailable)
     /// - Connection timeouts
@@ -153,8 +300,21 @@ pub trait RetryableError {
 
     /// Returns the recommended delay before retrying, if the server specified one.
     ///
-    /// This is typically parsed from the `Retry-After` HTTP header.
+    /// This is typically parsed from the `Retry-After` HTTP header. Report the
+    /// server's value as is: [`with_retry`] gives up rather than wait past
+    /// [`MAX_RETRY_AFTER`], which it can only do when it sees the real delay.
     fn retry_after(&self) -> Option<Duration>;
+
+    /// Returns true if the error says the endpoint is unhealthy, so it counts
+    /// against a circuit breaker.
+    ///
+    /// Defaults to `true`. Return `false` for the server's considered answer
+    /// to the request itself (a spent quota, say): [`with_retry`] records that
+    /// as a success, since the endpoint is up, so repeating it never opens the
+    /// circuit and hides the server's message behind a circuit-open error.
+    fn trips_circuit(&self) -> bool {
+        true
+    }
 
     /// Construct the error to report when a circuit breaker stayed open for the
     /// entire attempt budget, so no real attempt ever ran.
@@ -177,6 +337,12 @@ pub trait RetryableError {
 /// # Returns
 ///
 /// A `RetryResult` indicating success, non-retryable failure, or exhausted retries.
+///
+/// A server-directed wait ([`RetryableError::retry_after`]) replaces the
+/// policy backoff for that retry, and is honored only while it fits in the
+/// call's [`RetryAfterBudget`] ([`MAX_RETRY_AFTER`] in total). One that does
+/// not fit returns [`RetryResult::Exhausted`] with that error at once, without
+/// sleeping or asking `circuit` for another request.
 ///
 /// # Example
 ///
@@ -215,8 +381,27 @@ where
     E: RetryableError,
 {
     let mut last_error: Option<E> = None;
+    let mut retry_after_budget = RetryAfterBudget::new();
+    let mut attempts_made: u32 = 0;
 
     for attempt in 0..policy.max_attempts {
+        let server_wait = last_error.as_ref().and_then(E::retry_after);
+
+        // The server wants longer than this call may still wait: report its
+        // error now instead of sleeping or retrying early. Settled before the
+        // circuit breaker is asked, because `can_execute` takes one of a
+        // half-open circuit's few test requests, and a request taken for an
+        // attempt that never runs is never recorded: the circuit would refuse
+        // every later call.
+        if let Some(err) = last_error
+            .take_if(|_| server_wait.is_some_and(|wait| wait > retry_after_budget.remaining()))
+        {
+            return RetryResult::Exhausted {
+                last_error: err,
+                attempts: attempts_made,
+            };
+        }
+
         // Check circuit breaker if provided
         if let Some(cb) = circuit {
             if !cb.can_execute() {
@@ -227,13 +412,16 @@ where
             }
         }
 
-        // Calculate delay for this attempt (0 for first attempt)
-        let delay = if let Some(ref err) = last_error {
-            // Use server-specified retry-after if available
-            err.retry_after()
-                .unwrap_or_else(|| policy.delay_for_attempt(attempt))
-        } else {
-            policy.delay_for_attempt(attempt)
+        // The attempt runs now. Wait as long as the server asked, charging it
+        // to the budget (it fits: checked above, and nothing was charged
+        // since), or else the policy backoff (0 for the first attempt). The
+        // previous error, if any, is replaced by this attempt's or returned.
+        let delay = match server_wait {
+            Some(wait) => {
+                retry_after_budget.spend(wait);
+                wait
+            }
+            None => policy.delay_for_attempt(attempt),
         };
 
         if !delay.is_zero() {
@@ -241,6 +429,7 @@ where
         }
 
         // Execute the operation
+        attempts_made += 1;
         match operation() {
             Ok(result) => {
                 // Record success with circuit breaker
@@ -250,9 +439,15 @@ where
                 return RetryResult::Success(result);
             }
             Err(err) => {
-                // Record failure with circuit breaker
+                // Record failure with circuit breaker, unless the endpoint
+                // answered for itself: that shows it is up (and must close a
+                // half-open circuit, which would otherwise refuse every call)
                 if let Some(cb) = circuit {
-                    cb.record_failure();
+                    if err.trips_circuit() {
+                        cb.record_failure();
+                    } else {
+                        cb.record_success();
+                    }
                 }
 
                 // Check if error is retryable
@@ -482,6 +677,260 @@ mod tests {
 
         assert!(matches!(result, RetryResult::Exhausted { attempts: 3, .. }));
         assert_eq!(call_count, 3);
+    }
+
+    /// A `Retry-After` beyond the budget ends the loop after the one attempt
+    /// that produced it, without sleeping, and reports that error.
+    #[test]
+    fn retry_after_beyond_budget_gives_up_without_sleeping() {
+        let policy = RetryPolicy {
+            max_attempts: 5,
+            initial_delay_ms: 1,
+            max_delay_ms: 10,
+            jitter_factor: 0.0,
+        };
+        let mut call_count = 0;
+        let started = std::time::Instant::now();
+
+        let result: RetryResult<&str, TestError> = with_retry(&policy, None, || {
+            call_count += 1;
+            Err(TestError {
+                retryable: true,
+                retry_after: Some(Duration::from_secs(86_400)),
+            })
+        });
+
+        assert_eq!(call_count, 1, "no retry once the wait exceeds the budget");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "gave up after {:?}",
+            started.elapsed()
+        );
+        match result {
+            RetryResult::Exhausted {
+                last_error,
+                attempts,
+            } => {
+                assert_eq!(attempts, 1);
+                assert_eq!(last_error.retry_after, Some(Duration::from_secs(86_400)));
+            }
+            other => panic!("expected Exhausted, got {other:?}"),
+        }
+    }
+
+    /// A short `Retry-After` is honored (it replaces the policy backoff) and
+    /// the operation is retried.
+    #[test]
+    fn short_retry_after_is_honored_and_retried() {
+        let policy = RetryPolicy {
+            max_attempts: 3,
+            initial_delay_ms: 1,
+            max_delay_ms: 10,
+            jitter_factor: 0.0,
+        };
+        let wait = Duration::from_millis(50);
+        let mut call_count = 0;
+        let started = std::time::Instant::now();
+
+        let result: RetryResult<&str, TestError> = with_retry(&policy, None, || {
+            call_count += 1;
+            if call_count < 3 {
+                Err(TestError {
+                    retryable: true,
+                    retry_after: Some(wait),
+                })
+            } else {
+                Ok("success")
+            }
+        });
+
+        assert!(result.is_success());
+        assert_eq!(call_count, 3);
+        assert!(
+            started.elapsed() >= wait * 2,
+            "server wait skipped: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn retry_after_budget_is_cumulative_per_call() {
+        let mut budget = RetryAfterBudget::new();
+        assert_eq!(budget.remaining(), MAX_RETRY_AFTER);
+
+        // Waits that fit are charged; zero always fits.
+        assert!(budget.spend(Duration::ZERO));
+        assert!(budget.spend(MAX_RETRY_AFTER / 2));
+        assert!(budget.spend(MAX_RETRY_AFTER / 2));
+        assert_eq!(budget.remaining(), Duration::ZERO);
+
+        // Nothing more fits, and a refusal leaves the budget unchanged.
+        assert!(!budget.spend(Duration::from_millis(1)));
+        assert_eq!(budget.remaining(), Duration::ZERO);
+
+        // A single wait above the cap never fits a fresh budget.
+        let mut fresh = RetryAfterBudget::default();
+        assert!(!fresh.spend(MAX_RETRY_AFTER + Duration::from_millis(1)));
+        assert!(!fresh.spend(Duration::from_secs(u64::MAX)));
+        assert_eq!(fresh.remaining(), MAX_RETRY_AFTER);
+        assert!(fresh.spend(MAX_RETRY_AFTER));
+    }
+
+    #[test]
+    fn retry_after_budget_with_limit_never_exceeds_the_cap() {
+        let tight = RetryAfterBudget::with_limit(Duration::from_secs(1));
+        assert_eq!(tight.remaining(), Duration::from_secs(1));
+        let mut tight = tight;
+        assert!(!tight.spend(Duration::from_secs(2)));
+
+        let generous = RetryAfterBudget::with_limit(Duration::from_secs(86_400));
+        assert_eq!(generous.remaining(), MAX_RETRY_AFTER);
+    }
+
+    #[test]
+    fn parse_retry_after_reads_every_form_a_server_sends() {
+        use std::time::SystemTime;
+
+        // 2026-10-21T07:27:00Z
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_792_567_620);
+        let secs = |value: &str| parse_retry_after(value, now).map(|d| d.as_secs());
+
+        // delay-seconds, surrounding whitespace tolerated
+        assert_eq!(secs("0"), Some(0));
+        assert_eq!(secs(" 120 "), Some(120));
+        // HTTP-date: the time until then; one already past is no wait
+        assert_eq!(secs("Wed, 21 Oct 2026 07:28:00 GMT"), Some(60));
+        assert_eq!(secs("Wed, 21 Oct 2026 07:26:00 GMT"), Some(0));
+        assert_eq!(secs("Wed, 21 Oct 2099 07:28:00 GMT"), Some(2_303_683_260));
+        // Out of spec but unambiguous: saturate, or round up
+        assert_eq!(secs("99999999999999999999999"), Some(u64::MAX));
+        assert_eq!(secs("1.5"), Some(2));
+        assert_eq!(secs("2.0"), Some(2));
+        // Anything else is left to the caller's default
+        for unreadable in ["", "soon", "-1", "1.5s", ".5", "1e3", "inf", "NaN"] {
+            assert_eq!(secs(unreadable), None, "{unreadable:?}");
+        }
+    }
+
+    /// An error the endpoint answered with on purpose (a spent quota, say).
+    #[derive(Debug)]
+    struct Refusal;
+
+    impl RetryableError for Refusal {
+        fn is_retryable(&self) -> bool {
+            false
+        }
+
+        fn retry_after(&self) -> Option<Duration> {
+            None
+        }
+
+        fn trips_circuit(&self) -> bool {
+            false
+        }
+
+        fn circuit_open() -> Self {
+            Refusal
+        }
+    }
+
+    /// Repeating an answer that does not trip the circuit never opens it, so
+    /// each caller keeps getting the server's error; and it closes a
+    /// half-open circuit rather than leaving it refusing every call.
+    #[test]
+    fn errors_that_do_not_trip_the_circuit_count_as_the_endpoint_answering() {
+        use crate::http::{CircuitConfig, CircuitState};
+
+        let policy = RetryPolicy {
+            max_attempts: 3,
+            initial_delay_ms: 0,
+            max_delay_ms: 0,
+            jitter_factor: 0.0,
+        };
+        let breaker = CircuitBreaker::new(CircuitConfig {
+            failure_threshold: 1,
+            open_duration_ms: 0,
+            half_open_max: 1,
+        });
+
+        let mut calls = 0;
+        for _ in 0..5 {
+            let result: RetryResult<(), Refusal> = with_retry(&policy, Some(&breaker), || {
+                calls += 1;
+                Err(Refusal)
+            });
+            assert!(matches!(result, RetryResult::Failure(Refusal)));
+        }
+        assert_eq!(calls, 5, "one request per call, none refused locally");
+        assert!(breaker.is_closed());
+
+        // Opened, with its zero open duration already over: the next call is
+        // the half-open probe.
+        breaker.record_failure();
+        assert!(breaker.is_open());
+        let mut state_during_probe = None;
+        let result: RetryResult<(), Refusal> = with_retry(&policy, Some(&breaker), || {
+            state_during_probe = Some(breaker.state());
+            Err(Refusal)
+        });
+        assert!(matches!(result, RetryResult::Failure(Refusal)));
+        assert_eq!(state_during_probe, Some(CircuitState::HalfOpen));
+        assert!(breaker.is_closed());
+
+        // Errors that do trip it still open it.
+        let result: RetryResult<(), TestError> = with_retry(&policy, Some(&breaker), || {
+            Err(TestError {
+                retryable: false,
+                retry_after: None,
+            })
+        });
+        assert!(matches!(result, RetryResult::Failure(_)));
+        assert!(breaker.is_open());
+    }
+
+    /// Giving up on a `Retry-After` past the budget takes no request from the
+    /// breaker. Here the failure opens the circuit and its zero open duration
+    /// is over at once, so a request taken for the retry would be the only
+    /// half-open one; never run, it would never be recorded, and the circuit
+    /// would refuse every later call.
+    #[test]
+    fn retry_after_beyond_budget_leaves_the_half_open_request_free() {
+        use crate::http::{CircuitConfig, CircuitState};
+
+        let policy = RetryPolicy {
+            max_attempts: 3,
+            initial_delay_ms: 0,
+            max_delay_ms: 0,
+            jitter_factor: 0.0,
+        };
+        let breaker = CircuitBreaker::new(CircuitConfig {
+            failure_threshold: 1,
+            open_duration_ms: 0,
+            half_open_max: 1,
+        });
+
+        let mut calls = 0;
+        let result: RetryResult<(), TestError> = with_retry(&policy, Some(&breaker), || {
+            calls += 1;
+            Err(TestError {
+                retryable: true,
+                retry_after: Some(MAX_RETRY_AFTER + Duration::from_secs(1)),
+            })
+        });
+        assert_eq!(calls, 1);
+        assert!(matches!(result, RetryResult::Exhausted { attempts: 1, .. }));
+        assert!(!breaker.is_closed(), "the failure opened the circuit");
+
+        // The next call is the half-open probe, and its outcome decides the
+        // circuit.
+        let mut state_during_probe = None;
+        let result: RetryResult<(), TestError> = with_retry(&policy, Some(&breaker), || {
+            state_during_probe = Some(breaker.state());
+            Ok(())
+        });
+        assert!(result.is_success(), "{result:?}");
+        assert_eq!(state_during_probe, Some(CircuitState::HalfOpen));
+        assert!(breaker.is_closed());
     }
 
     #[test]

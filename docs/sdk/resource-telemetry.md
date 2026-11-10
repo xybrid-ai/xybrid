@@ -25,6 +25,15 @@ configured sampling mode when observability is initialized. This does not turn
 on export by itself. Resource sampling is independent of content capture and of
 trace sampling/suppression.
 
+The mode belongs to the session. An operation pinned to an
+`ObservabilitySession` (`ObservationOptions::with_session`) samples with that
+session's mode whether or not it is the default. Operations that select no
+session use the process-wide mode. Installing a default session sets it to that
+session's mode; `xybrid_sdk::init().resource_telemetry(...)` without an
+observability configuration also sets it, and the most recent setting wins. An
+operation fixes its mode when it starts, so replacing the default session does
+not change sampling for work already under way.
+
 | Mode | Per-run collection | Periodic sampler | Separate raw-sample output |
 |---|---|---|---|
 | `Off` | None | No | No |
@@ -57,20 +66,48 @@ memory, worst memory/thermal pressure, ending battery percentage, sample count,
 mode and interval. `sample_count` includes start and end bookends plus any
 periodic samples. These aggregate fields remain available to local diagnostics.
 
-The SDK currently translates this subset to portable observations:
+The SDK translates these summary fields to portable observations
+([contract "Resource samples"](../../crates/xybrid-observability/CONTRACT.md#resource-samples)):
 
-| Summary field | OTLP span attribute | Conversion |
-|---|---|---|
-| `cpu_avg_pct` | `xybrid.genai.resource.cpu.utilization` | Percentage divided by 100 |
-| `process_rss_peak_mb` | `xybrid.genai.resource.process.peak_rss_bytes` | MiB multiplied by 1,048,576 |
-| `thermal_state_peak` | `xybrid.genai.resource.thermal.state` | Normal/Warm/Hot/Critical → nominal/fair/serious/critical |
-| `battery_pct_end` | `xybrid.genai.resource.battery.level` | Percentage divided by 100 |
+| Summary field | OTLP span attribute | Type | Conversion |
+|---|---|---|---|
+| `cpu_avg_pct` | `xybrid.genai.resource.cpu.utilization` | double, 0–1 | Percentage divided by 100 |
+| `cpu_peak_pct` | `xybrid.genai.resource.cpu.peak_utilization` | double, 0–1 | Percentage divided by 100 |
+| `available_mem_min_mb` | `xybrid.genai.resource.memory.min_available_bytes` | int, bytes | MiB multiplied by 1,048,576 |
+| `memory_pressure_peak` | `xybrid.genai.resource.memory.pressure` | string | Normal/Warn/Critical → normal/warn/critical; Unknown → absent |
+| `process_rss_peak_mb` | `xybrid.genai.resource.process.peak_rss_bytes` | int, bytes | MiB multiplied by 1,048,576 |
+| `thermal_state_peak` | `xybrid.genai.resource.thermal.state` | string | Normal/Warm/Hot/Critical → nominal/fair/serious/critical; absent unless a platform reading supplied it |
+| `battery_pct_end` | `xybrid.genai.resource.battery.level` | double, 0–1 | Percentage divided by 100 |
+
+A summary field that was not measured stays absent; nothing is filled with zero,
+`nominal` or `normal`. Peak and minimum values are extremes of the run's samples
+(start and end bookends plus any periodic samples), not of continuous time, so a
+short Boundary run reports the worse of its two readings. The core keeps memory
+in whole MiB rounded down, so `memory.min_available_bytes` and
+`process.peak_rss_bytes` are multiples of 1,048,576 and can understate the
+reading by less than 1 MiB. A reading of 0 MiB available exports as `0`.
+`memory.pressure` uses the same thresholds as the core classification above
+(Critical below 5% of total memory available, Warn below 15%), evaluated per
+sample; Unknown means no sample had both available and total memory.
+
+CPU readings are not confined to the run. Each one is sysinfo's system-wide
+utilization since the previous CPU refresh of the process-wide monitor,
+whatever triggered it: SDK prewarm, an earlier or concurrent run, a live
+snapshot. The start bookend's reading therefore describes the time before the
+run. sysinfo also leaves CPU usage unchanged when two refreshes are less than
+`sysinfo::MINIMUM_CPU_UPDATE_INTERVAL` apart (200 ms on Linux, Android, Apple
+platforms and Windows), so the end bookend of a shorter run repeats the start reading.
+`cpu.utilization` and `cpu.peak_utilization` can thus carry load from just
+before the run, and a short Boundary run can carry nothing else. Read them as
+system load around the run, not load the run caused. Memory, pressure, RSS,
+thermal and battery readings are instantaneous and have no such lag.
 
 These resource values are attached to spans, not emitted as separate resource
-metric instruments by the current adapter. Available/minimum system memory, memory pressure, peak CPU,
-sample count and sampling configuration are not currently mapped by the SDK to
-portable resource attributes. Accelerator utilization/memory and charging state
-are not populated by this adapter. Do not infer those fields from legacy
+metric instruments, and are never metric dimensions. Sample count and sampling
+configuration stay local. System memory in use (`memory.used_bytes`) is not
+exported because the summary carries no device total to derive it from.
+Accelerator utilization/memory, current process RSS and charging state are not
+populated by this adapter. Do not infer those fields from legacy
 `event.data.resource_summary` examples.
 
 ## Live snapshots

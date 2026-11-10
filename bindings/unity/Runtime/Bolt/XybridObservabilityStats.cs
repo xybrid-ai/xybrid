@@ -12,18 +12,18 @@ namespace XybridBolt
     /// </summary>
     public readonly struct XybridObservabilityStats
     {
-        public XybridObservabilityStats(bool Enabled, ulong SpansExported, ulong SpansDropped, ulong ExportFailures) { this.Enabled = Enabled; this.SpansExported = SpansExported; this.SpansDropped = SpansDropped; this.ExportFailures = ExportFailures; }
+        public XybridObservabilityStats(bool Enabled, XybridSignalStats Traces, XybridSignalStats Logs, XybridSignalStats Metrics) { this.Enabled = Enabled; this.Traces = Traces; this.Logs = Logs; this.Metrics = Metrics; }
         public bool Enabled { get; }
-        public ulong SpansExported { get; }
-        public ulong SpansDropped { get; }
-        public ulong ExportFailures { get; }
+        public XybridSignalStats Traces { get; }
+        public XybridSignalStats Logs { get; }
+        public XybridSignalStats Metrics { get; }
 
         internal static XybridObservabilityStats Decode(WireReader reader) =>
             new XybridObservabilityStats(
                 reader.ReadBool(),
-                reader.ReadU64(),
-                reader.ReadU64(),
-                reader.ReadU64()
+                XybridSignalStats.Decode(reader),
+                XybridSignalStats.Decode(reader),
+                XybridSignalStats.Decode(reader)
             );
 
         internal void Encode(WireWriter writer)
@@ -32,13 +32,13 @@ namespace XybridBolt
                 writer.WriteBool(this.Enabled);
             }
             {
-                writer.WriteU64(this.SpansExported);
+                this.Traces.Encode(writer);
             }
             {
-                writer.WriteU64(this.SpansDropped);
+                this.Logs.Encode(writer);
             }
             {
-                writer.WriteU64(this.ExportFailures);
+                this.Metrics.Encode(writer);
             }
         }
 

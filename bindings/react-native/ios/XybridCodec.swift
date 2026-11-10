@@ -473,21 +473,27 @@ enum XybridCodec {
   // MARK: - Observability
 
   static func encodeObservationRef(_ ref: XybridObservationRef) -> JSObject {
-    ["traceId": ref.traceId, "spanId": ref.spanId]
+    // The portable reference shape shared with the JavaScript packages.
+    ["trace_id": ref.traceId, "span_id": ref.spanId]
   }
 
   static func decodeObservationRef(_ any: Any?) throws -> XybridObservationRef {
     let object = try self.object(any, "observation")
-    return XybridObservationRef(traceId: try string(object, "traceId", "observation"),
-                                spanId: try string(object, "spanId", "observation"))
+    return XybridObservationRef(traceId: try string(object, "trace_id", "observation"),
+                                spanId: try string(object, "span_id", "observation"))
+  }
+
+  static func encodeSignalStats(_ stats: XybridSignalStats) -> JSObject {
+    ["accepted": Double(stats.accepted), "exported": Double(stats.exported),
+     "dropped": Double(stats.dropped), "failed": Double(stats.failed), "pending": Double(stats.pending)]
   }
 
   static func encodeObservabilityStats(_ stats: XybridObservabilityStats) -> JSObject {
     [
       "enabled": stats.enabled,
-      "spansExported": Double(stats.spansExported),
-      "spansDropped": Double(stats.spansDropped),
-      "exportFailures": Double(stats.exportFailures),
+      "traces": encodeSignalStats(stats.traces),
+      "logs": encodeSignalStats(stats.logs),
+      "metrics": encodeSignalStats(stats.metrics),
     ]
   }
 
@@ -500,6 +506,12 @@ enum XybridCodec {
       }
       return (name, value)
     }
+  }
+
+  static func encodeTtsAudio(_ packet: XybridTtsAudioChunk) -> JSObject {
+    ["pcmBase64": Data(packet.pcm).base64EncodedString(),
+     "sampleRate": Double(packet.sampleRate), "channels": Double(packet.channels),
+     "firstSample": Double(packet.firstSample)]
   }
 
   static func encodeStreamToken(_ token: XybridStreamToken) -> JSObject {
@@ -576,6 +588,7 @@ enum XybridCodec {
       "latencyMs": stage.latencyMs,
       "executionTarget": encodeExecutionTarget(stage.executionTarget),
       "metrics": encodeMetrics(stage.metrics),
+      "observation": stage.observation.map(encodeObservationRef) ?? NSNull(),
     ]
   }
 
@@ -585,6 +598,7 @@ enum XybridCodec {
       "outputType": encodeOutputType(result.outputType),
       "latencyMs": result.latencyMs,
       "stages": result.stages.map(encodeStageResult),
+      "observation": result.observation.map { encodeObservationRef($0) as Any } ?? NSNull(),
     ]
   }
 
@@ -594,7 +608,24 @@ enum XybridCodec {
       "isStable": partial.isStable,
       "chunkSequence": Double(partial.chunkSequence),
       "audioDurationMs": Double(partial.audioDurationMs),
+      "decoderObservation": partial.decoderObservation.map { encodeObservationRef($0) as Any } ?? NSNull(),
     ]
+  }
+
+  static func encodeTranscription(_ result: XybridTranscriptionResult) -> JSObject {
+    ["text": result.text, "durationMs": Double(result.durationMs),
+     "chunksProcessed": Double(result.chunksProcessed),
+     "observation": result.observation.map { encodeObservationRef($0) as Any } ?? NSNull()]
+  }
+
+  static func decodeObservation(_ any: Any?) throws -> XybridObservationOptions? {
+    guard let any, !(any is NSNull) else { return nil }
+    let o = try object(any, "observation options")
+    return XybridObservationOptions(
+      traceparent: try optionalString(o, "traceparent", "observation options"),
+      tracestate: try optionalString(o, "tracestate", "observation options"),
+      conversationId: try optionalString(o, "conversationId", "observation options"),
+      suppressTrace: try optionalBool(o, "suppressTrace", "observation options") ?? false)
   }
 
   // MARK: - Live ASR
@@ -613,7 +644,8 @@ enum XybridCodec {
       vad: vad,
       vadThreshold: try optionalFloat(object, "vadThreshold", what) ?? 0.5,
       language: try optionalString(object, "language", what),
-      audioCtx: try optionalUInt32(object, "audioCtx", what)
+      audioCtx: try optionalUInt32(object, "audioCtx", what),
+      observation: try decodeObservation(object["observation"])
     )
   }
 
@@ -645,6 +677,7 @@ enum XybridCodec {
     case .unsupportedBackendCapability: return "xybrid_unsupported_backend_capability"
     case .invalidImage: return "xybrid_invalid_image"
     case .cancelled: return "xybrid_cancelled"
+    case .telemetryDelivery: return "xybrid_telemetry_delivery"
     }
   }
 

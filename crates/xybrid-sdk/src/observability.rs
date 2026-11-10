@@ -12,8 +12,8 @@
 //! use std::time::Duration;
 //! use xybrid_sdk::observability::{self, ObservabilityConfig, OtlpConfig};
 //!
-//! // Traces to the Xybrid dashboard:
-//! observability::init_observability(ObservabilityConfig::xybrid("xy_live_..."))?;
+//! // Traces to the Xybrid console (a key from `xybrid connect` or the console):
+//! observability::init_observability(ObservabilityConfig::xybrid("sk_live_..."))?;
 //! // ...or everything to an OpenTelemetry Collector:
 //! observability::init_observability(ObservabilityConfig::otlp(OtlpConfig::collector(
 //!     "http://localhost:4318",
@@ -26,37 +26,62 @@
 //! Applications that already own OpenTelemetry providers pass an
 //! [`Observer`] built from them with [`ObservabilityConfig::with_observer`].
 //! Prompts and outputs are captured once observability is enabled; use
-//! [`ContentPolicy::metadata_only`] to record metadata only.
+//! [`ContentPolicy::metadata_only`] to record metadata only. A per-run
+//! session or observer can lower that capture for one run, never raise it
+//! (see [`ObservationOptions::session`]).
 //!
 //! Per run, [`ObservationOptions`] on `RunOptions` sets an explicit parent
 //! (for example a `traceparent` from another process or language), a
 //! conversation id, prompt metadata, and trace suppression. Results return
 //! their [`ObservationRef`] for feedback and evaluations.
+//!
+//! With the Xybrid preset, trace ingest also reports the lifecycle of a key
+//! from `xybrid connect` (a provisional workspace and its deadline, or its
+//! expiry); see [`WorkspaceFeedback`] and [`workspace_feedback`]. An expired
+//! key stops that destination only, never local inference.
 
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 
-use xybrid_core::device::{ResourceTelemetryMode, ResourceUsageSummary, ThermalState};
+use xybrid_core::device::{
+    MemoryPressure, ResourceTelemetryMode, ResourceUsageSummary, ThermalState,
+};
 use xybrid_core::execution::{ExecutionTemplate, ModelMetadata};
 use xybrid_core::ir::{Envelope, EnvelopeKind, ImageSource};
+use xybrid_core::runtime_adapter::types::StreamingError;
 use xybrid_core::tracing::{RecorderScope, TraceHeaders, TraceRecorder};
 
 pub use xybrid_observability::otlp::{
-    BatchLimits, ExportStats, OtlpConfig, Protocol, ResourceConfig, RetryLimits, SignalEndpoint,
+    BatchLimits, ExportResponse, OtlpConfig, PipelineStats, Protocol, ResourceConfig,
+    ResponseAction, ResponseHook, RetryLimits, RpcStatus, SignalEndpoint, SignalStats,
     XYBRID_TRACES_ENDPOINT,
 };
 pub use xybrid_observability::{
     semconv, AttemptInfo, AttemptOperation, AttemptReason, ContentCapture, ContentPolicy,
     ErrorInfo, Evaluation, Feedback, InferenceOperation, InferenceRequest, InputMessage, KeyValue,
     Location, MediaMetadata, Modality, ModelLoadInfo, ModelLoadOperation, ObservationContext,
-    ObservationRef, Observer, ObserverBuilder, OutputMessage, Part, PromptRef, Redactor,
-    ResourceSample, SpanOperation, StartOptions, SubstringRedactor, ToolCallInfo, ToolOperation,
-    TraceMode, Usage, WorkflowOperation,
+    ObservationRef, Observer, ObserverBuilder, OutputMessage, Part, PromptRef, RedactionRule,
+    Redactor, ResourceSample, SpanOperation, StartOptions, SubstringRedactor, ToolCallInfo,
+    ToolOperation, TraceMode, Usage, WorkflowOperation,
 };
 
 use crate::model::{SdkError, SdkResult};
+
+mod asr;
+mod manual;
+pub use manual::{
+    start_inference, start_model_load, start_tool, start_workflow, ManualObservation,
+};
+mod session;
+pub(crate) use asr::AsrObservation;
+use session::resolve_session;
+pub use session::{
+    default_session, install_default_session, CapturedContext, CapturedScope, ObservabilitySession,
+};
+mod workspace;
+pub use workspace::{WorkspaceFeedback, WorkspaceNotice};
 
 /// How observability is exported.
 #[derive(Clone)]
@@ -74,6 +99,8 @@ pub struct ObservabilityConfig {
     resource_telemetry: ResourceTelemetryMode,
     live_trace_interval: Duration,
     device_attributes: bool,
+    device_id: Option<String>,
+    provider_origins: Vec<String>,
 }
 
 impl ObservabilityConfig {
@@ -85,12 +112,15 @@ impl ObservabilityConfig {
             resource_telemetry: ResourceTelemetryMode::Off,
             live_trace_interval: Duration::from_secs(1),
             device_attributes: true,
+            device_id: None,
+            provider_origins: Vec::new(),
         }
     }
 
-    /// Xybrid dashboard preset: traces only, bearer-authenticated. Metrics and
+    /// Xybrid console preset: traces only, bearer-authenticated. Metrics and
     /// logs are not sent; use [`ObservabilityConfig::otlp`] with a Collector
-    /// to route them to your own stores.
+    /// to route them to your own stores. Sessions built from it report the
+    /// key's workspace lifecycle ([`ObservabilitySession::workspace_feedback`]).
     pub fn xybrid(api_key: &str) -> Self {
         Self::otlp(OtlpConfig::xybrid_traces(api_key))
     }
@@ -109,6 +139,8 @@ impl ObservabilityConfig {
             resource_telemetry: ResourceTelemetryMode::Off,
             live_trace_interval: Duration::from_secs(1),
             device_attributes: true,
+            device_id: None,
+            provider_origins: Vec::new(),
         }
     }
 
@@ -127,6 +159,10 @@ impl ObservabilityConfig {
 
     /// Samples device resources (CPU, memory, thermal, battery) around runs
     /// and records them on spans. Defaults to `Off`.
+    ///
+    /// Operations that select the session explicitly use this mode. Installed
+    /// as the default, it also becomes the process-wide mode for operations
+    /// that select no session.
     pub fn resource_telemetry(mut self, mode: ResourceTelemetryMode) -> Self {
         self.resource_telemetry = mode;
         self
@@ -134,6 +170,11 @@ impl ObservabilityConfig {
 
     /// Minimum interval between traced frames of one live session. Every frame
     /// is still counted in metrics. Defaults to one second.
+    ///
+    /// The sampler remembers at most 1,024 frame sessions, evicting the least
+    /// recently used, and forgets a session 300 s after its last frame; a
+    /// forgotten session's next frame is traced. A fresh frame session id per
+    /// frame therefore traces every frame without growing memory.
     pub fn live_trace_interval(mut self, interval: Duration) -> Self {
         self.live_trace_interval = interval;
         self
@@ -144,6 +185,27 @@ impl ObservabilityConfig {
     pub fn device_attributes(mut self, enabled: bool) -> Self {
         self.device_attributes = enabled;
         self
+    }
+
+    /// Sets a caller-owned device identifier. Never synthesized from hardware.
+    pub fn device_id(mut self, id: impl Into<String>) -> Self {
+        self.device_id = Some(id.into());
+        self
+    }
+
+    /// Allows context propagation to one exact third-party HTTP(S) origin.
+    /// Xybrid-owned hops propagate automatically. Provider propagation defaults off.
+    ///
+    /// # Errors
+    /// Returns a configuration error unless `origin` is an absolute HTTP(S) origin.
+    pub fn propagate_context_to(mut self, origin: &str) -> SdkResult<Self> {
+        let origin = xybrid_core::tracing::provider_origin(origin).ok_or_else(|| {
+            SdkError::ConfigError("provider propagation requires an HTTP(S) origin".into())
+        })?;
+        if !self.provider_origins.contains(&origin) {
+            self.provider_origins.push(origin);
+        }
+        Ok(self)
     }
 
     /// Sets the service name and version reported as the OTel resource.
@@ -171,110 +233,102 @@ impl fmt::Debug for ObservabilityConfig {
     }
 }
 
-struct Installed {
-    observer: Observer,
-    pipeline: Option<Arc<xybrid_observability::otlp::ObservabilityPipeline>>,
-    live_trace_interval: Duration,
-}
-
-static INSTALLED: RwLock<Option<Installed>> = RwLock::new(None);
-
-fn installed() -> std::sync::RwLockReadGuard<'static, Option<Installed>> {
-    INSTALLED
-        .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-/// Enables observability for this process. Replaces a previous configuration
-/// (its packaged pipeline is shut down within one second).
+/// Creates and installs the helper-owned default session.
+///
+/// A previous helper-owned pipeline with no operation pinned to it shuts down
+/// before this returns (bounded to one second); one still pinned by in-flight
+/// operations drains on a background worker after the last of them releases
+/// it. Application-installed sessions retain lifecycle control.
 ///
 /// # Errors
-///
-/// [`SdkError::ConfigError`] when the exporter configuration is rejected.
+/// [`SdkError::ConfigError`] for invalid configuration.
 pub fn init_observability(config: ObservabilityConfig) -> SdkResult<()> {
-    crate::telemetry::activate_resource_telemetry(config.resource_telemetry);
-    let (observer, pipeline) = match config.exporter {
-        Exporter::Observer(observer) => (observer, None),
-        Exporter::Otlp(mut otlp) => {
-            otlp.resource
-                .attributes
-                .extend(sdk_resource_attributes(config.device_attributes));
-            if otlp.resource.service_name.is_none() {
-                otlp.resource.service_name = Some("xybrid-app".to_owned());
-            }
-            let pipeline = xybrid_observability::otlp::ObservabilityPipeline::build(*otlp)
-                .map_err(|e| SdkError::ConfigError(format!("observability: {e}")))?;
-            let content = config.content.unwrap_or_else(ContentPolicy::from_env);
-            (pipeline.observer_with(content), Some(Arc::new(pipeline)))
-        }
-    };
-    let previous = {
-        let mut slot = INSTALLED
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        slot.replace(Installed {
-            observer,
-            pipeline,
-            live_trace_interval: config.live_trace_interval,
-        })
-    };
-    if let Some(previous) = previous.and_then(|p| p.pipeline) {
-        let _ = previous.shutdown(Duration::from_secs(1));
+    let session = ObservabilitySession::new(config)?;
+    if let Some(previous) = session::replace_default(session, true) {
+        session::retire_replaced(previous);
     }
     Ok(())
 }
 
-/// The observer runs report to. Disabled until [`init_observability`].
+/// The default observer. Disabled until explicitly configured.
 pub fn observer() -> Observer {
-    installed()
-        .as_ref()
-        .map_or_else(Observer::disabled, |i| i.observer.clone())
+    default_session().map_or_else(Observer::disabled, |s| s.observer().clone())
 }
 
-/// Whether observability has been configured.
+/// Whether the default observer is enabled.
 pub fn is_enabled() -> bool {
-    installed()
-        .as_ref()
-        .is_some_and(|i| i.observer.is_enabled())
+    observer().is_enabled()
 }
 
-/// Delivery counters of the packaged pipeline, if one is running.
-pub fn stats() -> Option<ExportStats> {
-    installed()
-        .as_ref()
-        .and_then(|i| i.pipeline.as_ref().map(|p| p.stats()))
+/// Per-signal delivery counters of the default session; unavailable for
+/// borrowed providers.
+///
+/// After [`shutdown_observability`] uninstalls a helper-owned default (one
+/// [`init_observability`] created), this keeps returning that session's
+/// counters, settled by the shutdown: the final per-signal totals, with what
+/// it failed (in flight at its deadline) or dropped (still queued), and
+/// nothing pending. They stay readable until the next [`init_observability`]
+/// or [`install_default_session`], whose session starts its own counters. An
+/// [`init_observability`] that replaces a default without a shutdown starts
+/// the new session's counters at once: shut the old one down first to read
+/// its final counters. After uninstalling an application-installed session
+/// this is `None`; read that session's own [`ObservabilitySession::stats`].
+pub fn stats() -> Option<PipelineStats> {
+    session::default_stats()
 }
 
-/// Exports queued telemetry, waiting at most `timeout`. No-op without a
-/// packaged pipeline.
+/// The workspace feedback of the default session's Xybrid trace destination
+/// (see [`ObservabilitySession::workspace_feedback`]).
+///
+/// [`shutdown_observability`] uninstalls the default session, and its final
+/// drain may bring the first response: take this handle before shutting down
+/// and read [`WorkspaceFeedback::notice`] afterwards.
+pub fn workspace_feedback() -> Option<WorkspaceFeedback> {
+    default_session().and_then(|s| s.workspace_feedback())
+}
+
+/// Flushes the default session's owned pipeline.
 ///
 /// # Errors
-///
-/// [`SdkError::Timeout`] when the bound is exceeded.
+/// Returns timeout or delivery errors from the pipeline.
 pub fn flush_observability(timeout: Duration) -> SdkResult<()> {
-    let pipeline = installed().as_ref().and_then(|i| i.pipeline.clone());
-    match pipeline {
-        Some(p) => p
-            .force_flush(timeout)
-            .map_err(|e| lifecycle_error(e, timeout)),
+    default_session().map_or(Ok(()), |s| s.flush(timeout))
+}
+
+/// Async [`flush_observability`].
+///
+/// # Errors
+/// As for [`flush_observability`].
+pub async fn flush_observability_async(timeout: Duration) -> SdkResult<()> {
+    match default_session() {
+        Some(s) => s.flush_async(timeout).await,
         None => Ok(()),
     }
 }
 
-/// Flushes and stops the packaged pipeline, waiting at most `timeout`, and
-/// disables observability. Idempotent.
+/// Uninstalls the default session, shutting down a helper-owned pipeline.
+/// Application-installed sessions retain application-controlled lifecycle.
+///
+/// A helper-owned session's final counters stay readable through [`stats`]
+/// until the next initialization.
 ///
 /// # Errors
-///
-/// [`SdkError::Timeout`] when the bound is exceeded.
+/// Returns timeout or delivery errors from a helper-owned pipeline.
 pub fn shutdown_observability(timeout: Duration) -> SdkResult<()> {
-    let previous = INSTALLED
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .take();
-    match previous.and_then(|p| p.pipeline) {
-        Some(p) => p.shutdown(timeout).map_err(|e| lifecycle_error(e, timeout)),
-        None => Ok(()),
+    match session::uninstall_default() {
+        Some(slot) if slot.helper_owned => slot.session.shutdown(timeout),
+        _ => Ok(()),
+    }
+}
+
+/// Async [`shutdown_observability`].
+///
+/// # Errors
+/// As for [`shutdown_observability`].
+pub async fn shutdown_observability_async(timeout: Duration) -> SdkResult<()> {
+    match session::uninstall_default() {
+        Some(slot) if slot.helper_owned => slot.session.shutdown_async(timeout).await,
+        _ => Ok(()),
     }
 }
 
@@ -297,8 +351,39 @@ fn lifecycle_error(e: xybrid_observability::Error, timeout: Duration) -> SdkErro
             timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
         }
     } else {
-        SdkError::network(e.to_string())
+        SdkError::TelemetryDelivery(e.to_string())
     }
+}
+
+/// The OpenTelemetry resource attributes the SDK adds to sessions it builds:
+/// `telemetry.sdk.name`, `xybrid.sdk.*`, detected device attributes when
+/// `device_attributes` is set (never hostnames), and a caller-owned
+/// `device.id` when given.
+///
+/// Hosts that build their own provider around the SDK (the CLI's local trace
+/// capture, for example) use this to describe themselves the same way.
+///
+/// # Errors
+/// [`SdkError::ConfigError`] unless `device_id` has 1–128 characters and no
+/// control characters.
+pub fn resource_attributes(
+    device_attributes: bool,
+    device_id: Option<&str>,
+) -> SdkResult<Vec<KeyValue>> {
+    let mut attributes = sdk_resource_attributes(device_attributes);
+    if let Some(id) = device_id {
+        attributes.push(KeyValue::new("device.id", validated_device_id(id)?));
+    }
+    Ok(attributes)
+}
+
+pub(crate) fn validated_device_id(id: &str) -> SdkResult<String> {
+    if id.is_empty() || id.chars().count() > 128 || id.chars().any(char::is_control) {
+        return Err(SdkError::ConfigError(
+            "device.id must contain 1–128 characters without controls".into(),
+        ));
+    }
+    Ok(id.to_owned())
 }
 
 fn sdk_resource_attributes(device: bool) -> Vec<KeyValue> {
@@ -339,7 +424,19 @@ pub struct ObservationOptions {
     pub prompt: Option<PromptRef>,
     /// Trace hint. Metrics are recorded either way.
     pub trace: TraceMode,
-    /// Observer override for this run.
+    /// Session override, retained for the operation and all its children.
+    ///
+    /// It can lower content capture, never raise it: its content policy is
+    /// capped by the policy of the session the operation would otherwise use
+    /// (the enclosing operation's, else the default), so content goes only
+    /// where both capture, within the smaller budgets, redacted by both. A
+    /// session whose observer is disabled records nothing and caps nothing,
+    /// so the next one out caps instead: inside an operation that observes
+    /// nothing, the default still caps. With neither, its own policy applies.
+    pub session: Option<ObservabilitySession>,
+    /// Observer override for this run (borrowed provider lifecycle). Capped
+    /// like [`Self::session`]. To lower capture on the default's providers,
+    /// pass `observability::observer().content_capped_by(&ContentPolicy::metadata_only())`.
     pub observer: Option<Observer>,
     /// Extra span attributes.
     pub attributes: Vec<KeyValue>,
@@ -358,6 +455,13 @@ impl ObservationOptions {
             parent: Some(parent),
             ..Self::default()
         })
+    }
+
+    /// Pins this operation to an application-owned session.
+    #[must_use]
+    pub fn with_session(mut self, session: &ObservabilitySession) -> Self {
+        self.session = Some(session.clone());
+        self
     }
 
     /// Sets the parent.
@@ -387,6 +491,7 @@ pub(crate) struct RunSubject {
     pub runtime: Option<&'static str>,
     pub model: String,
     pub format: Option<&'static str>,
+    pub size_bytes: Option<u64>,
     pub input_modalities: Vec<Modality>,
     pub output_modalities: Vec<Modality>,
     pub output_type: Option<&'static str>,
@@ -551,10 +656,76 @@ impl RunSubject {
             runtime,
             model: model_id.to_owned(),
             format,
+            size_bytes: declared_model_size(metadata),
             input_modalities: inputs,
             output_modalities: outputs,
             output_type,
             is_llm,
+        }
+    }
+
+    pub(crate) fn pipeline_stage(stage: &xybrid_core::context::StageDescriptor) -> Self {
+        let model = stage.model.as_deref().unwrap_or(&stage.name);
+        if let Some(metadata) = stage
+            .bundle_path
+            .as_deref()
+            .and_then(|path| {
+                std::fs::read_to_string(std::path::Path::new(path).join("model_metadata.json")).ok()
+            })
+            .and_then(|json| serde_json::from_str::<ModelMetadata>(&json).ok())
+        {
+            return Self::from_metadata(model, &metadata);
+        }
+        // Integration stages are served by core's chat-completions client
+        // (gateway or direct); ElevenLabs is speech synthesis. Other stages
+        // without local metadata report only facts known at dispatch: never
+        // infer modalities or a task from an id.
+        match stage.provider {
+            Some(xybrid_core::pipeline::IntegrationProvider::ElevenLabs) => {
+                return Self {
+                    operation: "generate_content",
+                    task: Some("text_to_speech".into()),
+                    runtime: Some("http"),
+                    model: model.to_owned(),
+                    format: None,
+                    size_bytes: None,
+                    input_modalities: vec![Modality::Text],
+                    output_modalities: vec![Modality::Audio],
+                    output_type: Some("speech"),
+                    is_llm: false,
+                };
+            }
+            Some(_) => return Self::remote_chat(model),
+            None => {}
+        }
+        Self {
+            operation: "predict",
+            task: None,
+            runtime: stage.is_cloud().then_some("http"),
+            model: model.to_owned(),
+            format: None,
+            size_bytes: None,
+            input_modalities: Vec::new(),
+            output_modalities: Vec::new(),
+            output_type: None,
+            is_llm: false,
+        }
+    }
+
+    /// A subject that knows only its model's id, for a request recorded
+    /// before the model's metadata could be read.
+    pub(crate) fn unknown(model: &str) -> Self {
+        Self {
+            operation: "predict",
+            task: None,
+            runtime: None,
+            model: model.to_owned(),
+            format: None,
+            size_bytes: None,
+            input_modalities: Vec::new(),
+            output_modalities: Vec::new(),
+            output_type: None,
+            is_llm: false,
         }
     }
 
@@ -566,34 +737,11 @@ impl RunSubject {
             runtime: Some("http"),
             model: model.to_owned(),
             format: None,
+            size_bytes: None,
             input_modalities: vec![Modality::Text],
             output_modalities: vec![Modality::Text],
             output_type: None,
             is_llm: true,
-        }
-    }
-}
-
-/// Live-session trace sampler: one traced frame per interval per session.
-static LIVE_TRACED: std::sync::LazyLock<Mutex<HashMap<String, Instant>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
-
-const LIVE_SESSION_TTL: Duration = Duration::from_secs(300);
-
-fn live_trace_mode(session: &str) -> TraceMode {
-    let interval = installed()
-        .as_ref()
-        .map_or(Duration::from_secs(1), |i| i.live_trace_interval);
-    let now = Instant::now();
-    let mut map = LIVE_TRACED
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    map.retain(|id, last| id == session || now.duration_since(*last) <= LIVE_SESSION_TTL);
-    match map.get(session) {
-        Some(last) if now.duration_since(*last) < interval => TraceMode::Suppress,
-        _ => {
-            map.insert(session.to_owned(), now);
-            TraceMode::Default
         }
     }
 }
@@ -610,6 +758,10 @@ pub(crate) struct RunStart<'a> {
     /// Parent captured on the caller's thread before a hop to a blocking
     /// worker. Explicit `ObservationOptions::parent` still wins.
     pub parent: Option<ObservationContext>,
+    /// Provider override (defaults to the runtime locally, `xybrid` remotely).
+    pub provider: Option<&'a str>,
+    /// Remote server address and port, when known.
+    pub server: Option<(Option<String>, Option<i64>)>,
 }
 
 /// Observation of one SDK run: the logical inference span plus a stage
@@ -618,45 +770,96 @@ pub(crate) struct RunObservation {
     op: Arc<InferenceOperation>,
     stages: Arc<StageRecorder>,
     _scope: Option<RecorderScope>,
-    chunks: Arc<Mutex<ChunkState>>,
     started: SystemTime,
     subject: RunSubject,
-    attempts: std::sync::atomic::AtomicU32,
+    server: Option<(Option<String>, Option<i64>)>,
+    /// Shared with attempt recorders, whose transport retries start attempts too.
+    attempts: Arc<std::sync::atomic::AtomicU32>,
+    /// Set where the run stopped on its caller's cancellation (see
+    /// [`ends_cancelled`]).
+    stopped: CancelMark,
 }
 
-#[derive(Default)]
-struct ChunkState {
-    first_token_marked: bool,
+/// Where a run stopped on its caller's cancellation.
+///
+/// Set by whatever stops the run for that reason, at the point it stops: an
+/// abort gate that stopped on [`AbortReason::UserCancelled`], a token callback
+/// that returned it (the consumer of a stream went away), or a pipeline
+/// consumer whose `on_token` failed. The run's error then says only that the
+/// stream failed, so the mark, not the error or the token, decides that it
+/// ends `cancelled`. Shared with the run's attempts.
+///
+/// [`AbortReason::UserCancelled`]: crate::run_options::AbortReason::UserCancelled
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CancelMark(Arc<std::sync::atomic::AtomicBool>);
+
+impl CancelMark {
+    /// Records that the run stopped on its caller's cancellation.
+    pub(crate) fn set(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Records the cancellation `error` carries, if it is one: the typed
+    /// [`AbortReason::UserCancelled`] an abort gate or a token callback
+    /// returns to stop a stream.
+    ///
+    /// [`AbortReason::UserCancelled`]: crate::run_options::AbortReason::UserCancelled
+    pub(crate) fn note(&self, error: &(dyn std::error::Error + 'static)) {
+        if is_user_cancel(error) {
+            self.set();
+        }
+    }
+
+    fn is_set(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// Whether a token callback's `error` is the caller's cancellation.
+fn is_user_cancel(error: &(dyn std::error::Error + 'static)) -> bool {
+    error
+        .downcast_ref::<crate::run_options::AbortReason>()
+        .is_some_and(|reason| *reason == crate::run_options::AbortReason::UserCancelled)
 }
 
 /// Records streamed chunks from token callbacks (which must be `Send`).
 #[derive(Clone)]
 pub(crate) struct ChunkSink {
     op: Arc<InferenceOperation>,
-    chunks: Arc<Mutex<ChunkState>>,
-    stages: Arc<StageRecorder>,
-    is_llm: bool,
+    stopped: CancelMark,
 }
 
 impl ChunkSink {
     /// One streamed output chunk (token callback, audio packet). Performs no
-    /// I/O.
+    /// I/O. A chunk never sets first-token time: that comes only from the
+    /// runtime's measured `ttft_ms` (see `RunObservation::apply_harvest`).
     pub(crate) fn chunk(&self) {
         self.op.record_chunk();
-        if !self.is_llm {
-            return;
+    }
+
+    /// Hands one token to the caller through `deliver` and counts it as a
+    /// delivered chunk, timed when it was handed over, once `deliver`
+    /// accepts it. The time is the operation's anchored reading, as for
+    /// every other default timing call, so a wall-clock step mid-stream does
+    /// not distort the chunk timings. A token the caller refuses is not
+    /// delivered; a refusal that is the caller's cancellation (see
+    /// [`CancelMark::note`]) marks the run cancelled.
+    pub(crate) fn deliver(
+        &self,
+        deliver: impl FnOnce() -> Result<(), StreamingError>,
+    ) -> Result<(), StreamingError> {
+        let at = self.op.now();
+        let delivered = deliver();
+        match &delivered {
+            Ok(()) => self.op.record_chunk_at(at),
+            Err(error) => self.stopped.note(error.as_ref()),
         }
-        let mut state = self
-            .chunks
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !state.first_token_marked {
-            state.first_token_marked = true;
-            drop(state);
-            if self.stages.harvest().ttft_ms.is_none() {
-                self.op.record_first_token();
-            }
-        }
+        delivered
+    }
+
+    /// The run's cancellation mark, for callbacks that stop it.
+    pub(crate) fn cancel_mark(&self) -> &CancelMark {
+        &self.stopped
     }
 }
 
@@ -671,34 +874,144 @@ pub(crate) struct AttemptSpec<'a> {
 
 /// One concrete execution attempt of a run (speculative cloud leg, reactive
 /// fallback). Outbound requests made on this thread while it lives carry the
-/// attempt's trace context; stages become its children.
+/// attempt's trace context; stages become its children. A transport retry
+/// inside it becomes the run's next (`retry`) attempt (see [`AttemptChain`]).
 pub(crate) struct AttemptScope {
-    op: AttemptOperation,
+    chain: Arc<AttemptChain>,
     stages: Arc<StageRecorder>,
     parent_stages: Arc<StageRecorder>,
+    started: SystemTime,
+    logical_started: SystemTime,
+    /// The run's cancellation mark (see [`ends_cancelled`]).
+    stopped: CancelMark,
     _scope: Option<RecorderScope>,
 }
 
 impl AttemptScope {
     /// Ends the attempt with the outcome of its leg.
-    pub(crate) fn end<T>(mut self, result: &SdkResult<T>) {
+    pub(crate) fn end(self, result: &SdkResult<crate::result::InferenceResult>) {
+        self.end_with_output(result, result.as_ref().ok().map(|r| r.envelope()));
+    }
+
+    fn end_with_output<T>(mut self, result: &SdkResult<T>, output: Option<&Envelope>) {
         self._scope.take();
-        let h = self.stages.harvest();
+        // The live attempt: the initial one, or the last retry core started.
+        let op = self.chain.finish();
+        let mut h = self.stages.harvest();
+        if let Some(output) = output {
+            // Runtime envelopes may carry the only usage report. Absorb it
+            // within its attempt before folding distinct attempts into totals.
+            h.absorb(
+                output
+                    .metadata
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v.as_str())),
+            );
+        }
         let usage = Usage {
             input_tokens: h.tokens_in,
             output_tokens: h.tokens_out,
-            cache_read_input_tokens: h.cached_tokens.filter(|n| *n > 0),
+            cache_read_input_tokens: h.cached_tokens,
             ..Usage::default()
         };
-        if !usage.is_empty() {
-            self.op.record_usage(&usage);
+        if let Some(op) = op.as_ref().filter(|_| !usage.is_empty()) {
+            op.record_usage(&usage);
         }
+        // Runtime TTFT is relative to this attempt, never the earlier logical
+        // start. Failed attempts cannot establish delivered-token timing.
+        h.ttft_ms = h.ttft_ms.filter(|_| result.is_ok()).and_then(|ms| {
+            self.started
+                .duration_since(self.logical_started)
+                .ok()
+                .map(|offset| offset.as_secs_f64() * 1000.0 + ms)
+        });
         self.parent_stages.merge(&h);
+        let Some(op) = op else {
+            return;
+        };
         match result {
-            Ok(_) => self.op.end(),
-            Err(SdkError::Cancelled { .. }) => self.op.cancel(),
-            Err(e) => self.op.end_with_error(&error_info(e)),
+            Ok(_) => op.end(),
+            Err(e) if ends_cancelled(e, &self.stopped) => op.cancel(),
+            Err(e) => op.end_with_error(&error_info(e)),
         }
+    }
+}
+
+/// The live attempt behind an attempt recorder.
+///
+/// Core reports each transport retry it makes inside the attempt
+/// ([`xybrid_core::tracing::record_request_retry`]); the live attempt then
+/// ends as failed with the try's error class and the run's next attempt
+/// (reason `retry`, same target) replaces it. Requests and stages started
+/// afterwards use the new attempt's context, so every try has its own parent
+/// span and `traceparent`. Stages already open stay under the attempt they
+/// started in.
+pub(crate) struct AttemptChain {
+    run: Arc<InferenceOperation>,
+    counter: Arc<std::sync::atomic::AtomicU32>,
+    /// The first attempt's target; retries keep it with a new index and reason.
+    target: AttemptInfo,
+    observer: Observer,
+    /// The live attempt and when it started.
+    live: Mutex<Option<(AttemptOperation, SystemTime)>>,
+}
+
+impl AttemptChain {
+    /// Starts the chain's first attempt (`target`) at `started`.
+    fn new(
+        run: &Arc<InferenceOperation>,
+        counter: &Arc<std::sync::atomic::AtomicU32>,
+        target: AttemptInfo,
+        observer: &Observer,
+        started: SystemTime,
+    ) -> Self {
+        Self {
+            live: Mutex::new(Some((
+                run.start_attempt_at(target.clone(), started),
+                started,
+            ))),
+            run: run.clone(),
+            counter: counter.clone(),
+            target,
+            observer: observer.clone(),
+        }
+    }
+
+    fn live(&self) -> std::sync::MutexGuard<'_, Option<(AttemptOperation, SystemTime)>> {
+        self.live
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Context of the live attempt, for its stages and outbound requests.
+    fn context(&self) -> Option<ObservationContext> {
+        self.live().as_ref().and_then(|(op, _)| op.context())
+    }
+
+    /// Ends the live attempt as failed when its try failed (`failed_at`) and
+    /// starts the next `retry` attempt now, so the backoff between the two
+    /// belongs to neither. A no-op once the attempt scope has finished.
+    fn retry(&self, error_type: &str, failed_at: std::time::Instant) {
+        let mut live = self.live();
+        let Some((failed, started)) = live.take() else {
+            return;
+        };
+        let now = self.observer.now();
+        let failed_end = now
+            .checked_sub(failed_at.elapsed())
+            .map_or(now, |end| end.max(started).min(now));
+        failed.end_with_error_at(&ErrorInfo::new(error_type), failed_end);
+        let mut next = self.target.clone();
+        next.index = self
+            .counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        next.reason = AttemptReason::Retry;
+        *live = Some((self.run.start_attempt_at(next, now), now));
+    }
+
+    /// Takes the live attempt for its final outcome.
+    fn finish(&self) -> Option<AttemptOperation> {
+        self.live().take().map(|(op, _)| op)
     }
 }
 
@@ -719,12 +1032,12 @@ impl ParentScope {
 impl AttemptScope {
     /// Ends the attempt with the outcome of a runtime adapter call (errors
     /// are recorded as `inference_error`).
-    pub(crate) fn end_adapter<T, E: fmt::Display>(self, result: &Result<T, E>) {
+    pub(crate) fn end_adapter<E: fmt::Display>(self, result: &Result<Envelope, E>) {
         let mapped: SdkResult<()> = match result {
             Ok(_) => Ok(()),
             Err(e) => Err(SdkError::inference(e.to_string())),
         };
-        self.end(&mapped);
+        self.end_with_output(&mapped, result.as_ref().ok());
     }
 }
 
@@ -732,17 +1045,18 @@ impl AttemptScope {
 /// model runs started beneath it) become its children.
 pub(crate) struct WorkflowScope {
     op: WorkflowOperation,
+    /// Set when the consumer of the workflow's stream stopped it (see
+    /// [`CancelMark`]).
+    stopped: CancelMark,
     _scope: Option<RecorderScope>,
 }
 
 impl WorkflowScope {
     pub(crate) fn start(name: &str, options: &crate::run_options::RunOptions) -> Self {
         let obs_opts = options.observation.as_ref();
-        let observer = obs_opts
-            .and_then(|o| o.observer.clone())
-            .unwrap_or_else(observer);
-        let mut start =
-            StartOptions::default().with_trace(obs_opts.map(|o| o.trace).unwrap_or_default());
+        let session = resolve_session(obs_opts);
+        let observer = session.observer().clone();
+        let mut start = StartOptions::default().with_trace(option_trace(obs_opts));
         start.parent = obs_opts
             .and_then(|o| o.parent.clone())
             .or_else(ambient_parent);
@@ -754,18 +1068,28 @@ impl WorkflowScope {
                 .attributes
                 .push(KeyValue::new("xybrid.correlation_id", id.clone()));
         }
+        let conversation_id = conversation_id(obs_opts);
+        if let Some(id) = &conversation_id {
+            start
+                .attributes
+                .push(KeyValue::new(semconv::attr::CONVERSATION_ID, id.clone()));
+        }
+        let start_suppressed = start.trace == TraceMode::Suppress;
         let op = observer.start_workflow(name, start);
-        let stages = Arc::new(StageRecorder::new(observer, op.context()));
+        let stages = Arc::new(
+            StageRecorder::for_session(session, op.context(), start_suppressed)
+                .with_conversation_id(conversation_id),
+        );
         let scope = RecorderScope::install(stages);
         Self {
             op,
+            stopped: CancelMark::default(),
             _scope: Some(scope),
         }
     }
 
     /// Carries the run's controls into an inference nested under this workflow.
     /// An explicit caller parent belongs to the workflow; its inference is a child of it.
-    #[cfg(any(test, feature = "llm-mistral", feature = "llm-llamacpp"))]
     pub(crate) fn child_options(
         &self,
         options: &crate::run_options::RunOptions,
@@ -777,6 +1101,17 @@ impl WorkflowScope {
         child
     }
 
+    /// The workflow's context, the parent of its stages.
+    pub(crate) fn context(&self) -> Option<ObservationContext> {
+        self.op.context()
+    }
+
+    /// The workflow's cancellation mark: a streaming consumer that stops the
+    /// workflow sets it, so the workflow ends `cancelled` with its stage.
+    pub(crate) fn cancel_mark(&self) -> &CancelMark {
+        &self.stopped
+    }
+
     /// Ends the workflow with `result`, returning its reference on success.
     pub(crate) fn end<T>(mut self, result: &SdkResult<T>) -> Option<ObservationRef> {
         self._scope.take();
@@ -786,7 +1121,7 @@ impl WorkflowScope {
                 self.op.end();
                 reference
             }
-            Err(e) if is_cancellation(e) => {
+            Err(e) if is_cancellation(e) || self.stopped.is_set() => {
                 self.op.cancel();
                 None
             }
@@ -801,6 +1136,7 @@ impl WorkflowScope {
 /// A generic span with a stage recorder (warmup, pipelines' internal steps).
 pub(crate) struct SpanScope {
     span: SpanOperation,
+    session: ObservabilitySession,
     _scope: Option<RecorderScope>,
 }
 
@@ -808,15 +1144,41 @@ impl SpanScope {
     /// Starts `name` under the ambient run (if any) and records stages
     /// beneath it.
     pub(crate) fn start(name: &str, attributes: Vec<KeyValue>) -> Self {
-        let observer = observer();
-        let options = StartOptions::default().with_parent(ambient_parent());
+        Self::start_loading(name, attributes, None)
+    }
+
+    /// [`Self::start`], reporting weights core loads beneath it as
+    /// `load_model` operations of `load`.
+    pub(crate) fn start_loading(
+        name: &str,
+        attributes: Vec<KeyValue>,
+        load: Option<Arc<LoadSubject>>,
+    ) -> Self {
+        let session = resolve_session(None);
+        let observer = session.observer().clone();
+        let options = StartOptions::default()
+            .with_parent(ambient_parent())
+            .with_trace(inherited_trace(TraceMode::Default));
         let span = observer.start_span(name.to_owned(), attributes, options);
-        let stages = Arc::new(StageRecorder::new(observer, span.context()));
-        let scope = RecorderScope::install(stages);
+        let mut stages =
+            StageRecorder::for_session(session.clone(), span.context(), span.context().is_none());
+        stages.load = load;
+        let scope = RecorderScope::install(Arc::new(stages));
         Self {
             span,
+            session,
             _scope: Some(scope),
         }
+    }
+
+    /// The span's context.
+    pub(crate) fn context(&self) -> Option<ObservationContext> {
+        self.span.context()
+    }
+
+    /// Starts measuring resources with the mode of the span's session.
+    pub(crate) fn begin_resources(&self) -> xybrid_core::device::RunGuard {
+        self.session.begin_resources()
     }
 
     /// Ends the span with `result`.
@@ -833,25 +1195,29 @@ impl RunObservation {
     /// Starts observing a run on the current thread.
     pub(crate) fn start(run: RunStart<'_>) -> Self {
         let obs_opts = run.options.and_then(|o| o.observation.as_ref());
-        let observer = obs_opts
-            .and_then(|o| o.observer.clone())
-            .unwrap_or_else(observer);
-        let mut trace = obs_opts.map(|o| o.trace).unwrap_or_default();
+        let observation_session = resolve_session(obs_opts);
+        let observer = observation_session.observer().clone();
+        let mut trace = option_trace(obs_opts);
         if let Some(opts) = run.options {
             if opts.live_mode && trace == TraceMode::Default {
                 if let Some(session) = opts.frame_session_id.as_deref() {
-                    trace = live_trace_mode(session);
+                    trace = observation_session.live_trace_mode(session);
                 }
             }
         }
         let subject = run.subject;
         let mut request = InferenceRequest::new(
             subject.operation,
-            match run.location {
+            run.provider.unwrap_or(match run.location {
                 Location::Remote => "xybrid",
                 Location::Local => subject.runtime.unwrap_or("xybrid"),
-            },
+            }),
         );
+        let server = run.server;
+        if let (Location::Remote, Some((address, port))) = (run.location, server.clone()) {
+            request.server_address = address;
+            request.server_port = port;
+        }
         request.model = Some(subject.model.clone());
         request.location = Some(run.location);
         request.runtime = subject.runtime.map(str::to_owned);
@@ -871,8 +1237,8 @@ impl RunObservation {
                 request.stop_sequences = cfg.stop_sequences.clone();
             }
         }
+        request.conversation_id = conversation_id(obs_opts);
         if let Some(o) = obs_opts {
-            request.conversation_id = o.conversation_id.clone();
             request.prompt = o.prompt.clone();
         }
         let mut start = StartOptions::default().with_trace(trace);
@@ -901,6 +1267,7 @@ impl RunObservation {
                 .push(KeyValue::new("xybrid.genai.model.format", format));
         }
         let started = observer.now();
+        start.start_time = Some(started);
         let op = observer.start_inference(request, start);
 
         let (system, messages) = input_messages(run.history, run.input);
@@ -910,17 +1277,34 @@ impl RunObservation {
         if !messages.is_empty() {
             op.record_input_messages(&messages);
         }
+        if let Some(definitions) = run.generation.and_then(tool_definitions) {
+            op.record_tool_definitions(&definitions);
+        }
 
-        let stages = Arc::new(StageRecorder::new(observer, op.context()));
+        let stages = Arc::new(
+            StageRecorder::for_session(
+                observation_session,
+                op.context(),
+                trace == TraceMode::Suppress,
+            )
+            .with_conversation_id(conversation_id(obs_opts))
+            .with_load(LoadSubject::new(
+                &subject.model,
+                subject.format,
+                "lazy",
+                subject.size_bytes,
+            )),
+        );
         let scope = RecorderScope::install(stages.clone());
         Self {
             op: Arc::new(op),
             stages,
             _scope: Some(scope),
-            chunks: Arc::new(Mutex::new(ChunkState::default())),
             started,
             subject,
-            attempts: std::sync::atomic::AtomicU32::new(0),
+            server,
+            attempts: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            stopped: CancelMark::default(),
         }
     }
 
@@ -928,10 +1312,14 @@ impl RunObservation {
     pub(crate) fn chunk_sink(&self) -> ChunkSink {
         ChunkSink {
             op: self.op.clone(),
-            chunks: self.chunks.clone(),
-            stages: self.stages.clone(),
-            is_llm: self.subject.is_llm,
+            stopped: self.stopped.clone(),
         }
+    }
+
+    /// Records that the run stopped on its caller's cancellation (see
+    /// [`CancelMark`]).
+    pub(crate) fn mark_cancelled(&self) {
+        self.stopped.set();
     }
 
     /// Starts the next execution attempt of this run.
@@ -940,10 +1328,11 @@ impl RunObservation {
             .attempts
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (server_address, server_port) = match spec.location {
-            Location::Remote => gateway_address(),
+            Location::Remote => self.server.clone().unwrap_or_else(gateway_address),
             Location::Local => (None, None),
         };
-        let op = self.op.start_attempt(AttemptInfo {
+        let started = self.stages.observer.now();
+        let target = AttemptInfo {
             index,
             reason: spec.reason,
             provider: spec
@@ -962,16 +1351,31 @@ impl RunObservation {
             },
             server_address,
             server_port,
-        });
-        let stages = Arc::new(StageRecorder::new(
-            self.stages.observer.clone(),
-            op.context(),
+        };
+        let chain = Arc::new(AttemptChain::new(
+            &self.op,
+            &self.attempts,
+            target,
+            &self.stages.observer,
+            started,
         ));
+        let mut stages = StageRecorder::for_session(
+            self.stages.session.clone(),
+            chain.context(),
+            self.stages.suppressed,
+        );
+        stages.load = self.stages.load.clone();
+        stages.conversation_id = self.stages.conversation_id.clone();
+        stages.attempt = Some(chain.clone());
+        let stages = Arc::new(stages);
         let scope = RecorderScope::install(stages.clone());
         AttemptScope {
-            op,
+            chain,
             stages,
             parent_stages: self.stages.clone(),
+            started,
+            logical_started: self.started,
+            stopped: self.stopped.clone(),
             _scope: Some(scope),
         }
     }
@@ -1009,6 +1413,12 @@ impl RunObservation {
         &self.op
     }
 
+    /// Starts measuring resources with the mode of the run's session, fixed
+    /// when the run started.
+    pub(crate) fn begin_resources(&self) -> xybrid_core::device::RunGuard {
+        self.stages.session.begin_resources()
+    }
+
     /// Records a resource summary measured around the run.
     pub(crate) fn resource(&self, summary: Option<&ResourceUsageSummary>) {
         if let Some(sample) = summary.map(resource_sample) {
@@ -1038,7 +1448,7 @@ impl RunObservation {
     /// Ends the run with an error (user cancellation ends it as cancelled).
     pub(crate) fn fail(self, error: &SdkError) {
         self.apply_harvest(None);
-        if is_cancellation(error) {
+        if ends_cancelled(error, &self.stopped) {
             self.op.cancel();
         } else {
             self.op.end_with_error(&error_info(error));
@@ -1046,20 +1456,36 @@ impl RunObservation {
     }
 
     /// Ends the run as cancelled.
-    pub(crate) fn cancel(self) {
+    pub(crate) fn cancel(self) -> Option<ObservationRef> {
         self.apply_harvest(None);
+        let reference = self.op.observation_ref();
         self.op.cancel();
+        reference
     }
 
     fn apply_harvest(&self, output: Option<&Envelope>) {
         let mut h = self.stages.harvest();
         if let Some(meta) = output.map(|o| &o.metadata) {
+            let attempts = self.attempt_count() > 0;
+            let totals = (h.tokens_in, h.tokens_out, h.cached_tokens, h.ttft_ms);
             h.absorb(meta.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+            if attempts {
+                // The terminal envelope repeats the delivering attempt's
+                // cumulative counts; it is not another attempt or a new total.
+                (h.tokens_in, h.tokens_out, h.cached_tokens, h.ttft_ms) = totals;
+            }
+        }
+        if h.finish_reason.is_none()
+            && output.is_some_and(|o| o.metadata.contains_key(Envelope::TOOL_CALLS_METADATA_KEY))
+            && output.is_some_and(|o| !tool_call_parts(o).is_empty())
+        {
+            // The turn ended on tool calls and no runtime reported a reason.
+            h.finish_reason = Some("tool_call".to_owned());
         }
         let usage = Usage {
             input_tokens: h.tokens_in,
             output_tokens: h.tokens_out,
-            cache_read_input_tokens: h.cached_tokens.filter(|n| *n > 0),
+            cache_read_input_tokens: h.cached_tokens,
             text_input_tokens: if self.subject.input_modalities == [Modality::Text] {
                 h.tokens_in
             } else {
@@ -1083,13 +1509,8 @@ impl RunObservation {
             .and_then(|ms| Duration::try_from_secs_f64(ms / 1000.0).ok())
             .and_then(|duration| self.started.checked_add(duration))
         {
-            let state = self
-                .chunks
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if !state.first_token_marked || self.subject.is_llm {
-                self.op.record_first_token_at(at);
-            }
+            // Runtime-measured first token (first call wins).
+            self.op.record_first_token_at(at);
         }
         if let Some(itl) = h.mean_itl_ms {
             self.op.record_token_timing(itl / 1000.0);
@@ -1133,18 +1554,21 @@ fn is_cancellation(error: &SdkError) -> bool {
     }
 }
 
+/// Whether a run (or one of its attempts) that failed with `error` ends as
+/// cancelled: a cancellation error, or a run that stopped on its caller's
+/// cancellation (see [`CancelMark`]). What reaches the run after a stream
+/// stops is the callback's failure wrapped as an inference error (`Streaming
+/// callback failed`, or `Streaming execution failed` when the runtime adapter
+/// keeps only the cause's text), so the mark set where it stopped is the
+/// signal that survives every shape. The token is not read: a run whose token
+/// was cancelled but that failed for its own reason keeps its error type.
+fn ends_cancelled(error: &SdkError, stopped: &CancelMark) -> bool {
+    is_cancellation(error) || stopped.is_set()
+}
+
 /// Host and port of the configured LLM gateway.
 fn gateway_address() -> (Option<String>, Option<i64>) {
-    let url = xybrid_core::cloud::platform_gateway_url();
-    let rest = url.split_once("://").map_or(url.as_str(), |(_, r)| r);
-    let authority = rest.split('/').next().unwrap_or_default();
-    match authority.rsplit_once(':') {
-        Some((host, port)) if !host.contains(']') || host.ends_with(']') => {
-            (Some(host.to_owned()), port.parse().ok())
-        }
-        _ if authority.is_empty() => (None, None),
-        _ => (Some(authority.to_owned()), None),
-    }
+    url_address(&xybrid_core::cloud::platform_gateway_url())
 }
 
 fn finish_reason(raw: &str) -> String {
@@ -1168,6 +1592,7 @@ pub(crate) fn error_info(error: &SdkError) -> ErrorInfo {
         SdkError::Offline { .. } => "offline",
         SdkError::AbortedForCloudFallback { .. } => "aborted_for_cloud_fallback",
         SdkError::Cancelled { .. } => "cancelled",
+        SdkError::TelemetryDelivery(_) => "telemetry_delivery",
         SdkError::ConfigError(_) => "config_error",
         SdkError::ModelNotFound(_) => "model_not_found",
         SdkError::LoadError { .. } => "load_error",
@@ -1232,6 +1657,102 @@ fn image_metadata(source: &ImageSource) -> MediaMetadata {
     }
 }
 
+/// Tool definitions offered to the model, as recorded schema content.
+fn tool_definitions(
+    config: &xybrid_core::runtime_adapter::types::GenerationConfig,
+) -> Option<serde_json::Value> {
+    if config.tools.is_empty() {
+        return None;
+    }
+    serde_json::to_value(&config.tools).ok()
+}
+
+/// Tool-call parts for calls the model requested, from the envelope's
+/// `tool_calls` metadata (the same parse as `InferenceResult::tool_calls`).
+fn tool_call_parts(envelope: &Envelope) -> Vec<Part> {
+    envelope
+        .metadata
+        .get(Envelope::TOOL_CALLS_METADATA_KEY)
+        .and_then(|raw| serde_json::from_str::<Vec<xybrid_core::gateway::ToolCall>>(raw).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(tool_call_part)
+        .collect()
+}
+
+fn tool_call_part(call: xybrid_core::gateway::ToolCall) -> Part {
+    // Arguments are a JSON string on the wire; keep the raw string when it
+    // does not parse rather than dropping what the model sent.
+    let arguments = serde_json::from_str(&call.function.arguments)
+        .unwrap_or(serde_json::Value::String(call.function.arguments));
+    Part::ToolCall {
+        id: Some(call.id).filter(|id| !id.is_empty()),
+        name: call.function.name,
+        arguments,
+    }
+}
+
+fn is_empty_text(part: &Part) -> bool {
+    matches!(part, Part::Text { content } if content.is_empty())
+}
+
+/// Expands a tool-continuation envelope into the conversation it replays:
+/// the user turn, the assistant turn that requested the tools and one `tool`
+/// message per result. `None` when the envelope carries no tool results.
+fn tool_continuation_messages(envelope: &Envelope, role: &str) -> Option<Vec<InputMessage>> {
+    let results: Vec<xybrid_core::ir::ToolCallResult> = envelope
+        .metadata
+        .get(Envelope::TOOL_RESPONSES_METADATA_KEY)
+        .and_then(|raw| serde_json::from_str(raw).ok())?;
+    let mut messages = Vec::with_capacity(results.len() + 2);
+    let user = parts(envelope);
+    if !user.is_empty() {
+        messages.push(InputMessage {
+            role: role.to_owned(),
+            parts: user,
+            name: None,
+        });
+    }
+    let mut calls: Vec<Part> = envelope
+        .metadata
+        .get(Envelope::TOOL_PRIOR_TEXT_METADATA_KEY)
+        .map(|text| xybrid_core::runtime_adapter::tool_call::parse_tool_calls(text))
+        .unwrap_or_default()
+        .into_iter()
+        .map(tool_call_part)
+        .collect();
+    if calls.is_empty() {
+        // The prior turn's protocol text did not parse: the results still
+        // name the calls they answer.
+        calls = results
+            .iter()
+            .map(|result| Part::ToolCall {
+                id: Some(result.call_id.clone()),
+                name: result.name.clone(),
+                arguments: serde_json::Value::Null,
+            })
+            .collect();
+    }
+    if !calls.is_empty() {
+        messages.push(InputMessage {
+            role: "assistant".into(),
+            parts: calls,
+            name: None,
+        });
+    }
+    for result in results {
+        messages.push(InputMessage {
+            role: "tool".into(),
+            parts: vec![Part::ToolCallResponse {
+                id: Some(result.call_id),
+                response: result.content,
+            }],
+            name: None,
+        });
+    }
+    Some(messages)
+}
+
 /// Builds the GenAI system instructions and input messages for a run.
 fn input_messages(
     history: &[Envelope],
@@ -1241,7 +1762,17 @@ fn input_messages(
     let mut messages = Vec::new();
     for envelope in history.iter().chain(input) {
         let role = role(envelope, "user");
-        let p = parts(envelope);
+        if let Some(expanded) = tool_continuation_messages(envelope, &role) {
+            messages.extend(expanded);
+            continue;
+        }
+        let mut p = parts(envelope);
+        // An assistant history turn that requested tools keeps its calls.
+        let calls = tool_call_parts(envelope);
+        if !calls.is_empty() {
+            p.retain(|part| !is_empty_text(part));
+            p.extend(calls);
+        }
         if p.is_empty() {
             continue;
         }
@@ -1278,6 +1809,12 @@ fn output_message(output: &Envelope) -> Option<OutputMessage> {
             },
         );
     }
+    let calls = tool_call_parts(output);
+    let called = !calls.is_empty();
+    if called {
+        parts.retain(|part| !is_empty_text(part));
+        parts.extend(calls);
+    }
     if parts.is_empty() {
         return None;
     }
@@ -1288,28 +1825,47 @@ fn output_message(output: &Envelope) -> Option<OutputMessage> {
         finish_reason: output
             .metadata
             .get("finish_reason")
-            .map(|r| finish_reason(r)),
+            .map(|r| finish_reason(r))
+            // A turn that ended on tool calls without a reported reason.
+            .or_else(|| called.then(|| "tool_call".to_owned())),
     })
 }
 
 /// Converts a measured resource summary to a portable sample.
+///
+/// Only measured values are mapped: a field the summary does not hold stays
+/// absent, and an `Unknown` memory pressure or an unmeasured thermal state is
+/// not reported as a level. `memory.used_bytes` (system memory in use) cannot
+/// be derived from available memory without the device total, which the
+/// summary does not carry; sample count and sampling configuration stay local.
+/// The CPU fields can include load from just before the run: the start
+/// bookend's reading covers the time since the shared monitor's previous
+/// refresh (docs/sdk/resource-telemetry.md).
 pub(crate) fn resource_sample(summary: &ResourceUsageSummary) -> ResourceSample {
+    const MIB: u64 = 1024 * 1024;
     ResourceSample {
         cpu_utilization: summary.cpu_avg_pct.map(|p| f64::from(p) / 100.0),
+        cpu_peak_utilization: summary.cpu_peak_pct.map(|p| f64::from(p) / 100.0),
         memory_used_bytes: None,
+        memory_min_available_bytes: summary.available_mem_min_mb.map(|mb| u64::from(mb) * MIB),
+        memory_pressure: match summary.memory_pressure_peak {
+            MemoryPressure::Unknown => None,
+            MemoryPressure::Normal => Some("normal"),
+            MemoryPressure::Warn => Some("warn"),
+            MemoryPressure::Critical => Some("critical"),
+        }
+        .map(str::to_owned),
         process_rss_bytes: None,
-        process_peak_rss_bytes: summary
-            .process_rss_peak_mb
-            .map(|mb| u64::from(mb) * 1024 * 1024),
-        thermal_state: Some(
+        process_peak_rss_bytes: summary.process_rss_peak_mb.map(|mb| u64::from(mb) * MIB),
+        thermal_state: summary.thermal_measured.then(|| {
             match summary.thermal_state_peak {
                 ThermalState::Normal => "nominal",
                 ThermalState::Warm => "fair",
                 ThermalState::Hot => "serious",
                 ThermalState::Critical => "critical",
             }
-            .to_owned(),
-        ),
+            .to_owned()
+        }),
         battery_level: summary.battery_pct_end.map(|p| f64::from(p) / 100.0),
         battery_charging: None,
         accelerator_utilization: None,
@@ -1321,9 +1877,11 @@ pub(crate) fn resource_sample(summary: &ResourceUsageSummary) -> ResourceSample 
 // Stage recorder: core `SpanGuard`s become child spans of the run.
 // ---------------------------------------------------------------------------
 
-/// Values harvested from stage metadata (the keys execution code stamps).
+pub(crate) type Harvest = StageMeasurements;
+
+/// Measured stage values; missing measurements remain unavailable.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Harvest {
+pub struct StageMeasurements {
     pub tokens_in: Option<u64>,
     pub tokens_out: Option<u64>,
     pub cached_tokens: Option<u64>,
@@ -1336,7 +1894,7 @@ pub(crate) struct Harvest {
     pub quantization: Option<String>,
 }
 
-impl Harvest {
+impl StageMeasurements {
     fn absorb<'a>(&mut self, pairs: impl Iterator<Item = (&'a str, &'a str)>) {
         for (key, value) in pairs {
             // Output envelopes are caller/runtime-owned too. Use the same
@@ -1375,7 +1933,9 @@ impl Harvest {
 /// Keep descriptor values closed as well as keys; token-shaped secrets are
 /// still secrets. Explicit public observation APIs continue to accept custom
 /// model/provider identities and application-owned attributes.
-fn stage_metadata_value(key: &str, value: &str) -> Option<String> {
+/// Validates the SDK's reviewed, content-free core metadata vocabulary.
+#[must_use]
+pub fn stage_metadata_value(key: &str, value: &str) -> Option<String> {
     let known = match key {
         "backend" => matches!(
             value,
@@ -1542,28 +2102,297 @@ fn stage_metadata_value(key: &str, value: &str) -> Option<String> {
     known.then(|| value.to_owned())
 }
 
-/// Records execution stages as `INTERNAL` child spans of the run and keeps
-/// the last value of the usage/timing keys stages stamp.
-pub(crate) struct StageRecorder {
-    observer: Observer,
-    root: Option<ObservationContext>,
-    spans: Mutex<HashMap<u64, SpanOperation>>,
-    next: std::sync::atomic::AtomicU64,
-    harvest: Mutex<Harvest>,
+pub(crate) type StageRecorder = StageCapture;
+
+/// SDK attribute naming why a `load_model` operation ran: `load` (explicit
+/// load), `lazy` (first execution after a load), `reload` (after automatic
+/// release), `warmup`, or `speculative_background`.
+pub(crate) const LOAD_TRIGGER: &str = "xybrid.load.trigger";
+
+/// The model that lazy materializations beneath a recorder load, and why.
+/// Shared by a run's logical recorder and its attempts.
+pub(crate) struct LoadSubject {
+    model: String,
+    format: Option<&'static str>,
+    size_bytes: Option<u64>,
+    trigger: Mutex<&'static str>,
 }
 
-impl StageRecorder {
-    pub(crate) fn new(observer: Observer, root: Option<ObservationContext>) -> Self {
-        Self {
-            observer,
-            root,
-            spans: Mutex::new(HashMap::new()),
-            next: std::sync::atomic::AtomicU64::new(1),
-            harvest: Mutex::new(Harvest::default()),
+impl LoadSubject {
+    pub(crate) fn new(
+        model: &str,
+        format: Option<&'static str>,
+        trigger: &'static str,
+        size_bytes: Option<u64>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            model: model.to_owned(),
+            format,
+            size_bytes,
+            trigger: Mutex::new(trigger),
+        })
+    }
+
+    fn trigger(&self) -> &'static str {
+        *self
+            .trigger
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// Declared artifact size only; missing or invalid metadata stays absent.
+pub(crate) fn declared_model_size(metadata: &ModelMetadata) -> Option<u64> {
+    metadata
+        .metadata
+        .get("size_bytes")
+        .and_then(serde_json::Value::as_u64)
+        .or_else(|| {
+            metadata
+                .metadata
+                .get("size_mb")
+                .and_then(serde_json::Value::as_u64)?
+                .checked_mul(1024 * 1024)
+        })
+        .filter(|bytes| i64::try_from(*bytes).is_ok())
+}
+
+fn conversation_id(options: Option<&ObservationOptions>) -> Option<String> {
+    options.and_then(|o| o.conversation_id.clone()).or_else(|| {
+        xybrid_core::tracing::current_recorder().and_then(|recorder| {
+            recorder
+                .as_any()
+                .and_then(|r| r.downcast_ref::<StageRecorder>())
+                .and_then(|r| r.conversation_id.clone())
+        })
+    })
+}
+
+struct ActiveLoad {
+    operation: Arc<ModelLoadOperation>,
+    facts: Mutex<LoadFacts>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct LoadFacts {
+    size: Option<(i64, LoadSizeSource)>,
+    cache_hit: Option<bool>,
+    runtime: Option<&'static str>,
+    format: Option<&'static str>,
+}
+
+/// A model's own declaration takes precedence over measured model files;
+/// transfer/archive bytes are only a fallback while model size is unknown.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum LoadSizeSource {
+    Transfer,
+    MeasuredFiles,
+    ModelDeclaration,
+}
+
+impl ActiveLoad {
+    fn record_size(&self, bytes: u64, source: LoadSizeSource) {
+        let Ok(bytes) = i64::try_from(bytes) else {
+            return;
+        };
+        let mut facts = self
+            .facts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if facts.size.is_none_or(|(_, previous)| source >= previous) {
+            facts.size = Some((bytes, source));
         }
     }
 
-    pub(crate) fn harvest(&self) -> Harvest {
+    /// The OTel SDK appends attributes; emit each final fact once to avoid
+    /// duplicate keys and spending the attribute budget on progress updates.
+    fn finish_metadata(&self) {
+        let facts = *self
+            .facts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((bytes, _)) = facts.size {
+            self.operation
+                .set_attribute(KeyValue::new(semconv::attr::MODEL_SIZE_BYTES, bytes));
+        }
+        if let Some(hit) = facts.cache_hit {
+            self.operation.record_cache_hit(hit);
+        }
+        if let Some(runtime) = facts.runtime {
+            self.operation
+                .set_attribute(KeyValue::new(semconv::attr::RUNTIME_NAME, runtime));
+        }
+        if let Some(format) = facts.format {
+            self.operation
+                .set_attribute(KeyValue::new(semconv::attr::MODEL_FORMAT, format));
+        }
+    }
+}
+
+fn current_load() -> Option<Arc<ActiveLoad>> {
+    xybrid_core::tracing::current_recorder().and_then(|recorder| {
+        recorder
+            .as_any()
+            .and_then(|r| r.downcast_ref::<StageRecorder>())
+            .and_then(|r| r.active_load.clone())
+    })
+}
+
+/// The first cache decision describes the payload source. A cached bundle that
+/// still needs extraction is a hit; extraction must not overwrite that decision.
+/// For a directly supplied local bundle, the extraction cache decides instead.
+pub(crate) fn record_load_cache_hit(hit: bool) {
+    if let Some(load) = current_load() {
+        let mut facts = load
+            .facts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if facts.cache_hit.is_none() {
+            facts.cache_hit = Some(hit);
+        }
+    }
+}
+
+/// The resolved artifact size is known before its transfer, including on errors.
+pub(crate) fn record_load_size(bytes: u64) {
+    if let Some(load) = current_load() {
+        load.record_size(bytes, LoadSizeSource::Transfer);
+    }
+}
+
+struct MeasuredLoad {
+    operation: ModelLoadOperation,
+    resources: xybrid_core::device::RunGuard,
+}
+
+impl MeasuredLoad {
+    fn finish_resources(self) -> ModelLoadOperation {
+        if let Some(summary) = self.resources.finish() {
+            self.operation.record_resource(&resource_sample(&summary));
+        }
+        self.operation
+    }
+}
+
+/// Records that the run on this thread reloads an automatically released
+/// model: the materialization it triggers is a `reload`, not a lazy load.
+pub(crate) fn mark_reload() {
+    if let Some(recorder) = xybrid_core::tracing::current_recorder() {
+        if let Some(load) = recorder
+            .as_any()
+            .and_then(|r| r.downcast_ref::<StageRecorder>())
+            .and_then(|r| r.load.as_ref())
+        {
+            *load
+                .trigger
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = "reload";
+        }
+    }
+}
+
+/// Records execution stages as `INTERNAL` child spans of the run and keeps
+/// the last value of the usage/timing keys stages stamp.
+///
+/// A core `model_load:<runtime>` stage (weights actually loaded into a
+/// runtime) becomes a `load_model` operation when the model is known
+/// ([`StageCapture::for_model`]).
+pub struct StageCapture {
+    observer: Observer,
+    session: ObservabilitySession,
+    suppressed: bool,
+    root: Option<ObservationContext>,
+    spans: Mutex<HashMap<u64, SpanOperation>>,
+    loads: Mutex<HashMap<u64, MeasuredLoad>>,
+    failed: Mutex<std::collections::HashSet<u64>>,
+    next: std::sync::atomic::AtomicU64,
+    harvest: Mutex<Harvest>,
+    load: Option<Arc<LoadSubject>>,
+    conversation_id: Option<String>,
+    active_load: Option<Arc<ActiveLoad>>,
+    /// Set on an attempt's recorder: its root follows the live attempt.
+    attempt: Option<Arc<AttemptChain>>,
+}
+
+impl fmt::Debug for StageCapture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StageCapture")
+            .field("suppressed", &self.suppressed)
+            .field("root", &self.root())
+            .field("model", &self.load.as_ref().map(|l| l.model.as_str()))
+            .finish_non_exhaustive()
+    }
+}
+
+impl StageCapture {
+    /// Records core stages beneath an explicitly captured parent.
+    pub fn new(observer: Observer, root: Option<ObservationContext>) -> Self {
+        let suppressed = root.is_none();
+        let session = ObservabilitySession::borrowed(observer).for_operation();
+        Self::for_session(session, root, suppressed)
+    }
+
+    /// Reports weights that core loads lazily beneath this recorder as
+    /// `load_model {model}` operations (trigger `lazy`).
+    #[must_use]
+    pub fn for_model(self, model: &str, metadata: Option<&ModelMetadata>) -> Self {
+        let format = metadata.and_then(|m| RunSubject::from_metadata(model, m).format);
+        self.with_load(LoadSubject::new(
+            model,
+            format,
+            "lazy",
+            metadata.and_then(declared_model_size),
+        ))
+    }
+
+    pub(crate) fn with_load(mut self, load: Arc<LoadSubject>) -> Self {
+        self.load = Some(load);
+        self
+    }
+
+    fn for_session(
+        session: ObservabilitySession,
+        root: Option<ObservationContext>,
+        suppressed: bool,
+    ) -> Self {
+        Self {
+            observer: session.observer().clone(),
+            session,
+            suppressed,
+            root,
+            spans: Mutex::new(HashMap::new()),
+            loads: Mutex::new(HashMap::new()),
+            failed: Mutex::new(std::collections::HashSet::new()),
+            next: std::sync::atomic::AtomicU64::new(1),
+            harvest: Mutex::new(Harvest::default()),
+            load: None,
+            conversation_id: conversation_id(None),
+            active_load: None,
+            attempt: None,
+        }
+    }
+
+    /// Parent of stages without an open parent stage and of outbound
+    /// requests: the live attempt for an attempt's recorder, else the root.
+    fn root(&self) -> Option<ObservationContext> {
+        match &self.attempt {
+            Some(attempt) => attempt.context(),
+            None => self.root.clone(),
+        }
+    }
+
+    fn with_conversation_id(mut self, id: Option<String>) -> Self {
+        self.conversation_id = id;
+        self
+    }
+
+    fn with_active_load(mut self, load: Arc<ActiveLoad>) -> Self {
+        self.active_load = Some(load);
+        self
+    }
+
+    /// The latest known measurement snapshot; repeated cumulative reports replace values.
+    pub fn harvest(&self) -> StageMeasurements {
         self.harvest
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1576,10 +2405,19 @@ impl StageRecorder {
             .harvest
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        h.tokens_in = other.tokens_in.or(h.tokens_in);
-        h.tokens_out = other.tokens_out.or(h.tokens_out);
-        h.cached_tokens = other.cached_tokens.or(h.cached_tokens);
-        h.ttft_ms = other.ttft_ms.or(h.ttft_ms);
+        fn sum(a: Option<u64>, b: Option<u64>) -> Option<u64> {
+            match (a, b) {
+                (Some(a), Some(b)) => Some(a.saturating_add(b)),
+                (a, b) => a.or(b),
+            }
+        }
+        h.tokens_in = sum(h.tokens_in, other.tokens_in);
+        h.tokens_out = sum(h.tokens_out, other.tokens_out);
+        h.cached_tokens = sum(h.cached_tokens, other.cached_tokens);
+        h.ttft_ms = match (h.ttft_ms, other.ttft_ms) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
         h.mean_itl_ms = other.mean_itl_ms.or(h.mean_itl_ms);
         h.finish_reason = other.finish_reason.clone().or(h.finish_reason.take());
         h.backend = other.backend.clone().or(h.backend.take());
@@ -1596,22 +2434,75 @@ impl StageRecorder {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+
+    fn loads(&self) -> std::sync::MutexGuard<'_, HashMap<u64, MeasuredLoad>> {
+        self.loads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Context of the open stage `id` (generic span or load), else the root.
+    fn context_of(&self, id: Option<u64>) -> Option<ObservationContext> {
+        id.and_then(|id| {
+            self.spans()
+                .get(&id)
+                .map(SpanOperation::context)
+                .or_else(|| self.loads().get(&id).map(|load| load.operation.context()))
+        })
+        .unwrap_or_else(|| self.root())
+    }
 }
 
-impl TraceRecorder for StageRecorder {
+impl TraceRecorder for StageCapture {
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
     fn start_span(&self, name: &str, parent: Option<u64>) -> u64 {
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let parent_cx = match parent {
-            Some(p) => self.spans().get(&p).and_then(SpanOperation::context),
-            None => None,
-        }
-        .or_else(|| self.root.clone());
-        let options = match parent_cx {
+            Some(p) => self.context_of(Some(p)),
+            None => self.root(),
+        };
+        let mut options = match parent_cx {
             Some(cx) => StartOptions::child_of(cx),
             // A run whose logical span was suppressed keeps its stages
             // untraced too.
             None => StartOptions::default().with_trace(TraceMode::Suppress),
         };
+        if let Some(id) = &self.conversation_id {
+            options
+                .attributes
+                .push(KeyValue::new(semconv::attr::CONVERSATION_ID, id.clone()));
+        }
+        if let (Some(runtime), Some(load)) = (
+            name.strip_prefix(xybrid_core::tracing::MODEL_LOAD_STAGE_PREFIX),
+            &self.load,
+        ) {
+            let runtime = Some(runtime_name(runtime))
+                .filter(|r| *r != "unknown")
+                .map(str::to_owned);
+            options
+                .attributes
+                .push(KeyValue::new(LOAD_TRIGGER, load.trigger()));
+            let operation = self.observer.start_model_load(
+                ModelLoadInfo {
+                    model: load.model.clone(),
+                    provider: runtime.clone(),
+                    runtime,
+                    format: load.format.map(str::to_owned),
+                    size_bytes: load.size_bytes,
+                },
+                options,
+            );
+            self.loads().insert(
+                id,
+                MeasuredLoad {
+                    operation,
+                    resources: self.session.begin_resources(),
+                },
+            );
+            return id;
+        }
         let span = self.observer.start_span(
             name.to_owned(),
             vec![KeyValue::new("xybrid.stage.name", name.to_owned())],
@@ -1622,12 +2513,38 @@ impl TraceRecorder for StageRecorder {
     }
 
     fn end_span(&self, id: u64) {
+        let failed = self
+            .failed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&id);
         if let Some(span) = self.spans().remove(&id) {
-            span.end();
+            if failed {
+                span.end_with_error(&ErrorInfo::new("stage_error"));
+            } else {
+                span.end();
+            }
+        } else if let Some(load) = self.loads().remove(&id) {
+            let load = load.finish_resources();
+            if failed {
+                load.end_with_error(&ErrorInfo::new("load_error"));
+            } else {
+                load.end();
+            }
         }
     }
 
     fn add_metadata(&self, id: u64, key: &str, value: &str) {
+        if key == xybrid_core::tracing::STAGE_OUTCOME_KEY {
+            // Only the fact of failure crosses; core never sends a reason here.
+            if value == "error" {
+                self.failed
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(id);
+            }
+            return;
+        }
         let Some(value) = stage_metadata_value(key, value) else {
             return;
         };
@@ -1640,10 +2557,20 @@ impl TraceRecorder for StageRecorder {
         }
     }
 
-    fn trace_headers(&self, id: Option<u64>) -> Option<TraceHeaders> {
-        let cx = id
-            .and_then(|id| self.spans().get(&id).and_then(SpanOperation::context))
-            .or_else(|| self.root.clone())?;
+    fn allows_provider_context(&self, origin: &str) -> bool {
+        self.session.allows_provider_context(origin)
+    }
+
+    fn retry_request(&self, _id: Option<u64>, error_type: &str, failed_at: std::time::Instant) {
+        if let Some(attempt) = &self.attempt {
+            attempt.retry(error_type, failed_at);
+        }
+    }
+
+    fn trace_headers(&self, _id: Option<u64>) -> Option<TraceHeaders> {
+        // Network children belong to the enclosing run/attempt, not an
+        // INTERNAL preprocessing stage that happens to be open at the call.
+        let cx = self.root()?;
         Some(TraceHeaders {
             traceparent: cx.to_traceparent(),
             tracestate: cx.tracestate().map(str::to_owned),
@@ -1651,40 +2578,962 @@ impl TraceRecorder for StageRecorder {
     }
 }
 
-/// The parent for a run started inside another observed run on this thread
-/// (for example a pipeline stage), taken from the installed stage recorder,
-/// or the application's active OpenTelemetry span before a worker hop.
-pub(crate) fn ambient_parent() -> Option<ObservationContext> {
-    if xybrid_core::tracing::current_recorder().is_some() {
-        // An installed recorder with no headers can represent a suppressed workflow.
-        // Do not bypass it by resurrecting an outer application's span.
-        return xybrid_core::tracing::current_trace_headers().and_then(|headers| {
-            ObservationContext::from_traceparent(
-                &headers.traceparent,
-                headers.tracestate.as_deref(),
-            )
-            .ok()
-        });
+fn option_trace(options: Option<&ObservationOptions>) -> TraceMode {
+    let trace = options.map(|o| o.trace).unwrap_or_default();
+    if options.is_some_and(|o| o.parent.is_some()) {
+        trace
+    } else {
+        inherited_trace(trace)
     }
-    ObservationContext::current()
 }
 
-/// Starts a model-load observation.
-pub(crate) fn start_model_load(
-    model_id: &str,
-    metadata: Option<&ModelMetadata>,
-) -> ModelLoadOperation {
-    let subject = metadata.map(|m| RunSubject::from_metadata(model_id, m));
-    observer().start_model_load(
-        ModelLoadInfo {
-            model: model_id.to_owned(),
-            provider: subject.as_ref().and_then(|s| s.runtime).map(str::to_owned),
-            runtime: subject.as_ref().and_then(|s| s.runtime).map(str::to_owned),
-            format: subject.as_ref().and_then(|s| s.format).map(str::to_owned),
-            size_bytes: None,
-        },
-        StartOptions::default().with_parent(ambient_parent()),
-    )
+/// Whether this thread's innermost recorder is an SDK recorder that
+/// explicitly suppresses tracing. A foreign recorder (for example
+/// `xybrid_core::tracing::capture()`) or one without trace context is not
+/// suppression.
+fn recorder_suppressed() -> bool {
+    xybrid_core::tracing::current_recorder().is_some_and(|r| {
+        r.as_any()
+            .and_then(|r| r.downcast_ref::<StageRecorder>())
+            .is_some_and(|r| r.suppressed)
+    })
+}
+
+fn inherited_trace(trace: TraceMode) -> TraceMode {
+    if trace == TraceMode::Suppress {
+        return trace;
+    }
+    if recorder_suppressed() {
+        TraceMode::Suppress
+    } else {
+        trace
+    }
+}
+
+/// Resource sampling for work on this thread: the mode of the SDK operation
+/// running here, else the process-wide mode.
+pub(crate) fn current_resource_telemetry() -> ResourceTelemetryMode {
+    session::ambient_session().map_or_else(crate::telemetry::resource_telemetry_mode, |session| {
+        session.resource_telemetry()
+    })
+}
+
+/// The parent for an operation started on this thread: the innermost open
+/// stage of an installed SDK recorder (else that recorder's run), a foreign
+/// recorder's trace headers, or the application's active OpenTelemetry span.
+pub(crate) fn ambient_parent() -> Option<ObservationContext> {
+    let Some(recorder) = xybrid_core::tracing::current_recorder() else {
+        return ObservationContext::current();
+    };
+    if let Some(stages) = recorder
+        .as_any()
+        .and_then(|r| r.downcast_ref::<StageRecorder>())
+    {
+        // A suppressed recorder has no root or stage contexts: do not bypass
+        // it by resurrecting an outer application's span.
+        return stages.context_of(xybrid_core::tracing::current_span_id());
+    }
+    // An installed recorder with no headers can represent a suppressed workflow.
+    xybrid_core::tracing::current_trace_headers().and_then(|headers| {
+        ObservationContext::from_traceparent(&headers.traceparent, headers.tracestate.as_deref())
+            .ok()
+    })
+}
+
+/// Observation of an explicit model load (`load_model {model}`).
+pub(crate) struct LoadScope {
+    load: Arc<ActiveLoad>,
+    resources: Option<xybrid_core::device::RunGuard>,
+    _scope: Option<RecorderScope>,
+}
+
+impl LoadScope {
+    /// Starts an explicit load (`xybrid.load.trigger = load`).
+    pub(crate) fn start(
+        model: &str,
+        metadata: Option<&ModelMetadata>,
+        options: Option<&ObservationOptions>,
+    ) -> Self {
+        Self::start_with_trigger(model, metadata, options, "load")
+    }
+
+    /// Starts a load observation for `trigger` under the explicit or ambient parent.
+    pub(crate) fn start_with_trigger(
+        model: &str,
+        metadata: Option<&ModelMetadata>,
+        options: Option<&ObservationOptions>,
+        trigger: &'static str,
+    ) -> Self {
+        let session = resolve_session(options);
+        let subject = metadata.map(|m| RunSubject::from_metadata(model, m));
+        let trace = option_trace(options);
+        let mut start = StartOptions::default().with_trace(trace).with_parent(
+            options
+                .and_then(|o| o.parent.clone())
+                .or_else(ambient_parent),
+        );
+        if let Some(options) = options {
+            start.attributes = options.attributes.clone();
+        }
+        let conversation_id = conversation_id(options);
+        if let Some(id) = &conversation_id {
+            start
+                .attributes
+                .push(KeyValue::new(semconv::attr::CONVERSATION_ID, id.clone()));
+        }
+        start.attributes.push(KeyValue::new(LOAD_TRIGGER, trigger));
+        let runtime = subject
+            .as_ref()
+            .and_then(|s| s.runtime)
+            .filter(|r| *r != "unknown");
+        let op = Arc::new(session.observer().start_model_load(
+            ModelLoadInfo {
+                model: model.to_owned(),
+                provider: runtime.map(str::to_owned),
+                // Mutable metadata is emitted once with its final known facts.
+                runtime: None,
+                format: None,
+                size_bytes: None,
+            },
+            start,
+        ));
+        let load = Arc::new(ActiveLoad {
+            operation: op.clone(),
+            facts: Mutex::new(LoadFacts {
+                runtime,
+                format: subject.as_ref().and_then(|s| s.format),
+                ..Default::default()
+            }),
+        });
+        if let Some(bytes) = metadata.and_then(declared_model_size) {
+            load.record_size(bytes, LoadSizeSource::ModelDeclaration);
+        }
+        let resources = Some(session.begin_resources());
+        let _scope = Some(RecorderScope::install(Arc::new(
+            StageRecorder::for_session(session, op.context(), trace == TraceMode::Suppress)
+                .with_conversation_id(conversation_id)
+                .with_active_load(load.clone()),
+        )));
+        Self {
+            load,
+            _scope,
+            resources,
+        }
+    }
+
+    /// Records what was loaded once it is known (runtime and format of the
+    /// resolved model). Values that are not known stay absent.
+    pub(crate) fn describe(&self, model_id: &str, metadata: &ModelMetadata) {
+        let subject = RunSubject::from_metadata(model_id, metadata);
+        {
+            let mut facts = self
+                .load
+                .facts
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            facts.runtime = subject
+                .runtime
+                .filter(|r| *r != "unknown")
+                .or(facts.runtime);
+            facts.format = subject.format.or(facts.format);
+        }
+        if let Some(bytes) = subject.size_bytes {
+            self.load
+                .record_size(bytes, LoadSizeSource::ModelDeclaration);
+        }
+    }
+
+    /// Metadata read from a successfully fetched extraction, without requiring weights.
+    pub(crate) fn describe_directory(&self, model_id: &str, directory: &std::path::Path) {
+        if let Some(metadata) = std::fs::read(directory.join("model_metadata.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<ModelMetadata>(&bytes).ok())
+        {
+            self.describe(model_id, &metadata);
+            if declared_model_size(&metadata).is_none() && !metadata.files.is_empty() {
+                let size = metadata.files.iter().try_fold(0_u64, |total, file| {
+                    let file = std::fs::metadata(directory.join(file)).ok()?;
+                    if !file.is_file() {
+                        return None;
+                    }
+                    total.checked_add(file.len())
+                });
+                if let Some(bytes) = size {
+                    self.load.record_size(bytes, LoadSizeSource::MeasuredFiles);
+                }
+            }
+        }
+    }
+
+    /// Retains transfer/archive size as a fallback; unrepresentable values stay absent.
+    pub(crate) fn size_bytes(&self, bytes: u64) {
+        self.load.record_size(bytes, LoadSizeSource::Transfer);
+    }
+
+    /// Records the resources measured around the load.
+    pub(crate) fn resource(&self, summary: Option<&ResourceUsageSummary>) {
+        if let Some(sample) = summary.map(resource_sample) {
+            self.load.operation.record_resource(&sample);
+        }
+    }
+
+    pub(crate) fn end<T>(mut self, result: &SdkResult<T>) -> Option<ObservationRef> {
+        if let Some(resources) = self.resources.take() {
+            self.resource(resources.finish().as_ref());
+        }
+        self._scope.take();
+        self.load.finish_metadata();
+        let reference = self.load.operation.observation_ref();
+        match result {
+            Ok(_) => {
+                self.load.operation.end();
+                reference
+            }
+            Err(e) if is_cancellation(e) => {
+                self.load.operation.cancel();
+                None
+            }
+            Err(e) => {
+                self.load.operation.end_with_error(&error_info(e));
+                None
+            }
+        }
+    }
+}
+
+/// Why a pipeline executes: a real run, or a warmup that loads models
+/// without counting as inference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PipelinePurpose {
+    Run,
+    Warmup,
+}
+
+/// Closed-vocabulary routing attributes of a routed stage. The authority's
+/// free-text reason (model ids, policy and remote-advice text) is never exported.
+fn routing_attributes(route: &xybrid_core::orchestrator::StageRoute<'_>) -> Vec<KeyValue> {
+    use xybrid_core::orchestrator::routing_engine::RouteTarget;
+    use xybrid_core::orchestrator::DecisionSource;
+    vec![
+        KeyValue::new(
+            "xybrid.routing.target",
+            match route.decision.target {
+                RouteTarget::Local => "local",
+                RouteTarget::Cloud => "cloud",
+                RouteTarget::Fallback(_) => "fallback",
+            },
+        ),
+        KeyValue::new(
+            "xybrid.routing.source",
+            match route.source {
+                DecisionSource::Local => "local",
+                DecisionSource::Remote => "remote",
+                DecisionSource::Cached => "cached",
+                DecisionSource::Default => "default",
+            },
+        ),
+        KeyValue::new("xybrid.routing.policy_allowed", route.policy_allowed),
+    ]
+}
+
+/// Where a routed stage executes, decided from the route (not from whether a
+/// bundle happens to be present): provider, location and server.
+struct StageDestination {
+    location: Location,
+    provider: Option<String>,
+    server: Option<(Option<String>, Option<i64>)>,
+}
+
+fn stage_destination(
+    stage: &xybrid_core::context::StageDescriptor,
+    route: &xybrid_core::orchestrator::StageRoute<'_>,
+) -> StageDestination {
+    use xybrid_core::orchestrator::routing_engine::RouteTarget;
+    if matches!(route.decision.target, RouteTarget::Local) {
+        return StageDestination {
+            location: Location::Local,
+            provider: None,
+            server: None,
+        };
+    }
+    let option = |key: &str| stage.options.as_ref().and_then(|o| o.get::<String>(key));
+    let direct = option("backend").as_deref() == Some("direct");
+    let url = option("gateway_url").or_else(|| match (direct, stage.provider.as_ref()) {
+        (true, Some(provider)) => Some(provider.default_base_url().to_owned()),
+        (true, None) => None,
+        (false, _) => Some(xybrid_core::cloud::platform_gateway_url()),
+    });
+    let provider = match (direct, stage.provider.as_ref()) {
+        (true, Some(provider)) => provider.as_str().to_owned(),
+        _ => "xybrid".to_owned(),
+    };
+    StageDestination {
+        location: Location::Remote,
+        provider: Some(provider),
+        server: Some(url.map_or((None, None), |url| url_address(&url))),
+    }
+}
+
+/// HTTP host and optional non-default port, excluding credentials, path,
+/// query and fragment. Invalid or non-HTTP URLs provide no server attributes.
+fn url_address(url: &str) -> (Option<String>, Option<i64>) {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return (None, None);
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return (None, None);
+    }
+    let host = parsed.host().map(|host| match host {
+        url::Host::Domain(domain) => domain.to_owned(),
+        url::Host::Ipv4(address) => address.to_string(),
+        url::Host::Ipv6(address) => address.to_string(),
+    });
+    (host, parsed.port().map(i64::from))
+}
+
+/// Observation of one routed pipeline stage.
+pub(crate) enum StageObservation {
+    /// A real run: the stage's logical inference, measured on its own.
+    Inference(Box<StageInference>),
+    /// A warmup: execution stages stay generic spans and lazy loads are
+    /// `load_model` operations with trigger `warmup`; nothing is an inference.
+    Warmup { _scope: RecorderScope },
+}
+
+pub(crate) struct StageInference {
+    run: RunObservation,
+    attempt: AttemptScope,
+    resources: xybrid_core::device::RunGuard,
+}
+
+impl StageObservation {
+    /// Starts observing `stage` once its route is known, under `parent`.
+    pub(crate) fn start(
+        stage: &xybrid_core::context::StageDescriptor,
+        input: &Envelope,
+        route: &xybrid_core::orchestrator::StageRoute<'_>,
+        options: &crate::run_options::RunOptions,
+        parent: Option<ObservationContext>,
+        purpose: PipelinePurpose,
+    ) -> Self {
+        let mut subject = RunSubject::pipeline_stage(stage);
+        if purpose == PipelinePurpose::Warmup {
+            let session = resolve_session(options.observation.as_ref());
+            let suppressed = parent.is_none();
+            let recorder = StageRecorder::for_session(session, parent, suppressed).with_load(
+                LoadSubject::new(&subject.model, subject.format, "warmup", subject.size_bytes),
+            );
+            return Self::Warmup {
+                _scope: RecorderScope::install(Arc::new(recorder)),
+            };
+        }
+        let StageDestination {
+            location,
+            provider,
+            server,
+        } = stage_destination(stage, route);
+        if location == Location::Remote {
+            subject.runtime = Some("http");
+        }
+        let mut options = options.clone();
+        // A prompt describes a model run, not the stages of a pipeline.
+        if let Some(observation) = options.observation.as_mut() {
+            observation.prompt = None;
+            observation.parent = parent.clone();
+        }
+        let run = RunObservation::start(RunStart {
+            subject,
+            input: Some(input),
+            history: &[],
+            options: Some(&options),
+            generation: None,
+            streaming: false,
+            location,
+            parent,
+            provider: provider.as_deref(),
+            server,
+        });
+        run.operation()
+            .set_attribute(KeyValue::new("xybrid.stage.name", stage.name.clone()));
+        for attribute in routing_attributes(route) {
+            run.operation().set_attribute(attribute);
+        }
+        let attempt = run.attempt(AttemptSpec {
+            reason: AttemptReason::Initial,
+            location,
+            provider: provider.as_deref(),
+            model: stage.model.as_deref(),
+        });
+        let resources = run.begin_resources();
+        Self::Inference(Box::new(StageInference {
+            run,
+            attempt,
+            resources,
+        }))
+    }
+
+    /// Ends the stage from its outcome, returning the stage inference reference.
+    pub(crate) fn finish(
+        self,
+        result: &Result<
+            xybrid_core::orchestrator::StageExecutionResult,
+            xybrid_core::orchestrator::OrchestratorError,
+        >,
+    ) -> Option<ObservationRef> {
+        match self {
+            Self::Warmup { _scope } => None,
+            Self::Inference(inference) => {
+                let StageInference {
+                    run,
+                    attempt,
+                    resources,
+                } = *inference;
+                run.resource(resources.finish().as_ref());
+                match result {
+                    Ok(stage) => {
+                        attempt.end_with_output(&Ok::<(), SdkError>(()), Some(&stage.output));
+                        run.succeed(&stage.output)
+                    }
+                    Err(error) => {
+                        let error = SdkError::pipeline(error.to_string());
+                        attempt.end_with_output(
+                            &Err::<(), _>(SdkError::pipeline(error.to_string())),
+                            None,
+                        );
+                        run.fail(&error);
+                        None
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A future whose every poll runs with `recorder` installed, so stages of
+/// work that moves between executor threads stay under one operation without
+/// holding a thread-local guard across an await.
+pub(crate) struct Instrumented<F> {
+    recorder: Arc<StageRecorder>,
+    inner: std::pin::Pin<Box<F>>,
+}
+
+impl<F: std::future::Future> std::future::Future for Instrumented<F> {
+    type Output = F::Output;
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<F::Output> {
+        let _scope = RecorderScope::install(self.recorder.clone());
+        self.inner.as_mut().poll(cx)
+    }
+}
+
+/// An `invoke_workflow` operation for async work: no thread-local guard is
+/// held; [`AsyncWorkflow::instrument`] installs it on every poll instead.
+pub(crate) struct AsyncWorkflow {
+    op: WorkflowOperation,
+    recorder: Arc<StageRecorder>,
+}
+
+impl AsyncWorkflow {
+    pub(crate) fn start(name: &str, options: &crate::run_options::RunOptions) -> Self {
+        let obs_opts = options.observation.as_ref();
+        let session = resolve_session(obs_opts);
+        let mut start = StartOptions::default().with_trace(option_trace(obs_opts));
+        start.parent = obs_opts
+            .and_then(|o| o.parent.clone())
+            .or_else(ambient_parent);
+        if let Some(o) = obs_opts {
+            start.attributes = o.attributes.clone();
+        }
+        let conversation_id = conversation_id(obs_opts);
+        if let Some(id) = &conversation_id {
+            start
+                .attributes
+                .push(KeyValue::new(semconv::attr::CONVERSATION_ID, id.clone()));
+        }
+        let suppressed = start.trace == TraceMode::Suppress;
+        let op = session.observer().start_workflow(name, start);
+        let recorder = Arc::new(
+            StageRecorder::for_session(session, op.context(), suppressed)
+                .with_conversation_id(conversation_id),
+        );
+        Self { op, recorder }
+    }
+
+    /// The workflow's context, the parent of its stages.
+    pub(crate) fn context(&self) -> Option<ObservationContext> {
+        self.op.context()
+    }
+
+    pub(crate) fn instrument<F: std::future::Future>(&self, future: F) -> Instrumented<F> {
+        Instrumented {
+            recorder: self.recorder.clone(),
+            inner: Box::pin(future),
+        }
+    }
+
+    pub(crate) fn end<T, E: fmt::Display>(self, result: &Result<T, E>) -> Option<ObservationRef> {
+        let reference = self.op.observation_ref();
+        match result {
+            Ok(_) => {
+                self.op.end();
+                reference
+            }
+            Err(_) => {
+                self.op.end_with_error(&ErrorInfo::new("pipeline_error"));
+                None
+            }
+        }
+    }
+}
+
+/// In-memory span, metric and log capture through application-owned
+/// providers, for tests that assert exported signals without a collector.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use opentelemetry_sdk::error::OTelSdkResult;
+    use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider};
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
+    use opentelemetry_sdk::trace::{SdkTracerProvider, SpanData, SpanProcessor};
+
+    /// Every ended span, in end order.
+    #[derive(Clone, Debug, Default)]
+    pub(crate) struct Memory(Arc<Mutex<Vec<SpanData>>>);
+
+    impl SpanProcessor for Memory {
+        fn on_start(&self, _: &mut opentelemetry_sdk::trace::Span, _: &opentelemetry::Context) {}
+        fn on_end(&self, span: SpanData) {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(span);
+        }
+        fn force_flush(&self) -> OTelSdkResult {
+            Ok(())
+        }
+        fn shutdown_with_timeout(&self, _: Duration) -> OTelSdkResult {
+            Ok(())
+        }
+    }
+
+    impl Memory {
+        pub(crate) fn spans(&self) -> Vec<SpanData> {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        }
+
+        /// The only span named `name`.
+        pub(crate) fn named(&self, name: &str) -> SpanData {
+            let matching: Vec<_> = self
+                .spans()
+                .into_iter()
+                .filter(|s| s.name == name)
+                .collect();
+            assert_eq!(
+                matching.len(),
+                1,
+                "expected one span {name:?}, have {:?}",
+                self.spans()
+                    .iter()
+                    .map(|s| s.name.to_string())
+                    .collect::<Vec<_>>()
+            );
+            matching.into_iter().next().unwrap()
+        }
+
+        /// The span with `reference`'s id.
+        pub(crate) fn by_ref(&self, reference: &ObservationRef) -> SpanData {
+            self.spans()
+                .into_iter()
+                .find(|s| span_id(s) == reference.span_id)
+                .unwrap_or_else(|| panic!("no exported span for {reference:?}"))
+        }
+    }
+
+    /// A borrowed session over an application-owned provider that keeps every
+    /// span in memory. Keep the provider alive for the test.
+    pub(crate) fn memory_session() -> (ObservabilitySession, Memory, SdkTracerProvider) {
+        let memory = Memory::default();
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(memory.clone())
+            .build();
+        let observer = Observer::builder().tracer_provider(&provider).build();
+        (ObservabilitySession::borrowed(observer), memory, provider)
+    }
+
+    /// [`memory_session`] configured (not borrowed) with resource sampling `mode`.
+    pub(crate) fn resource_session(
+        mode: ResourceTelemetryMode,
+    ) -> (ObservabilitySession, Memory, SdkTracerProvider) {
+        let memory = Memory::default();
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(memory.clone())
+            .build();
+        let config = ObservabilityConfig::with_observer(
+            Observer::builder().tracer_provider(&provider).build(),
+        )
+        .resource_telemetry(mode);
+        (ObservabilitySession::new(config).unwrap(), memory, provider)
+    }
+
+    /// Whether `span` carries a measured resource sample.
+    pub(crate) fn has_resources(span: &SpanData) -> bool {
+        attr(span, semconv::attr::RESOURCE_CPU_UTILIZATION).is_some()
+    }
+
+    /// [`memory_session`] whose session allowlists trace context to each of
+    /// `origins` (third-party HTTP(S) origins such as a loopback gateway).
+    pub(crate) fn memory_session_allowing(
+        origins: &[&str],
+    ) -> (ObservabilitySession, Memory, SdkTracerProvider) {
+        let memory = Memory::default();
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(memory.clone())
+            .build();
+        let mut config = ObservabilityConfig::with_observer(
+            Observer::builder().tracer_provider(&provider).build(),
+        );
+        for origin in origins {
+            config = config
+                .propagate_context_to(origin)
+                .expect("test origins are HTTP(S) origins");
+        }
+        (ObservabilitySession::new(config).unwrap(), memory, provider)
+    }
+
+    /// One metric data point read back from the in-memory exporter.
+    #[derive(Clone, Debug, PartialEq)]
+    pub(crate) struct Point {
+        /// Attribute values, by key, as strings.
+        pub(crate) attributes: std::collections::BTreeMap<String, String>,
+        /// A histogram's count, or a counter's value.
+        pub(crate) count: u64,
+    }
+
+    impl Point {
+        pub(crate) fn attr(&self, key: &str) -> Option<&str> {
+            self.attributes.get(key).map(String::as_str)
+        }
+    }
+
+    /// A configured session over application-owned tracer, meter and logger
+    /// providers that keep every span, metric point and log record in memory
+    /// (see [`memory_session_with_signals`]). Keep it alive for the test.
+    pub(crate) struct Signals {
+        pub(crate) session: ObservabilitySession,
+        pub(crate) spans: Memory,
+        pub(crate) metrics: InMemoryMetricExporter,
+        pub(crate) logs: InMemoryLogExporter,
+        meter: SdkMeterProvider,
+        // Kept alive for the test, like the meter.
+        _tracer: SdkTracerProvider,
+        _logger: SdkLoggerProvider,
+    }
+
+    impl Signals {
+        /// Every data point of the metric `name`, read after a meter flush.
+        /// Temporality is cumulative, so each point counts everything recorded
+        /// for its attributes so far.
+        pub(crate) fn points(&self, name: &str) -> Vec<Point> {
+            self.meter.force_flush().expect("meter flush");
+            let finished = self.metrics.get_finished_metrics().expect("metrics");
+            let Some(last) = finished.last() else {
+                return Vec::new();
+            };
+            fn point<'a>(attributes: impl Iterator<Item = &'a KeyValue>, count: u64) -> Point {
+                Point {
+                    attributes: attributes
+                        .map(|kv| (kv.key.to_string(), kv.value.to_string()))
+                        .collect(),
+                    count,
+                }
+            }
+            let mut out = Vec::new();
+            for metric in last
+                .scope_metrics()
+                .flat_map(|scope| scope.metrics())
+                .filter(|m| m.name() == name)
+            {
+                match metric.data() {
+                    AggregatedMetrics::F64(MetricData::Histogram(h)) => {
+                        out.extend(h.data_points().map(|p| point(p.attributes(), p.count())));
+                    }
+                    AggregatedMetrics::U64(MetricData::Histogram(h)) => {
+                        out.extend(h.data_points().map(|p| point(p.attributes(), p.count())));
+                    }
+                    AggregatedMetrics::U64(MetricData::Sum(s)) => {
+                        out.extend(s.data_points().map(|p| point(p.attributes(), p.value())));
+                    }
+                    _ => panic!("{name} is neither a histogram nor a u64 counter"),
+                }
+            }
+            out
+        }
+
+        /// Event names of every emitted log record, in emit order.
+        pub(crate) fn log_events(&self) -> Vec<String> {
+            self.logs
+                .get_emitted_logs()
+                .expect("logs")
+                .iter()
+                .filter_map(|l| l.record.event_name().map(str::to_owned))
+                .collect()
+        }
+    }
+
+    /// [`memory_session_with_signals_configured`] with the default config.
+    pub(crate) fn memory_session_with_signals() -> Signals {
+        memory_session_with_signals_configured(|config| config)
+    }
+
+    /// A session built by `configure` from [`ObservabilityConfig::with_observer`]
+    /// over in-memory span, metric and log providers, so session options such
+    /// as `live_trace_interval` apply.
+    pub(crate) fn memory_session_with_signals_configured(
+        configure: impl FnOnce(ObservabilityConfig) -> ObservabilityConfig,
+    ) -> Signals {
+        signals_over(None, configure)
+    }
+
+    /// [`memory_session_with_signals`] whose observer records content under
+    /// `policy`. An application-owned observer carries its own content policy
+    /// (`ObservabilityConfig::content` applies to packaged pipelines only).
+    pub(crate) fn memory_session_with_content(policy: ContentPolicy) -> Signals {
+        signals_over(Some(policy), |config| config)
+    }
+
+    fn signals_over(
+        policy: Option<ContentPolicy>,
+        configure: impl FnOnce(ObservabilityConfig) -> ObservabilityConfig,
+    ) -> Signals {
+        let spans = Memory::default();
+        let tracer = SdkTracerProvider::builder()
+            .with_span_processor(spans.clone())
+            .build();
+        let metrics = InMemoryMetricExporter::default();
+        let meter = SdkMeterProvider::builder()
+            .with_reader(PeriodicReader::builder(metrics.clone()).build())
+            .build();
+        let logs = InMemoryLogExporter::default();
+        let logger = SdkLoggerProvider::builder()
+            .with_simple_exporter(logs.clone())
+            .build();
+        let mut observer = Observer::builder()
+            .tracer_provider(&tracer)
+            .meter_provider(&meter)
+            .logger_provider(&logger);
+        if let Some(policy) = policy {
+            observer = observer.content_policy(policy);
+        }
+        let session = ObservabilitySession::new(configure(ObservabilityConfig::with_observer(
+            observer.build(),
+        )))
+        .expect("observer sessions are valid");
+        Signals {
+            session,
+            spans,
+            metrics,
+            logs,
+            meter,
+            _tracer: tracer,
+            _logger: logger,
+        }
+    }
+
+    /// Serializes tests that replace the process-wide default session, so
+    /// parallel test threads never observe each other's defaults.
+    pub(crate) fn default_session_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub(crate) fn attr(span: &SpanData, key: &str) -> Option<String> {
+        span.attributes
+            .iter()
+            .find(|kv| kv.key.as_str() == key)
+            .map(|kv| kv.value.to_string())
+    }
+
+    pub(crate) fn span_id(span: &SpanData) -> String {
+        span.span_context.span_id().to_string()
+    }
+
+    pub(crate) fn parent_id(span: &SpanData) -> String {
+        span.parent_span_id.to_string()
+    }
+
+    pub(crate) fn trace_id(span: &SpanData) -> String {
+        span.span_context.trace_id().to_string()
+    }
+
+    /// Holds [`default_session_lock`] with no default session installed, and
+    /// restores the previous default when dropped.
+    ///
+    /// A test whose per-run session or observer captures more content than
+    /// the product default policy holds one: a default installed by another
+    /// test would cap that content.
+    pub(crate) struct NoDefaultSession {
+        previous: Option<super::session::DefaultSlot>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl NoDefaultSession {
+        pub(crate) fn hold() -> Self {
+            let lock = default_session_lock();
+            Self {
+                previous: super::session::uninstall_default(),
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for NoDefaultSession {
+        fn drop(&mut self) {
+            // Whatever the test installed meanwhile goes first.
+            let _ = super::session::uninstall_default();
+            if let Some(previous) = self.previous.take() {
+                super::session::replace_default(previous.session, previous.helper_owned);
+            }
+        }
+    }
+
+    /// Installs a session as the process default until dropped, then
+    /// restores the previous default. Hold [`default_session_lock`] while it
+    /// lives.
+    pub(crate) struct DefaultSession(Option<ObservabilitySession>);
+
+    impl DefaultSession {
+        pub(crate) fn install(session: &ObservabilitySession) -> Self {
+            Self(install_default_session(session.clone()))
+        }
+    }
+
+    impl Drop for DefaultSession {
+        fn drop(&mut self) {
+            // Uninstalls an application-installed default without shutting it down.
+            let _ = shutdown_observability(Duration::ZERO);
+            if let Some(previous) = self.0.take() {
+                install_default_session(previous);
+            }
+        }
+    }
+
+    impl Memory {
+        /// How many spans have ended so far (a mark for [`Memory::named_since`]).
+        pub(crate) fn mark(&self) -> usize {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .len()
+        }
+
+        /// The only span named `name` among those ended after the first `mark`.
+        pub(crate) fn named_since(&self, mark: usize, name: &str) -> SpanData {
+            let spans = self.spans();
+            let matching: Vec<_> = spans
+                .iter()
+                .skip(mark)
+                .filter(|s| s.name == name)
+                .cloned()
+                .collect();
+            assert_eq!(
+                matching.len(),
+                1,
+                "expected one new span {name:?}, have {:?}",
+                spans
+                    .iter()
+                    .skip(mark)
+                    .map(|s| s.name.to_string())
+                    .collect::<Vec<_>>()
+            );
+            matching.into_iter().next().unwrap()
+        }
+    }
+
+    /// How a caller drives an async SDK entry point that takes no observation
+    /// options, relative to the application context it attached. The
+    /// entry point reads the ambient context where its future first runs.
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) enum Hop {
+        /// `tokio::spawn` on a multi-thread runtime after `Context::attach`
+        /// on the caller: the worker that polls the task never sees it.
+        Spawned,
+        /// `tokio::spawn(future.with_context(cx))`: every poll sees it.
+        WithContext,
+        /// `block_on` on a current-thread runtime after `Context::attach`:
+        /// the future runs on the caller's thread.
+        BlockOn,
+    }
+
+    impl Hop {
+        /// Every hop; the spawned one last, so a context left behind by an
+        /// earlier call would show up in it.
+        pub(crate) const ALL: [Self; 3] = [Self::WithContext, Self::BlockOn, Self::Spawned];
+
+        /// Runs `future` this way, under the application context `parent`.
+        pub(crate) fn run<F>(self, parent: &ObservationContext, future: F) -> F::Output
+        where
+            F: std::future::Future + Send + 'static,
+            F::Output: Send + 'static,
+        {
+            use opentelemetry::context::FutureExt as _;
+            let multi_thread = || {
+                tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(2)
+                    .build()
+                    .expect("runtime")
+            };
+            match self {
+                Self::Spawned => {
+                    let runtime = multi_thread();
+                    let _attached = parent.to_otel().attach();
+                    runtime
+                        .block_on(runtime.spawn(future))
+                        .expect("the task completes")
+                }
+                Self::WithContext => {
+                    let runtime = multi_thread();
+                    runtime
+                        .block_on(runtime.spawn(future.with_context(parent.to_otel())))
+                        .expect("the task completes")
+                }
+                Self::BlockOn => {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .build()
+                        .expect("runtime");
+                    let _attached = parent.to_otel().attach();
+                    runtime.block_on(future)
+                }
+            }
+        }
+
+        /// Asserts `span` is a child of `parent` when this hop carries the
+        /// context, and the root of a trace of its own when it does not.
+        pub(crate) fn assert_parent(self, span: &SpanData, parent: &ObservationContext) {
+            match self {
+                Self::Spawned => {
+                    assert_eq!(
+                        span.parent_span_id,
+                        opentelemetry::trace::SpanId::INVALID,
+                        "{}: {self:?} must export a root, parent {}",
+                        span.name,
+                        parent_id(span)
+                    );
+                    assert_ne!(trace_id(span), parent.trace_id(), "{}", span.name);
+                }
+                Self::WithContext | Self::BlockOn => {
+                    assert_eq!(parent_id(span), parent.span_id(), "{}: {self:?}", span.name);
+                    assert_eq!(trace_id(span), parent.trace_id(), "{}: {self:?}", span.name);
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1693,6 +3542,91 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;
+
+    /// A chunk is timed on the operation's anchored clock, not the raw wall
+    /// clock: an NTP step between the start of a stream and its first token
+    /// must not move `time_to_first_chunk` by the size of the step. Needs the
+    /// observability crate's wall-steppable test clock (feature `test-util`).
+    #[cfg(feature = "test-util")]
+    #[test]
+    fn a_delivered_chunk_is_timed_on_the_operation_clock_across_a_wall_clock_step() {
+        use opentelemetry_sdk::trace::SdkTracerProvider;
+        use xybrid_observability::{Clock, ManualClock};
+
+        const STEP: Duration = Duration::from_secs(3_600);
+        let wall = Arc::new(ManualClock::new(
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+        ));
+        let memory = test_support::Memory::default();
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(memory.clone())
+            .build();
+        let observer = Observer::builder()
+            .tracer_provider(&provider)
+            .clock(Clock::manual_wall(wall.clone()))
+            .build();
+        let started = observer.now();
+        let op = observer.start_inference(
+            InferenceRequest::new("chat", "llama.cpp").streaming(true),
+            StartOptions::default().with_start_time(started),
+        );
+        let sink = ChunkSink {
+            op: Arc::new(op),
+            stopped: CancelMark::default(),
+        };
+
+        // The device clock jumps an hour ahead before the first token.
+        wall.advance(STEP);
+        assert_eq!(observer.now(), started + STEP, "the wall clock stepped");
+        sink.deliver(|| Ok(()))
+            .expect("the caller accepts the token");
+        sink.op.end();
+
+        let span = memory.spans().pop().expect("the run's span ended");
+        let ttfc: f64 = test_support::attr(&span, semconv::attr::RESPONSE_TIME_TO_FIRST_CHUNK)
+            .expect("the delivered chunk sets the time to first chunk")
+            .parse()
+            .expect("time to first chunk is a number of seconds");
+        assert!(
+            ttfc < STEP.as_secs_f64() / 2.0,
+            "time to first chunk follows the operation clock, not the {STEP:?} \
+             wall-clock step: {ttfc} s"
+        );
+    }
+
+    #[test]
+    fn url_address_extracts_only_http_host_and_port() {
+        for (url, host, port) in [
+            ("https://[::1]", Some("::1"), None),
+            ("http://[::1]:8080/v1", Some("::1"), Some(8080)),
+            (
+                "https://user:secret@gateway.example:8443/v1?token=private#fragment",
+                Some("gateway.example"),
+                Some(8443),
+            ),
+            (
+                "https://user:secret@[2001:db8::1]?token=private#fragment",
+                Some("2001:db8::1"),
+                None,
+            ),
+            (
+                "https://gateway.example?token=private#fragment",
+                Some("gateway.example"),
+                None,
+            ),
+            (
+                "https://gateway.example:443/v1",
+                Some("gateway.example"),
+                None,
+            ),
+            ("not a URL", None, None),
+            ("https://[::1", None, None),
+            ("https://gateway.example:invalid", None, None),
+            ("file:///private/model", None, None),
+        ] {
+            assert_eq!(url_address(url), (host.map(str::to_owned), port), "{url}");
+        }
+    }
 
     /// One bounded local request; the long batch delay lets shutdown export all
     /// test spans together, without sleeps or a dependency on a collector service.
@@ -1717,6 +3651,9 @@ mod tests {
                     Err(error) => panic!("collector accept: {error}"),
                 }
             };
+            // Accepted sockets inherit O_NONBLOCK on macOS/BSD (not on Linux), which
+            // would make the read timeout below a busy WouldBlock instead of a wait.
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();
@@ -1809,6 +3746,7 @@ mod tests {
                     runtime: Some("llama.cpp"),
                     model: "test-model".into(),
                     format: Some("gguf"),
+                    size_bytes: None,
                     input_modalities: vec![Modality::Text],
                     output_modalities: vec![Modality::Text],
                     output_type: None,
@@ -1821,6 +3759,8 @@ mod tests {
                 streaming: false,
                 location: Location::Local,
                 parent: None,
+                provider: None,
+                server: None,
             });
             {
                 let _stage = xybrid_core::tracing::SpanGuard::new("core-stage");
@@ -2109,6 +4049,7 @@ mod tests {
                     runtime: Some("llama.cpp"),
                     model: "tiny".into(),
                     format: Some("gguf"),
+                    size_bytes: None,
                     input_modalities: vec![Modality::Text],
                     output_modalities: vec![Modality::Text],
                     output_type: None,
@@ -2121,6 +4062,8 @@ mod tests {
                 streaming: true,
                 location: Location::Local,
                 parent: None,
+                provider: None,
+                server: None,
             });
             if trace == TraceMode::Suppress {
                 assert!(obs.context().is_none());
@@ -2133,7 +4076,7 @@ mod tests {
                 let sent = server.mock(|when, then| {
                     when.method(POST)
                         .path("/v1/traces")
-                        .body_contains(format!("\"parentSpanId\": \"{}\"", parent.span_id()))
+                        .body_contains(format!("\"parentSpanId\":\"{}\"", parent.span_id()))
                         .body_contains("chat tiny");
                     then.status(200);
                 });
@@ -2142,7 +4085,7 @@ mod tests {
             }
         }
         assert_eq!(
-            pipeline.stats().spans_queued,
+            pipeline.stats().traces.accepted,
             2,
             "the suppressed workflow and inference must enqueue no spans"
         );
@@ -2157,6 +4100,1573 @@ mod tests {
         assert_eq!(h.tokens_out, Some(9));
         assert_eq!(h.tokens_in, Some(4));
         assert_eq!(h.ttft_ms, Some(12.5));
+    }
+
+    fn test_run(options: &crate::RunOptions) -> RunObservation {
+        RunObservation::start(RunStart {
+            subject: RunSubject {
+                operation: "chat",
+                task: None,
+                runtime: Some("llama.cpp"),
+                model: "test".into(),
+                format: Some("gguf"),
+                size_bytes: None,
+                input_modalities: vec![Modality::Text],
+                output_modalities: vec![Modality::Text],
+                output_type: None,
+                is_llm: true,
+            },
+            input: None,
+            history: &[],
+            options: Some(options),
+            generation: None,
+            streaming: true,
+            location: Location::Local,
+            parent: None,
+            provider: None,
+            server: None,
+        })
+    }
+
+    #[test]
+    fn run_outcomes_reach_the_inference_duration_metric() {
+        // The in-memory metric and log helper reads run outcomes.
+        let signals = test_support::memory_session_with_signals();
+        let options = crate::RunOptions::default()
+            .with_observation(ObservationOptions::default().with_session(&signals.session));
+        let duration = semconv::metric::INFERENCE_DURATION;
+
+        test_run(&options).succeed(&Envelope::new(EnvelopeKind::Text("ok".into())));
+        let points = signals.points(duration);
+        assert_eq!(points.len(), 1, "{points:?}");
+        assert_eq!(points[0].count, 1);
+        assert_eq!(points[0].attr("error.type"), None);
+
+        test_run(&options).fail(&SdkError::inference("runtime failed"));
+        let mut points = signals.points(duration);
+        points.sort_by(|a, b| a.attr("error.type").cmp(&b.attr("error.type")));
+        assert_eq!(points.len(), 2, "{points:?}");
+        assert_eq!((points[0].attr("error.type"), points[0].count), (None, 1));
+        assert_eq!(
+            (points[1].attr("error.type"), points[1].count),
+            (Some("inference_error"), 1)
+        );
+        assert_eq!(
+            signals.log_events(),
+            [semconv::event::OPERATION_EXCEPTION],
+            "only the failure is an exception"
+        );
+    }
+
+    #[test]
+    fn a_workflow_stage_failing_after_an_unheeded_cancel_stays_an_error() {
+        // A pipeline never acts on the cancellation token, so its streaming
+        // fast-path stage fails after a cancel for its own reason: the stage,
+        // its attempt and the workflow record the same error.
+        let signals = test_support::memory_session_with_signals();
+        let token = crate::run_options::CancellationToken::new();
+        token.cancel();
+        let options = crate::RunOptions::default()
+            .with_cancellation_token(token)
+            .with_observation(ObservationOptions::default().with_session(&signals.session));
+        let workflow = WorkflowScope::start("flow", &options);
+        let stage = test_run(&workflow.child_options(&options));
+        let attempt = stage.attempt(AttemptSpec {
+            reason: AttemptReason::Initial,
+            location: Location::Local,
+            provider: None,
+            model: None,
+        });
+        let error = SdkError::inference("LLM streaming execution failed");
+        attempt.end_adapter(&Err::<Envelope, _>("decoder failed"));
+        stage.fail(&error);
+        workflow.end(&Err::<(), _>(error));
+
+        for name in ["invoke_workflow flow", "chat test", "attempt 0"] {
+            assert_eq!(
+                test_support::attr(&signals.spans.named(name), "error.type").as_deref(),
+                Some("inference_error"),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn attempts_sum_usage_once_and_offset_only_successful_first_token() {
+        let (config, exports, collector) = collector();
+        let session = ObservabilitySession::new(ObservabilityConfig::otlp(config)).unwrap();
+        let options = crate::RunOptions::default()
+            .with_observation(ObservationOptions::default().with_session(&session));
+        let run = test_run(&options);
+        let failed = run.attempt(AttemptSpec {
+            reason: AttemptReason::Initial,
+            location: Location::Local,
+            provider: None,
+            model: None,
+        });
+        {
+            let _stage = xybrid_core::tracing::SpanGuard::new("failed-runtime");
+            xybrid_core::tracing::add_metadata("tokens_out", "1");
+            xybrid_core::tracing::add_metadata("tokens_out", "3");
+            xybrid_core::tracing::add_metadata("tokens_in", "4");
+            xybrid_core::tracing::add_metadata("ttft_ms", "1");
+        }
+        failed.end(&Err(SdkError::inference("retry")));
+        assert_eq!(run.stages.harvest().ttft_ms, None);
+        let mut winner = run.attempt(AttemptSpec {
+            reason: AttemptReason::Fallback,
+            location: Location::Remote,
+            provider: None,
+            model: None,
+        });
+        // Deterministic timing input: the runtime's 5 ms starts 100 ms
+        // after the logical request, even though this test does no waiting.
+        winner.started = run.started + Duration::from_millis(100);
+        let mut output = Envelope::new(EnvelopeKind::Text("done".into()));
+        for (key, value) in [
+            ("tokens_in", "10"),
+            ("tokens_out", "7"),
+            ("cache_read_input_tokens", "0"),
+            ("ttft_ms", "5"),
+        ] {
+            output.metadata.insert(key.into(), value.into());
+        }
+        winner.end_adapter(&Ok::<_, SdkError>(output.clone()));
+        assert_eq!(run.stages.harvest().tokens_in, Some(14));
+        assert_eq!(run.stages.harvest().tokens_out, Some(10));
+        assert_eq!(run.stages.harvest().cached_tokens, Some(0));
+        assert_eq!(run.stages.harvest().ttft_ms, Some(105.0));
+        run.succeed(&output);
+        session.shutdown(Duration::from_secs(2)).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&exports.recv().unwrap()).unwrap();
+        let all = spans(&body);
+        let logical = all.iter().find(|s| s["name"] == "chat test").unwrap();
+        assert_eq!(
+            attribute(logical, "gen_ai.usage.input_tokens").unwrap()["intValue"],
+            "14"
+        );
+        assert_eq!(
+            attribute(logical, "gen_ai.usage.output_tokens").unwrap()["intValue"],
+            "10"
+        );
+        assert_eq!(
+            attribute(logical, semconv::attr::RESPONSE_TIME_TO_FIRST_TOKEN).unwrap()["doubleValue"],
+            0.105
+        );
+        collector.join().unwrap();
+    }
+
+    #[test]
+    fn asr_workflows_start_on_feed_and_keep_decoder_and_terminal_references() {
+        use test_support::*;
+        use xybrid_core::streaming::{DecoderObserver, StreamError};
+
+        let (session, memory, _provider) = memory_session();
+        let parent = ObservationContext::from_traceparent(
+            "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01",
+            None,
+        )
+        .unwrap();
+        let options = ObservationOptions::default()
+            .with_session(&session)
+            .with_parent(parent.clone())
+            .with_conversation_id("utterance");
+        let mut metadata = ModelMetadata::onnx("decoder", "1", "model.onnx");
+        metadata
+            .metadata
+            .insert("task".into(), serde_json::json!("speech-recognition"));
+        let asr = AsrObservation::for_model(Some(&options), Some(("decoder", &metadata)));
+
+        // Opening, warming and flushing a stream that was never fed records no workflow.
+        assert_eq!(asr.reference(), None);
+        drop(asr.warmup_span().1);
+        {
+            let _scope = asr.enter();
+        }
+        assert_eq!(asr.finish(&Ok::<_, SdkError>(())), None);
+
+        // An abandoned utterance is cancelled by reset.
+        drop(asr.enter_feed());
+        let abandoned = asr.reference().unwrap();
+        asr.reset();
+        assert_eq!(asr.reference(), None);
+
+        let input = Envelope::new(EnvelopeKind::Audio(vec![0; 32]));
+        let output = Envelope::new(EnvelopeKind::Text("transcription".into()));
+        let mut decoders = Vec::new();
+        for _ in 0..2 {
+            let _scope = asr.enter_feed();
+            asr.start(&metadata, &input).finish(&Ok(output.clone()));
+            let reference = asr.decoder_reference().unwrap();
+            // Cached partial reads keep the reference and record nothing.
+            for _ in 0..5 {
+                assert_eq!(asr.decoder_reference(), Some(reference.clone()));
+            }
+            decoders.push(reference);
+        }
+        let workflow = asr.reference().unwrap();
+        {
+            let _scope = asr.enter_feed();
+            asr.start(&metadata, &input)
+                .finish(&Err(StreamError::InferenceError("decode failed".into())));
+        }
+        assert_eq!(
+            asr.decoder_reference().as_ref(),
+            decoders.last(),
+            "a failed decode keeps the last transcript's reference"
+        );
+        assert_eq!(asr.reference(), Some(workflow.clone()));
+        {
+            let _scope = asr.enter();
+            assert_eq!(asr.finish(&Ok::<_, SdkError>(())), Some(workflow.clone()));
+        }
+        // A repeated flush returns the cached reference and starts nothing.
+        assert_eq!(
+            asr.finish(&Err::<(), _>(SdkError::inference("late"))),
+            Some(workflow.clone())
+        );
+        asr.reset();
+        assert_eq!(asr.decoder_reference(), None);
+        drop(asr.enter_feed());
+        let dropped = asr.reference().unwrap();
+        drop(asr);
+
+        let spans = memory.spans();
+        let workflows: Vec<_> = spans
+            .iter()
+            .filter(|s| s.name == "invoke_workflow asr_session")
+            .collect();
+        assert_eq!(
+            workflows.len(),
+            3,
+            "abandoned, completed and dropped utterances"
+        );
+        assert_eq!(
+            spans
+                .iter()
+                .filter(|s| s.name == "generate_content decoder")
+                .count(),
+            3,
+            "only real decoder executions are inferences"
+        );
+        assert!(spans.iter().any(|s| s.name == "warmup"));
+        for reference in &decoders {
+            let decode = memory.by_ref(reference);
+            assert_eq!(parent_id(&decode), workflow.span_id);
+            assert_eq!(trace_id(&decode), parent.trace_id());
+        }
+        let failed = spans
+            .iter()
+            .find(|s| {
+                s.name == "generate_content decoder" && attr(s, semconv::attr::ERROR_TYPE).is_some()
+            })
+            .unwrap();
+        assert_eq!(parent_id(failed), workflow.span_id);
+        for reference in [&abandoned, &dropped] {
+            assert_eq!(
+                attr(&memory.by_ref(reference), semconv::attr::ERROR_TYPE).as_deref(),
+                Some("cancelled")
+            );
+        }
+        let completed = memory.by_ref(&workflow);
+        assert_eq!(parent_id(&completed), parent.span_id());
+        assert_eq!(attr(&completed, semconv::attr::ERROR_TYPE), None);
+        assert_eq!(
+            attr(&completed, semconv::attr::CONVERSATION_ID).as_deref(),
+            Some("utterance")
+        );
+        assert_eq!(
+            attr(&completed, semconv::attr::WORKFLOW_NAME).as_deref(),
+            Some("asr_session")
+        );
+    }
+
+    #[test]
+    fn tool_definitions_calls_and_results_are_captured_automatically() {
+        use test_support::*;
+        use xybrid_core::gateway::Tool;
+        use xybrid_core::runtime_adapter::types::GenerationConfig;
+
+        let tool: Tool = serde_json::from_value(serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Weather for a city",
+                "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}
+            }
+        }))
+        .unwrap();
+        let config = GenerationConfig {
+            tools: vec![tool],
+            ..GenerationConfig::default()
+        };
+        let call = |id: &str| {
+            serde_json::json!([{
+                "id": id, "type": "function",
+                "function": {"name": "get_weather", "arguments": "{\"city\":\"Paris\"}"}
+            }])
+            .to_string()
+        };
+        // A history assistant turn that requested a tool, then the continuation.
+        let mut assistant = Envelope::new(EnvelopeKind::Text(String::new()))
+            .with_role(xybrid_core::ir::MessageRole::Assistant);
+        assistant
+            .metadata
+            .insert(Envelope::TOOL_CALLS_METADATA_KEY.into(), call("call_h"));
+        let continuation = Envelope::tool_results(
+            "what is the weather?",
+            "<unparseable prior turn>",
+            &[xybrid_core::ir::ToolCallResult {
+                call_id: "call_0".into(),
+                name: "get_weather".into(),
+                content: serde_json::json!({"temp_c": 21}),
+            }],
+        );
+        let mut output = Envelope::new(EnvelopeKind::Text(String::new()));
+        output
+            .metadata
+            .insert(Envelope::TOOL_CALLS_METADATA_KEY.into(), call("call_1"));
+
+        for capture in [true, false] {
+            let (session, memory, _provider) = memory_session();
+            let session = if capture {
+                session
+            } else {
+                ObservabilitySession::borrowed(
+                    Observer::builder()
+                        .tracer_provider(&_provider)
+                        .content_policy(ContentPolicy::metadata_only())
+                        .build(),
+                )
+            };
+            let options = crate::RunOptions::default()
+                .with_observation(ObservationOptions::default().with_session(&session));
+            let run = RunObservation::start(RunStart {
+                subject: RunSubject::remote_chat("tool-model"),
+                input: Some(&continuation),
+                history: std::slice::from_ref(&assistant),
+                options: Some(&options),
+                generation: Some(&config),
+                streaming: false,
+                location: Location::Local,
+                parent: None,
+                provider: None,
+                server: None,
+            });
+            let reference = run.succeed(&output).unwrap();
+            let span = memory.by_ref(&reference);
+            let definitions = attr(&span, semconv::attr::TOOL_DEFINITIONS)
+                .expect("tool definitions are schema content in every capture mode");
+            assert!(definitions.contains("get_weather"), "{definitions}");
+            assert!(
+                attr(&span, semconv::attr::RESPONSE_FINISH_REASONS)
+                    .is_some_and(|r| r.contains("tool_call")),
+                "a turn that ended on tool calls reports tool_call"
+            );
+            let input = attr(&span, semconv::attr::INPUT_MESSAGES);
+            let output_messages = attr(&span, semconv::attr::OUTPUT_MESSAGES);
+            if !capture {
+                assert_eq!(input, None);
+                assert_eq!(output_messages, None);
+                continue;
+            }
+            let input: serde_json::Value = serde_json::from_str(&input.unwrap()).unwrap();
+            let roles: Vec<&str> = input
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|m| m["role"].as_str().unwrap())
+                .collect();
+            assert_eq!(roles, ["assistant", "user", "assistant", "tool"]);
+            assert_eq!(input[0]["parts"][0]["type"], "tool_call");
+            assert_eq!(input[0]["parts"][0]["id"], "call_h");
+            assert_eq!(input[1]["parts"][0]["content"], "what is the weather?");
+            // The prior protocol text did not parse: the results name their calls.
+            assert_eq!(input[2]["parts"][0]["type"], "tool_call");
+            assert_eq!(input[2]["parts"][0]["id"], "call_0");
+            assert_eq!(input[3]["parts"][0]["type"], "tool_call_response");
+            assert_eq!(input[3]["parts"][0]["id"], "call_0");
+            assert_eq!(input[3]["parts"][0]["response"]["temp_c"], 21);
+            let output: serde_json::Value =
+                serde_json::from_str(&output_messages.unwrap()).unwrap();
+            let call = output[0]["parts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["type"] == "tool_call")
+                .expect("the model's tool call is an output part");
+            assert_eq!(call["name"], "get_weather");
+            assert_eq!(call["id"], "call_1");
+            assert_eq!(call["arguments"]["city"], "Paris");
+        }
+    }
+
+    #[test]
+    fn lazy_reload_and_warmup_materializations_are_load_operations() {
+        use test_support::*;
+        let (session, memory, _provider) = memory_session();
+        let options = crate::RunOptions::default().with_observation(
+            ObservationOptions::default()
+                .with_session(&session)
+                .with_conversation_id("lazy-conversation"),
+        );
+        let mut subject = test_run_subject();
+        subject.model = "lazy-model".into();
+        subject.size_bytes = Some(8192);
+        let run = RunObservation::start(RunStart {
+            subject,
+            input: None,
+            history: &[],
+            options: Some(&options),
+            generation: None,
+            streaming: false,
+            location: Location::Local,
+            parent: None,
+            provider: None,
+            server: None,
+        });
+        {
+            let _execute = xybrid_core::tracing::SpanGuard::new("execute:lazy-model");
+            drop(xybrid_core::tracing::model_load_stage("llamacpp"));
+        }
+        // An automatically released model reloads on its next run.
+        mark_reload();
+        {
+            let attempt = run.attempt(AttemptSpec {
+                reason: AttemptReason::Initial,
+                location: Location::Local,
+                provider: None,
+                model: None,
+            });
+            {
+                let _load = xybrid_core::tracing::model_load_stage("ort");
+                xybrid_core::tracing::mark_stage_failed();
+            }
+            attempt.end_adapter(&Err::<Envelope, _>("load failed"));
+        }
+        let run_ref = run.succeed_without_output().unwrap();
+        let warmup_root = memory_session_root(&session);
+        let warmup_scope = warmup_root.enter();
+        let warmup = SpanScope::start_loading(
+            "warmup lazy-model",
+            Vec::new(),
+            Some(LoadSubject::new("lazy-model", Some("gguf"), "warmup", None)),
+        );
+        drop(xybrid_core::tracing::model_load_stage("llamacpp"));
+        warmup.end(&Ok::<(), SdkError>(()));
+        drop(warmup_scope);
+        warmup_root.end();
+        // Without a known model a load stays a generic stage (no fabricated name).
+        {
+            let root = memory_session_root(&session);
+            let _scope = RecorderScope::install(Arc::new(StageCapture::new(
+                session.observer().clone(),
+                root.context(),
+            )));
+            drop(xybrid_core::tracing::model_load_stage("ort"));
+            root.end();
+        }
+
+        let loads: Vec<_> = memory
+            .spans()
+            .into_iter()
+            .filter(|s| s.name == "load_model lazy-model")
+            .collect();
+        assert_eq!(loads.len(), 3);
+        let trigger = |s: &opentelemetry_sdk::trace::SpanData| attr(s, LOAD_TRIGGER).unwrap();
+        let lazy = &loads[0];
+        assert_eq!(trigger(lazy), "lazy");
+        assert_eq!(
+            parent_id(lazy),
+            span_id(&memory.named("execute:lazy-model")),
+            "a load is a child of the stage that triggered it"
+        );
+        assert_eq!(
+            attr(lazy, semconv::attr::RUNTIME_NAME).as_deref(),
+            Some("llama.cpp")
+        );
+        assert_eq!(
+            attr(lazy, semconv::attr::MODEL_FORMAT).as_deref(),
+            Some("gguf")
+        );
+        let reload = &loads[1];
+        for load in [lazy, reload] {
+            assert_eq!(
+                attr(load, semconv::attr::CONVERSATION_ID).as_deref(),
+                Some("lazy-conversation")
+            );
+            assert_eq!(
+                attr(load, semconv::attr::MODEL_SIZE_BYTES).as_deref(),
+                Some("8192")
+            );
+            assert_eq!(
+                attr(load, semconv::attr::MODEL_CACHE_HIT),
+                None,
+                "materializing local weights does not establish their cache origin"
+            );
+        }
+        assert_eq!(
+            attr(&loads[2], semconv::attr::MODEL_SIZE_BYTES),
+            None,
+            "unknown size stays absent"
+        );
+        assert_eq!(trigger(reload), "reload");
+        assert_eq!(
+            attr(reload, semconv::attr::ERROR_TYPE).as_deref(),
+            Some("load_error")
+        );
+        let attempt = memory
+            .spans()
+            .into_iter()
+            .find(|s| span_id(s) == parent_id(reload))
+            .unwrap();
+        assert_eq!(parent_id(&attempt), run_ref.span_id);
+        assert_eq!(trigger(&loads[2]), "warmup");
+        assert!(memory.spans().iter().any(|s| s.name == "model_load:ort"));
+        assert_eq!(
+            memory
+                .spans()
+                .iter()
+                .filter(|s| attr(s, semconv::attr::OPERATION_NAME).as_deref() == Some("load_model"))
+                .count(),
+            3
+        );
+    }
+
+    #[test]
+    fn automatic_workflows_and_worker_loads_retain_conversation_controls() {
+        use test_support::*;
+        let (session, memory, _provider) = memory_session();
+        let controls = ObservationOptions::default()
+            .with_session(&session)
+            .with_conversation_id("automatic-conversation");
+        let options = crate::RunOptions::default().with_observation(controls);
+        let workflow = WorkflowScope::start("automatic", &options);
+        let inference = RunObservation::start(RunStart {
+            subject: test_run_subject(),
+            input: None,
+            history: &[],
+            options: None,
+            generation: None,
+            streaming: false,
+            location: Location::Local,
+            parent: None,
+            provider: None,
+            server: None,
+        });
+        inference.succeed_without_output();
+        let captured = CapturedContext::capture();
+        std::thread::spawn(move || {
+            let _context = captured.enter();
+            let load =
+                LoadScope::start_with_trigger("worker", None, None, "speculative_background");
+            load.end(&Err::<(), _>(SdkError::load("missing artifact")));
+        })
+        .join()
+        .unwrap();
+        workflow.end(&Ok::<(), SdkError>(()));
+        let asynchronous = AsyncWorkflow::start("asynchronous", &options);
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(asynchronous.instrument(async {
+                let load = LoadScope::start("async-worker", None, None);
+                load.end(&Ok::<(), SdkError>(()));
+            }));
+        asynchronous.end(&Ok::<(), SdkError>(()));
+        for span in memory.spans() {
+            assert_eq!(
+                attr(&span, semconv::attr::CONVERSATION_ID).as_deref(),
+                Some("automatic-conversation")
+            );
+            if attr(&span, semconv::attr::OPERATION_NAME).as_deref() == Some("load_model") {
+                assert_eq!(attr(&span, semconv::attr::MODEL_SIZE_BYTES), None);
+                assert_eq!(attr(&span, semconv::attr::MODEL_CACHE_HIT), None);
+            }
+        }
+        assert_eq!(memory.spans().len(), 5);
+    }
+
+    #[test]
+    fn final_load_metadata_is_unique_and_model_size_beats_transfer_progress() {
+        use test_support::*;
+        let (session, memory, _provider) = memory_session();
+        let options = ObservationOptions::default().with_session(&session);
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("model.onnx"), b"1234").unwrap();
+        std::fs::write(directory.path().join("tokens.json"), b"abc").unwrap();
+        for (name, initial, describe, declared, expected) in [
+            ("initial", true, true, Some(4_u64), Some("4")),
+            ("late", false, true, Some(4), Some("4")),
+            ("measured", false, true, None, Some("7")),
+            ("transfer", false, false, None, Some("900")),
+            ("unknown", false, false, None, None),
+        ] {
+            let mut metadata = ModelMetadata::onnx(name, "1", "model.onnx");
+            metadata.files.push("tokens.json".into());
+            if let Some(bytes) = declared {
+                metadata.metadata.insert("size_bytes".into(), bytes.into());
+            }
+            std::fs::write(
+                directory.path().join("model_metadata.json"),
+                serde_json::to_vec(&metadata).unwrap(),
+            )
+            .unwrap();
+            let load = LoadScope::start(name, initial.then_some(&metadata), Some(&options));
+            let reference = load.load.operation.observation_ref().unwrap();
+            if expected.is_some() {
+                // More progress reports than the default span-attribute budget.
+                for bytes in 396..652 {
+                    record_load_size(bytes);
+                    record_load_cache_hit(true);
+                }
+                if describe {
+                    load.describe_directory(name, directory.path());
+                    load.describe_directory(name, directory.path());
+                }
+                // A late archive/header update cannot replace known model bytes.
+                load.size_bytes(900);
+                record_load_size(u64::MAX);
+                record_load_cache_hit(false);
+            }
+            if name == "measured" {
+                load.end(&Err::<(), _>(SdkError::load("after metadata resolution")));
+            } else {
+                load.end(&Ok::<(), SdkError>(()));
+            }
+            let span = memory.by_ref(&reference);
+            assert_eq!(
+                attr(&span, semconv::attr::MODEL_SIZE_BYTES).as_deref(),
+                expected,
+                "{name}"
+            );
+            assert_eq!(
+                attr(&span, semconv::attr::MODEL_CACHE_HIT).as_deref(),
+                expected.map(|_| "true"),
+                "{name}"
+            );
+            for key in [
+                semconv::attr::MODEL_SIZE_BYTES,
+                semconv::attr::MODEL_CACHE_HIT,
+                semconv::attr::MODEL_FORMAT,
+                semconv::attr::RUNTIME_NAME,
+            ] {
+                assert!(
+                    span.attributes
+                        .iter()
+                        .filter(|a| a.key.as_str() == key)
+                        .count()
+                        <= 1,
+                    "duplicate {key} on {name}"
+                );
+            }
+            assert_eq!(span.dropped_attributes_count, 0, "{name}");
+        }
+    }
+
+    #[test]
+    fn declared_load_size_is_exported_without_inventing_missing_values() {
+        use test_support::*;
+        let (session, memory, _provider) = memory_session();
+        let options = ObservationOptions::default().with_session(&session);
+        for (declared, size_mb, expected) in [
+            (
+                serde_json::json!(1234),
+                serde_json::Value::Null,
+                Some("1234"),
+            ),
+            (
+                serde_json::Value::Null,
+                serde_json::json!(2),
+                Some("2097152"),
+            ),
+            (serde_json::json!(-1), serde_json::Value::Null, None),
+            (serde_json::json!("unknown"), serde_json::Value::Null, None),
+            (serde_json::Value::Null, serde_json::json!(u64::MAX), None),
+            (serde_json::json!(u64::MAX), serde_json::Value::Null, None),
+        ] {
+            let mut metadata = ModelMetadata::onnx("size-model", "1", "missing.onnx");
+            metadata.metadata.insert("size_bytes".into(), declared);
+            metadata.metadata.insert("size_mb".into(), size_mb);
+            let load = LoadScope::start("size-model", Some(&metadata), Some(&options));
+            let reference = load.end(&Ok::<(), SdkError>(())).unwrap();
+            let span = memory.by_ref(&reference);
+            assert_eq!(
+                attr(&span, semconv::attr::MODEL_SIZE_BYTES).as_deref(),
+                expected
+            );
+            assert_eq!(attr(&span, semconv::attr::MODEL_CACHE_HIT), None);
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let mut metadata = ModelMetadata::onnx("measured-size", "1", "model.onnx");
+        metadata.files = vec!["model.onnx".into(), "tokens.json".into()];
+        std::fs::write(
+            directory.path().join("model_metadata.json"),
+            serde_json::to_vec(&metadata).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(directory.path().join("model.onnx"), b"1234").unwrap();
+        std::fs::write(directory.path().join("tokens.json"), b"abc").unwrap();
+        for (model, expected) in [("complete-files", Some("7")), ("missing-files", None)] {
+            if expected.is_none() {
+                std::fs::remove_file(directory.path().join("tokens.json")).unwrap();
+            }
+            let load = LoadScope::start(model, None, Some(&options));
+            load.describe_directory(model, directory.path());
+            let reference = load.end(&Ok::<(), SdkError>(())).unwrap();
+            assert_eq!(
+                attr(&memory.by_ref(&reference), semconv::attr::MODEL_SIZE_BYTES).as_deref(),
+                expected
+            );
+        }
+    }
+
+    fn test_run_subject() -> RunSubject {
+        RunSubject {
+            operation: "chat",
+            task: None,
+            runtime: Some("llama.cpp"),
+            model: "test".into(),
+            format: Some("gguf"),
+            size_bytes: None,
+            input_modalities: vec![Modality::Text],
+            output_modalities: vec![Modality::Text],
+            output_type: None,
+            is_llm: true,
+        }
+    }
+
+    fn memory_session_root(session: &ObservabilitySession) -> ManualObservation<WorkflowOperation> {
+        start_workflow("root", &ObservationOptions::default().with_session(session))
+    }
+
+    #[test]
+    fn operations_started_inside_an_open_stage_are_its_children() {
+        use test_support::*;
+        let (session, memory, _provider) = memory_session();
+        let options = crate::RunOptions::default()
+            .with_observation(ObservationOptions::default().with_session(&session));
+        let workflow = WorkflowScope::start("nested", &options);
+        let workflow_ref = workflow.op.observation_ref().unwrap();
+        let stage_id;
+        let captured;
+        {
+            let stage = xybrid_core::tracing::SpanGuard::new("inference:model");
+            stage_id = stage.id();
+            let tool = start_tool(
+                ToolCallInfo::new("in-stage"),
+                &ObservationOptions::default(),
+            );
+            tool.end();
+            captured = CapturedContext::capture();
+        }
+        std::thread::spawn(move || {
+            let _scope = captured.enter();
+            start_tool(ToolCallInfo::new("worker"), &ObservationOptions::default()).end();
+        })
+        .join()
+        .unwrap();
+        // After the stage closes, new operations attach to the workflow again.
+        start_tool(ToolCallInfo::new("after"), &ObservationOptions::default()).end();
+        workflow.end(&Ok::<(), SdkError>(()));
+        assert_ne!(stage_id, 0);
+        let stage = memory.named("inference:model");
+        assert_eq!(parent_id(&stage), workflow_ref.span_id);
+        for name in ["execute_tool in-stage", "execute_tool worker"] {
+            assert_eq!(parent_id(&memory.named(name)), span_id(&stage), "{name}");
+        }
+        assert_eq!(
+            parent_id(&memory.named("execute_tool after")),
+            workflow_ref.span_id
+        );
+    }
+
+    #[test]
+    fn routing_attributes_never_export_free_text_or_endpoints() {
+        use xybrid_core::orchestrator::routing_engine::{
+            LocalReliabilityHint, RouteTarget, RoutingDecision,
+        };
+        use xybrid_core::orchestrator::{DecisionSource, StageRoute};
+        let decision = RoutingDecision {
+            stage: "stage".into(),
+            target: RouteTarget::Fallback("https://private.example/endpoint".into()),
+            reason: "[remote] policy_deny: secret-model-id is private (confidence: 90%)".into(),
+            timestamp_ms: 0,
+            local_reliability_hint: LocalReliabilityHint::EMPTY,
+        };
+        let attributes =
+            routing_attributes(&StageRoute::new(&decision, DecisionSource::Remote, false));
+        let rendered: Vec<(String, String)> = attributes
+            .iter()
+            .map(|kv| (kv.key.to_string(), kv.value.to_string()))
+            .collect();
+        assert_eq!(
+            rendered,
+            [
+                ("xybrid.routing.target".to_owned(), "fallback".to_owned()),
+                ("xybrid.routing.source".to_owned(), "remote".to_owned()),
+                (
+                    "xybrid.routing.policy_allowed".to_owned(),
+                    "false".to_owned()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn manual_workflow_tool_and_load_record_the_conversation_id() {
+        use test_support::*;
+        let (session, memory, _provider) = memory_session();
+        let options = ObservationOptions::default()
+            .with_session(&session)
+            .with_conversation_id("conversation-7");
+        start_workflow("conversation", &options).end();
+        start_tool(ToolCallInfo::new("lookup"), &options).end();
+        start_model_load(
+            ModelLoadInfo {
+                model: "m".into(),
+                ..Default::default()
+            },
+            &options,
+        )
+        .end();
+        start_inference(InferenceRequest::new("chat", "app"), &options).end();
+        let spans = memory.spans();
+        assert_eq!(spans.len(), 4);
+        for span in &spans {
+            assert_eq!(
+                attr(span, semconv::attr::CONVERSATION_ID).as_deref(),
+                Some("conversation-7"),
+                "{}",
+                span.name
+            );
+        }
+    }
+
+    #[test]
+    fn async_workflows_parent_stages_across_polls_without_holding_a_guard() {
+        use test_support::*;
+        fn assert_send<T: Send>(_: &T) {}
+        let (session, memory, _provider) = memory_session();
+        let options = crate::RunOptions::default()
+            .with_observation(ObservationOptions::default().with_session(&session));
+        let workflow = AsyncWorkflow::start("legacy", &options);
+        let future = workflow.instrument(async {
+            {
+                let _first = xybrid_core::tracing::SpanGuard::new("before-yield");
+            }
+            // Core's `pipeline:` guard in `execute_pipeline_async` is held
+            // across its awaits: the poll that drops it runs under a fresh
+            // scope, yet the stage still ends (not cancelled after the run).
+            let held = xybrid_core::tracing::SpanGuard::new("held-across-yield");
+            tokio::task::yield_now().await;
+            let _second = xybrid_core::tracing::SpanGuard::new("after-yield");
+            drop(held);
+            Ok::<(), String>(())
+        });
+        assert_send(&future);
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .unwrap();
+        let result = runtime.block_on(future);
+        let reference = workflow.end(&result).unwrap();
+        assert!(xybrid_core::tracing::current_recorder().is_none());
+        for name in ["before-yield", "after-yield"] {
+            assert_eq!(parent_id(&memory.named(name)), reference.span_id);
+        }
+        let workflow_span = memory.by_ref(&reference);
+        assert_eq!(workflow_span.name, "invoke_workflow legacy");
+        let held = memory.named("held-across-yield");
+        assert_eq!(parent_id(&held), reference.span_id);
+        assert_eq!(attr(&held, semconv::attr::ERROR_TYPE), None);
+        assert!(held.end_time <= workflow_span.end_time);
+    }
+
+    /// Polls `inner`, asserting that no SDK recorder and no application
+    /// context is installed on the polling thread before or after the poll:
+    /// whatever one task installs must not outlive its own poll.
+    struct NoLeak<F>(std::pin::Pin<Box<F>>);
+
+    impl<F: std::future::Future> std::future::Future for NoLeak<F> {
+        type Output = F::Output;
+
+        fn poll(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<F::Output> {
+            fn assert_clean(when: &str) {
+                assert!(
+                    xybrid_core::tracing::current_recorder().is_none(),
+                    "a recorder is installed {when} a poll"
+                );
+                assert!(
+                    ObservationContext::current().is_none(),
+                    "an application context is attached {when} a poll"
+                );
+            }
+            assert_clean("before");
+            let polled = self.0.as_mut().poll(cx);
+            assert_clean("after");
+            polled
+        }
+    }
+
+    /// Task `i` of [`concurrent_async_workflows_keep_their_own_parents`]: a
+    /// workflow whose stages and run interleave with every other task's at
+    /// two barriers, with a stage held across a yield.
+    async fn interleaved_workflow(
+        i: usize,
+        workflow_options: crate::RunOptions,
+        run_options: crate::RunOptions,
+        barrier: Arc<tokio::sync::Barrier>,
+    ) -> Option<ObservationRef> {
+        let workflow = AsyncWorkflow::start(&format!("wf-{i}"), &workflow_options);
+        let result = workflow
+            .instrument(async move {
+                {
+                    let _first = xybrid_core::tracing::SpanGuard::new(format!("first-{i}"));
+                }
+                barrier.wait().await;
+                let held = xybrid_core::tracing::SpanGuard::new(format!("held-{i}"));
+                tokio::task::yield_now().await;
+                barrier.wait().await;
+                {
+                    let _last = xybrid_core::tracing::SpanGuard::new(format!("last-{i}"));
+                    // A run starts and ends within one poll, as on the SDK's
+                    // blocking workers.
+                    let mut subject = test_run_subject();
+                    subject.model = format!("m-{i}");
+                    RunObservation::start(RunStart {
+                        subject,
+                        input: None,
+                        history: &[],
+                        options: Some(&run_options),
+                        generation: None,
+                        streaming: false,
+                        location: Location::Local,
+                        parent: None,
+                        provider: None,
+                        server: None,
+                    })
+                    .succeed(&Envelope::new(EnvelopeKind::Text("ok".into())));
+                }
+                drop(held);
+                Ok::<(), String>(())
+            })
+            .await;
+        workflow.end(&result)
+    }
+
+    /// Spawns [`interleaved_workflow`] once per parent on `runtime` and waits
+    /// for every reference. Even tasks get their parent explicitly; odd tasks
+    /// only through the application context the caller attached, carried
+    /// into the task with `with_context`.
+    fn interleave(
+        runtime: &tokio::runtime::Runtime,
+        session: &ObservabilitySession,
+        parents: &[ObservationContext],
+    ) -> Vec<ObservationRef> {
+        use opentelemetry::context::FutureExt as _;
+        let barrier = Arc::new(tokio::sync::Barrier::new(parents.len()));
+        let run_options = crate::RunOptions::default()
+            .with_observation(ObservationOptions::default().with_session(session));
+        let tasks: Vec<_> = parents
+            .iter()
+            .enumerate()
+            .map(|(i, parent)| {
+                let observation = ObservationOptions::default().with_session(session);
+                if i % 2 == 0 {
+                    let options = crate::RunOptions::default()
+                        .with_observation(observation.with_parent(parent.clone()));
+                    let task =
+                        interleaved_workflow(i, options, run_options.clone(), barrier.clone());
+                    runtime.spawn(NoLeak(Box::pin(task)))
+                } else {
+                    let _attached = parent.to_otel().attach();
+                    let options = crate::RunOptions::default().with_observation(observation);
+                    let task =
+                        interleaved_workflow(i, options, run_options.clone(), barrier.clone())
+                            .with_context(opentelemetry::Context::current());
+                    runtime.spawn(NoLeak(Box::pin(task)))
+                }
+            })
+            .collect();
+        runtime.block_on(async {
+            let mut references = Vec::new();
+            for task in tasks {
+                references.push(
+                    task.await
+                        .expect("no task panicked")
+                        .expect("a sampled workflow"),
+                );
+            }
+            references
+        })
+    }
+
+    #[test]
+    fn concurrent_async_workflows_keep_their_own_parents() {
+        // 16 workflows interleave stage by stage (barriers, a yield, a
+        // stage held across it) on one thread and on four workers. Each keeps
+        // its own parent, nothing crosses into another task's trace, nothing
+        // installed by one task's poll outlives it, and every workflow and
+        // run is counted once.
+        use std::collections::HashSet;
+        use test_support::*;
+        const TASKS: usize = 16;
+        let parents: Vec<ObservationContext> = (1..=TASKS)
+            .map(|i| {
+                ObservationContext::from_traceparent(
+                    &format!("00-{:032x}-{:016x}-01", 0xa100 + i, 0xb100 + i),
+                    None,
+                )
+                .unwrap()
+            })
+            .collect();
+        for workers in [0, 4] {
+            let runtime = if workers == 0 {
+                tokio::runtime::Builder::new_current_thread().build()
+            } else {
+                tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(workers)
+                    .build()
+            }
+            .unwrap();
+            let signals = memory_session_with_signals();
+            let references = interleave(&runtime, &signals.session, &parents);
+            assert!(xybrid_core::tracing::current_recorder().is_none());
+
+            for (i, (parent, reference)) in parents.iter().zip(&references).enumerate() {
+                let label = format!("{workers} workers, task {i}");
+                let workflow = signals.spans.by_ref(reference);
+                assert_eq!(workflow.name, format!("invoke_workflow wf-{i}"), "{label}");
+                assert_eq!(parent_id(&workflow), parent.span_id(), "{label}");
+                assert_eq!(trace_id(&workflow), parent.trace_id(), "{label}");
+                for stage in ["first", "held", "last"] {
+                    let span = signals.spans.named(&format!("{stage}-{i}"));
+                    assert_eq!(parent_id(&span), reference.span_id, "{label}: {stage}");
+                    assert_eq!(trace_id(&span), parent.trace_id(), "{label}: {stage}");
+                    assert_eq!(attr(&span, semconv::attr::ERROR_TYPE), None, "{label}");
+                }
+                let run = signals.spans.named(&format!("chat m-{i}"));
+                assert_eq!(
+                    parent_id(&run),
+                    span_id(&signals.spans.named(&format!("last-{i}"))),
+                    "{label}: the run is a child of the stage open around it"
+                );
+                assert_eq!(trace_id(&run), parent.trace_id(), "{label}");
+            }
+            // Workflow, three stages and a run per task, each in its own
+            // task's trace: no extra root and no span in a foreign trace.
+            let spans = signals.spans.spans();
+            assert_eq!(spans.len(), TASKS * 5, "{workers} workers");
+            let traces: HashSet<String> =
+                parents.iter().map(ObservationContext::trace_id).collect();
+            assert_eq!(
+                spans.iter().map(trace_id).collect::<HashSet<_>>(),
+                traces,
+                "{workers} workers"
+            );
+            for metric in [
+                semconv::metric::WORKFLOW_DURATION,
+                semconv::metric::INFERENCE_DURATION,
+            ] {
+                let points = signals.points(metric);
+                assert_eq!(
+                    points.iter().map(|p| p.count).sum::<u64>(),
+                    TASKS as u64,
+                    "{workers} workers, {metric}: {points:?}"
+                );
+                assert!(
+                    points.iter().all(|p| p.attr("error.type").is_none()),
+                    "{workers} workers, {metric}: {points:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn concurrent_async_workflows_keep_session_counters_consistent() {
+        // The same interleaving against an SDK-owned pipeline. After a
+        // flush every span is exported exactly once and every signal's
+        // counters reconcile with nothing pending.
+        use httpmock::prelude::*;
+        const TASKS: usize = 16;
+        let server = MockServer::start();
+        let accepted = server.mock(|when, then| {
+            when.method(POST);
+            then.status(200);
+        });
+        let endpoint = |signal: &str| {
+            SignalEndpoint::new(server.url(format!("/v1/{signal}")))
+                .with_protocol(Protocol::HttpJson)
+        };
+        let config = OtlpConfig::default()
+            .with_traces(Some(endpoint("traces")))
+            .with_logs(Some(endpoint("logs")))
+            .with_metrics(Some(endpoint("metrics")))
+            .with_batch(BatchLimits {
+                scheduled_delay: Duration::from_secs(60),
+                ..BatchLimits::default()
+            });
+        let session =
+            ObservabilitySession::new(ObservabilityConfig::otlp(config).device_attributes(false))
+                .unwrap();
+        let parents: Vec<ObservationContext> = (1..=TASKS)
+            .map(|i| {
+                ObservationContext::from_traceparent(
+                    &format!("00-{:032x}-{:016x}-01", 0xc100 + i, 0xd100 + i),
+                    None,
+                )
+                .unwrap()
+            })
+            .collect();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .build()
+            .unwrap();
+        let references = interleave(&runtime, &session, &parents);
+        assert_eq!(references.len(), TASKS);
+        session.flush(Duration::from_secs(10)).unwrap();
+        let stats = session.stats().expect("an SDK-owned pipeline");
+        assert_eq!(
+            (
+                stats.traces.accepted,
+                stats.traces.exported,
+                stats.traces.dropped,
+                stats.traces.failed,
+                stats.traces.pending
+            ),
+            ((TASKS * 5) as u64, (TASKS * 5) as u64, 0, 0, 0),
+            "{stats:?}"
+        );
+        for (signal, s) in [("logs", stats.logs), ("metrics", stats.metrics)] {
+            assert!(s.is_consistent(), "{signal}: {s:?}");
+            assert_eq!(
+                (s.failed, s.dropped, s.pending),
+                (0, 0, 0),
+                "{signal}: {s:?}"
+            );
+        }
+        assert!(stats.metrics.exported > 0, "{stats:?}");
+        assert!(accepted.hits() > 0);
+        session.shutdown(Duration::from_secs(10)).unwrap();
+    }
+
+    #[test]
+    fn replaced_helper_sessions_shut_down_now_unless_pinned() {
+        let _default = test_support::default_session_lock();
+        // Unpinned: the previous pipeline exports before replacement returns.
+        let (config, exports, first) = collector();
+        let unpinned = ObservabilitySession::new(ObservabilityConfig::otlp(config)).unwrap();
+        start_workflow(
+            "before",
+            &ObservationOptions::default().with_session(&unpinned),
+        )
+        .end();
+        session::retire_replaced(session::DefaultSlot {
+            session: unpinned,
+            helper_owned: true,
+        });
+        assert!(
+            exports.try_recv().is_ok(),
+            "an unpinned replaced pipeline shuts down synchronously"
+        );
+        first.join().unwrap();
+
+        // Pinned: it drains after the last pinned operation releases it.
+        let (config, exports, second) = collector();
+        let pinned = ObservabilitySession::new(ObservabilityConfig::otlp(config)).unwrap();
+        let operation = start_workflow(
+            "in-flight",
+            &ObservationOptions::default().with_session(&pinned),
+        );
+        session::retire_replaced(session::DefaultSlot {
+            session: pinned,
+            helper_owned: true,
+        });
+        assert!(
+            exports.try_recv().is_err(),
+            "a pinned pipeline keeps running"
+        );
+        operation.end();
+        drop(operation);
+        let body: serde_json::Value =
+            serde_json::from_str(&exports.recv_timeout(Duration::from_secs(5)).unwrap()).unwrap();
+        assert_eq!(spans(&body).len(), 1);
+        second.join().unwrap();
+
+        // A helper-owned default handed back by install_default_session is retired.
+        let helper = ObservabilitySession::borrowed(Observer::disabled());
+        let previous = session::replace_default(helper, true);
+        let returned =
+            install_default_session(ObservabilitySession::borrowed(Observer::disabled())).unwrap();
+        assert!(returned.is_retired());
+        let installed = session::uninstall_default();
+        assert!(installed.is_some_and(|slot| !slot.helper_owned));
+        if let Some(previous) = previous {
+            session::replace_default(previous.session, previous.helper_owned);
+        }
+    }
+
+    #[test]
+    fn device_id_reaches_the_exported_resource_and_is_validated() {
+        let (config, exports, collector) = collector();
+        let session = ObservabilitySession::new(
+            ObservabilityConfig::otlp(config)
+                .device_attributes(false)
+                .device_id("device-42"),
+        )
+        .unwrap();
+        start_workflow(
+            "device",
+            &ObservationOptions::default().with_session(&session),
+        )
+        .end();
+        session.shutdown(Duration::from_secs(2)).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&exports.recv().unwrap()).unwrap();
+        collector.join().unwrap();
+        let resource = &body["resourceSpans"][0]["resource"]["attributes"];
+        let value = |key: &str| {
+            resource
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|a| a["key"] == key)
+                .map(|a| a["value"]["stringValue"].clone())
+        };
+        assert_eq!(value("device.id"), Some(serde_json::json!("device-42")));
+        assert_eq!(
+            value("telemetry.sdk.name"),
+            Some(serde_json::json!("xybrid"))
+        );
+
+        for invalid in ["", "line\nbreak", &"x".repeat(129)] {
+            assert!(matches!(
+                ObservabilitySession::new(
+                    ObservabilityConfig::otlp(OtlpConfig::default()).device_id(invalid)
+                ),
+                Err(SdkError::ConfigError(_))
+            ));
+            assert!(resource_attributes(false, Some(invalid)).is_err());
+        }
+        let conflicting =
+            OtlpConfig::default().with_resource_attribute(KeyValue::new("device.id", "other"));
+        assert!(ObservabilitySession::new(
+            ObservabilityConfig::otlp(conflicting).device_id("device-42")
+        )
+        .is_err());
+        assert!(ObservabilitySession::new(
+            ObservabilityConfig::with_observer(Observer::disabled()).device_id("device-42")
+        )
+        .is_err());
+        let attributes = resource_attributes(false, Some("device-42")).unwrap();
+        assert!(attributes
+            .iter()
+            .any(|kv| kv.key.as_str() == "device.id" && kv.value.to_string() == "device-42"));
+    }
+
+    #[test]
+    fn retired_helper_keeps_pipeline_alive_until_pinned_operation_finishes() {
+        let (config, exports, collector) = collector();
+        let session = ObservabilitySession::new(ObservabilityConfig::otlp(config)).unwrap();
+        let options = crate::RunOptions::default()
+            .with_observation(ObservationOptions::default().with_session(&session));
+        let run = test_run(&options);
+        session.retire();
+        drop(options);
+        drop(session);
+        assert!(run.succeed_without_output().is_some());
+        let body: serde_json::Value =
+            serde_json::from_str(&exports.recv_timeout(Duration::from_secs(5)).unwrap()).unwrap();
+        assert_eq!(spans(&body).len(), 1);
+        collector.join().unwrap();
+    }
+
+    #[test]
+    fn explicit_parent_overrides_inherited_suppression_unless_explicitly_suppressed() {
+        let (config, exports, collector) = collector();
+        let session = ObservabilitySession::new(ObservabilityConfig::otlp(config)).unwrap();
+        let options = crate::RunOptions::default().with_observation(ObservationOptions {
+            session: Some(session.clone()),
+            trace: TraceMode::Suppress,
+            ..Default::default()
+        });
+        let workflow = WorkflowScope::start("suppressed", &options);
+        let parent = ObservationContext::from_traceparent(
+            "00-11111111111111111111111111111111-2222222222222222-01",
+            None,
+        )
+        .unwrap();
+        for trace in [TraceMode::Default, TraceMode::Suppress] {
+            let child = crate::RunOptions::default().with_observation(ObservationOptions {
+                parent: Some(parent.clone()),
+                session: Some(session.clone()),
+                trace,
+                ..Default::default()
+            });
+            let run = test_run(&child);
+            if trace == TraceMode::Default {
+                assert_eq!(run.context().unwrap().trace_id(), parent.trace_id());
+            } else {
+                assert!(run.context().is_none());
+            }
+            run.succeed_without_output();
+        }
+        workflow.end(&Ok::<(), SdkError>(()));
+        session.shutdown(Duration::from_secs(2)).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&exports.recv().unwrap()).unwrap();
+        assert_eq!(spans(&body).len(), 1);
+        collector.join().unwrap();
+    }
+
+    #[test]
+    fn provider_policy_survives_a_captured_worker_hop() {
+        let original = ObservabilitySession::new(
+            ObservabilityConfig::with_observer(Observer::disabled())
+                .propagate_context_to("https://API.example:443/")
+                .unwrap(),
+        )
+        .unwrap();
+        let _scope =
+            RecorderScope::install(Arc::new(StageRecorder::for_session(original, None, true)));
+        assert!(xybrid_core::tracing::current_recorder()
+            .unwrap()
+            .allows_provider_context("https://api.example"));
+        let captured = CapturedContext::capture();
+        std::thread::spawn(move || {
+            let _scope = captured.enter();
+            let recorder = xybrid_core::tracing::current_recorder().unwrap();
+            assert!(recorder.allows_provider_context("https://api.example"));
+            assert!(!recorder.allows_provider_context("https://other.example"));
+            assert!(xybrid_core::tracing::current_trace_headers().is_none());
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn manual_handles_retain_retired_sessions_and_parent_worker_children() {
+        let (config, exports, collector) = collector();
+        let session = ObservabilitySession::new(ObservabilityConfig::otlp(config)).unwrap();
+        let root = start_workflow(
+            "manual-root",
+            &ObservationOptions::default().with_session(&session),
+        );
+        let reference = root.observation_ref().unwrap();
+        session.retire();
+        drop(session);
+        let captured = {
+            let _scope = root.enter();
+            CapturedContext::capture()
+        };
+        std::thread::spawn(move || {
+            let _scope = captured.enter();
+            let tool = start_tool(
+                ToolCallInfo {
+                    name: "worker-tool".into(),
+                    ..Default::default()
+                },
+                &ObservationOptions::default(),
+            );
+            assert_eq!(tool.context().unwrap().trace_id(), reference.trace_id);
+            tool.record_result(&serde_json::json!({"count": 0}));
+            tool.end();
+            tool.end_with_error(&ErrorInfo::new("late_error"));
+            tool.record_result(&serde_json::json!({"count": 99}));
+            assert!(tool.is_finished());
+        })
+        .join()
+        .unwrap();
+        root.end();
+        root.cancel();
+        drop(root);
+        let body: serde_json::Value =
+            serde_json::from_str(&exports.recv_timeout(Duration::from_secs(5)).unwrap()).unwrap();
+        let all = spans(&body);
+        assert_eq!(all.len(), 2);
+        let root = all
+            .iter()
+            .find(|s| s["name"] == "invoke_workflow manual-root")
+            .unwrap();
+        let tool = all
+            .iter()
+            .find(|s| s["name"] == "execute_tool worker-tool")
+            .unwrap();
+        assert_eq!(tool["parentSpanId"], root["spanId"]);
+        assert!(attribute(tool, semconv::attr::ERROR_TYPE).is_none());
+        assert_eq!(
+            attribute(tool, "gen_ai.tool.call.result").unwrap()["stringValue"],
+            "{\"count\":0}"
+        );
+        collector.join().unwrap();
+    }
+
+    #[test]
+    fn manual_drop_cancels_once_and_explicit_parent_overrides_suppression() {
+        let (config, exports, collector) = collector();
+        let session = ObservabilitySession::new(ObservabilityConfig::otlp(config)).unwrap();
+        let options = ObservationOptions::default().with_session(&session);
+        let suppressed = start_workflow(
+            "suppressed",
+            &ObservationOptions {
+                trace: TraceMode::Suppress,
+                ..options.clone()
+            },
+        );
+        let parent = ObservationContext::from_traceparent(
+            "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01",
+            None,
+        )
+        .unwrap();
+        let reference;
+        {
+            let _scope = suppressed.enter();
+            let child = start_inference(
+                InferenceRequest::default(),
+                &options.clone().with_parent(parent.clone()),
+            );
+            reference = child.observation_ref().unwrap();
+            assert_eq!(reference.trace_id, parent.trace_id());
+            let inherited = start_model_load(
+                ModelLoadInfo {
+                    model: "hidden".into(),
+                    ..Default::default()
+                },
+                &options,
+            );
+            assert!(inherited.observation_ref().is_none());
+            assert!(inherited.context().is_none());
+            inherited.end();
+            // Child drops unfinished here; it must emit exactly one cancellation.
+        }
+        suppressed.end();
+        session.shutdown(Duration::from_secs(2)).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&exports.recv().unwrap()).unwrap();
+        let all = spans(&body);
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0]["spanId"], reference.span_id);
+        assert_eq!(
+            attribute(all[0], semconv::attr::ERROR_TYPE).unwrap()["stringValue"],
+            "cancelled"
+        );
+        collector.join().unwrap();
+    }
+
+    #[test]
+    fn manual_unsampled_operations_keep_references_and_children() {
+        let (config, exports, collector) = collector();
+        let session = ObservabilitySession::new(ObservabilityConfig::otlp(config)).unwrap();
+        let options = ObservationOptions::default().with_session(&session);
+        let parent = ObservationContext::from_traceparent(
+            "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-00",
+            None,
+        )
+        .unwrap();
+        let workflow = start_workflow("unsampled", &options.clone().with_parent(parent.clone()));
+        assert!(workflow.observation_ref().is_some());
+        assert!(!workflow.context().unwrap().is_sampled());
+        {
+            let _scope = workflow.enter();
+            let inference = start_inference(InferenceRequest::default(), &options);
+            assert!(inference.observation_ref().is_some());
+            assert_eq!(inference.context().unwrap().trace_id(), parent.trace_id());
+            assert!(!inference.context().unwrap().is_sampled());
+            inference.end();
+        }
+        workflow.end();
+        assert_eq!(session.stats().unwrap().traces.accepted, 0);
+        let anchor = start_workflow("sampled", &options);
+        anchor.end();
+        session.shutdown(Duration::from_secs(2)).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&exports.recv().unwrap()).unwrap();
+        assert_eq!(spans(&body).len(), 1);
+        collector.join().unwrap();
+    }
+
+    #[test]
+    fn unavailable_thermal_state_is_not_reported_as_nominal() {
+        let summary = ResourceUsageSummary {
+            cpu_avg_pct: None,
+            cpu_peak_pct: None,
+            process_rss_peak_mb: None,
+            available_mem_min_mb: None,
+            memory_pressure_peak: xybrid_core::device::MemoryPressure::Unknown,
+            thermal_state_peak: ThermalState::Normal,
+            thermal_measured: false,
+            battery_pct_end: None,
+            sample_count: 0,
+            sampling_mode: "off".into(),
+            sampling_interval_ms: None,
+        };
+        assert_eq!(resource_sample(&summary).thermal_state, None);
+        let measured = ResourceUsageSummary {
+            thermal_measured: true,
+            ..summary
+        };
+        assert_eq!(
+            resource_sample(&measured).thermal_state.as_deref(),
+            Some("nominal")
+        );
+    }
+
+    #[test]
+    fn resource_summaries_export_peak_cpu_minimum_memory_and_pressure_only_when_measured() {
+        let unmeasured = ResourceUsageSummary {
+            cpu_avg_pct: None,
+            cpu_peak_pct: None,
+            process_rss_peak_mb: None,
+            available_mem_min_mb: None,
+            memory_pressure_peak: MemoryPressure::Unknown,
+            thermal_state_peak: ThermalState::Normal,
+            thermal_measured: false,
+            battery_pct_end: None,
+            sample_count: 0,
+            sampling_mode: "off".into(),
+            sampling_interval_ms: None,
+        };
+        assert_eq!(resource_sample(&unmeasured), ResourceSample::default());
+
+        let measured = ResourceUsageSummary {
+            cpu_avg_pct: Some(40.0),
+            cpu_peak_pct: Some(90.0),
+            available_mem_min_mb: Some(1024),
+            memory_pressure_peak: MemoryPressure::Warn,
+            sample_count: 3,
+            sampling_mode: "summary".into(),
+            sampling_interval_ms: Some(1000),
+            ..unmeasured.clone()
+        };
+        let sample = resource_sample(&measured);
+        assert_eq!(sample.cpu_utilization, Some(0.4));
+        assert_eq!(sample.cpu_peak_utilization, Some(0.9));
+        assert_eq!(sample.memory_min_available_bytes, Some(1_073_741_824));
+        assert_eq!(sample.memory_pressure.as_deref(), Some("warn"));
+        assert_eq!(sample.memory_used_bytes, None);
+
+        // Zero available memory is a measurement, not a missing value.
+        let exhausted = ResourceUsageSummary {
+            available_mem_min_mb: Some(0),
+            ..unmeasured.clone()
+        };
+        assert_eq!(
+            resource_sample(&exhausted).memory_min_available_bytes,
+            Some(0)
+        );
+
+        for (pressure, level) in [
+            (MemoryPressure::Normal, "normal"),
+            (MemoryPressure::Warn, "warn"),
+            (MemoryPressure::Critical, "critical"),
+        ] {
+            let summary = ResourceUsageSummary {
+                memory_pressure_peak: pressure,
+                ..unmeasured.clone()
+            };
+            let sample = resource_sample(&summary);
+            assert_eq!(sample.memory_pressure.as_deref(), Some(level));
+            assert!(semconv::MEMORY_PRESSURE_LEVELS.contains(&level));
+        }
     }
 
     #[test]
@@ -2188,9 +5698,319 @@ mod tests {
     }
 
     #[test]
+    fn sessions_remain_pinned_across_default_replacement_and_worker_hops() {
+        let _default = test_support::default_session_lock();
+        let (config, exports, collector) = collector();
+        let original =
+            ObservabilitySession::new(ObservabilityConfig::otlp(config).device_attributes(false))
+                .unwrap();
+        let options = crate::RunOptions::default()
+            .with_observation(ObservationOptions::default().with_session(&original));
+        let workflow = WorkflowScope::start("pinned", &options);
+        let workflow_ref = workflow.op.observation_ref().unwrap();
+        let captured = CapturedContext::capture();
+        let replacement = ObservabilitySession::borrowed(Observer::disabled());
+        let previous = install_default_session(replacement.clone());
+        std::thread::spawn(move || {
+            let _scope = captured.enter();
+            let load = LoadScope::start("worker-model", None, None);
+            let reference = load.end(&Ok::<(), SdkError>(())).unwrap();
+            assert_eq!(reference.trace_id, workflow_ref.trace_id);
+        })
+        .join()
+        .unwrap();
+        workflow.end(&Ok::<(), SdkError>(()));
+        original.shutdown(Duration::from_secs(2)).unwrap();
+        assert_eq!(original.stats().unwrap().traces.exported, 2);
+        let body: serde_json::Value = serde_json::from_str(&exports.recv().unwrap()).unwrap();
+        assert_eq!(spans(&body).len(), 2);
+        collector.join().unwrap();
+        let installed = session::uninstall_default().unwrap();
+        assert!(!installed.session.observer().is_enabled());
+        if let Some(previous) = previous {
+            install_default_session(previous);
+        }
+    }
+
+    #[test]
+    fn pinned_operations_keep_their_session_resource_mode_after_the_default_is_replaced() {
+        use test_support::*;
+        let _default = default_session_lock();
+        let (pinned, memory, _provider) = resource_session(ResourceTelemetryMode::Boundary);
+        let previous = install_default_session(pinned.clone());
+        // Both start while `pinned` is the default, so both are pinned to it.
+        let workflow = start_workflow("pinned-resources", &ObservationOptions::default());
+        let captured = CapturedContext::capture();
+        let (replacement, replacement_memory, _replacement_provider) =
+            resource_session(ResourceTelemetryMode::Off);
+        install_default_session(replacement);
+
+        let scope = workflow.enter();
+        let entered = LoadScope::start("entered-model", None, None)
+            .end(&Ok::<(), SdkError>(()))
+            .unwrap();
+        drop(scope);
+        let hopped = std::thread::spawn(move || {
+            let _scope = captured.enter();
+            LoadScope::start("hopped-model", None, None)
+                .end(&Ok::<(), SdkError>(()))
+                .unwrap()
+        })
+        .join()
+        .unwrap();
+        workflow.end();
+        // An operation started after the replacement uses the new default's mode.
+        let fresh = LoadScope::start("fresh-model", None, None)
+            .end(&Ok::<(), SdkError>(()))
+            .unwrap();
+
+        let restore = session::uninstall_default();
+        if let Some(previous) = previous {
+            install_default_session(previous);
+        }
+        drop(restore);
+        for reference in [entered, hopped] {
+            let load = memory.by_ref(&reference);
+            assert!(
+                has_resources(&load),
+                "{} lost its session's resource mode",
+                load.name
+            );
+        }
+        assert!(!has_resources(&replacement_memory.by_ref(&fresh)));
+    }
+
+    #[test]
+    fn in_flight_operations_keep_the_resource_mode_they_started_with() {
+        use test_support::*;
+        let _default = default_session_lock();
+        // A borrowed default has no resource mode of its own: operations that
+        // select no session sample with the process-wide mode.
+        let (borrowed, memory, _provider) = memory_session();
+        let previous = install_default_session(borrowed);
+        crate::init()
+            .resource_telemetry(ResourceTelemetryMode::Boundary)
+            .run();
+        let workflow = start_workflow("in-flight-resources", &ObservationOptions::default());
+        // The replacement publishes its own mode (`Off`) process-wide.
+        let (replacement, _replacement_memory, _replacement_provider) =
+            resource_session(ResourceTelemetryMode::Off);
+        install_default_session(replacement);
+
+        let scope = workflow.enter();
+        let load = LoadScope::start("in-flight-model", None, None)
+            .end(&Ok::<(), SdkError>(()))
+            .unwrap();
+        drop(scope);
+        workflow.end();
+
+        let restore = session::uninstall_default();
+        if let Some(previous) = previous {
+            install_default_session(previous);
+        }
+        drop(restore);
+        crate::init()
+            .resource_telemetry(ResourceTelemetryMode::Off)
+            .run();
+        assert!(
+            has_resources(&memory.by_ref(&load)),
+            "the in-flight load lost the mode its operation started with"
+        );
+    }
+
+    #[test]
+    fn suppression_and_borrowed_lifecycle_survive_hops() {
+        let borrowed = ObservabilitySession::borrowed(Observer::disabled());
+        assert!(!borrowed.owns_pipeline());
+        assert_eq!(borrowed.stats(), None);
+        borrowed.flush(Duration::ZERO).unwrap();
+        borrowed.shutdown(Duration::ZERO).unwrap();
+        let options = crate::RunOptions::default().with_observation(ObservationOptions {
+            session: Some(borrowed),
+            trace: TraceMode::Suppress,
+            ..Default::default()
+        });
+        let workflow = WorkflowScope::start("suppressed", &options);
+        let captured = CapturedContext::capture();
+        std::thread::spawn(move || {
+            let _scope = captured.enter();
+            assert_eq!(inherited_trace(TraceMode::Default), TraceMode::Suppress);
+            assert!(ambient_parent().is_none());
+        })
+        .join()
+        .unwrap();
+        workflow.end(&Ok::<(), SdkError>(()));
+    }
+
+    #[test]
     fn live_sampler_traces_one_frame_per_interval() {
-        let session = format!("s-{}", uuid::Uuid::new_v4());
-        assert_eq!(live_trace_mode(&session), TraceMode::Default);
-        assert_eq!(live_trace_mode(&session), TraceMode::Suppress);
+        let session = ObservabilitySession::borrowed(Observer::disabled());
+        assert_eq!(session.live_trace_mode("stream"), TraceMode::Default);
+        assert_eq!(session.live_trace_mode("stream"), TraceMode::Suppress);
+        let other = ObservabilitySession::borrowed(Observer::disabled());
+        assert_eq!(other.live_trace_mode("stream"), TraceMode::Default);
+    }
+
+    /// A session whose live-frame sampler runs on a clock the test moves,
+    /// with a `interval` long enough that a remembered session's next frame
+    /// is always suppressed: a traced frame then shows it was forgotten.
+    fn live_sampler(interval: Duration) -> (ObservabilitySession, Arc<Mutex<Instant>>) {
+        let mut session = ObservabilitySession::new(
+            ObservabilityConfig::with_observer(Observer::disabled()).live_trace_interval(interval),
+        )
+        .unwrap();
+        let clock = Arc::new(Mutex::new(Instant::now()));
+        session.drive_live_clock(clock.clone());
+        (session, clock)
+    }
+
+    #[test]
+    fn the_live_sampler_remembers_at_most_1024_sessions_and_forgets_the_least_recently_used() {
+        // Per-frame ids cannot grow the
+        // sampler; a new session beyond the cap evicts the least recently
+        // used one, which is traced again when it returns.
+        const CAP: usize = 1024;
+        let (session, _clock) = live_sampler(Duration::from_secs(3600));
+        let id = |i: usize| format!("frame-{i}");
+        for i in 0..CAP {
+            assert_eq!(session.live_trace_mode(&id(i)), TraceMode::Default, "{i}");
+        }
+        assert_eq!(session.live_sessions(), CAP);
+        // A frame of the oldest session makes it the most recently used one.
+        assert_eq!(session.live_trace_mode(&id(0)), TraceMode::Suppress);
+
+        // One session past the cap evicts the least recently used: `frame-1`,
+        // not `frame-0`, which was used later.
+        assert_eq!(session.live_trace_mode(&id(CAP)), TraceMode::Default);
+        assert_eq!(session.live_sessions(), CAP);
+        assert_eq!(session.live_trace_mode(&id(0)), TraceMode::Suppress);
+        // `frame-1` was forgotten: traced again, evicting `frame-2` in turn.
+        assert_eq!(session.live_trace_mode(&id(1)), TraceMode::Default);
+        assert_eq!(session.live_trace_mode(&id(2)), TraceMode::Default);
+        assert_eq!(session.live_sessions(), CAP);
+        // The sessions used since are all remembered.
+        for i in [0, 1, 2, CAP] {
+            assert_eq!(session.live_trace_mode(&id(i)), TraceMode::Suppress, "{i}");
+        }
+
+        // A fresh id per frame never grows it.
+        for i in CAP + 1..3 * CAP {
+            assert_eq!(session.live_trace_mode(&id(i)), TraceMode::Default, "{i}");
+            assert!(session.live_sessions() <= CAP, "{i}");
+        }
+    }
+
+    #[test]
+    fn the_live_sampler_forgets_sessions_with_no_frame_for_300_seconds() {
+        // The TTL is kept beside the cap.
+        let (session, clock) = live_sampler(Duration::from_secs(3600));
+        let t0 = *clock.lock().unwrap();
+        let at = |seconds: u64| *clock.lock().unwrap() = t0 + Duration::from_secs(seconds);
+        assert_eq!(session.live_trace_mode("a"), TraceMode::Default);
+        assert_eq!(session.live_trace_mode("b"), TraceMode::Default);
+        // At the TTL itself nothing has expired yet.
+        at(300);
+        assert_eq!(session.live_trace_mode("c"), TraceMode::Default);
+        assert_eq!(session.live_sessions(), 3);
+        assert_eq!(session.live_trace_mode("b"), TraceMode::Suppress);
+
+        // One second past it, `a` (no frame since t0) is gone; `b` and `c`
+        // had frames at t0 + 300.
+        at(301);
+        assert_eq!(session.live_trace_mode("d"), TraceMode::Default);
+        assert_eq!(session.live_sessions(), 3);
+        assert_eq!(
+            session.live_trace_mode("a"),
+            TraceMode::Default,
+            "a is traced again"
+        );
+        assert_eq!(session.live_trace_mode("b"), TraceMode::Suppress);
+
+        // Every session idle past the TTL is forgotten by the next frame.
+        at(1000);
+        assert_eq!(session.live_trace_mode("e"), TraceMode::Default);
+        assert_eq!(session.live_sessions(), 1);
+    }
+
+    #[test]
+    fn a_session_the_sdk_resolved_for_an_operation_keeps_its_content_cap() {
+        // A per-run session is capped once, when its
+        // operation starts. A live ASR stream hands its resolved session to
+        // each later decode; the decode must keep that cap rather than take
+        // the one of wherever it runs.
+        use test_support::{memory_session_with_content, NoDefaultSession};
+        let _no_default = NoDefaultSession::hold();
+        let everything = memory_session_with_content(
+            ContentPolicy::default().with_capture(ContentCapture::SpanAndEvent),
+        );
+        let per_run = ObservationOptions::default().with_session(&everything.session);
+        let capture =
+            |session: &ObservabilitySession| session.observer().content_policy().capture();
+        // Resolved with nothing around it: its own policy.
+        let resolved = resolve_session(Some(&per_run));
+        assert_eq!(capture(&resolved), ContentCapture::SpanAndEvent);
+
+        let floor = memory_session_with_content(ContentPolicy::metadata_only());
+        let _enclosing =
+            CapturedScope::for_operation(floor.session.clone().for_operation(), None, false, None);
+        // An application's handle is capped by the enclosing operation's session...
+        assert_eq!(
+            capture(&resolve_session(Some(&per_run))),
+            ContentCapture::NoContent
+        );
+        // ...a handle already resolved for an operation keeps its cap.
+        let pinned = ObservationOptions {
+            session: Some(resolved),
+            ..ObservationOptions::default()
+        };
+        assert_eq!(
+            capture(&resolve_session(Some(&pinned))),
+            ContentCapture::SpanAndEvent
+        );
+    }
+
+    #[test]
+    fn stats_keep_the_last_shut_down_helper_session_until_a_session_is_installed() {
+        // The final counters of the helper-owned default
+        // that `shutdown_observability` uninstalled stay readable, a repeated
+        // shutdown keeps them, and the next installation starts fresh.
+        let _default = test_support::default_session_lock();
+        let previous = session::uninstall_default();
+        let (config, exports, collector) = collector();
+        init_observability(ObservabilityConfig::otlp(config).device_attributes(false)).unwrap();
+        start_workflow("final-counters", &ObservationOptions::default()).end();
+        // Bounds a hang only: the collector answers at once.
+        shutdown_observability(Duration::from_secs(10)).unwrap();
+        exports.recv().unwrap();
+        collector.join().unwrap();
+
+        let last = stats().expect("the final counters stay readable");
+        // At least this test's span: while installed, the default also
+        // collects any unpinned operation of a test running beside this one.
+        let traces = last.traces;
+        assert!(traces.accepted >= 1 && traces.exported >= 1, "{traces:?}");
+        assert_eq!(traces.pending, 0, "settled by the shutdown");
+        assert_eq!(
+            traces.accepted,
+            traces.exported + traces.dropped + traces.failed,
+            "{traces:?}"
+        );
+        assert!(!is_enabled());
+        shutdown_observability(Duration::ZERO).unwrap();
+        assert_eq!(stats(), Some(last), "a repeated shutdown keeps them");
+
+        // An installation starts its own counters; a borrowed observer has none.
+        let borrowed =
+            install_default_session(ObservabilitySession::borrowed(Observer::disabled()));
+        assert!(borrowed.is_none());
+        assert_eq!(stats(), None);
+        // Uninstalling an application-installed session leaves nothing: the
+        // application reads that session's own stats.
+        shutdown_observability(Duration::ZERO).unwrap();
+        assert_eq!(stats(), None);
+
+        if let Some(previous) = previous {
+            session::replace_default(previous.session, previous.helper_owned);
+        }
     }
 }

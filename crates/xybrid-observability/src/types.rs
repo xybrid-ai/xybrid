@@ -72,6 +72,25 @@ impl StartOptions {
         self
     }
 
+    /// Sets the parent from W3C headers. An invalid `traceparent` is rejected
+    /// here, so it can never fall back to the ambient context or start a new
+    /// root; an invalid `tracestate` is discarded.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::Error::InvalidTraceparent`] when `traceparent` is invalid.
+    pub fn with_traceparent(
+        mut self,
+        traceparent: &str,
+        tracestate: Option<&str>,
+    ) -> crate::Result<Self> {
+        self.parent = Some(ObservationContext::from_traceparent(
+            traceparent,
+            tracestate,
+        )?);
+        Ok(self)
+    }
+
     /// Sets the trace hint.
     #[must_use]
     pub fn with_trace(mut self, trace: TraceMode) -> Self {
@@ -281,14 +300,29 @@ impl Usage {
 
 /// A measured resource sample supplied by the host (CPU, memory, thermal,
 /// battery, accelerator). The observer never probes the device itself.
+///
+/// Every field is optional: leave a field `None` when it was not measured,
+/// never fill it with a default. Peak, minimum and state fields describe the
+/// operation's measurement window (see `CONTRACT.md` "Resource samples").
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ResourceSample {
     /// CPU utilization, 0.0–1.0.
     #[serde(default)]
     pub cpu_utilization: Option<f64>,
+    /// Highest CPU utilization observed in the window, 0.0–1.0.
+    #[serde(default)]
+    pub cpu_peak_utilization: Option<f64>,
     /// System memory in use, bytes.
     #[serde(default)]
     pub memory_used_bytes: Option<u64>,
+    /// Lowest system memory available for allocation in the window, bytes.
+    #[serde(default)]
+    pub memory_min_available_bytes: Option<u64>,
+    /// Most severe system memory pressure in the window: `normal`, `warn` or
+    /// `critical` ([`crate::semconv::MEMORY_PRESSURE_LEVELS`]). Any other
+    /// value is ignored.
+    #[serde(default)]
+    pub memory_pressure: Option<String>,
     /// Process resident set size, bytes.
     #[serde(default)]
     pub process_rss_bytes: Option<u64>,

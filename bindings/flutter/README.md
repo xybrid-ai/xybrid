@@ -56,6 +56,8 @@ Future<void> main() async {
 
 Inference runs locally without an account. `apiKey` configures cloud authentication;
 export is off until you explicitly configure observability.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
 
 ## Observability
 
@@ -96,21 +98,44 @@ use explicit observability configuration to enable content capture.
 
 The same `RunOptions.observation` works with `runWithContext`, `runStreaming`,
 `runStreamingWithContext`, `runStreamingWithFallback`, and `runTtsStreaming`.
-`suppressTrace: true` skips detailed spans while retaining aggregate metrics. Invalid W3C context is
-ignored by the SDK. Normal and fallback streams merge `observation` and metrics
-into one terminal token, preserving its native index and finish reason.
-Context streams retain their separate metrics/completion token.
-Tool calls are delivered once. Pipeline workflow spans are exported, but the
-current SDK pipeline result exposes no workflow reference; pipeline results
-therefore have `observation == null`. Chunked TTS exports spans automatically,
-and accepts observation options, but the SDK audio-chunk result exposes no trace
-reference.
+`suppressTrace: true` skips detailed spans while retaining aggregate metrics.
+An invalid explicit `traceparent` is rejected before any work starts: `run`
+and `XybridPipeline.run` throw `XybridException`, token streams end with an
+error token, `runTtsStreaming` fails its stream with a `StateError`, and
+`XybridStreamSession.fromModel`, `withObservation` and the manual `start*`
+calls throw. Normal and fallback
+streams merge `observation` and metrics into one terminal token, preserving its
+native index and finish reason. Context streams retain their separate
+metrics/completion token. Tool calls are delivered once.
+
+Every traced surface takes observation controls and returns a reference
+(`null` when untraced or suppressed):
+
+| Surface | Controls | Reference |
+|---|---|---|
+| `model.run(...)` and token streams | `RunOptions.observation` | `result.observation`; the terminal `StreamToken.observation` |
+| Model load | `XybridModelLoader.withObservation(options)` | `model.loadObservationRef` |
+| Pipeline | `pipeline.run(envelope, observation: options)` | `result.observation` (the workflow); `result.metrics.stageLatenciesMs[i].observation` (each stage's inference) |
+| Live ASR | `XybridStreamSession.fromModel(model, observation: options)` | `(await session.flush()).observation` (the session); `partial.decoderObservation` (each decoder run) |
+| Streamed TTS | `runTtsStreaming(..., options: RunOptions(observation: options))` | `onComplete: (result) => result.observation` |
+
+```dart
+final pipeline = XybridPipeline.fromYaml(yaml);
+final run = await pipeline.run(
+  XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000),
+  observation: const ObservationOptions(conversationId: 'conversation-1'),
+);
+final workflow = run.observation;
+final stages = run.metrics.stageLatenciesMs.map((stage) => stage.observation);
+```
 
 `XybridObservability.init(config)` replaces an exporter and propagates config
 errors; corrected config can be retried. `shutdown` disables native exporter
 state and is idempotent; a later `init` restarts export. Flush/shutdown run off
 the UI isolate, have bounded timeouts, and surface native lifecycle errors. Counters
-and state are available through `XybridObservability.stats`.
+and state are available through `XybridObservability.stats`; after shutdown the
+counters are the session's final ones (what the shutdown failed or dropped
+included) until the next `init`.
 
 Migration: `Xybrid.init(apiKey: ...)` now configures authentication only. Pass
 `observability:` to enable export. The explicit legacy
@@ -125,6 +150,60 @@ key. `resourceTelemetry` keeps configuring CPU/memory
 sampling independently of export (`off`, `boundary`, `summary[:ms]`,
 `debug_local[:ms]`). Invalid modes and malformed intervals now fail before
 export is enabled or replaced.
+
+Migration (breaking): `XybridStreamSession.flush()` returns an
+`FfiTranscriptionResult` instead of a `String`. Read `.text` for the
+transcript; `durationMs`, `chunksProcessed` and `observation` come with it.
+`FfiTtsStreamEvent.complete` now carries an `FfiTtsStreamResult` (status,
+sample rate, channels, sample and chunk counts, `observation`).
+`runTtsStreaming` passes it to the new `onComplete` callback and, when the
+status is `limited`, fails the stream with a `StateError` after the partial
+audio. A `traceparent` that is not valid W3C now fails the call instead of
+being ignored.
+
+### Manual operations
+
+Record work Xybrid does not run itself (a tool, another runtime's inference, a
+model load) with a manual handle. `context()` returns the W3C context to pass
+to children, `observationRef()` the reference for feedback. The first terminal
+call (`complete`, `fail` or `cancel`) wins. Disposing an unfinished handle
+cancels it without flushing.
+
+```dart
+final workflow = await XybridObservability.startWorkflow('answer-question',
+    options: const ObservationOptions(conversationId: 'conversation-1'));
+final parent = await workflow.context(); // null when untraced or suppressed
+final child = parent == null
+    ? null
+    : ObservationOptions(
+        traceparent: parent.traceparent, tracestate: parent.tracestate);
+
+final tool = await XybridObservability.startTool(
+  const ToolCallInfo(name: 'search', callId: 'call-1', argumentsJson: '{"q":"rivers"}'),
+  options: child,
+);
+try {
+  await tool.recordResult(resultJson: '{"hits":3}');
+  await tool.complete();
+} catch (error) {
+  await tool.fail(errorType: 'tool_error', message: '$error');
+}
+
+final answer = await model.run(
+  XybridEnvelope.text('Name three rivers.'),
+  options: RunOptions(observation: child),
+);
+await workflow.complete();
+tool.dispose();
+workflow.dispose();
+```
+
+`XybridObservability.startInference(InferenceRequest(...))` records another
+runtime's inference (`recordInputMessages`, `recordOutputMessages`,
+`recordUsage`, `recordFirstToken`, `recordChunk`, `recordFinishReasons`), and
+`startModelLoad(ModelLoadInfo(model: ...))` a load (`recordCacheHit`). Content
+arguments are JSON strings; they go through the same capture mode, redaction
+rules and size budgets as the SDK's own content.
 
 ## Features
 

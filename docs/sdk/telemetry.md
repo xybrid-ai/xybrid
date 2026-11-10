@@ -39,7 +39,14 @@ Use `OtlpConfig::with_traces`, `with_metrics` and `with_logs` to select each
 signal's destination, protocol, headers and timeout with `SignalEndpoint`.
 `with_batch` and `with_retry` control bounded in-memory queues and retries.
 Delivery is best effort; the exporter has no durable offline spool. Inspect
-`observability::stats()` for packaged-pipeline export/drop counters.
+`observability::stats()` for packaged-pipeline export/drop counters. After
+`shutdown_observability` it keeps returning the shut-down session's final
+counters, settled by the shutdown (what it failed in flight or dropped from the
+queue included, nothing pending), until the next `init_observability` or
+`install_default_session`; `is_enabled()` is then `false`. An init that
+replaces a running session reports the new session's counters at once, so shut
+down first to read the old one's. The bindings' observability stats behave the
+same way.
 
 `ObservabilityConfig::from_env()` explicitly opts into standard
 `OTEL_EXPORTER_OTLP_*` endpoint, protocol and header configuration. It returns
@@ -105,7 +112,17 @@ The HTTP receiver necessarily sees the network source address.
 The SDK observes model loads, logical inferences, concrete execution attempts,
 pipelines and internal stages. `RunOptions::observation` accepts
 `ObservationOptions` for an explicit W3C parent, conversation/prompt metadata,
-per-run observer and trace suppression. Successful inference results expose
+per-run observer and trace suppression. A per-run session or observer can only
+lower content capture: its policy is capped by the session the run would
+otherwise use (the enclosing operation's, else the default), so content goes
+only where both capture, within the smaller budgets, through both policies'
+redaction. A session whose observer is disabled caps nothing, so the next one
+out caps instead: a per-run session inside an operation that observes nothing
+is still capped by the default. A per-run setting that would capture more is
+ignored; with no enabled session around it, the per-run policy applies as is. To lower capture for one run on the
+default's providers, pass
+`observer().content_capped_by(&ContentPolicy::metadata_only())` as the run's
+observer. Successful inference results expose
 `observation_ref()` for linking feedback or evaluations. See the
 [trace model](trace-model.md) for parentage and current result limitations.
 
@@ -114,7 +131,9 @@ their tracer/meter/logger providers and install
 `ObservabilityConfig::with_observer(observer)`. The observer retains its own
 content policy. The application owns provider flushing and shutdown; SDK
 lifecycle calls do not flush or stop application-owned providers. Reinitializing
-a packaged pipeline replaces the previous one and shuts it down with a bound.
+a packaged pipeline replaces the default session. Operations retain the session
+that created them; retirement drains the old owned pipeline once its last
+operation releases it.
 
 Feedback and evaluations already have public APIs: `record_feedback` and
 `record_evaluation` emit linked `gen_ai.evaluation.result` log events. They return
@@ -136,4 +155,75 @@ format, device-ID generation and flush-time UUID stamping are not the current
 OTLP protocol.
 
 Resource sampling is separately opt-in and defaults to `Off` for every exporter
-preset. See [resource telemetry](resource-telemetry.md).
+preset. When enabled, observed model loads and inferences carry the run's
+measured average and peak CPU utilization, minimum available memory, memory
+pressure (`normal`, `warn` or `critical`), peak process RSS, thermal state and
+ending battery level as `xybrid.genai.resource.*` span attributes. Values that
+were not measured are absent, never zero or a default level. CPU utilization is
+system-wide and its first reading covers time before the run, so it shows load
+around the run rather than load the run caused. See
+[resource telemetry](resource-telemetry.md).
+
+## Sessions, explicit parents and manual operations
+
+`ObservabilitySession::new(config)` creates an owned pipeline without changing
+the process default. Pass `ObservationOptions::default().with_session(&session)`
+through the existing loader, model, pipeline or ASR options. `install_default_session`
+selects the default for subsequent operations. `ObservabilitySession::borrowed(observer)`
+retains application-owned provider lifecycle: stats are unavailable and SDK
+flush/shutdown are no-ops. Owned sessions expose stats and sync/async flush and shutdown.
+
+[The session example](../../crates/xybrid-sdk/examples/observability_session.rs)
+starts a workflow and a manual inference without loading a model. Typed
+`start_workflow`, `start_tool`, `start_inference` and `start_model_load` handles
+expose context/reference, recording, successful `end`, `end_with_error` and
+`cancel`. The first terminal transition wins. Later mutations do nothing.
+Dropping the last owner cancels unfinished work without flushing. An `enter()`
+guard is thread-local: capture and pass context before a worker hop and never
+hold the guard across `.await`.
+
+Model loaders accept `.observation(options)` and expose the completed load's
+reference on the returned model. Existing `RunOptions` carries per-run controls;
+there are no capability-specific run entry points. Pipelines, streamed TTS and
+ASR expose workflow/decoder references on their existing result shapes. See
+[the execution matrix and binding examples](observability-coverage.md).
+
+Use `.device_id("application-device-id")` to attach a caller-owned `device.id`
+(1–128 characters, no controls). With borrowed providers set it on the provider's
+resource instead. There is no generated device identifier. Xybrid-owned network
+hops propagate the current context; direct third-party propagation requires
+`.propagate_context_to("https://provider.example")?` for each exact origin.
+Provider-child spans additionally require that provider's instrumentation.
+
+`RedactionRule::replace_literal(from, to)` and `RedactionRule::omit_attribute(key)`
+apply ordered string replacements and exact governed-attribute omission across
+native bindings. Structured keys and value types remain intact. Rust/JS callback
+redactors run first. Invalid redaction output fails closed before truncation.
+Metadata-only mode still permits explicit bounded error messages through the
+error redactor; use a classification alone when error text may contain secrets.
+
+The portable defaults include a 208 KiB retained-operation budget, a 480 KiB
+traversal budget, 32 MiB of queued plus in-flight data per signal, and a
+128-level JSON guard. These bound library-owned data, not process RSS. The
+existing per-attribute content limit remains 16 KiB. Content budgets are
+clamped so that a span's content fits the request bound (480 KiB by default)
+with 64 KiB left for the span's other data: a raised budget truncates or omits
+(and lists) content instead of dropping the whole span. That 64 KiB is
+reserved, not enforced: a span whose other data outgrows it (attributes the
+application adds, a large resource, many or very long omitted prompt-variable
+names in `xybrid.genai.content.truncated_attributes`) can still exceed the
+bound and is then dropped as an oversized item. Content for a
+span that is not recording (an unsampled parent, suppression) is not
+processed. A Rust redaction hook that panics fails closed like one that
+returns an error: the value is omitted and listed, the run is unaffected.
+Oversized singletons are dropped; metrics collections that cannot fit fail
+explicitly. `stats()` exposes accepted/exported/dropped/failed/pending per
+signal; the Rust `PipelineStats` also carries `buffered_bytes`, the bytes held
+against the 32 MiB budget (not yet exposed through the foreign bindings). Retry attempts do not multiply item counts. A lost or invalid
+acknowledgement leaves delivery unknown. Flush waits through its acceptance
+barrier; shutdown closes admission, drains, cancels outstanding work at its
+deadline, and memoizes the result.
+
+CLI `--trace` renders operation-scoped local diagnostics. `--trace-export PATH`
+explicitly writes an artifact. Neither flag enables remote OTLP export. Local
+trace artifacts can contain application data independently of the OTLP policy.

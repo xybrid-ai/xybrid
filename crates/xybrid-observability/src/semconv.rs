@@ -11,7 +11,7 @@
 pub const GENAI_SEMCONV_REVISION: &str = "95aff9cdf605bbc7d7e8f7c4745a693bd0c4eea8";
 
 /// Version of the shared contract (`contract/catalog.json`).
-pub const CONTRACT_VERSION: &str = "1";
+pub const CONTRACT_VERSION: &str = "2";
 
 /// Instrumentation scope name used for traces, metrics, and logs.
 pub const SCOPE_NAME: &str = "xybrid-observability";
@@ -34,6 +34,12 @@ pub mod op {
     pub const INVOKE_WORKFLOW: &str = "invoke_workflow";
     /// Tool execution.
     pub const EXECUTE_TOOL: &str = "execute_tool";
+
+    /// Names `start_inference` resolves through the catalog
+    /// (`catalog.inference_operations`). Every other name is a custom
+    /// inference operation that uses the generative inference metrics.
+    pub const INFERENCE_OPERATIONS: [&str; 5] =
+        [CHAT, TEXT_COMPLETION, GENERATE_CONTENT, EMBEDDINGS, PREDICT];
 }
 
 /// Attribute keys.
@@ -189,8 +195,15 @@ pub mod attr {
     pub const MODEL_FORMAT: &str = "xybrid.genai.model.format";
     /// `xybrid.genai.resource.cpu.utilization`
     pub const RESOURCE_CPU_UTILIZATION: &str = "xybrid.genai.resource.cpu.utilization";
+    /// `xybrid.genai.resource.cpu.peak_utilization`
+    pub const RESOURCE_CPU_PEAK_UTILIZATION: &str = "xybrid.genai.resource.cpu.peak_utilization";
     /// `xybrid.genai.resource.memory.used_bytes`
     pub const RESOURCE_MEMORY_USED_BYTES: &str = "xybrid.genai.resource.memory.used_bytes";
+    /// `xybrid.genai.resource.memory.min_available_bytes`
+    pub const RESOURCE_MEMORY_MIN_AVAILABLE_BYTES: &str =
+        "xybrid.genai.resource.memory.min_available_bytes";
+    /// `xybrid.genai.resource.memory.pressure`, one of [`super::MEMORY_PRESSURE_LEVELS`].
+    pub const RESOURCE_MEMORY_PRESSURE: &str = "xybrid.genai.resource.memory.pressure";
     /// `xybrid.genai.resource.process.rss_bytes`
     pub const RESOURCE_PROCESS_RSS_BYTES: &str = "xybrid.genai.resource.process.rss_bytes";
     /// `xybrid.genai.resource.process.peak_rss_bytes`
@@ -290,8 +303,15 @@ pub const TOKEN_BUCKETS: [f64; 14] = [
     67_108_864.0,
 ];
 
+/// Values of `xybrid.genai.resource.memory.pressure`, least to most severe
+/// (`catalog.enums`). A recorded value outside this list is ignored.
+pub const MEMORY_PRESSURE_LEVELS: [&str; 3] = ["normal", "warn", "critical"];
+
 /// Default per-attribute byte budget for content attributes.
 pub const DEFAULT_MAX_CONTENT_ATTRIBUTE_BYTES: usize = 16_384;
+/// Redaction kind of error messages (`Redactor` and `omit_attribute`); not
+/// an attribute key.
+pub const ERROR_MESSAGE_KIND: &str = "error.message";
 /// Maximum characters of an error message recorded as span status.
 pub const MAX_ERROR_MESSAGE_CHARS: usize = 256;
 /// Marker appended to truncated strings.
@@ -302,3 +322,50 @@ pub const TRUNCATION_MIN_STRING_BYTES: usize = 32;
 pub const REDACTION_REPLACEMENT: &str = "[REDACTED]";
 /// Environment variable selecting the content capture mode.
 pub const CAPTURE_CONTENT_ENV: &str = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT";
+/// Legacy capture variable, honoured only when [`CAPTURE_CONTENT_ENV`] is
+/// unset (`true` means `span_only`; `false` and unknown values `no_content`).
+pub const CAPTURE_CONTENT_LEGACY_ENV: &str = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT";
+/// Default budget of content retained by one operation, in bytes (208 KiB):
+/// the most the content budgets may reach under the default request bound
+/// (see [`span_content_ceiling`]).
+pub const DEFAULT_MAX_RETAINED_OPERATION_BYTES: usize = 212_992;
+/// Default `max_request_body_bytes` of an OTLP export request (480 KiB). The
+/// content budgets are clamped so that a span's content fits it with
+/// [`SPAN_ENVELOPE_ALLOWANCE_BYTES`] left for the span's other data.
+pub const DEFAULT_MAX_REQUEST_BODY_BYTES: usize = 491_520;
+/// Bytes of a span's request reserved for its non-content data (ids, name,
+/// resource and scope, metadata attributes, status, the truncation list)
+/// when the content budgets are fitted to the request bound (64 KiB).
+/// Reserved, not enforced: a span whose non-content data outgrows it can
+/// still exceed the request bound, and the exporter then drops it whole.
+pub const SPAN_ENVELOPE_ALLOWANCE_BYTES: usize = 65_536;
+/// How much larger a span's content can encode than the retained bytes it
+/// is charged: OTLP/JSON writes each content attribute as a JSON string, and
+/// escaping at most doubles a serialized JSON value (`"` and `\` take two
+/// bytes); plain text is charged at its escaped length.
+pub const SPAN_CONTENT_ENCODING_GROWTH: usize = 2;
+
+/// The largest retained-operation (and so attribute) budget that keeps one
+/// span's content within `max_request_body_bytes` less
+/// [`SPAN_ENVELOPE_ALLOWANCE_BYTES`]: `(request − allowance) / growth`, at
+/// least 1 (CONTRACT.md "Content pipeline", budgets).
+#[must_use]
+pub const fn span_content_ceiling(max_request_body_bytes: usize) -> usize {
+    let ceiling = max_request_body_bytes.saturating_sub(SPAN_ENVELOPE_ALLOWANCE_BYTES)
+        / SPAN_CONTENT_ENCODING_GROWTH;
+    if ceiling == 0 {
+        1
+    } else {
+        ceiling
+    }
+}
+/// Default preflight traversal budget per content value, in bytes (480 KiB).
+pub const DEFAULT_MAX_TRAVERSAL_BYTES: usize = 491_520;
+/// Maximum JSON nesting depth of a content value.
+pub const MAX_JSON_DEPTH: usize = 128;
+/// Bytes charged per JSON node by the conservative preflight cost.
+pub const PREFLIGHT_NODE_BYTES: usize = 16;
+/// Maximum `tracestate` list members (W3C Trace Context).
+pub const MAX_TRACESTATE_MEMBERS: usize = 32;
+/// Maximum normalized `tracestate` length in characters (W3C Trace Context).
+pub const MAX_TRACESTATE_CHARS: usize = 512;

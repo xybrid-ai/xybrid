@@ -11,6 +11,9 @@ export type WireObservabilityConfig = (
   jsonProtocol?: boolean;
   service?: { name: string; version?: string };
   resourceAttributes?: Record<string, string>;
+  deviceId?: string;
+  providerOrigins?: string[];
+  redactionRules?: Array<{ kind: 'replaceLiteral'; find: string; replacement: string } | { kind: 'omitAttribute'; key: string }>;
   metadataOnly?: boolean;
   maxContentBytes?: number;
   liveTraceIntervalMs?: number;
@@ -78,6 +81,32 @@ export class ObservabilityConfig {
     return this;
   }
 
+  /** Permit W3C propagation to this exact provider origin. */
+  allowProviderContext(origin: string): this {
+    (this.wire.providerOrigins ??= []).push(origin);
+    return this;
+  }
+
+  /** Caller-supplied stable device identity; never detected automatically. */
+  setDeviceId(id: string): this {
+    this.wire.deviceId = id;
+    return this;
+  }
+
+  /** Replace literal text in governed string values, in insertion order. */
+  addLiteralRedaction(find: string, replacement: string): this {
+    if (find.length === 0) throw new TypeError('redaction find must be nonempty');
+    (this.wire.redactionRules ??= []).push({ kind: 'replaceLiteral', find, replacement });
+    return this;
+  }
+
+  /** Omit one exact governed content attribute. */
+  omitContentAttribute(key: string): this {
+    if (key.length === 0) throw new TypeError('redaction key must be nonempty');
+    (this.wire.redactionRules ??= []).push({ kind: 'omitAttribute', key });
+    return this;
+  }
+
   /** Record metadata only: no prompts, outputs or tool payloads. */
   setMetadataOnly(metadataOnly: boolean): this {
     this.wire.metadataOnly = metadataOnly;
@@ -130,7 +159,11 @@ export const Observability = {
     return NativeXybrid.observabilityDefaultTracesEndpoint();
   },
 
-  /** Delivery counters; all zero while export is off. */
+  /**
+   * Delivery counters: live while export runs; after `shutdown`, the final ones
+   * (what the shutdown failed or dropped included) until the next `init`; all
+   * zero before any.
+   */
   async stats(): Promise<ObservabilityStats> {
     return (await NativeXybrid.observabilityStats()) as ObservabilityStats;
   },

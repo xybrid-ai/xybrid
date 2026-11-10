@@ -354,6 +354,46 @@ fn should_cancel_on_sink_close(reached_terminal: bool) -> bool {
     !reached_terminal
 }
 
+/// The token callback of a Dart token stream. Forwards each token to the
+/// sink through `add`, which reports whether the sink took it.
+///
+/// A sink Dart closed before the terminal token is the caller's cancellation:
+/// the callback cancels `cancel_handle` (when the caller passed one) and
+/// returns [`xybrid_sdk::AbortReason::UserCancelled`], so the run stops at this
+/// token and the SDK records it as cancelled instead of running it to the end.
+/// A close that races in after the terminal token is not a cancellation.
+fn sink_token_callback(
+    mut add: impl FnMut(FfiStreamEvent) -> bool + Send,
+    cancel_handle: Option<FfiCancellationToken>,
+    reached_terminal: Arc<std::sync::atomic::AtomicBool>,
+) -> impl FnMut(
+    xybrid_core::runtime_adapter::types::PartialToken,
+) -> Result<(), xybrid_sdk::StreamingError>
+       + Send {
+    let mut token_index = 0u32;
+    move |token| {
+        let is_final = token.finish_reason.is_some();
+        let ffi_token = FfiStreamToken::from_sdk(&token, token_index);
+        token_index = token_index.saturating_add(1);
+        // Mark terminal *before* the final emit so a sink-close that races
+        // the last token does not look like a mid-stream cancel.
+        if is_final {
+            reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        if !add(FfiStreamEvent::Token(ffi_token))
+            && should_cancel_on_sink_close(
+                reached_terminal.load(std::sync::atomic::Ordering::SeqCst),
+            )
+        {
+            if let Some(handle) = cancel_handle.as_ref() {
+                handle.0.cancel();
+            }
+            return Err(Box::new(xybrid_sdk::AbortReason::UserCancelled));
+        }
+        Ok(())
+    }
+}
+
 /// Preserve the default streaming policy unless the caller supplied options.
 /// Generation parameters have already been resolved against the loaded model.
 fn resolved_streaming_run_options(
@@ -600,9 +640,50 @@ pub enum FfiTtsStreamEvent {
     /// One synthesized chunk: raw 16-bit LE PCM and its sample rate (Hz).
     AudioChunk { pcm: Vec<u8>, sample_rate: u32 },
     /// Synthesis completed.
-    Complete,
+    Complete(FfiTtsStreamResult),
     /// An error occurred during synthesis.
     Error(String),
+}
+
+/// Terminal synthesis status and counters, including partial cancellation.
+#[derive(Clone)]
+pub struct FfiTtsStreamResult {
+    pub status: FfiTtsStatus,
+    pub sample_rate: u32,
+    pub channels: u32,
+    pub samples: u64,
+    pub chunks: u32,
+    pub limited_chunks: u32,
+    pub observation: Option<super::observability::FfiObservationRef>,
+}
+
+#[derive(Clone)]
+pub enum FfiTtsStatus {
+    Completed,
+    Cancelled,
+    Limited,
+}
+
+impl From<xybrid_sdk::result::TtsStreamResult> for FfiTtsStreamResult {
+    fn from(result: xybrid_sdk::result::TtsStreamResult) -> Self {
+        use xybrid_core::execution::TtsStatus;
+        Self {
+            status: match result.status {
+                TtsStatus::Completed => FfiTtsStatus::Completed,
+                TtsStatus::Cancelled => FfiTtsStatus::Cancelled,
+                TtsStatus::Limited => FfiTtsStatus::Limited,
+            },
+            sample_rate: result.sample_rate,
+            channels: result.channels,
+            samples: result.samples,
+            chunks: result.chunks,
+            limited_chunks: result.limited_chunks,
+            observation: result
+                .observation
+                .as_ref()
+                .map(super::observability::FfiObservationRef::from_sdk),
+        }
+    }
 }
 
 /// Token received during streaming inference.
@@ -758,6 +839,18 @@ impl From<xybrid_sdk::StreamEvent> for FfiStreamEvent {
 }
 
 impl FfiModelLoader {
+    /// Clone this loader with validated observation controls.
+    #[frb(sync)]
+    pub fn with_observation(
+        &self,
+        options: super::observability::FfiObservationOptions,
+    ) -> Result<Self, String> {
+        let mut loader = self.0.clone();
+        if let Some(options) = options.to_sdk()? {
+            loader = loader.observation(options);
+        }
+        Ok(Self(loader))
+    }
     #[frb(sync)]
     pub fn from_registry(model_id: String) -> FfiModelLoader {
         FfiModelLoader(ModelLoader::from_registry(&model_id))
@@ -858,6 +951,14 @@ impl FfiModelLoader {
 }
 
 impl FfiModel {
+    /// Immutable reference for the load that created this model.
+    #[frb(sync)]
+    pub fn load_observation_ref(&self) -> Option<super::observability::FfiObservationRef> {
+        self.0
+            .load_observation_ref()
+            .map(super::observability::FfiObservationRef::from_sdk)
+    }
+
     /// Whether runs are currently answered by the cloud because the local
     /// weights are not ready yet. `false` for ordinary local models.
     ///
@@ -1062,33 +1163,15 @@ impl FfiModel {
                 }
             };
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let mut token_index = 0u32;
             let result = {
-                let reached_terminal = reached_terminal.clone();
-                let cancel_handle = cancel_handle.clone();
                 // Clone the sink for the callback so the original remains
                 // available for the terminal Complete/Error emit below.
                 let token_sink = sink.clone();
-                let on_token = move |token: xybrid_core::runtime_adapter::types::PartialToken| {
-                    let is_final = token.finish_reason.is_some();
-                    let ffi_token = FfiStreamToken::from_sdk(&token, token_index);
-                    token_index = token_index.saturating_add(1);
-                    // Mark terminal *before* the final emit so a sink-close that
-                    // races the last token does not look like a mid-stream cancel.
-                    if is_final {
-                        reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
-                    }
-                    if token_sink.add(FfiStreamEvent::Token(ffi_token)).is_err()
-                        && should_cancel_on_sink_close(
-                            reached_terminal.load(std::sync::atomic::Ordering::SeqCst),
-                        )
-                    {
-                        if let Some(handle) = cancel_handle.as_ref() {
-                            handle.0.cancel();
-                        }
-                    }
-                    Ok(())
-                };
+                let on_token = sink_token_callback(
+                    move |event| token_sink.add(event).is_ok(),
+                    cancel_handle.clone(),
+                    reached_terminal.clone(),
+                );
                 model.run_streaming_with_options_preempt(&env, &run_options, preempt, on_token)
             };
 
@@ -1193,23 +1276,9 @@ impl FfiModel {
             match result {
                 Ok(summary) => {
                     reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
-                    // A cancelled run (barge-in via sink-close, or the caller
-                    // cancelling the token) stopped early — don't surface it as a
-                    // successful Complete. On sink-close the add would no-op
-                    // anyway, but a token-only cancel keeps the sink open.
-                    let cancelled = cancel_handle
-                        .as_ref()
-                        .map(|h| h.0.is_cancelled())
-                        .unwrap_or(false);
-                    if summary.status == xybrid_core::execution::TtsStatus::Limited {
-                        let _ = sink.add(FfiTtsStreamEvent::Error(
-                            "TTS output limited; partial audio delivered".into(),
-                        ));
-                    } else if !cancelled
-                        && summary.status != xybrid_core::execution::TtsStatus::Cancelled
-                    {
-                        let _ = sink.add(FfiTtsStreamEvent::Complete);
-                    }
+                    // Terminal status distinguishes completed, limited and
+                    // cancelled synthesis while retaining counters/reference.
+                    let _ = sink.add(FfiTtsStreamEvent::Complete(summary.into()));
                 }
                 Err(e) => {
                     let _ = sink.add(FfiTtsStreamEvent::Error(sdk_error_message(e)));
@@ -1361,37 +1430,21 @@ impl FfiModel {
             };
 
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let mut token_index = 0u32;
 
             // Use callback-based streaming through the options-aware path so the
             // per-token abort check runs (honouring the cancellation token).
             let result = {
-                let reached_terminal = reached_terminal.clone();
-                let cancel_handle = cancel_handle.clone();
                 let token_sink = sink.clone();
                 model.run_streaming_with_context_options_preempt(
                     &env,
                     &ctx_guard,
                     &run_options,
                     preempt,
-                    move |token| {
-                        let is_final = token.finish_reason.is_some();
-                        let ffi_token = FfiStreamToken::from_sdk(&token, token_index);
-                        token_index = token_index.saturating_add(1);
-                        if is_final {
-                            reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
-                        }
-                        if token_sink.add(FfiStreamEvent::Token(ffi_token)).is_err()
-                            && should_cancel_on_sink_close(
-                                reached_terminal.load(std::sync::atomic::Ordering::SeqCst),
-                            )
-                        {
-                            if let Some(handle) = cancel_handle.as_ref() {
-                                handle.0.cancel();
-                            }
-                        }
-                        Ok(())
-                    },
+                    sink_token_callback(
+                        move |event| token_sink.add(event).is_ok(),
+                        cancel_handle.clone(),
+                        reached_terminal.clone(),
+                    ),
                 )
             };
 
@@ -1457,29 +1510,13 @@ impl FfiModel {
                 }
             };
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let mut token_index = 0u32;
             let result = {
-                let reached_terminal = reached_terminal.clone();
-                let cancel_handle = cancel_handle.clone();
                 let token_sink = sink.clone();
-                let mut on_token = |token: xybrid_core::runtime_adapter::types::PartialToken| {
-                    let is_final = token.finish_reason.is_some();
-                    let ffi_token = FfiStreamToken::from_sdk(&token, token_index);
-                    token_index = token_index.saturating_add(1);
-                    if is_final {
-                        reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
-                    }
-                    if token_sink.add(FfiStreamEvent::Token(ffi_token)).is_err()
-                        && should_cancel_on_sink_close(
-                            reached_terminal.load(std::sync::atomic::Ordering::SeqCst),
-                        )
-                    {
-                        if let Some(handle) = cancel_handle.as_ref() {
-                            handle.0.cancel();
-                        }
-                    }
-                    Ok(())
-                };
+                let mut on_token = sink_token_callback(
+                    move |event| token_sink.add(event).is_ok(),
+                    cancel_handle.clone(),
+                    reached_terminal.clone(),
+                );
                 let mut on_seam = |_seam: xybrid_sdk::model::SeamInfo| {};
 
                 model.run_streaming_with_fallback(
@@ -1639,9 +1676,7 @@ mod tests {
         options.suppress_trace = false;
         assert!(options
             .to_sdk_with_cancellation_over(None, GenerationConfig::default(), None)
-            .unwrap()
-            .observation
-            .is_none());
+            .is_err());
     }
 
     #[test]
@@ -1770,6 +1805,62 @@ mod tests {
             .expect("no tools, so lowering cannot fail");
         assert!(sdk.live_mode);
         assert_eq!(sdk.frame_session_id.as_deref(), Some("frame-sess-9"));
+    }
+
+    fn token(
+        index: usize,
+        finish_reason: Option<&str>,
+    ) -> xybrid_core::runtime_adapter::types::PartialToken {
+        xybrid_core::runtime_adapter::types::PartialToken {
+            token: format!("t{index}"),
+            token_id: None,
+            index,
+            cumulative_text: String::new(),
+            finish_reason: finish_reason.map(str::to_owned),
+            tool_calls: Vec::new(),
+            raw_text: None,
+        }
+    }
+
+    #[test]
+    fn a_sink_closed_mid_stream_stops_the_run_at_that_token_as_a_user_cancellation() {
+        // Dart takes two tokens, then cancels its subscription: the next
+        // token cannot be added. With or without a cancellation token, the
+        // callback stops the run there with the cancellation the SDK records
+        // as `cancelled`, and cancels the caller's token when there is one.
+        for cancel_handle in [None, Some(FfiCancellationToken::new())] {
+            let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let open = accepted.clone();
+            let mut on_token = sink_token_callback(
+                move |_event| open.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2,
+                cancel_handle.clone(),
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            );
+            assert!(on_token(token(0, None)).is_ok());
+            assert!(on_token(token(1, None)).is_ok());
+
+            let stopped = on_token(token(2, None)).expect_err("the sink is closed");
+            assert_eq!(
+                stopped.downcast_ref::<xybrid_sdk::AbortReason>(),
+                Some(&xybrid_sdk::AbortReason::UserCancelled),
+                "{stopped}"
+            );
+            if let Some(handle) = cancel_handle {
+                assert!(handle.is_cancelled());
+            }
+        }
+    }
+
+    #[test]
+    fn a_sink_closed_after_the_terminal_token_is_not_a_cancellation() {
+        let cancel_handle = FfiCancellationToken::new();
+        let mut on_token = sink_token_callback(
+            |_event| false,
+            Some(cancel_handle.clone()),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
+        assert!(on_token(token(0, Some("stop"))).is_ok());
+        assert!(!cancel_handle.is_cancelled());
     }
 
     #[test]

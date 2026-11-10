@@ -105,9 +105,11 @@ export interface WireStreamToken {
 
 export type WireStreamEvent =
   | { kind: 'token'; token: WireStreamToken }
+  | { kind: 'audio'; audio: import('./types').TtsAudioChunk }
   | { kind: 'complete'; result: WireResult };
 
 export interface WireStageResult {
+  observation?: ObservationRef | null;
   stageId: string;
   envelope: WireEnvelope;
   outputType: OutputType;
@@ -117,6 +119,7 @@ export interface WireStageResult {
 }
 
 export interface WirePipelineResult {
+  observation?: ObservationRef | null;
   envelope: WireEnvelope;
   outputType: OutputType;
   latencyMs: number;
@@ -421,6 +424,7 @@ function fromWireStage(wire: WireStageResult): StageResult {
     latencyMs: wire.latencyMs,
     executionTarget: wire.executionTarget,
     metrics: wire.metrics,
+    ...(wire.observation ? { observation: wire.observation } : {}),
   };
 }
 
@@ -435,6 +439,7 @@ export function fromWirePipelineResult(wire: WirePipelineResult): PipelineResult
       : {}),
     latencyMs: wire.latencyMs,
     stages: wire.stages.map(fromWireStage),
+    ...(wire.observation ? { observation: wire.observation } : {}),
   };
 }
 

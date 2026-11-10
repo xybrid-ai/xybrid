@@ -1,4 +1,4 @@
-import { SpanKind, SpanStatusCode } from "@opentelemetry/api";
+import { ProxyTracerProvider, SpanKind, SpanStatusCode } from "@opentelemetry/api";
 import {
   InMemoryLogRecordExporter,
   LoggerProvider,
@@ -14,7 +14,9 @@ import {
 import {
   InMemorySpanExporter,
   type ReadableSpan,
+  type Sampler,
   SimpleSpanProcessor,
+  type SpanProcessor,
   TracerProvider,
 } from "@opentelemetry/sdk-trace";
 import {
@@ -51,25 +53,46 @@ export type Harness = {
   readonly tracerProvider: TracerProvider;
   readonly loggerProvider: LoggerProvider;
   collectMetrics(): Promise<ResourceMetrics>;
+  /** Metrics plus the collection errors the reader reported. */
+  collect(): Promise<{ resourceMetrics: ResourceMetrics; errors: unknown[] }>;
 };
+
+/** `sdk`: the in-memory SDK provider; `none`: no tracer; `noop`: the API without an SDK. */
+export type TracerKind = "sdk" | "none" | "noop";
 
 /** In-memory providers owned by the test plus an observer over them. */
 export const createHarness = (
-  options: { content?: ContentOptions; logs?: boolean; traces?: boolean; metrics?: boolean } = {},
+  options: {
+    content?: ContentOptions;
+    logs?: boolean;
+    traces?: boolean;
+    metrics?: boolean;
+    tracer?: TracerKind;
+    /** The SDK tracer's sampler (default: parent-based, always on). */
+    sampler?: Sampler;
+    /** Application span processors, registered before the in-memory exporter's. */
+    spanProcessors?: readonly SpanProcessor[];
+  } = {},
 ): Harness => {
   const clock = new ManualClock();
   const spans = new InMemorySpanExporter();
   const logs = new InMemoryLogRecordExporter();
   const reader = new CollectingReader();
   const tracerProvider = new TracerProvider({
-    spanProcessors: [new SimpleSpanProcessor({ exporter: spans })],
+    spanProcessors: [
+      ...(options.spanProcessors ?? []),
+      new SimpleSpanProcessor({ exporter: spans }),
+    ],
+    ...(options.sampler === undefined ? {} : { sampler: options.sampler }),
   });
   const meterProvider = new MeterProvider({ readers: [reader] });
   const loggerProvider = new LoggerProvider({
     processors: [new SimpleLogRecordProcessor({ exporter: logs })],
   });
+  const tracer: TracerKind = options.traces === false ? "none" : (options.tracer ?? "sdk");
   const observer = new Observer({
-    tracerProvider: options.traces === false ? null : tracerProvider,
+    tracerProvider:
+      tracer === "none" ? null : tracer === "noop" ? new ProxyTracerProvider() : tracerProvider,
     meterProvider: options.metrics === false ? null : meterProvider,
     loggerProvider: options.logs === false ? null : (loggerProvider as LoggerProviderLike),
     clock: clock.now,
@@ -83,6 +106,10 @@ export const createHarness = (
     tracerProvider,
     loggerProvider,
     collectMetrics: async () => (await reader.collect()).resourceMetrics,
+    collect: async () => {
+      const { resourceMetrics, errors } = await reader.collect();
+      return { resourceMetrics, errors };
+    },
   };
 };
 
@@ -131,7 +158,7 @@ export const normalizeMetrics = (resourceMetrics: ResourceMetrics): NormalizedMe
         const attributes = canonical(point.attributes) as Record<string, unknown>;
         if (metric.dataPointType === DataPointType.HISTOGRAM) {
           const histogram = point.value as { count: number; sum?: number };
-          return { attributes, count: histogram.count, sum: round(histogram.sum ?? 0) };
+          return { attributes, count: histogram.count, sum: histogram.sum ?? 0 };
         }
         return { attributes, value: point.value as number };
       });

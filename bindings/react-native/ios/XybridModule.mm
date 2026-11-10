@@ -540,4 +540,44 @@ RCT_EXPORT_MODULE(RNXybrid)
 {
   [_impl sessionIsRunning:session resolve:resolve reject:reject];
 }
+- (void)observationStart:(NSString *)kind descriptor:(NSDictionary *)descriptor options:(NSDictionary *)options resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject
+{
+  [_impl observationStart:kind descriptor:descriptor options:options resolve:resolve reject:reject];
+}
+
+- (void)observationContext:(NSString *)handle resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject
+{
+  [_impl observationContext:handle resolve:resolve reject:reject];
+}
+
+- (void)observationReference:(NSString *)handle resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject
+{
+  [_impl observationReference:handle resolve:resolve reject:reject];
+}
+
+- (void)observationComplete:(NSString *)handle resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject
+{
+  [_impl observationComplete:handle resolve:resolve reject:reject];
+}
+
+- (void)observationFail:(NSString *)handle errorType:(NSString *)errorType message:(NSString *)message resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject
+{
+  [_impl observationFail:handle errorType:errorType message:message resolve:resolve reject:reject];
+}
+
+- (void)observationCancel:(NSString *)handle resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject
+{
+  [_impl observationCancel:handle resolve:resolve reject:reject];
+}
+
+- (void)observationIsFinished:(NSString *)handle resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject
+{
+  [_impl observationIsFinished:handle resolve:resolve reject:reject];
+}
+
+- (void)observationRecord:(NSString *)handle field:(NSString *)field value:(NSDictionary *)value resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject
+{
+  [_impl observationRecord:handle field:field value:value resolve:resolve reject:reject];
+}
+
 @end

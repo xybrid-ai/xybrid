@@ -5,7 +5,7 @@
  * bindings in `XybridBolt.kt`. Both files live in the same `ai.xybrid`
  * package so consumers `import ai.xybrid.…` and see a single surface.
  *
- * For full API documentation, see https://docs.xybrid.dev/sdk/kotlin
+ * For full API documentation, see https://docs.xybrid.dev/docs/sdks/kotlin
  */
 @file:Suppress("unused")
 
@@ -37,8 +37,8 @@ import kotlinx.coroutines.withContext
  * Call [Xybrid.init] once before using any other Xybrid functionality.
  * Inference runs on-device whether or not you authenticate. The `apiKey`
  * authenticates the cloud gateway; it does not export anything. Trace export
- * is off until you start it with [Xybrid.Observability]. Get a free key at
- * https://dashboard.xybrid.dev.
+ * is off until you start it with [Xybrid.Observability]. Get a key at
+ * https://console.xybrid.dev.
  *
  * ```kotlin
  * class MyApplication : Application() {
@@ -308,6 +308,33 @@ object Xybrid {
      * [recordFeedback] and [recordEvaluation].
      */
     object Observability {
+        /** Manual operations pin the original session; pass context() to each child. */
+        fun startWorkflow(name: String, options: XybridObservationOptions? = null): XybridWorkflowObservation =
+            XybridWorkflowObservation.new(name, options)
+        fun startTool(call: XybridToolCallInfo, options: XybridObservationOptions? = null): XybridToolObservation =
+            XybridToolObservation.new(call, options)
+        fun startInference(request: XybridInferenceRequest, options: XybridObservationOptions? = null): XybridInferenceObservation =
+            XybridInferenceObservation.new(request, options)
+        fun startModelLoad(info: XybridModelLoadInfo, options: XybridObservationOptions? = null): XybridModelLoadObservation =
+            XybridModelLoadObservation.new(info, options)
+
+        /** Complete on return; cancellation and exceptions preserve first-terminal-wins. */
+        inline fun <T> withWorkflow(name: String, options: XybridObservationOptions? = null,
+                                   block: (XybridWorkflowObservation) -> T): T =
+            startWorkflow(name, options).use { operation ->
+                try {
+                    val result = block(operation)
+                    operation.complete()
+                    result
+                } catch (cancelled: CancellationException) {
+                    operation.cancel()
+                    throw cancelled
+                } catch (error: Throwable) {
+                    operation.fail("application_error", null)
+                    throw error
+                }
+            }
+
         /** The Xybrid dashboard's OTLP trace endpoint, used by [xybrid]. */
         @JvmStatic
         val defaultTracesEndpoint: String get() = ai.xybrid.observabilityDefaultTracesEndpoint()
@@ -327,7 +354,11 @@ object Xybrid {
         @JvmStatic
         fun otlp(endpoint: String): XybridObservabilityConfig = XybridObservabilityConfig.otlp(endpoint)
 
-        /** Current delivery counters; all zero while export is off. */
+        /**
+         * Delivery counters: live while export runs; after [shutdown], the final
+         * ones (what the shutdown failed or dropped included) until the next
+         * `start()`; all zero before any.
+         */
         @JvmStatic
         val stats: XybridObservabilityStats get() = ai.xybrid.observabilityStats()
 
@@ -721,7 +752,7 @@ typealias Pipeline = XybridPipeline
  * // from the audio callback:
  * session.feed(pcm)
  * // when the user stops talking:
- * val transcript = session.flush()
+ * val transcript = session.flush().text   // .observation references the session
  * ```
  *
  * @param config chunking options; defaults to fixed-window chunking at
@@ -743,6 +774,7 @@ fun defaultStreamingConfig(): XybridStreamingConfig = XybridStreamingConfig(
     vadThreshold = 0.5f,
     language = null,
     audioCtx = null,
+    observation = null,
 )
 
 /**
@@ -759,17 +791,21 @@ fun defaultStreamingConfig(): XybridStreamingConfig = XybridStreamingConfig(
  * @param language language hint such as `"en"`; null uses the model default.
  * @param threshold VAD sensitivity, 0.0–1.0. Lower catches quieter speech,
  *   and more background noise with it.
+ * @param observation parent trace context, conversation id and trace
+ *   suppression for the session's workflow; null for none.
  */
 fun streamingConfigWithVad(
     modelDir: String,
     language: String? = null,
     threshold: Float = 0.5f,
+    observation: XybridObservationOptions? = null,
 ): XybridStreamingConfig = XybridStreamingConfig(
     sampleRate = 16_000u,
     vad = XybridVadMode.Enabled(modelDir),
     vadThreshold = threshold,
     language = language,
     audioCtx = null,
+    observation = observation,
 )
 
 /**
@@ -866,8 +902,11 @@ fun XybridPipeline.run(envelope: XybridEnvelope): XybridPipelineResult = this.ru
 /**
  * Run every pipeline stage off the caller's thread.
  *
- * Of [options], only `correlationId` applies to a pipeline run; setting
- * `generationConfig` or `abortOn` throws [XybridError.ConfigError].
+ * Of [options], `correlationId` and the observation controls (`traceparent`,
+ * `tracestate`, `conversationId`, `suppressTrace`) apply to a pipeline run:
+ * [XybridPipelineResult.observation] references its workflow and each
+ * [XybridStageResult.observation] its stage. Setting `generationConfig` or
+ * `abortOn` throws [XybridError.ConfigError].
  */
 suspend fun XybridPipeline.runAsync(
     envelope: XybridEnvelope,
@@ -1330,4 +1369,16 @@ val XybridError.displayMessage: String
         is XybridError.UnsupportedBackendCapability -> message
         is XybridError.InvalidImage -> message
         is XybridError.Cancelled -> message
+        is XybridError.TelemetryDelivery -> "Telemetry delivery failed: $message"
     }
+
+/** Explicit W3C parent controls, captured before crossing execution threads. */
+fun observationOptions(traceparent: String? = null, tracestate: String? = null,
+                       conversationId: String? = null, suppressTrace: Boolean = false) =
+    XybridObservationOptions(traceparent, tracestate, conversationId, suppressTrace)
+val XybridObservationContext.childOptions: XybridObservationOptions
+    get() = observationOptions(traceparent, tracestate)
+fun XybridObservabilityConfig.deviceId(id: String) = apply { setDeviceId(id) }
+fun XybridObservabilityConfig.propagateContextTo(origin: String) = apply { allowProviderContext(origin) }
+fun XybridObservabilityConfig.redactLiteral(find: String, replacement: String) = apply { addLiteralRedaction(find, replacement) }
+fun XybridObservabilityConfig.omitContent(key: String) = apply { omitContentAttribute(key) }

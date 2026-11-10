@@ -83,9 +83,11 @@ if let reasoning = result.reasoningContent { print("Reasoning:", reasoning) }
 Export is off until you start it; an API key alone does not enable it. Once
 started, each run is exported as an OpenTelemetry trace, with prompts and
 outputs included unless you call `.metadataOnly()`.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
 
 ```swift
-// Traces to the Xybrid dashboard (free key at dashboard.xybrid.dev)
+// Traces to Xybrid (get a key at console.xybrid.dev)
 try Xybrid.Observability.xybrid(apiKey: key)
     .service("MyApp", version: "1.4.0")
     .start()
@@ -110,9 +112,58 @@ if let observation = result.observation {
 try await Xybrid.Observability.flushAsync()
 ```
 
-`Xybrid.Observability.stats` reports spans exported, dropped, and failed.
-`suppressTrace: true` in `XybridRunOptions.make(...)` skips the detailed trace
-for one run.
+`Xybrid.Observability.stats` reports accepted, exported, dropped, failed, and
+pending counts per signal (`traces`, `logs`, `metrics`); after `shutdown` they are
+the session's final counters (what the shutdown failed or dropped included)
+until the next `start()`. A flush or shutdown that
+cannot deliver everything throws `XybridError.telemetryDelivery`; the inference
+already succeeded, so do not rerun it. `suppressTrace: true` in
+`XybridRunOptions.make(...)` skips the detailed trace for one run. Pipelines
+take the same trace fields and return `observation` references for the workflow
+and each stage; ASR sessions take them through
+`XybridStreamingConfig.default.observed(by:)` or
+`voiceActivity(modelDir:observation:)`, and `flush()` returns the session's
+reference.
+
+Record work Xybrid does not run itself (a tool, another runtime's inference)
+with a manual operation. Pass `context()?.childOptions` to its children. The
+first terminal call wins, and releasing an unfinished one cancels it without
+flushing:
+
+```swift
+try await Xybrid.Observability.withWorkflow("answer-question") { workflow in
+    let call = XybridToolCallInfo(name: "search", callId: nil, toolType: nil,
+                                  description: nil, argumentsJson: #"{"q":"otel"}"#)
+    let tool = try Xybrid.Observability.startTool(call, options: workflow.context()?.childOptions)
+    try tool.recordResult(resultJson: #"{"hits":3}"#)
+    tool.complete()
+}
+```
+
+`withWorkflow` completes on return, cancels on `CancellationError`, and fails
+with the label `application_error` (never the error text) otherwise.
+
+`Tests/XybridTests/ObservabilityRuntimeTests.swift` runs the shared
+[observability runtime scenario](../../tools/scripts/observability_capture/scenario.md)
+through this API against a local OTLP receiver. It skips unless the scenario
+driver supplies the receiver, which CI's `Observability runtime scenario (iOS
+Simulator)` job in `build-apple.yml` does. To run it on a Mac, with the local
+xcframework unzipped (see below) and a booted simulator:
+
+```bash
+./bindings/apple/scripts/set-natives-mode.sh --set-local
+SIM_ID=<booted simulator UDID>   # xcrun simctl list devices booted
+python3 tools/scripts/observability_capture/run_scenario.py --binding swift --out-dir out/swift -- \
+  env "TEST_RUNNER_XYBRID_SCENARIO_ENDPOINT={endpoint}" \
+      "TEST_RUNNER_XYBRID_SCENARIO_EXPECTATIONS={expectations}" \
+      "TEST_RUNNER_XYBRID_SCENARIO_WORKDIR={workdir}" \
+  xcodebuild test -scheme Xybrid -destination "platform=iOS Simulator,id=$SIM_ID" \
+    -only-testing:XybridTests/ObservabilityRuntimeTests CODE_SIGNING_ALLOWED=NO
+./bindings/apple/scripts/set-natives-mode.sh --set-remote   # before committing
+```
+
+`xcodebuild` passes a variable to the simulator's test runner only with the
+`TEST_RUNNER_` prefix, which it strips.
 
 ### Available Types
 

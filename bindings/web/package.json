@@ -36,7 +36,7 @@
     "pretypecheck": "node scripts/prepare-observability.mjs",
     "runtime:build": "bun run scripts/build-runtime.ts",
     "size": "bun run scripts/measure-size.ts",
-    "test": "bun test test/metadata.test.ts test/llm.test.ts test/registry.test.ts test/huggingface.test.ts test/observability.test.ts",
+    "test": "bun test test/clock.test.ts test/metadata.test.ts test/llm.test.ts test/registry.test.ts test/huggingface.test.ts test/observability.test.ts",
     "test:browser": "playwright test",
     "typecheck": "tsc --noEmit",
     "test:release": "node --test scripts/check-pack.test.mjs"

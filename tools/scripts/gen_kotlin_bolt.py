@@ -201,6 +201,17 @@ def render() -> tuple[str, dict[str, bytes]]:
     )
     if tails != 1:
         sys.exit("error: expected one XybridResult reasoning/observation constructor tail")
+    # New optional trailing observation fields keep source-level constructors
+    # usable. Nested wire records still require a matching native library.
+    for field, ty, expected in (
+        ("observation", "XybridObservationRef", 3),
+        ("observation", "XybridObservationOptions", 1),
+        ("decoderObservation", "XybridObservationRef", 1),
+    ):
+        pattern = rf"(    val {field}: {ty}\?)(\n\) \{{)"
+        source, count = re.subn(pattern, r"\1 = null\2", source)
+        if count != expected:
+            sys.exit(f"error: expected {expected} optional {field}: {ty} constructor tails, found {count}")
     source = _add_result_wire_compatibility(source)
     source = _qualify_kotlin_result(source)
     if overrides == 0:

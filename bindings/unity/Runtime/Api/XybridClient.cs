@@ -141,8 +141,8 @@ namespace Xybrid
         /// not enable observability export &#x2014; build an
         /// <see cref="ObservabilityConfig"/> and call
         /// <see cref="InitializeObservability"/> for that. Omit it to run
-        /// anonymously; inference still runs fully on-device. Get a free key at
-        /// https://dashboard.xybrid.dev.
+        /// anonymously; inference still runs fully on-device. Get a key at
+        /// https://console.xybrid.dev.
         /// </param>
         /// <param name="gatewayUrl">Optional override for the LLM gateway URL.</param>
         /// <remarks>
@@ -368,8 +368,10 @@ namespace Xybrid
         public static bool IsObservabilityEnabled => ObservabilityStats().Enabled;
 
         /// <summary>
-        /// Returns the export pipeline's delivery counters (all zero when
-        /// observability is off).
+        /// Returns the export pipeline's delivery counters: live while export
+        /// runs; after <see cref="ShutdownObservability"/>, the final ones (what
+        /// the shutdown failed or dropped included) until the next
+        /// initialization; all zero before any.
         /// </summary>
         public static XybridBolt.XybridObservabilityStats ObservabilityStats() =>
             XybridBolt.XybridBolt.ObservabilityStats();

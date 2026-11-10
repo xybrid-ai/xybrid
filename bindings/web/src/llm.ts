@@ -7,6 +7,7 @@ import {
   RuntimeConfigurationError,
   XybridError,
 } from "./errors.ts";
+import { epochClock } from "./internal/clock.ts";
 import { resolveHuggingFaceModel } from "./internal/huggingface.ts";
 import { type RuntimeInitializer, sharedLlmInitializer } from "./internal/initialization.ts";
 import {
@@ -26,7 +27,6 @@ import {
   throwIfAborted,
 } from "./internal/loading.ts";
 import {
-  epochNow,
   GenerationObservation,
   type LoadObservation,
   loadObservation,
@@ -108,13 +108,14 @@ const observedLoad = async (
 ): Promise<LlmSession> => {
   if (observation === undefined) return load();
   const fallbackModel = typeof modelName === "string" ? modelName : modelName();
-  const startedAtMs = epochNow();
+  const clock = epochClock();
+  const startedAtMs = clock();
   // Capture the caller's context now. Browser context managers may restore it as soon as
   // load() returns a Promise, while the resolved model identity is only known afterwards.
   const finishLoad = observeSafely(() =>
     observation.observer.bindContext(
       (model: string, outcome: { readonly session: LlmSession } | { readonly error: unknown }) =>
-        recordLoad(observation, model, startedAtMs, outcome),
+        recordLoad(observation, model, startedAtMs, outcome, clock()),
     ),
   );
   let session: LlmSession;

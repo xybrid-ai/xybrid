@@ -24,12 +24,13 @@ namespace XybridBolt
     /// <param name="AudioCtx">Whisper encoder context in mel frames; null uses the model default.</param>
     public readonly struct XybridStreamingConfig
     {
-        public XybridStreamingConfig(uint SampleRate, XybridVadMode Vad, float VadThreshold, string? Language, uint? AudioCtx) { this.SampleRate = SampleRate; this.Vad = Vad; this.VadThreshold = VadThreshold; this.Language = Language; this.AudioCtx = AudioCtx; }
+        public XybridStreamingConfig(uint SampleRate, XybridVadMode Vad, float VadThreshold, string? Language, uint? AudioCtx, XybridObservationOptions? Observation = null) { this.SampleRate = SampleRate; this.Vad = Vad; this.VadThreshold = VadThreshold; this.Language = Language; this.AudioCtx = AudioCtx; this.Observation = Observation; }
         public uint SampleRate { get; }
         public XybridVadMode Vad { get; }
         public float VadThreshold { get; }
         public string? Language { get; }
         public uint? AudioCtx { get; }
+        public XybridObservationOptions? Observation { get; }
 
         internal static XybridStreamingConfig Decode(WireReader reader) =>
             new XybridStreamingConfig(
@@ -37,7 +38,8 @@ namespace XybridBolt
                 XybridVadMode.Decode(reader),
                 reader.ReadF32(),
                 reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
-                reader.ReadU8() == 0 ? default(uint?) : reader.ReadU32()
+                reader.ReadU8() == 0 ? default(uint?) : reader.ReadU32(),
+                reader.ReadU8() == 0 ? default(XybridObservationOptions?) : XybridObservationOptions.Decode(reader)
             );
 
         internal void Encode(WireWriter writer)
@@ -67,6 +69,17 @@ namespace XybridBolt
                 {
                     writer.WriteU8(1);
                     writer.WriteU32(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.Observation is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    boltffiValue0.Encode(writer);
                 }
                 else
                 {

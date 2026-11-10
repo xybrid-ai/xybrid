@@ -3675,35 +3675,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "opentelemetry-http"
-version = "0.33.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "302249bd8ee804789faaa7b5b2cbf79bc61cb864714079c644e3828af5b7e811"
-dependencies = [
- "async-trait",
- "bytes",
- "http 1.5.0",
- "opentelemetry",
-]
-
-[[package]]
-name = "opentelemetry-otlp"
-version = "0.33.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0756af24841e367128ef31c831999937b8b5c5197d47914590d8f4e2e88c2e1a"
-dependencies = [
- "http 1.5.0",
- "httpdate",
- "opentelemetry",
- "opentelemetry-http",
- "opentelemetry-proto",
- "opentelemetry_sdk",
- "prost",
- "serde_json",
- "thiserror 2.0.20",
-]
-
-[[package]]
 name = "opentelemetry-proto"
 version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6431,9 +6402,12 @@ dependencies = [
  "console 0.16.6",
  "dialoguer",
  "dirs",
+ "httpmock",
  "image 0.25.10",
  "indicatif 0.17.11",
- "lazy_static",
+ "libc",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -6443,8 +6417,10 @@ dependencies = [
  "tracing-flame",
  "tracing-subscriber",
  "ureq 2.12.1",
+ "url",
  "uuid",
  "xybrid-core",
+ "xybrid-observability",
  "xybrid-sdk",
 ]
 
@@ -6466,6 +6442,7 @@ dependencies = [
  "filetime",
  "hf-hub",
  "hound",
+ "httpmock",
  "image 0.25.10",
  "lazy_static",
  "libc",
@@ -6566,17 +6543,21 @@ dependencies = [
 name = "xybrid-observability"
 version = "0.17.0"
 dependencies = [
- "async-trait",
+ "criterion",
+ "httpdate",
  "httpmock",
+ "libc",
  "log",
  "opentelemetry",
- "opentelemetry-http",
- "opentelemetry-otlp",
+ "opentelemetry-proto",
  "opentelemetry_sdk",
+ "prost",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
- "ureq 2.12.1",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -6589,6 +6570,8 @@ dependencies = [
  "hf-hub",
  "httpmock",
  "log",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "ort",
  "rustls",
  "serde",
@@ -6601,6 +6584,7 @@ dependencies = [
  "tokio-stream",
  "ureq 2.12.1",
  "ureq 3.4.2",
+ "url",
  "uuid",
  "xybrid-core",
  "xybrid-macros",

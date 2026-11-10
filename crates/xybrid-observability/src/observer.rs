@@ -10,13 +10,12 @@ use opentelemetry::global::{BoxedTracer, ObjectSafeTracerProvider};
 use opentelemetry::logs::{AnyValue, LogRecord as _, Logger, LoggerProvider, Severity};
 use opentelemetry::metrics::{Counter, Histogram, Meter, MeterProvider};
 use opentelemetry::trace::{
-    SpanId, SpanKind, TraceContextExt, TraceFlags, TraceId, Tracer, TracerProvider,
+    Span as _, SpanId, SpanKind, TraceContextExt, TraceFlags, TraceId, Tracer, TracerProvider,
 };
 use opentelemetry::{Context, InstrumentationScope, Key, KeyValue};
-use serde_json::Value;
 
 use crate::clock::Clock;
-use crate::content::ContentPolicy;
+use crate::content::{ContentPolicy, Outcome};
 use crate::context::ObservationRef;
 use crate::operation::{
     InferenceOperation, ModelLoadOperation, SpanOperation, ToolOperation, WorkflowOperation,
@@ -36,10 +35,12 @@ pub struct Observer {
     pub(crate) inner: Arc<ObserverInner>,
 }
 
+/// Provider handles are shared, so observers derived with
+/// [`Observer::content_capped_by`] record through the same providers.
 pub(crate) struct ObserverInner {
-    pub tracer: Option<BoxedTracer>,
-    pub instruments: Option<Instruments>,
-    pub events: Option<Box<dyn EventSink>>,
+    pub tracer: Option<Arc<BoxedTracer>>,
+    pub instruments: Option<Arc<Instruments>>,
+    pub events: Option<Arc<dyn EventSink>>,
     pub content: ContentPolicy,
     pub clock: Clock,
 }
@@ -58,7 +59,7 @@ impl Observer {
                 tracer: None,
                 instruments: None,
                 events: None,
-                content: ContentPolicy::metadata_only(),
+                content: ContentPolicy::metadata_only().resolved(),
                 clock: Clock::system(),
             }),
         }
@@ -78,13 +79,36 @@ impl Observer {
         self.inner.events.is_some()
     }
 
-    /// The content policy.
+    /// The content policy. Its [`ContentPolicy::capture`] is the mode
+    /// resolved when the observer was built.
     #[must_use]
     pub fn content_policy(&self) -> &ContentPolicy {
         &self.inner.content
     }
 
-    /// Current time from the observer clock.
+    /// This observer, recording through the same providers and clock, with
+    /// its content policy capped by `ceiling` (see
+    /// [`ContentPolicy::capped_by`]): it never captures more content than
+    /// either policy allows.
+    ///
+    /// Hosts that let one operation choose its own observer use this so the
+    /// choice can lower content capture but never raise it above the policy
+    /// that operation would otherwise run under.
+    #[must_use]
+    pub fn content_capped_by(&self, ceiling: &ContentPolicy) -> Self {
+        Self {
+            inner: Arc::new(ObserverInner {
+                tracer: self.inner.tracer.clone(),
+                instruments: self.inner.instruments.clone(),
+                events: self.inner.events.clone(),
+                content: self.inner.content.capped_by(ceiling).resolved(),
+                clock: self.inner.clock.clone(),
+            }),
+        }
+    }
+
+    /// Current wall-clock time from the observer clock (operations anchor
+    /// their own monotonic readings at start).
     #[must_use]
     pub fn now(&self) -> SystemTime {
         self.inner.clock.now()
@@ -139,11 +163,15 @@ impl Observer {
         SpanOperation::start(self.inner.clone(), name.into(), attributes, options)
     }
 
-    /// Emits a `gen_ai.evaluation.result` event linked to `target`.
+    /// Emits a `gen_ai.evaluation.result` event linked to `target` (trace
+    /// flags `0`: a reference carries no flags).
     ///
-    /// Returns `false` when no logger is configured or `target` is invalid.
+    /// Returns `true` only when the record was handed to an enabled logger;
+    /// `false` (recording nothing) when no logger is configured, the logger
+    /// reports the event disabled, or `target` is invalid. References of
+    /// unsampled spans are valid targets.
     pub fn record_evaluation(&self, target: &ObservationRef, evaluation: &Evaluation) -> bool {
-        let Some(events) = &self.inner.events else {
+        let Some(events) = self.evaluation_sink() else {
             return false;
         };
         let Some((trace_id, span_id)) = target.ids() else {
@@ -156,7 +184,10 @@ impl Observer {
         push_any(
             &mut attributes,
             attr::EVALUATION_SCORE_VALUE,
-            evaluation.score_value.map(AnyValue::from),
+            evaluation
+                .score_value
+                .filter(|v| v.is_finite())
+                .map(AnyValue::Double),
         );
         push_any(
             &mut attributes,
@@ -185,11 +216,14 @@ impl Observer {
     }
 
     /// Emits end-user feedback as a `gen_ai.evaluation.result` event named
-    /// `user_feedback`. The comment is content and follows the capture policy.
+    /// `user_feedback`. The comment is content: it follows the capture policy,
+    /// redaction hook, rules and the `K = B` bound, and is omitted when it
+    /// fails closed.
     ///
-    /// Returns `false` when no logger is configured or `target` is invalid.
+    /// Returns `false` (recording nothing) when no enabled logger is
+    /// configured or `target` is invalid.
     pub fn record_feedback(&self, target: &ObservationRef, feedback: &Feedback) -> bool {
-        let Some(events) = &self.inner.events else {
+        let Some(events) = self.evaluation_sink() else {
             return false;
         };
         let Some((trace_id, span_id)) = target.ids() else {
@@ -202,7 +236,10 @@ impl Observer {
         push_any(
             &mut attributes,
             attr::EVALUATION_SCORE_VALUE,
-            feedback.score.map(AnyValue::from),
+            feedback
+                .score
+                .filter(|v| v.is_finite())
+                .map(AnyValue::Double),
         );
         push_any(
             &mut attributes,
@@ -210,16 +247,17 @@ impl Observer {
             feedback.label.clone().map(AnyValue::from),
         );
         if let Some(comment) = &feedback.comment {
-            if self.inner.content.capture().any() {
-                let prepared = self
-                    .inner
-                    .content
-                    .prepare_text(attr::FEEDBACK_COMMENT, comment.clone());
-                push_any(
-                    &mut attributes,
-                    attr::FEEDBACK_COMMENT,
-                    prepared.value.map(AnyValue::from),
-                );
+            let content = &self.inner.content;
+            if content.capture().any() {
+                if let Outcome::Keep(bounded) =
+                    content.prepare_text(attr::FEEDBACK_COMMENT, comment, content.text_bound())
+                {
+                    push_any(
+                        &mut attributes,
+                        attr::FEEDBACK_COMMENT,
+                        Some(AnyValue::from(bounded.text)),
+                    );
+                }
             }
         }
         events.emit(LogEvent {
@@ -231,6 +269,15 @@ impl Observer {
             attributes,
         });
         true
+    }
+}
+
+impl Observer {
+    fn evaluation_sink(&self) -> Option<&dyn EventSink> {
+        self.inner
+            .events
+            .as_deref()
+            .filter(|events| events.enabled(Severity::Info, event::EVALUATION_RESULT))
     }
 }
 
@@ -255,9 +302,9 @@ impl Default for Observer {
 #[derive(Default)]
 #[must_use]
 pub struct ObserverBuilder {
-    tracer: Option<BoxedTracer>,
+    tracer: Option<Arc<BoxedTracer>>,
     meter: Option<Meter>,
-    events: Option<Box<dyn EventSink>>,
+    events: Option<Arc<dyn EventSink>>,
     content: Option<ContentPolicy>,
     clock: Option<Clock>,
 }
@@ -270,13 +317,15 @@ impl ObserverBuilder {
         P::Tracer: Send + Sync + 'static,
         <P::Tracer as Tracer>::Span: Send + Sync + 'static,
     {
-        self.tracer = Some(BoxedTracer::new(provider.boxed_tracer(scope())));
+        self.tracer = Some(Arc::new(BoxedTracer::new(provider.boxed_tracer(scope()))));
         self
     }
 
     /// Records spans with the global tracer provider (read, never installed).
     pub fn global_tracer_provider(mut self) -> Self {
-        self.tracer = Some(opentelemetry::global::tracer_provider().tracer_with_scope(scope()));
+        self.tracer = Some(Arc::new(
+            opentelemetry::global::tracer_provider().tracer_with_scope(scope()),
+        ));
         self
     }
 
@@ -299,12 +348,13 @@ impl ObserverBuilder {
         P: LoggerProvider,
         P::Logger: Send + Sync + 'static,
     {
-        self.events = Some(Box::new(LoggerSink(provider.logger_with_scope(scope()))));
+        self.events = Some(Arc::new(LoggerSink(provider.logger_with_scope(scope()))));
         self
     }
 
     /// Sets the content policy. Without this call the policy is the product
-    /// default with `OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT` honored.
+    /// default. A policy without an explicit capture mode resolves it from
+    /// the environment once, here (see [`crate::ContentCapture::from_env`]).
     pub fn content_policy(mut self, policy: ContentPolicy) -> Self {
         self.content = Some(policy);
         self
@@ -322,9 +372,9 @@ impl ObserverBuilder {
         Observer {
             inner: Arc::new(ObserverInner {
                 tracer: self.tracer,
-                instruments: self.meter.as_ref().map(Instruments::new),
+                instruments: self.meter.as_ref().map(|m| Arc::new(Instruments::new(m))),
                 events: self.events,
-                content: self.content.unwrap_or_else(ContentPolicy::from_env),
+                content: self.content.unwrap_or_default().resolved(),
                 clock: self.clock.unwrap_or_default(),
             }),
         }
@@ -446,6 +496,7 @@ pub(crate) struct LogEvent {
 /// Object-safe logger wrapper.
 pub(crate) trait EventSink: Send + Sync {
     fn emit(&self, event: LogEvent);
+    fn enabled(&self, severity: Severity, name: &'static str) -> bool;
 }
 
 struct LoggerSink<L>(L);
@@ -458,11 +509,29 @@ impl<L: Logger + Send + Sync> EventSink for LoggerSink<L> {
         record.set_severity_text(event.severity_text);
         record.set_timestamp(event.timestamp);
         record.set_observed_timestamp(event.timestamp);
-        if let Some((trace_id, span_id, flags)) = event.trace {
-            record.set_trace_context(trace_id, span_id, flags);
-        }
         record.add_attributes(event.attributes);
-        self.0.emit(record);
+        match event.trace {
+            Some((trace_id, span_id, flags)) => {
+                record.set_trace_context(trace_id, span_id, flags);
+                self.0.emit(record);
+            }
+            None => {
+                // An operation without a span of its own: emit with an
+                // explicitly empty trace context so the SDK does not fill it
+                // from the ambient span (suppression is preserved).
+                let empty = if Context::is_current_telemetry_suppressed() {
+                    Context::new().with_telemetry_suppressed()
+                } else {
+                    Context::new()
+                };
+                let _guard = empty.attach();
+                self.0.emit(record);
+            }
+        }
+    }
+
+    fn enabled(&self, severity: Severity, name: &'static str) -> bool {
+        self.0.event_enabled(severity, SCOPE_NAME, Some(name))
     }
 }
 
@@ -472,25 +541,18 @@ pub(crate) fn push_any(out: &mut Vec<(Key, AnyValue)>, key: &'static str, value:
     }
 }
 
-/// Structured JSON → `AnyValue` for log events.
-pub(crate) fn json_to_any(value: Value) -> AnyValue {
-    match value {
-        Value::Null => AnyValue::String("".into()),
-        Value::Bool(b) => AnyValue::Boolean(b),
-        Value::Number(n) => match n.as_i64() {
-            Some(i) => AnyValue::Int(i),
-            None => AnyValue::Double(n.as_f64().unwrap_or_default()),
-        },
-        Value::String(s) => AnyValue::String(s.into()),
-        Value::Array(items) => {
-            AnyValue::ListAny(Box::new(items.into_iter().map(json_to_any).collect()))
-        }
-        Value::Object(map) => AnyValue::Map(Box::new(
-            map.into_iter()
-                .map(|(k, v)| (Key::new(k), json_to_any(v)))
-                .collect(),
-        )),
-    }
+/// The span an operation started (if any).
+pub(crate) struct SpanState {
+    /// The parent context with the started span active.
+    pub cx: Context,
+    /// Whether the tracer created a span of its own: a valid span whose id
+    /// differs from the parent's. API-only (no SDK) tracers return the
+    /// parent's context instead, which is kept only for propagation.
+    pub own: bool,
+    /// Whether the span records (sampled, or a record-only sampler
+    /// decision). Content destined for a span that does not record is never
+    /// processed (CONTRACT.md "Content pipeline", step 1).
+    pub recording: bool,
 }
 
 impl ObserverInner {
@@ -502,14 +564,19 @@ impl ObserverInner {
         mut attributes: Vec<KeyValue>,
         options: &mut StartOptions,
         start: SystemTime,
-    ) -> Option<Context> {
+    ) -> Option<SpanState> {
         if options.trace == TraceMode::Suppress {
             return None;
         }
-        let tracer = self.tracer.as_ref()?;
+        let tracer = self.tracer.as_deref()?;
         let parent = match &options.parent {
             Some(parent) => parent.to_otel(),
             None => Context::current(),
+        };
+        let parent_span_id = {
+            let span = parent.span();
+            let sc = span.span_context();
+            sc.is_valid().then(|| sc.span_id())
         };
         attributes.append(&mut options.attributes);
         let span = tracer
@@ -518,6 +585,15 @@ impl ObserverInner {
             .with_start_time(start)
             .with_attributes(attributes)
             .start_with_context(tracer, &parent);
-        Some(parent.with_span(span))
+        let own = {
+            let sc = span.span_context();
+            sc.is_valid() && Some(sc.span_id()) != parent_span_id
+        };
+        let recording = own && span.is_recording();
+        Some(SpanState {
+            cx: parent.with_span(span),
+            own,
+            recording,
+        })
     }
 }

@@ -35,7 +35,7 @@ namespace Xybrid
     /// <example>
     /// <code>
     /// XybridClient.InitializeObservability(
-    ///     ObservabilityConfig.Xybrid("xy_live_...")
+    ///     ObservabilityConfig.Xybrid("sk_live_...")
     ///         .WithService("my-game", Application.version));
     /// </code>
     /// </example>
@@ -300,6 +300,55 @@ namespace Xybrid
                 _bolt.SetMetadataOnly(metadataOnly);
             }
 
+            return this;
+        }
+
+        /// <summary>Allows context propagation to one exact third-party HTTP(S) origin.</summary>
+        public ObservabilityConfig AllowProviderContext(string origin)
+        {
+            if (origin == null) throw new ArgumentNullException(nameof(origin));
+            lock (_lock)
+            {
+                ThrowIfDisposedLocked();
+                _bolt.AllowProviderContext(origin);
+            }
+            return this;
+        }
+
+        /// <summary>Sets the caller-owned device identifier for exported resources.</summary>
+        public ObservabilityConfig WithDeviceId(string deviceId)
+        {
+            if (deviceId == null) throw new ArgumentNullException(nameof(deviceId));
+            lock (_lock)
+            {
+                ThrowIfDisposedLocked();
+                _bolt.SetDeviceId(deviceId);
+            }
+            return this;
+        }
+
+        /// <summary>Replaces literal text in governed content, in registration order.</summary>
+        public ObservabilityConfig WithLiteralRedaction(string find, string replacement)
+        {
+            if (find == null) throw new ArgumentNullException(nameof(find));
+            if (replacement == null) throw new ArgumentNullException(nameof(replacement));
+            lock (_lock)
+            {
+                ThrowIfDisposedLocked();
+                _bolt.AddLiteralRedaction(find, replacement);
+            }
+            return this;
+        }
+
+        /// <summary>Omits one exact governed content attribute.</summary>
+        public ObservabilityConfig WithoutContentAttribute(string key)
+        {
+            if (key == null) throw new ArgumentNullException(nameof(key));
+            lock (_lock)
+            {
+                ThrowIfDisposedLocked();
+                _bolt.OmitContentAttribute(key);
+            }
             return this;
         }
 

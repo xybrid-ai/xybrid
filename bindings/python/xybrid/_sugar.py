@@ -22,6 +22,7 @@ instead of silently dropping the documented API.
 
 from __future__ import annotations
 
+import concurrent.futures
 import threading
 from functools import wraps
 from typing import Any
@@ -303,8 +304,12 @@ def _install_pipeline_accessors() -> None:
     def _run(self: Any, envelope: Any, options: Any = None) -> Any:
         """Run every stage and return each stage's output alongside the final one.
 
-        Of ``options``, only ``correlation_id`` applies to a pipeline run;
-        setting ``generation_config`` or ``abort_on`` raises ``ConfigError``.
+        Of ``options``, ``correlation_id`` and the observation controls
+        (``traceparent``, ``tracestate``, ``conversation_id``,
+        ``suppress_trace``) apply to a pipeline run: the result's
+        ``observation`` references its workflow and each stage's
+        ``observation`` that stage. Setting ``generation_config`` or
+        ``abort_on`` raises ``ConfigError``.
         """
 
         return run(self, envelope, options)
@@ -493,6 +498,50 @@ def _install_download_iteration() -> None:
         subscription.__iter__ = __iter__
 
 
+def _is_cancellation(exc_type: Any) -> bool:
+    """Interruptions, not failures: Ctrl-C, task/future cancellation, generator close.
+
+    Everything outside ``Exception`` (KeyboardInterrupt, SystemExit,
+    GeneratorExit, ``asyncio.CancelledError``) stops the work rather than
+    reporting an application error, like Swift's ``CancellationError`` and
+    Kotlin's ``CancellationException`` in their ``withWorkflow`` helpers.
+    """
+    return not issubclass(exc_type, Exception) or issubclass(
+        exc_type, concurrent.futures.CancelledError
+    )
+
+
+def _install_observation_context_managers() -> None:
+    """First terminal transition wins; closing unfinished work cancels in Rust."""
+    def __enter__(self: Any) -> Any:
+        return self
+
+    def __exit__(self: Any, exc_type: Any, exc: Any, traceback: Any) -> None:
+        try:
+            if exc_type is None:
+                self.complete()
+            elif _is_cancellation(exc_type):
+                self.cancel()
+            else:
+                # Exception values may contain private content; the runtime's
+                # error label is sufficient for automatic context-manager failure.
+                self.fail(error_type="application_error", message=None)
+        finally:
+            self.close()
+
+    def close(self: Any) -> None:
+        # Generated destructors clear the handle before releasing, so explicit
+        # disposal and later GC release exactly one Rust owner.
+        self.__del__()
+
+    for name in ("XybridWorkflowObservation", "XybridToolObservation",
+                 "XybridInferenceObservation", "XybridModelLoadObservation"):
+        handle = getattr(_bolt, name)
+        handle.close = close
+        handle.__enter__ = __enter__
+        handle.__exit__ = __exit__
+
+
 def install() -> None:
     """Attach the SDK conveniences to the generated classes. Idempotent."""
 
@@ -506,4 +555,5 @@ def install() -> None:
     _install_model_accessors()
     _install_pipeline_accessors()
     _install_download_iteration()
+    _install_observation_context_managers()
     _bolt._xybrid_sugar_installed = True

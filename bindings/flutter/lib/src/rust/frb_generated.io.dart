@@ -10,6 +10,7 @@
 import 'api/context.dart';
 import 'api/device.dart';
 import 'api/envelope.dart';
+import 'api/manual_observation.dart';
 import 'api/model.dart';
 import 'api/observability.dart';
 import 'api/pipeline.dart';
@@ -43,8 +44,16 @@ abstract class XybridRustLibApiImplPlatform
       get rust_arc_decrement_strong_count_FfiEnvelopePtr => wire
           ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelopePtr;
 
+  CrossPlatformFinalizerArg
+      get rust_arc_decrement_strong_count_FfiInferenceObservationPtr => wire
+          ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservationPtr;
+
   CrossPlatformFinalizerArg get rust_arc_decrement_strong_count_FfiModelPtr => wire
       ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelPtr;
+
+  CrossPlatformFinalizerArg
+      get rust_arc_decrement_strong_count_FfiModelLoadObservationPtr => wire
+          ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservationPtr;
 
   CrossPlatformFinalizerArg
       get rust_arc_decrement_strong_count_FfiModelLoaderPtr => wire
@@ -57,6 +66,14 @@ abstract class XybridRustLibApiImplPlatform
   CrossPlatformFinalizerArg
       get rust_arc_decrement_strong_count_FfiStreamSessionPtr => wire
           ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiStreamSessionPtr;
+
+  CrossPlatformFinalizerArg
+      get rust_arc_decrement_strong_count_FfiToolObservationPtr => wire
+          ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservationPtr;
+
+  CrossPlatformFinalizerArg
+      get rust_arc_decrement_strong_count_FfiWorkflowObservationPtr => wire
+          ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservationPtr;
 
   CrossPlatformFinalizerArg
       get rust_arc_decrement_strong_count_XybridDevicePtr => wire
@@ -85,8 +102,18 @@ abstract class XybridRustLibApiImplPlatform
           dynamic raw);
 
   @protected
+  FfiInferenceObservation
+      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+          dynamic raw);
+
+  @protected
   FfiModel
       dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+          dynamic raw);
+
+  @protected
+  FfiModelLoadObservation
+      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
           dynamic raw);
 
   @protected
@@ -102,6 +129,16 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   FfiStreamSession
       dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiStreamSession(
+          dynamic raw);
+
+  @protected
+  FfiToolObservation
+      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+          dynamic raw);
+
+  @protected
+  FfiWorkflowObservation
+      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
           dynamic raw);
 
   @protected
@@ -130,8 +167,18 @@ abstract class XybridRustLibApiImplPlatform
           dynamic raw);
 
   @protected
+  FfiInferenceObservation
+      dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+          dynamic raw);
+
+  @protected
   FfiModel
       dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+          dynamic raw);
+
+  @protected
+  FfiModelLoadObservation
+      dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
           dynamic raw);
 
   @protected
@@ -150,6 +197,16 @@ abstract class XybridRustLibApiImplPlatform
           dynamic raw);
 
   @protected
+  FfiToolObservation
+      dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+          dynamic raw);
+
+  @protected
+  FfiWorkflowObservation
+      dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
+          dynamic raw);
+
+  @protected
   FfiCancellationToken
       dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
           dynamic raw);
@@ -165,8 +222,18 @@ abstract class XybridRustLibApiImplPlatform
           dynamic raw);
 
   @protected
+  FfiInferenceObservation
+      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+          dynamic raw);
+
+  @protected
   FfiModel
       dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+          dynamic raw);
+
+  @protected
+  FfiModelLoadObservation
+      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
           dynamic raw);
 
   @protected
@@ -182,6 +249,16 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   FfiStreamSession
       dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiStreamSession(
+          dynamic raw);
+
+  @protected
+  FfiToolObservation
+      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+          dynamic raw);
+
+  @protected
+  FfiWorkflowObservation
+      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
           dynamic raw);
 
   @protected
@@ -240,10 +317,24 @@ abstract class XybridRustLibApiImplPlatform
   FfiGenerationConfig dco_decode_box_autoadd_ffi_generation_config(dynamic raw);
 
   @protected
+  FfiInferenceRequest dco_decode_box_autoadd_ffi_inference_request(dynamic raw);
+
+  @protected
   FfiMessageRole dco_decode_box_autoadd_ffi_message_role(dynamic raw);
 
   @protected
+  FfiModelLoadInfo dco_decode_box_autoadd_ffi_model_load_info(dynamic raw);
+
+  @protected
   FfiObservabilityConfig dco_decode_box_autoadd_ffi_observability_config(
+      dynamic raw);
+
+  @protected
+  FfiObservationContext dco_decode_box_autoadd_ffi_observation_context(
+      dynamic raw);
+
+  @protected
+  FfiObservationOptions dco_decode_box_autoadd_ffi_observation_options(
       dynamic raw);
 
   @protected
@@ -260,6 +351,15 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiStreamingConfig dco_decode_box_autoadd_ffi_streaming_config(dynamic raw);
+
+  @protected
+  FfiToolCallInfo dco_decode_box_autoadd_ffi_tool_call_info(dynamic raw);
+
+  @protected
+  FfiTtsStreamResult dco_decode_box_autoadd_ffi_tts_stream_result(dynamic raw);
+
+  @protected
+  FfiUsage dco_decode_box_autoadd_ffi_usage(dynamic raw);
 
   @protected
   FfiYuvColorInfo dco_decode_box_autoadd_ffi_yuv_color_info(dynamic raw);
@@ -313,6 +413,9 @@ abstract class XybridRustLibApiImplPlatform
   FfiDownloadStatus dco_decode_ffi_download_status(dynamic raw);
 
   @protected
+  FfiExecutionLocation dco_decode_ffi_execution_location(dynamic raw);
+
+  @protected
   FfiExecutionTarget dco_decode_ffi_execution_target(dynamic raw);
 
   @protected
@@ -325,6 +428,9 @@ abstract class XybridRustLibApiImplPlatform
   FfiInferenceMetrics dco_decode_ffi_inference_metrics(dynamic raw);
 
   @protected
+  FfiInferenceRequest dco_decode_ffi_inference_request(dynamic raw);
+
+  @protected
   FfiLoadEvent dco_decode_ffi_load_event(dynamic raw);
 
   @protected
@@ -334,10 +440,19 @@ abstract class XybridRustLibApiImplPlatform
   FfiMessageRole dco_decode_ffi_message_role(dynamic raw);
 
   @protected
+  FfiModelLoadInfo dco_decode_ffi_model_load_info(dynamic raw);
+
+  @protected
   FfiObservabilityConfig dco_decode_ffi_observability_config(dynamic raw);
 
   @protected
   FfiObservabilityStats dco_decode_ffi_observability_stats(dynamic raw);
+
+  @protected
+  FfiObservationContext dco_decode_ffi_observation_context(dynamic raw);
+
+  @protected
+  FfiObservationOptions dco_decode_ffi_observation_options(dynamic raw);
 
   @protected
   FfiObservationRef dco_decode_ffi_observation_ref(dynamic raw);
@@ -347,6 +462,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiPixelFormat dco_decode_ffi_pixel_format(dynamic raw);
+
+  @protected
+  FfiRedactionRule dco_decode_ffi_redaction_rule(dynamic raw);
 
   @protected
   FfiResourceSnapshot dco_decode_ffi_resource_snapshot(dynamic raw);
@@ -362,6 +480,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiScoreStatistic dco_decode_ffi_score_statistic(dynamic raw);
+
+  @protected
+  FfiSignalStats dco_decode_ffi_signal_stats(dynamic raw);
 
   @protected
   FfiStageLatency dco_decode_ffi_stage_latency(dynamic raw);
@@ -382,13 +503,28 @@ abstract class XybridRustLibApiImplPlatform
   FfiToolCall dco_decode_ffi_tool_call(dynamic raw);
 
   @protected
+  FfiToolCallInfo dco_decode_ffi_tool_call_info(dynamic raw);
+
+  @protected
   FfiToolDefinition dco_decode_ffi_tool_definition(dynamic raw);
 
   @protected
   FfiToolResult dco_decode_ffi_tool_result(dynamic raw);
 
   @protected
+  FfiTranscriptionResult dco_decode_ffi_transcription_result(dynamic raw);
+
+  @protected
+  FfiTtsStatus dco_decode_ffi_tts_status(dynamic raw);
+
+  @protected
   FfiTtsStreamEvent dco_decode_ffi_tts_stream_event(dynamic raw);
+
+  @protected
+  FfiTtsStreamResult dco_decode_ffi_tts_stream_result(dynamic raw);
+
+  @protected
+  FfiUsage dco_decode_ffi_usage(dynamic raw);
 
   @protected
   FfiVadMode dco_decode_ffi_vad_mode(dynamic raw);
@@ -427,6 +563,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   List<FfiImagePlane> dco_decode_list_ffi_image_plane(dynamic raw);
+
+  @protected
+  List<FfiRedactionRule> dco_decode_list_ffi_redaction_rule(dynamic raw);
 
   @protected
   List<FfiStageLatency> dco_decode_list_ffi_stage_latency(dynamic raw);
@@ -478,6 +617,14 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiMessageRole? dco_decode_opt_box_autoadd_ffi_message_role(dynamic raw);
+
+  @protected
+  FfiObservationContext? dco_decode_opt_box_autoadd_ffi_observation_context(
+      dynamic raw);
+
+  @protected
+  FfiObservationOptions? dco_decode_opt_box_autoadd_ffi_observation_options(
+      dynamic raw);
 
   @protected
   FfiObservationRef? dco_decode_opt_box_autoadd_ffi_observation_ref(
@@ -550,8 +697,18 @@ abstract class XybridRustLibApiImplPlatform
           SseDeserializer deserializer);
 
   @protected
+  FfiInferenceObservation
+      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+          SseDeserializer deserializer);
+
+  @protected
   FfiModel
       sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+          SseDeserializer deserializer);
+
+  @protected
+  FfiModelLoadObservation
+      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
           SseDeserializer deserializer);
 
   @protected
@@ -567,6 +724,16 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   FfiStreamSession
       sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiStreamSession(
+          SseDeserializer deserializer);
+
+  @protected
+  FfiToolObservation
+      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+          SseDeserializer deserializer);
+
+  @protected
+  FfiWorkflowObservation
+      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
           SseDeserializer deserializer);
 
   @protected
@@ -595,8 +762,18 @@ abstract class XybridRustLibApiImplPlatform
           SseDeserializer deserializer);
 
   @protected
+  FfiInferenceObservation
+      sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+          SseDeserializer deserializer);
+
+  @protected
   FfiModel
       sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+          SseDeserializer deserializer);
+
+  @protected
+  FfiModelLoadObservation
+      sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
           SseDeserializer deserializer);
 
   @protected
@@ -615,6 +792,16 @@ abstract class XybridRustLibApiImplPlatform
           SseDeserializer deserializer);
 
   @protected
+  FfiToolObservation
+      sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+          SseDeserializer deserializer);
+
+  @protected
+  FfiWorkflowObservation
+      sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
+          SseDeserializer deserializer);
+
+  @protected
   FfiCancellationToken
       sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
           SseDeserializer deserializer);
@@ -630,8 +817,18 @@ abstract class XybridRustLibApiImplPlatform
           SseDeserializer deserializer);
 
   @protected
+  FfiInferenceObservation
+      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+          SseDeserializer deserializer);
+
+  @protected
   FfiModel
       sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+          SseDeserializer deserializer);
+
+  @protected
+  FfiModelLoadObservation
+      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
           SseDeserializer deserializer);
 
   @protected
@@ -647,6 +844,16 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   FfiStreamSession
       sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiStreamSession(
+          SseDeserializer deserializer);
+
+  @protected
+  FfiToolObservation
+      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+          SseDeserializer deserializer);
+
+  @protected
+  FfiWorkflowObservation
+      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
           SseDeserializer deserializer);
 
   @protected
@@ -709,11 +916,27 @@ abstract class XybridRustLibApiImplPlatform
       SseDeserializer deserializer);
 
   @protected
+  FfiInferenceRequest sse_decode_box_autoadd_ffi_inference_request(
+      SseDeserializer deserializer);
+
+  @protected
   FfiMessageRole sse_decode_box_autoadd_ffi_message_role(
       SseDeserializer deserializer);
 
   @protected
+  FfiModelLoadInfo sse_decode_box_autoadd_ffi_model_load_info(
+      SseDeserializer deserializer);
+
+  @protected
   FfiObservabilityConfig sse_decode_box_autoadd_ffi_observability_config(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiObservationContext sse_decode_box_autoadd_ffi_observation_context(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiObservationOptions sse_decode_box_autoadd_ffi_observation_options(
       SseDeserializer deserializer);
 
   @protected
@@ -734,6 +957,17 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   FfiStreamingConfig sse_decode_box_autoadd_ffi_streaming_config(
       SseDeserializer deserializer);
+
+  @protected
+  FfiToolCallInfo sse_decode_box_autoadd_ffi_tool_call_info(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiTtsStreamResult sse_decode_box_autoadd_ffi_tts_stream_result(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiUsage sse_decode_box_autoadd_ffi_usage(SseDeserializer deserializer);
 
   @protected
   FfiYuvColorInfo sse_decode_box_autoadd_ffi_yuv_color_info(
@@ -793,6 +1027,10 @@ abstract class XybridRustLibApiImplPlatform
       SseDeserializer deserializer);
 
   @protected
+  FfiExecutionLocation sse_decode_ffi_execution_location(
+      SseDeserializer deserializer);
+
+  @protected
   FfiExecutionTarget sse_decode_ffi_execution_target(
       SseDeserializer deserializer);
 
@@ -808,6 +1046,10 @@ abstract class XybridRustLibApiImplPlatform
       SseDeserializer deserializer);
 
   @protected
+  FfiInferenceRequest sse_decode_ffi_inference_request(
+      SseDeserializer deserializer);
+
+  @protected
   FfiLoadEvent sse_decode_ffi_load_event(SseDeserializer deserializer);
 
   @protected
@@ -818,11 +1060,22 @@ abstract class XybridRustLibApiImplPlatform
   FfiMessageRole sse_decode_ffi_message_role(SseDeserializer deserializer);
 
   @protected
+  FfiModelLoadInfo sse_decode_ffi_model_load_info(SseDeserializer deserializer);
+
+  @protected
   FfiObservabilityConfig sse_decode_ffi_observability_config(
       SseDeserializer deserializer);
 
   @protected
   FfiObservabilityStats sse_decode_ffi_observability_stats(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiObservationContext sse_decode_ffi_observation_context(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiObservationOptions sse_decode_ffi_observation_options(
       SseDeserializer deserializer);
 
   @protected
@@ -834,6 +1087,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiPixelFormat sse_decode_ffi_pixel_format(SseDeserializer deserializer);
+
+  @protected
+  FfiRedactionRule sse_decode_ffi_redaction_rule(SseDeserializer deserializer);
 
   @protected
   FfiResourceSnapshot sse_decode_ffi_resource_snapshot(
@@ -851,6 +1107,9 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   FfiScoreStatistic sse_decode_ffi_score_statistic(
       SseDeserializer deserializer);
+
+  @protected
+  FfiSignalStats sse_decode_ffi_signal_stats(SseDeserializer deserializer);
 
   @protected
   FfiStageLatency sse_decode_ffi_stage_latency(SseDeserializer deserializer);
@@ -872,6 +1131,9 @@ abstract class XybridRustLibApiImplPlatform
   FfiToolCall sse_decode_ffi_tool_call(SseDeserializer deserializer);
 
   @protected
+  FfiToolCallInfo sse_decode_ffi_tool_call_info(SseDeserializer deserializer);
+
+  @protected
   FfiToolDefinition sse_decode_ffi_tool_definition(
       SseDeserializer deserializer);
 
@@ -879,8 +1141,22 @@ abstract class XybridRustLibApiImplPlatform
   FfiToolResult sse_decode_ffi_tool_result(SseDeserializer deserializer);
 
   @protected
+  FfiTranscriptionResult sse_decode_ffi_transcription_result(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiTtsStatus sse_decode_ffi_tts_status(SseDeserializer deserializer);
+
+  @protected
   FfiTtsStreamEvent sse_decode_ffi_tts_stream_event(
       SseDeserializer deserializer);
+
+  @protected
+  FfiTtsStreamResult sse_decode_ffi_tts_stream_result(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiUsage sse_decode_ffi_usage(SseDeserializer deserializer);
 
   @protected
   FfiVadMode sse_decode_ffi_vad_mode(SseDeserializer deserializer);
@@ -923,6 +1199,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   List<FfiImagePlane> sse_decode_list_ffi_image_plane(
+      SseDeserializer deserializer);
+
+  @protected
+  List<FfiRedactionRule> sse_decode_list_ffi_redaction_rule(
       SseDeserializer deserializer);
 
   @protected
@@ -979,6 +1259,14 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiMessageRole? sse_decode_opt_box_autoadd_ffi_message_role(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiObservationContext? sse_decode_opt_box_autoadd_ffi_observation_context(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiObservationOptions? sse_decode_opt_box_autoadd_ffi_observation_options(
       SseDeserializer deserializer);
 
   @protected
@@ -1059,8 +1347,18 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void
+      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+          FfiInferenceObservation self, SseSerializer serializer);
+
+  @protected
+  void
       sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
           FfiModel self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
+          FfiModelLoadObservation self, SseSerializer serializer);
 
   @protected
   void
@@ -1076,6 +1374,16 @@ abstract class XybridRustLibApiImplPlatform
   void
       sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiStreamSession(
           FfiStreamSession self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+          FfiToolObservation self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
+          FfiWorkflowObservation self, SseSerializer serializer);
 
   @protected
   void
@@ -1104,8 +1412,18 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void
+      sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+          FfiInferenceObservation self, SseSerializer serializer);
+
+  @protected
+  void
       sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
           FfiModel self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
+          FfiModelLoadObservation self, SseSerializer serializer);
 
   @protected
   void
@@ -1124,6 +1442,16 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void
+      sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+          FfiToolObservation self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
+          FfiWorkflowObservation self, SseSerializer serializer);
+
+  @protected
+  void
       sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
           FfiCancellationToken self, SseSerializer serializer);
 
@@ -1139,8 +1467,18 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void
+      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+          FfiInferenceObservation self, SseSerializer serializer);
+
+  @protected
+  void
       sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
           FfiModel self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
+          FfiModelLoadObservation self, SseSerializer serializer);
 
   @protected
   void
@@ -1156,6 +1494,16 @@ abstract class XybridRustLibApiImplPlatform
   void
       sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiStreamSession(
           FfiStreamSession self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+          FfiToolObservation self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
+          FfiWorkflowObservation self, SseSerializer serializer);
 
   @protected
   void
@@ -1216,12 +1564,28 @@ abstract class XybridRustLibApiImplPlatform
       FfiGenerationConfig self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_ffi_inference_request(
+      FfiInferenceRequest self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_ffi_message_role(
       FfiMessageRole self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_ffi_model_load_info(
+      FfiModelLoadInfo self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_ffi_observability_config(
       FfiObservabilityConfig self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ffi_observation_context(
+      FfiObservationContext self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ffi_observation_options(
+      FfiObservationOptions self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_ffi_observation_ref(
@@ -1242,6 +1606,18 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_box_autoadd_ffi_streaming_config(
       FfiStreamingConfig self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ffi_tool_call_info(
+      FfiToolCallInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ffi_tts_stream_result(
+      FfiTtsStreamResult self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ffi_usage(
+      FfiUsage self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_ffi_yuv_color_info(
@@ -1306,6 +1682,10 @@ abstract class XybridRustLibApiImplPlatform
       FfiDownloadStatus self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_execution_location(
+      FfiExecutionLocation self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_execution_target(
       FfiExecutionTarget self, SseSerializer serializer);
 
@@ -1321,6 +1701,10 @@ abstract class XybridRustLibApiImplPlatform
       FfiInferenceMetrics self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_inference_request(
+      FfiInferenceRequest self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_load_event(FfiLoadEvent self, SseSerializer serializer);
 
   @protected
@@ -1332,12 +1716,24 @@ abstract class XybridRustLibApiImplPlatform
       FfiMessageRole self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_model_load_info(
+      FfiModelLoadInfo self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_observability_config(
       FfiObservabilityConfig self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_observability_stats(
       FfiObservabilityStats self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_observation_context(
+      FfiObservationContext self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_observation_options(
+      FfiObservationOptions self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_observation_ref(
@@ -1350,6 +1746,10 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_ffi_pixel_format(
       FfiPixelFormat self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_redaction_rule(
+      FfiRedactionRule self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_resource_snapshot(
@@ -1367,6 +1767,10 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_ffi_score_statistic(
       FfiScoreStatistic self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_signal_stats(
+      FfiSignalStats self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_stage_latency(
@@ -1392,6 +1796,10 @@ abstract class XybridRustLibApiImplPlatform
   void sse_encode_ffi_tool_call(FfiToolCall self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_tool_call_info(
+      FfiToolCallInfo self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_tool_definition(
       FfiToolDefinition self, SseSerializer serializer);
 
@@ -1399,8 +1807,22 @@ abstract class XybridRustLibApiImplPlatform
   void sse_encode_ffi_tool_result(FfiToolResult self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_transcription_result(
+      FfiTranscriptionResult self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_tts_status(FfiTtsStatus self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_tts_stream_event(
       FfiTtsStreamEvent self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_tts_stream_result(
+      FfiTtsStreamResult self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_usage(FfiUsage self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_vad_mode(FfiVadMode self, SseSerializer serializer);
@@ -1446,6 +1868,10 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_list_ffi_image_plane(
       List<FfiImagePlane> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_redaction_rule(
+      List<FfiRedactionRule> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_ffi_stage_latency(
@@ -1506,6 +1932,14 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_opt_box_autoadd_ffi_message_role(
       FfiMessageRole? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_ffi_observation_context(
+      FfiObservationContext? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_ffi_observation_options(
+      FfiObservationOptions? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_ffi_observation_ref(
@@ -1678,6 +2112,38 @@ class XybridRustLibWire implements BaseWire {
           .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
   void
+      rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+    ffi.Pointer<ffi.Void> ptr,
+  ) {
+    return _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+      ptr,
+    );
+  }
+
+  late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservationPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+          'frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation');
+  late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation =
+      _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservationPtr
+          .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
+
+  void
+      rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+    ffi.Pointer<ffi.Void> ptr,
+  ) {
+    return _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+      ptr,
+    );
+  }
+
+  late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservationPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+          'frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation');
+  late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation =
+      _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservationPtr
+          .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
+
+  void
       rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
     ffi.Pointer<ffi.Void> ptr,
   ) {
@@ -1707,6 +2173,38 @@ class XybridRustLibWire implements BaseWire {
           'frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel');
   late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel =
       _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelPtr
+          .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
+
+  void
+      rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
+    ffi.Pointer<ffi.Void> ptr,
+  ) {
+    return _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
+      ptr,
+    );
+  }
+
+  late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservationPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+          'frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation');
+  late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation =
+      _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservationPtr
+          .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
+
+  void
+      rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
+    ffi.Pointer<ffi.Void> ptr,
+  ) {
+    return _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
+      ptr,
+    );
+  }
+
+  late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservationPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+          'frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation');
+  late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation =
+      _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservationPtr
           .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
   void
@@ -1803,6 +2301,70 @@ class XybridRustLibWire implements BaseWire {
           'frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiStreamSession');
   late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiStreamSession =
       _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiStreamSessionPtr
+          .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
+
+  void
+      rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+    ffi.Pointer<ffi.Void> ptr,
+  ) {
+    return _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+      ptr,
+    );
+  }
+
+  late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservationPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+          'frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation');
+  late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation =
+      _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservationPtr
+          .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
+
+  void
+      rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+    ffi.Pointer<ffi.Void> ptr,
+  ) {
+    return _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+      ptr,
+    );
+  }
+
+  late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservationPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+          'frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation');
+  late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation =
+      _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservationPtr
+          .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
+
+  void
+      rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
+    ffi.Pointer<ffi.Void> ptr,
+  ) {
+    return _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
+      ptr,
+    );
+  }
+
+  late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservationPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+          'frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation');
+  late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation =
+      _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservationPtr
+          .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
+
+  void
+      rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
+    ffi.Pointer<ffi.Void> ptr,
+  ) {
+    return _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
+      ptr,
+    );
+  }
+
+  late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservationPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+          'frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation');
+  late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation =
+      _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservationPtr
           .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
   void

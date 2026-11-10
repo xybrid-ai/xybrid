@@ -11,6 +11,7 @@ import 'context.dart';
 import 'envelope.dart';
 import 'generation_config.dart';
 import 'llm.dart';
+import 'observability.dart';
 import 'result.dart';
 import 'rust/api/model.dart';
 import 'run_options.dart';
@@ -232,6 +233,10 @@ class XybridModelLoader {
 
   XybridModelLoader._(this._inner);
 
+  /// Return a loader with explicit parent, suppression and correlation controls.
+  XybridModelLoader withObservation(ObservationOptions options) =>
+      XybridModelLoader._(_inner.withObservation(options: options.toFfi()));
+
   /// Create a loader for a model from the Xybrid registry.
   ///
   /// The [modelId] should match a model ID in the registry (e.g., "kokoro-82m").
@@ -365,6 +370,9 @@ class XybridModel {
   final FfiModel inner;
 
   XybridModel._(this.inner);
+
+  /// Immutable reference for the load that created this model.
+  ObservationRef? get loadObservationRef => inner.loadObservationRef();
 
   /// Whether runs are currently answered by the cloud because the local
   /// weights are not ready yet. `false` for ordinary local models.
@@ -581,6 +589,7 @@ class XybridModel {
     XybridEnvelope envelope, {
     CancellationToken? cancellationToken,
     RunOptions? options,
+    void Function(FfiTtsStreamResult result)? onComplete,
   }) async* {
     final stream = inner.runTtsStream(
       envelope: envelope.inner,
@@ -592,7 +601,11 @@ class XybridModel {
       switch (event) {
         case FfiTtsStreamEvent_AudioChunk(:final pcm, :final sampleRate):
           yield TtsAudioChunk(pcm: pcm, sampleRate: sampleRate);
-        case FfiTtsStreamEvent_Complete():
+        case FfiTtsStreamEvent_Complete(:final field0):
+          onComplete?.call(field0);
+          if (field0.status == FfiTtsStatus.limited) {
+            throw StateError('TTS output limited; partial audio delivered');
+          }
           return;
         case FfiTtsStreamEvent_Error(:final field0):
           throw StateError('TTS streaming failed: $field0');

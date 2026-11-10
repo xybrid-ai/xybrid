@@ -1,21 +1,44 @@
 # Portable instrumentation and the default OTLP/HTTP transport used by the SDK.
-# Cargo dependencies (including the optional transport deps) come from the hub.
+# Cargo dependencies (including the optional transport deps: opentelemetry-proto,
+# prost, reqwest with rustls, tokio, tokio-util, httpdate) come from the hub.
+# None of them is a proc macro, so every dep goes into `deps`.
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:defs.bzl", "all_crate_deps")
 load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
-# This crate has the same dependencies on every platform. The hub includes
-# proc macros in the normal list; rules_rust needs async-trait separately.
-_DEPS = all_crate_deps(normal = True)
-_PROC_MACROS = [dep for dep in _DEPS if dep.startswith("@crates//:async-trait-")]
-
+# This crate has the same dependencies on every platform.
 rust_library(
     name = "xybrid-observability",
     version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
     crate_features = ["default", "otlp"],
-    deps = [dep for dep in _DEPS if dep not in _PROC_MACROS],
-    proc_macro_deps = _PROC_MACROS,
+    deps = all_crate_deps(normal = True),
     visibility = ["//visibility:public"],
+)
+
+# The per-destination response hook regressions (tests/response_hook.rs):
+# loopback httpmock endpoints plus the scriptable server in tests/support.
+# The file opens with `#![cfg(feature = "otlp")]`, so the test crate needs the
+# feature too, or it compiles to an empty binary that still passes. The
+# crate's older tests/ binaries are still run by cargo only.
+rust_test(
+    name = "response_hook",
+    version = XYBRID_VERSION,
+    crate_root = "tests/response_hook.rs",
+    srcs = [
+        "tests/response_hook.rs",
+        "tests/support/mod.rs",
+    ],
+    edition = "2021",
+    crate_features = ["otlp"],
+    deps = [
+        ":xybrid-observability",
+        "@crates//:httpmock",
+        "@crates//:opentelemetry-proto",
+        "@crates//:opentelemetry_sdk",
+        "@crates//:prost",
+        "@crates//:serde_json",
+    ],
 )

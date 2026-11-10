@@ -1,6 +1,6 @@
+// The packaged OTLP pipeline: providers, presets, all three signals, saturation on hot paths,
+// unsampled spans, and export-request tracing suppression.
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import {
   type ContextManager,
   context,
@@ -8,69 +8,44 @@ import {
   DiagLogLevel,
   diag,
   ROOT_CONTEXT,
+  TraceFlags,
   type Tracer,
   trace,
 } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { isTracingSuppressed } from "@opentelemetry/core";
-import { OtlpHttpSender } from "../src/otlp/http.ts";
+import {
+  SimpleSpanProcessor,
+  TraceIdRatioBasedSampler,
+  TracerProvider,
+} from "@opentelemetry/sdk-trace";
+import {
+  type JsonValue,
+  type LoggerProviderLike,
+  type ObservationRef,
+  Observer,
+} from "../src/index.ts";
 import {
   createOtlpPipeline,
   type OtlpPipeline,
-  otlpConfigFromEnv,
+  OtlpTraceExporter,
+  type SignalStats,
   xybridTracesPreset,
 } from "../src/otlp/index.ts";
-import { createHarness } from "./support/harness.ts";
-
-type Received = { path: string; headers: IncomingHttpHeaders; body: Buffer };
-
-type TestServer = {
-  url: string;
-  received: Received[];
-  close(): Promise<void>;
-};
-
-/** A local OTLP endpoint. `respond` decides the status; `null` never answers. */
-const startServer = async (
-  respond: (path: string) => number | null = () => 200,
-): Promise<TestServer> => {
-  const received: Received[] = [];
-  const open = new Set<import("node:http").ServerResponse>();
-  const server: Server = createServer((request, response) => {
-    const chunks: Buffer[] = [];
-    request.on("data", (chunk: Buffer) => chunks.push(chunk));
-    request.on("end", () => {
-      const path = request.url ?? "";
-      received.push({ path, headers: request.headers, body: Buffer.concat(chunks) });
-      const status = respond(path);
-      if (status === null) {
-        open.add(response);
-        return;
-      }
-      response.writeHead(status, { "Content-Type": "application/x-protobuf" }).end();
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-  return {
-    url: `http://127.0.0.1:${port}`,
-    received,
-    close: async () => {
-      for (const response of open) response.destroy();
-      server.closeAllConnections();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    },
-  };
-};
-
-const closedPort = async (): Promise<string> => {
-  const server = await startServer();
-  const url = server.url;
-  await server.close();
-  return url;
-};
+import { decodeRequest } from "./support/otlp-decode.ts";
+import { closedUrl, startServer, type TestServer } from "./support/otlp-server.ts";
 
 const request = { operation: "chat", provider: "llama.cpp", model: "tiny" } as const;
+
+const stats = (partial: Partial<SignalStats>): SignalStats => ({
+  accepted: 0,
+  exported: 0,
+  dropped: 0,
+  failed: 0,
+  pending: 0,
+  bufferedBytes: 0,
+  ...partial,
+});
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -96,70 +71,39 @@ describe("createOtlpPipeline", () => {
     );
     const observer = pipeline.observer();
     for (let index = 0; index < 5; index += 1) observer.startInference(request).end();
-    expect(pipeline.stats()).toEqual({
-      spansQueued: 2,
-      spansExported: 0,
-      spansDropped: 3,
-      exportFailures: 0,
-    });
+    const held = pipeline.stats().traces;
+    expect(held.bufferedBytes).toBeGreaterThan(0);
+    expect(held).toEqual(
+      stats({ accepted: 5, dropped: 3, pending: 2, bufferedBytes: held.bufferedBytes }),
+    );
     expect(await pipeline.forceFlush(2000)).toBe(true);
-    expect(pipeline.stats()).toEqual({
-      spansQueued: 2,
-      spansExported: 2,
-      spansDropped: 3,
-      exportFailures: 0,
-    });
+    expect(pipeline.stats().traces).toEqual(stats({ accepted: 5, exported: 2, dropped: 3 }));
   });
 
-  test("an unavailable endpoint never throws on hot paths and is counted", async () => {
+  test("an unavailable endpoint never throws on hot paths and is counted failed", async () => {
     const pipeline = track(
       createOtlpPipeline({
-        traces: { endpoint: `${await closedPort()}/v1/traces`, timeoutMs: 500 },
+        traces: { endpoint: `${await closedUrl()}/v1/traces`, timeoutMs: 500 },
+        logs: { endpoint: `${await closedUrl()}/v1/logs`, timeoutMs: 500 },
+        metrics: { endpoint: `${await closedUrl()}/v1/metrics`, timeoutMs: 500 },
         retry: { maxRetries: 1, initialDelayMs: 10 },
       }),
     );
-    const observer = pipeline.observer();
+    const observer = pipeline.observer({ capture: "event_only" });
     const started = performance.now();
     for (let index = 0; index < 3; index += 1) {
       const op = observer.startInference(request);
       op.recordChunk();
+      op.recordInputMessages([{ role: "user", parts: [{ type: "text", content: "hi" }] }]);
       op.end();
     }
-    expect(performance.now() - started).toBeLessThan(50);
-    expect(await pipeline.forceFlush(3000)).toBe(true);
-    expect(pipeline.stats()).toEqual({
-      spansQueued: 3,
-      spansExported: 0,
-      spansDropped: 3,
-      exportFailures: 1,
-    });
-  });
-
-  test("flush and shutdown are bounded and idempotent", async () => {
-    const server = await startServer(() => null);
-    const pipeline = track(
-      createOtlpPipeline({
-        traces: { endpoint: `${server.url}/v1/traces` },
-        metrics: { endpoint: `${server.url}/v1/metrics` },
-        logs: { endpoint: `${server.url}/v1/logs` },
-      }),
-      server,
-    );
-    pipeline.observer().startInference(request).end();
-    let started = performance.now();
-    expect(await pipeline.forceFlush(150)).toBe(false);
-    expect(performance.now() - started).toBeLessThan(1000);
-    started = performance.now();
-    const first = pipeline.shutdown(150);
-    expect(await first).toBe(false);
-    expect(performance.now() - started).toBeLessThan(1000);
-    started = performance.now();
-    expect(pipeline.shutdown(150)).toBe(first);
-    expect(await pipeline.forceFlush(150)).toBe(true);
-    expect(performance.now() - started).toBeLessThan(50);
-    // Spans ended after shutdown are dropped, not queued.
-    pipeline.observer().startInference(request).end();
-    expect(pipeline.stats().spansDropped).toBe(1);
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(await pipeline.forceFlush(3000)).toBe(false);
+    const { traces, logs, metrics } = pipeline.stats();
+    expect(traces).toEqual(stats({ accepted: 3, failed: 3 }));
+    expect(logs).toEqual(stats({ accepted: 3, failed: 3 }));
+    expect(metrics.failed).toBeGreaterThan(0);
+    expect(metrics.accepted).toBe(metrics.failed);
   });
 
   test("never registers global providers", () => {
@@ -186,15 +130,74 @@ describe("createOtlpPipeline", () => {
       expect(observer.recordEvaluation(target, { name: "relevance", scoreValue: 1 })).toBe(false);
     }
     expect(await pipeline.forceFlush(2000)).toBe(true);
-    expect(server.received.map((received) => received.path)).toEqual(["/v1/traces"]);
-    expect(server.received[0]?.headers["authorization"]).toBe("Bearer xk_test");
-    expect(server.received[0]?.headers["content-type"]).toBe("application/x-protobuf");
-    expect(pipeline.stats().spansExported).toBe(1);
+    expect(server.requests.map((received) => received.path)).toEqual(["/v1/traces"]);
+    expect(server.requests[0]?.headers["authorization"]).toBe("Bearer xk_test");
+    expect(server.requests[0]?.headers["content-type"]).toBe("application/x-protobuf");
+    expect(pipeline.stats()).toEqual({
+      traces: stats({ accepted: 1, exported: 1 }),
+      logs: stats({}),
+      metrics: stats({}),
+    });
+  });
+
+  test("a traces-only pipeline has no event destination: content is processed for the span only", async () => {
+    const server = await startServer();
+    const pipeline = track(
+      createOtlpPipeline({
+        traces: { endpoint: `${server.url}/v1/traces`, protocol: "http/json" },
+        batch: { scheduledDelayMs: 60_000 },
+      }),
+      server,
+    );
+    expect(pipeline.loggerProvider).toBeUndefined();
+    const calls: string[] = [];
+    const redact = (kind: string, value: JsonValue): JsonValue => {
+      calls.push(kind);
+      return value;
+    };
+    const messages = [{ role: "user", parts: [{ type: "text", content: "hi" }] }];
+    // The span copy costs 95 bytes; an event copy (243 more) would not fit 300.
+    const both = pipeline
+      .observer({ capture: "span_and_event", maxRetainedOperationBytes: 300, redact })
+      .startInference(request);
+    both.recordInputMessages(messages);
+    both.end();
+    expect(calls).toEqual(["gen_ai.input.messages"]);
+    // event_only: governed content skips the span, and nothing receives the event. The message is
+    // over the 16 KiB attribute bound, so processing it for an event would mark the span truncated.
+    const large = [{ role: "user", parts: [{ type: "text", content: "x".repeat(20_000) }] }];
+    const eventOnly = pipeline.observer({ capture: "event_only", redact }).startInference(request);
+    eventOnly.recordInputMessages(large);
+    eventOnly.end();
+    expect(calls).toEqual(["gen_ai.input.messages"]);
+
+    expect(await pipeline.forceFlush(3000)).toBe(true);
+    const spans = server
+      .received("/v1/traces")
+      .flatMap((received) =>
+        JSON.parse(received.body.toString()).resourceSpans.flatMap(
+          (resource: { scopeSpans: { spans: unknown[] }[] }) =>
+            resource.scopeSpans.flatMap((scope) => scope.spans),
+        ),
+      ) as { spanId: string; attributes: { key: string; value: { stringValue?: string } }[] }[];
+    const attributes = (ref: ObservationRef | undefined) => {
+      const span = spans.find((candidate) => candidate.spanId === ref?.span_id);
+      if (span === undefined) throw new Error("expected the operation's span");
+      return Object.fromEntries(span.attributes.map(({ key, value }) => [key, value]));
+    };
+    const recorded = attributes(both.observationRef());
+    expect(JSON.parse(String(recorded["gen_ai.input.messages"]?.stringValue))).toEqual(messages);
+    expect(recorded["xybrid.genai.content.truncated_attributes"]).toBeUndefined();
+    const quiet = attributes(eventOnly.observationRef());
+    expect(quiet["gen_ai.input.messages"]).toBeUndefined();
+    expect(quiet["xybrid.genai.content.truncated_attributes"]).toBeUndefined();
   });
 
   test("the Xybrid preset defaults to the ingest endpoint and rejects empty keys", () => {
-    expect(xybridTracesPreset("k").traces?.endpoint).toBe("https://ingest.xybrid.dev/v1/traces");
-    expect(Object.keys(xybridTracesPreset("k"))).toEqual(["traces"]);
+    const preset = xybridTracesPreset("k");
+    expect(preset.traces?.endpoint).toBe("https://ingest.xybrid.dev/v1/traces");
+    expect(preset.traces?.headerPolicy).toBe("isolated");
+    expect(Object.keys(preset)).toEqual(["traces"]);
     expect(() => xybridTracesPreset(" ")).toThrow(TypeError);
   });
 
@@ -206,6 +209,7 @@ describe("createOtlpPipeline", () => {
         metrics: { endpoint: `${server.url}/v1/metrics`, protocol: "http/json" },
         logs: { endpoint: `${server.url}/v1/logs`, protocol: "http/json" },
         resource: { serviceName: "fixture-app", serviceVersion: "1.2.3" },
+        environment: null,
       }),
       server,
     );
@@ -214,54 +218,27 @@ describe("createOtlpPipeline", () => {
     op.recordInputMessages([{ role: "user", parts: [{ type: "text", content: "hello" }] }]);
     op.end();
     expect(await pipeline.forceFlush(3000)).toBe(true);
-    const paths = server.received.map((received) => received.path).sort();
+    const paths = server.requests.map((received) => received.path).sort();
     expect(paths).toEqual(["/v1/logs", "/v1/metrics", "/v1/traces"]);
-    const traces = JSON.parse(
-      server.received.find((received) => received.path === "/v1/traces")?.body.toString() ?? "{}",
-    );
+    const traces = JSON.parse(server.received("/v1/traces")[0]?.body.toString() ?? "{}");
     const span = traces.resourceSpans[0].scopeSpans[0].spans[0];
     expect(span.name).toBe("chat tiny");
     const service = traces.resourceSpans[0].resource.attributes.find(
       (attribute: { key: string }) => attribute.key === "service.name",
     );
     expect(service.value.stringValue).toBe("fixture-app");
-    const logs = server.received.find((received) => received.path === "/v1/logs")?.body.toString();
-    expect(logs).toContain("gen_ai.client.inference.operation.details");
-  });
-
-  test("oversized batches are split and an oversized span is dropped", async () => {
-    const server = await startServer();
-    const pipeline = track(
-      createOtlpPipeline({
-        traces: { endpoint: `${server.url}/v1/traces` },
-        maxRequestBodyBytes: 2048,
-        batch: { scheduledDelayMs: 60_000 },
-      }),
-      server,
+    expect(server.received("/v1/logs")[0]?.body.toString()).toContain(
+      "gen_ai.client.inference.operation.details",
     );
-    const observer = pipeline.observer();
-    for (let index = 0; index < 8; index += 1) {
-      const op = observer.startInference(request);
-      op.setAttribute("padding", "p".repeat(400));
-      op.end();
-    }
-    const huge = observer.startInference(request);
-    huge.setAttribute("padding", "h".repeat(4096));
-    huge.end();
-    expect(await pipeline.forceFlush(3000)).toBe(true);
-    expect(server.received.length).toBeGreaterThan(1);
-    for (const received of server.received)
-      expect(received.body.byteLength).toBeLessThanOrEqual(2048);
-    expect(pipeline.stats()).toEqual({
-      spansQueued: 9,
-      spansExported: 8,
-      spansDropped: 1,
-      exportFailures: 0,
-    });
+    const { traces: spans, logs, metrics } = pipeline.stats();
+    expect(spans).toEqual(stats({ accepted: 1, exported: 1 }));
+    expect(logs).toEqual(stats({ accepted: 1, exported: 1 }));
+    expect(metrics.exported).toBeGreaterThan(0);
+    expect(metrics).toEqual(stats({ accepted: metrics.exported, exported: metrics.exported }));
   });
 
   test("retries are bounded and diagnostics never carry headers or payloads", async () => {
-    const server = await startServer(() => 503);
+    const server = await startServer(() => ({ status: 503 }));
     const messages: string[] = [];
     const capture = (message: string): void => {
       messages.push(message);
@@ -285,9 +262,9 @@ describe("createOtlpPipeline", () => {
       const op = pipeline.observer().startInference(request);
       op.recordInputMessages([{ role: "user", parts: [{ type: "text", content: "PAYLOAD" }] }]);
       op.end();
-      expect(await pipeline.forceFlush(3000)).toBe(true);
-      expect(server.received).toHaveLength(3);
-      expect(pipeline.stats().exportFailures).toBe(1);
+      expect(await pipeline.forceFlush(3000)).toBe(false);
+      expect(server.requests).toHaveLength(3);
+      expect(pipeline.stats().traces).toEqual(stats({ accepted: 1, failed: 1 }));
       const joined = messages.join("\n");
       expect(joined).toContain("HTTP 503");
       expect(joined).not.toContain("s3cr3t");
@@ -296,6 +273,226 @@ describe("createOtlpPipeline", () => {
       diag.disable();
     }
   });
+});
+
+// biome-ignore lint/suspicious/noExplicitAny: decoded wire data is inspected dynamically.
+type Json = any;
+
+const plain = (attributes: Json[] | undefined): Record<string, unknown> =>
+  Object.fromEntries(
+    (attributes ?? []).map((entry: Json) => [entry.key, Object.values(entry.value ?? {})[0]]),
+  );
+
+/** A histogram point (`count` and `sum`) or a sum point (its value as `sum`, no `count`). */
+type Point = {
+  readonly metric: string;
+  readonly attributes: Record<string, unknown>;
+  readonly count: number | undefined;
+  readonly sum: number;
+};
+
+/** Every data point the receiver got, decoded from either encoding. */
+const receivedPoints = (server: TestServer): Point[] =>
+  server.received("/v1/metrics").flatMap((received) =>
+    decodeRequest(
+      "metrics",
+      received.headers["content-type"],
+      received.body,
+    ).resourceMetrics.flatMap((resource: Json) =>
+      resource.scopeMetrics.flatMap((scope: Json) =>
+        scope.metrics.flatMap((metric: Json) => [
+          ...(metric.histogram?.dataPoints ?? []).map((point: Json) => ({
+            metric: metric.name,
+            attributes: plain(point.attributes),
+            count: Number(point.count),
+            sum: Number(point.sum),
+          })),
+          ...(metric.sum?.dataPoints ?? []).map((point: Json) => ({
+            metric: metric.name,
+            attributes: plain(point.attributes),
+            count: undefined,
+            sum: Number(point.asInt ?? point.asDouble),
+          })),
+        ]),
+      ),
+    ),
+  );
+
+/** `[error.type, count, sum]` of each point of `metric`, sorted by error type. */
+const outcomes = (points: readonly Point[], metric: string): unknown[][] =>
+  points
+    .filter((point) => point.metric === metric)
+    .map((point) => [point.attributes["error.type"] ?? "", point.count, point.sum])
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+
+/** `[error.type, count]` of each histogram point of `metric` (durations: the sum is timing). */
+const counts = (points: readonly Point[], metric: string): unknown[][] =>
+  outcomes(points, metric).map(([type, count]) => [type, count]);
+
+type Received = { eventName: string; traceId: string; spanId: string; flags: number };
+
+const receivedLogs = (server: TestServer): Received[] =>
+  server.received("/v1/logs").flatMap((received) =>
+    decodeRequest("logs", received.headers["content-type"], received.body).resourceLogs.flatMap(
+      (resource: Json) =>
+        resource.scopeLogs.flatMap((scope: Json) =>
+          scope.logRecords.map((record: Json) => ({
+            eventName: record.eventName,
+            traceId: record.traceId,
+            spanId: record.spanId,
+            flags: Number(record.flags ?? 0),
+          })),
+        ),
+    ),
+  );
+
+const linked = (target: ObservationRef | undefined): ObservationRef => {
+  if (target === undefined) throw new Error("expected a reference to an unsampled span");
+  return target;
+};
+
+describe("unsampled spans still export metrics and linked evaluations", () => {
+  for (const protocol of ["http/json", "http/protobuf"] as const) {
+    test(`${protocol}: a dropping sampler sends no span, exact metrics and evaluations on its references`, async () => {
+      const server = await startServer();
+      const pipeline = track(
+        createOtlpPipeline({
+          metrics: { endpoint: `${server.url}/v1/metrics`, protocol },
+          logs: { endpoint: `${server.url}/v1/logs`, protocol },
+          batch: { scheduledDelayMs: 60_000 },
+          metricExportIntervalMs: 60_000,
+        }),
+        server,
+      );
+      // The application owns the tracer and its sampler; a sampled span would reach the
+      // same receiver through the package's trace exporter.
+      const exporter = new OtlpTraceExporter({
+        traces: { endpoint: `${server.url}/v1/traces`, protocol },
+      });
+      const tracerProvider = new TracerProvider({
+        sampler: new TraceIdRatioBasedSampler(0),
+        spanProcessors: [new SimpleSpanProcessor({ exporter })],
+      });
+      cleanups.push(() => tracerProvider.shutdown());
+      const observer = new Observer({
+        tracerProvider,
+        meterProvider: pipeline.meterProvider ?? null,
+        loggerProvider: (pipeline.loggerProvider as LoggerProviderLike | undefined) ?? null,
+      });
+      const ops = Array.from({ length: 5 }, () => observer.startInference(request));
+      for (const op of ops.slice(0, 3)) {
+        op.recordUsage({ inputTokens: 2, outputTokens: 4 });
+        op.end();
+      }
+      ops[3]?.endWithError({ errorType: "network" });
+      ops[4]?.cancel();
+      const refs = ops.map((op) => linked(op.observationRef()));
+      for (const op of ops) expect(op.context()?.traceFlags).toBe(TraceFlags.NONE);
+      expect(new Set(refs.map((ref) => ref.span_id)).size).toBe(5);
+      const first = linked(refs[0]);
+      const failed = linked(refs[3]);
+      expect(observer.recordEvaluation(first, { name: "relevance", scoreValue: 1 })).toBe(true);
+      expect(observer.recordFeedback(failed, { score: 0 })).toBe(true);
+
+      expect(await pipeline.forceFlush(10_000)).toBe(true);
+      await tracerProvider.forceFlush();
+      expect(server.received("/v1/traces")).toHaveLength(0);
+      expect(exporter.stats()).toEqual(stats({}));
+
+      const points = receivedPoints(server);
+      expect(counts(points, "gen_ai.client.inference.duration")).toEqual([
+        ["", 3],
+        ["cancelled", 1],
+        ["network", 1],
+      ]);
+      expect(outcomes(points, "gen_ai.client.inference.operation.input_tokens")).toEqual([
+        ["", 3, 6],
+      ]);
+      expect(outcomes(points, "gen_ai.client.inference.operation.output_tokens")).toEqual([
+        ["", 3, 12],
+      ]);
+      expect(outcomes(points, "gen_ai.client.inference.usage.input_tokens")).toEqual([
+        ["", undefined, 6],
+      ]);
+
+      const logs = receivedLogs(server);
+      const evaluations = logs.filter((log) => log.eventName === "gen_ai.evaluation.result");
+      expect(evaluations.map((log) => [log.traceId, log.spanId, log.flags])).toEqual([
+        [first.trace_id, first.span_id, 0],
+        [failed.trace_id, failed.span_id, 0],
+      ]);
+      expect(
+        logs
+          .filter((log) => log.eventName === "gen_ai.client.operation.exception")
+          .map((log) => [log.spanId, log.flags]),
+      ).toEqual([[failed.span_id, 0]]);
+      const { logs: logStats, metrics } = pipeline.stats();
+      expect(logStats).toEqual(stats({ accepted: 3, exported: 3 }));
+      expect(metrics).toEqual(stats({ accepted: points.length, exported: points.length }));
+    }, 30_000);
+
+    test(`${protocol}: an unsampled parent exports no child span, exact metrics and evaluations on its references`, async () => {
+      const server = await startServer();
+      const pipeline = track(
+        createOtlpPipeline({
+          traces: { endpoint: `${server.url}/v1/traces`, protocol },
+          metrics: { endpoint: `${server.url}/v1/metrics`, protocol },
+          logs: { endpoint: `${server.url}/v1/logs`, protocol },
+          batch: { scheduledDelayMs: 60_000 },
+          metricExportIntervalMs: 60_000,
+        }),
+        server,
+      );
+      const observer = pipeline.observer();
+      const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+      const inference = observer.startInference(request, {
+        parent: `00-${traceId}-00f067aa0ba902b7-00`,
+      });
+      inference.recordUsage({ inputTokens: 2, outputTokens: 4 });
+      inference
+        .startAttempt({ index: 0, reason: "initial", provider: "llama.cpp", location: "local" })
+        .end();
+      const tool = observer.startTool({ name: "search" }, { parent: inference.context() });
+      tool.end();
+      inference.end();
+      const inferenceRef = linked(inference.observationRef());
+      const toolRef = linked(tool.observationRef());
+      expect(inferenceRef.trace_id).toBe(traceId);
+      expect(toolRef.trace_id).toBe(traceId);
+      expect(inference.context()?.traceFlags).toBe(TraceFlags.NONE);
+      expect(tool.context()?.traceFlags).toBe(TraceFlags.NONE);
+      expect(observer.recordEvaluation(inferenceRef, { name: "relevance", scoreValue: 1 })).toBe(
+        true,
+      );
+      expect(observer.recordFeedback(toolRef, { score: 1 })).toBe(true);
+
+      expect(await pipeline.forceFlush(10_000)).toBe(true);
+      expect(server.received("/v1/traces")).toHaveLength(0);
+      const points = receivedPoints(server);
+      expect(counts(points, "gen_ai.client.inference.duration")).toEqual([["", 1]]);
+      expect(counts(points, "gen_ai.execute_tool.duration")).toEqual([["", 1]]);
+      expect(outcomes(points, "xybrid.genai.client.inference.attempts")).toEqual([
+        ["", undefined, 1],
+      ]);
+      expect(outcomes(points, "gen_ai.client.inference.operation.input_tokens")).toEqual([
+        ["", 1, 2],
+      ]);
+      expect(outcomes(points, "gen_ai.client.inference.operation.output_tokens")).toEqual([
+        ["", 1, 4],
+      ]);
+      expect(
+        receivedLogs(server).map((log) => [log.eventName, log.traceId, log.spanId, log.flags]),
+      ).toEqual([
+        ["gen_ai.evaluation.result", traceId, inferenceRef.span_id, 0],
+        ["gen_ai.evaluation.result", traceId, toolRef.span_id, 0],
+      ]);
+      expect(pipeline.stats()).toEqual({
+        traces: stats({}),
+        logs: stats({ accepted: 2, exported: 2 }),
+        metrics: stats({ accepted: points.length, exported: points.length }),
+      });
+    }, 30_000);
+  }
 });
 
 describe("export request tracing suppression", () => {
@@ -308,7 +505,7 @@ describe("export request tracing suppression", () => {
 
   // Simulate HTTP instrumentation on the pipeline's own tracer. Cap the generated spans so a
   // regression fails an assertion instead of leaving an infinite export loop running in the test.
-  const instrumentFetch = (tracer: Tracer, rejectFirst = false) => {
+  const instrumentFetch = (tracer: Tracer) => {
     const original = globalThis.fetch;
     const suppressed: boolean[] = [];
     let requests = 0;
@@ -320,7 +517,6 @@ describe("export request tracing suppression", () => {
       suppressed.push(isTracingSuppressed(context.active()));
       const span = attempt <= 8 ? tracer.startSpan("HTTP export") : undefined;
       try {
-        if (rejectFirst && attempt === 1) throw new TypeError("network unavailable");
         const response = await original(input, init);
         suppressed.push(isTracingSuppressed(context.active()));
         return response;
@@ -337,10 +533,10 @@ describe("export request tracing suppression", () => {
   for (const protocol of ["http/json", "http/protobuf"] as const) {
     test(`${protocol}: traces, metrics and logs suppress uploads and HTTP retries`, async () => {
       const attempts = new Map<string, number>();
-      const server = await startServer((path) => {
-        const count = (attempts.get(path) ?? 0) + 1;
-        attempts.set(path, count);
-        return count === 1 ? 503 : 200;
+      const server = await startServer((received) => {
+        const count = (attempts.get(received.path) ?? 0) + 1;
+        attempts.set(received.path, count);
+        return { status: count === 1 ? 503 : 200 };
       });
       const pipeline = track(
         createOtlpPipeline({
@@ -367,12 +563,7 @@ describe("export request tracing suppression", () => {
           ["/v1/metrics", 2],
           ["/v1/traces", 2],
         ]);
-        expect(pipeline.stats()).toEqual({
-          spansQueued: 1,
-          spansExported: 1,
-          spansDropped: 0,
-          exportFailures: 0,
-        });
+        expect(pipeline.stats().traces).toEqual(stats({ accepted: 1, exported: 1 }));
         expect(await pipeline.shutdown(3000)).toBe(true);
         expect(instrumented.suppressed.length).toBeGreaterThanOrEqual(18);
         expect(instrumented.suppressed.every(Boolean)).toBe(true);
@@ -397,58 +588,14 @@ describe("export request tracing suppression", () => {
     const instrumented = instrumentFetch(tracer);
     try {
       pipeline.observer().startInference(request).end();
-      const deadline = Date.now() + 2000;
-      while (pipeline.stats().spansExported === 0 && Date.now() < deadline) {
-        await new Promise<void>((resolve) => setTimeout(resolve, 5));
-      }
-      expect(pipeline.stats().spansExported).toBe(1);
+      await server.waitFor(() => pipeline.stats().traces.exported === 1, 2000);
       pipeline.observer().startInference(request).end();
       expect(await pipeline.shutdown(2000)).toBe(true);
-      expect(server.received).toHaveLength(2);
-      expect(pipeline.stats()).toEqual({
-        spansQueued: 2,
-        spansExported: 2,
-        spansDropped: 0,
-        exportFailures: 0,
-      });
+      expect(server.requests).toHaveLength(2);
+      expect(pipeline.stats().traces).toEqual(stats({ accepted: 2, exported: 2 }));
       expect(instrumented.suppressed).toEqual(Array<boolean>(6).fill(true));
     } finally {
       instrumented.restore();
-    }
-  });
-
-  test("split requests and network-error retries preserve suppression without leaking it", async () => {
-    const server = await startServer();
-    cleanups.push(() => server.close());
-    const { tracerProvider, spans } = createHarness();
-    const tracer = tracerProvider.getTracer("http-instrumentation");
-    const serializer = {
-      serializeRequest: (value: string[]) => new TextEncoder().encode(JSON.stringify(value)),
-    };
-    const sender = new OtlpHttpSender(
-      "traces",
-      { endpoint: `${server.url}/v1/traces` },
-      { json: serializer, protobuf: serializer },
-      { maxRetries: 1, initialDelayMs: 1 },
-      12,
-    );
-    const instrumented = instrumentFetch(tracer, true);
-    try {
-      expect(await sender.sendItems(["aaaaaa", "bbbbbb"], (items) => items)).toEqual({
-        exported: 2,
-        failed: 0,
-        oversized: 0,
-      });
-      expect(server.received).toHaveLength(2);
-      expect(instrumented.suppressed).toEqual(Array<boolean>(8).fill(true));
-      expect(spans.getFinishedSpans()).toHaveLength(0);
-      expect(isTracingSuppressed(context.active())).toBe(false);
-      tracer.startSpan("application operation").end();
-      expect(spans.getFinishedSpans()).toHaveLength(1);
-    } finally {
-      instrumented.restore();
-      sender.abort();
-      await tracerProvider.shutdown();
     }
   });
 
@@ -478,10 +625,10 @@ describe("export request tracing suppression", () => {
       context.disable();
       context.setGlobalContextManager(synchronous.enable());
       const serverAttempts = new Map<string, number>();
-      const server = await startServer((path) => {
-        const attempt = (serverAttempts.get(path) ?? 0) + 1;
-        serverAttempts.set(path, attempt);
-        return failure === "HTTP 503" && attempt === 1 ? 503 : 200;
+      const server = await startServer((received) => {
+        const attempt = (serverAttempts.get(received.path) ?? 0) + 1;
+        serverAttempts.set(received.path, attempt);
+        return { status: failure === "HTTP 503" && attempt === 1 ? 503 : 200 };
       });
       const pipeline = track(
         createOtlpPipeline({
@@ -527,7 +674,7 @@ describe("export request tracing suppression", () => {
           ["/v1/metrics", 2],
           ["/v1/traces", 2],
         ]);
-        expect(pipeline.stats().spansQueued).toBe(1);
+        expect(pipeline.stats().traces.accepted).toBe(1);
         expect(await pipeline.shutdown(3000)).toBe(true);
         expect(atFetch.length).toBeGreaterThanOrEqual(6);
         expect(atFetch.every(Boolean)).toBe(true);
@@ -541,45 +688,4 @@ describe("export request tracing suppression", () => {
       }
     });
   }
-});
-
-describe("otlpConfigFromEnv", () => {
-  test("reads the standard variables", () => {
-    const config = otlpConfigFromEnv({
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector:4318/",
-      OTEL_EXPORTER_OTLP_HEADERS: "api-key=abc%20def,bad",
-      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://logs:4318/custom",
-      OTEL_EXPORTER_OTLP_METRICS_PROTOCOL: "http/json",
-      OTEL_EXPORTER_OTLP_TRACES_TIMEOUT: "2500",
-      OTEL_SERVICE_NAME: "svc",
-      OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=dev",
-      OTEL_BSP_MAX_QUEUE_SIZE: "100",
-      OTEL_METRIC_EXPORT_INTERVAL: "5000",
-    });
-    expect(config.traces).toEqual({
-      endpoint: "http://collector:4318/v1/traces",
-      headers: { "api-key": "abc def" },
-      protocol: "http/protobuf",
-      timeoutMs: 2500,
-    });
-    expect(config.metrics?.protocol).toBe("http/json");
-    expect(config.metrics?.endpoint).toBe("http://collector:4318/v1/metrics");
-    expect(config.logs?.endpoint).toBe("http://logs:4318/custom");
-    expect(config.resource).toEqual({
-      serviceName: "svc",
-      attributes: { "deployment.environment": "dev" },
-    });
-    expect(config.batch).toEqual({ maxQueueSize: 100 });
-    expect(config.metricExportIntervalMs).toBe(5000);
-  });
-
-  test("exporter=none disables a signal; nothing configured means no signals", () => {
-    const config = otlpConfigFromEnv({
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector:4318",
-      OTEL_METRICS_EXPORTER: "none",
-      OTEL_LOGS_EXPORTER: "none",
-    });
-    expect(Object.keys(config)).toEqual(["traces"]);
-    expect(otlpConfigFromEnv({})).toEqual({});
-  });
 });

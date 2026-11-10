@@ -17,9 +17,9 @@ import 'result.dart';
 import 'streaming.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `completion`, `decision_io_refusal`, `from_sdk`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `resolved_streaming_run_options`, `sdk_error_message`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `completion`, `decision_io_refusal`, `from_sdk`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `resolved_streaming_run_options`, `sdk_error_message`, `should_cancel_on_sink_close`, `sink_token_callback`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 /// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
 /// [`FfiGenerationConfig::grammar`].
@@ -81,6 +81,9 @@ abstract class FfiModel implements RustOpaqueInterface {
   /// run that already happened actually did. They differ when a cloud leg
   /// fails and degrades to local mid-call.
   bool isCloudServing();
+
+  /// Immutable reference for the load that created this model.
+  FfiObservationRef? loadObservationRef();
 
   /// Run batch inference (non-streaming).
   ///
@@ -308,6 +311,9 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
   /// the model type: the load asks the registry and speculates only for a
   /// chat model.
   bool willSpeculate();
+
+  /// Clone this loader with validated observation controls.
+  FfiModelLoader withObservation({required FfiObservationOptions options});
 }
 
 /// Lifecycle of a model download.
@@ -745,6 +751,13 @@ class FfiToolResult {
           contentJson == other.contentJson;
 }
 
+enum FfiTtsStatus {
+  completed,
+  cancelled,
+  limited,
+  ;
+}
+
 @freezed
 sealed class FfiTtsStreamEvent with _$FfiTtsStreamEvent {
   const FfiTtsStreamEvent._();
@@ -756,10 +769,56 @@ sealed class FfiTtsStreamEvent with _$FfiTtsStreamEvent {
   }) = FfiTtsStreamEvent_AudioChunk;
 
   /// Synthesis completed.
-  const factory FfiTtsStreamEvent.complete() = FfiTtsStreamEvent_Complete;
+  const factory FfiTtsStreamEvent.complete(
+    FfiTtsStreamResult field0,
+  ) = FfiTtsStreamEvent_Complete;
 
   /// An error occurred during synthesis.
   const factory FfiTtsStreamEvent.error(
     String field0,
   ) = FfiTtsStreamEvent_Error;
+}
+
+/// Terminal synthesis status and counters, including partial cancellation.
+class FfiTtsStreamResult {
+  final FfiTtsStatus status;
+  final int sampleRate;
+  final int channels;
+  final BigInt samples;
+  final int chunks;
+  final int limitedChunks;
+  final FfiObservationRef? observation;
+
+  const FfiTtsStreamResult({
+    required this.status,
+    required this.sampleRate,
+    required this.channels,
+    required this.samples,
+    required this.chunks,
+    required this.limitedChunks,
+    this.observation,
+  });
+
+  @override
+  int get hashCode =>
+      status.hashCode ^
+      sampleRate.hashCode ^
+      channels.hashCode ^
+      samples.hashCode ^
+      chunks.hashCode ^
+      limitedChunks.hashCode ^
+      observation.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiTtsStreamResult &&
+          runtimeType == other.runtimeType &&
+          status == other.status &&
+          sampleRate == other.sampleRate &&
+          channels == other.channels &&
+          samples == other.samples &&
+          chunks == other.chunks &&
+          limitedChunks == other.limitedChunks &&
+          observation == other.observation;
 }

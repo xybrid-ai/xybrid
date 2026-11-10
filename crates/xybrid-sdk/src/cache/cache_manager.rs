@@ -622,6 +622,7 @@ impl CacheManager {
 
         // Check if already extracted and all files declared by metadata exist.
         if let Some(extract_dir) = self.existing_extraction_dir(&metadata.model_id) {
+            crate::observability::record_load_cache_hit(true);
             log::debug!(
                 "Bundle already extracted for '{}' at {}",
                 metadata.model_id,
@@ -631,6 +632,7 @@ impl CacheManager {
         }
 
         let extract_dir = self.extraction_dir(&metadata.model_id);
+        crate::observability::record_load_cache_hit(false);
 
         // Create extraction directory
         std::fs::create_dir_all(&extract_dir)

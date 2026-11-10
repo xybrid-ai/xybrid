@@ -98,7 +98,6 @@ pub(crate) fn run_pipeline(
     trace_enabled: bool,
     show_reasoning: bool,
     max_tokens: Option<usize>,
-    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     let _pipeline_span = if trace_enabled {
         Some(crate::tracing_viz::SpanGuard::new("pipeline_execution"))
@@ -135,9 +134,7 @@ pub(crate) fn run_pipeline(
         &availability_fn,
         policy_path,
         output_path,
-        trace_enabled,
         show_reasoning,
-        trace_export,
     )
 }
 
@@ -750,9 +747,7 @@ fn execute_pipeline(
     availability_fn: &dyn Fn(&str) -> LocalAvailability,
     policy_path: Option<&PathBuf>,
     output_path: Option<&PathBuf>,
-    trace_enabled: bool,
     show_reasoning: bool,
-    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     let mut orchestrator = Orchestrator::new();
 
@@ -783,7 +778,6 @@ fn execute_pipeline(
         Ok(results) => {
             sp.finish_and_clear();
             print_pipeline_results(&results, output_path, show_reasoning)?;
-            print_trace_output(trace_enabled, trace_export)?;
             Ok(())
         }
         Err(e) => {
@@ -919,24 +913,6 @@ fn save_pipeline_output(
     Ok(())
 }
 
-fn print_trace_output(trace_enabled: bool, trace_export: Option<&PathBuf>) -> Result<()> {
-    if trace_enabled {
-        println!("{}", crate::tracing_viz::render_trace());
-
-        if let Some(export_path) = trace_export {
-            let json = crate::tracing_viz::GLOBAL_COLLECTOR
-                .lock()
-                .unwrap()
-                .to_chrome_trace_json();
-            fs::write(export_path, json)
-                .with_context(|| format!("Failed to export trace to {}", export_path.display()))?;
-            ui::ok(&format!("Trace exported to {}", export_path.display()));
-        }
-    }
-
-    Ok(())
-}
-
 /// Run inference directly on a .xyb bundle file.
 pub(crate) fn run_bundle(
     bundle_path: &Path,
@@ -950,11 +926,7 @@ pub(crate) fn run_bundle(
     trace_enabled: bool,
     show_reasoning: bool,
     max_tokens: Option<usize>,
-    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
-    if trace_enabled {
-        crate::tracing_viz::reset_collector();
-    }
     let _bundle_span = if trace_enabled {
         Some(crate::tracing_viz::SpanGuard::new("bundle_execution"))
     } else {
@@ -1014,7 +986,6 @@ pub(crate) fn run_bundle(
 
         if trace_enabled {
             drop(_bundle_span);
-            print_trace_output(trace_enabled, trace_export)?;
         }
 
         Ok(())
@@ -1077,11 +1048,7 @@ pub(crate) fn run_model(
     trace_enabled: bool,
     show_reasoning: bool,
     max_tokens: Option<usize>,
-    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
-    if trace_enabled {
-        crate::tracing_viz::reset_collector();
-    }
     let _model_span = if trace_enabled {
         Some(crate::tracing_viz::SpanGuard::new("model_execution"))
     } else {
@@ -1205,7 +1172,6 @@ pub(crate) fn run_model(
 
         if trace_enabled {
             drop(_model_span);
-            print_trace_output(trace_enabled, trace_export)?;
         }
 
         Ok(())
@@ -1299,12 +1265,7 @@ pub(crate) fn run_directory(
     trace_enabled: bool,
     show_reasoning: bool,
     max_tokens: Option<usize>,
-    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
-    if trace_enabled {
-        crate::tracing_viz::reset_collector();
-    }
-
     ui::header("Run · Local Directory");
     ui::kv("Directory", &dir.display().to_string());
 
@@ -1344,10 +1305,6 @@ pub(crate) fn run_directory(
     print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
-    if trace_enabled {
-        print_trace_output(trace_enabled, trace_export)?;
-    }
-
     Ok(())
 }
 
@@ -1364,12 +1321,7 @@ pub(crate) fn run_huggingface(
     trace_enabled: bool,
     show_reasoning: bool,
     max_tokens: Option<usize>,
-    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
-    if trace_enabled {
-        crate::tracing_viz::reset_collector();
-    }
-
     ui::header(&format!("Run · HuggingFace · {}", repo));
 
     let sp = ui::spinner("Loading from HuggingFace...");
@@ -1424,10 +1376,6 @@ pub(crate) fn run_huggingface(
     print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
-    if trace_enabled {
-        print_trace_output(trace_enabled, trace_export)?;
-    }
-
     Ok(())
 }
 
@@ -1444,12 +1392,7 @@ pub(crate) fn run_model_file(
     trace_enabled: bool,
     show_reasoning: bool,
     max_tokens: Option<usize>,
-    trace_export: Option<&PathBuf>,
 ) -> Result<()> {
-    if trace_enabled {
-        crate::tracing_viz::reset_collector();
-    }
-
     let gguf_path = gguf_path
         .canonicalize()
         .with_context(|| format!("GGUF file not found: {}", gguf_path.display()))?;
@@ -1526,10 +1469,6 @@ pub(crate) fn run_model_file(
     print_inference_results(&metadata, &output, elapsed, output_path, show_reasoning)?;
     print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
-
-    if trace_enabled {
-        print_trace_output(trace_enabled, trace_export)?;
-    }
 
     Ok(())
 }

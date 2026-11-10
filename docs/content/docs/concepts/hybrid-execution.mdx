@@ -203,7 +203,9 @@ can restart in the cloud after a configured resource-driven local abort, when
 policy permits it. In the Flutter SDK, `runStreamingWithFallback` exposes this
 behavior for LLM streaming.
 
-Every routing decision is recorded in telemetry; inspect them with [`xybrid trace`](/docs/cli/reference/trace).
+Use `xybrid run --trace-export FILE` to capture routing decisions locally and
+inspect the artifact with [`xybrid trace FILE`](/docs/cli/reference/trace).
+Remote trace export requires explicit observability configuration.
 
 ## Related
 

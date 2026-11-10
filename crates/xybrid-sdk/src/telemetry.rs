@@ -84,13 +84,15 @@ fn parse_resource_telemetry_mode(raw: &str) -> Option<ResourceTelemetryMode> {
 
 // -- Process-wide resource-telemetry mode ----------------------------------
 //
-// `XybridModel::run*` / `Pipeline::run*` consult this to decide whether (and
-// how) to sample device resources for a run. Written by
-// `crate::observability::init_observability`; reads are cheap.
+// SDK operations that select no observability session (or a borrowed
+// observer) sample device resources with this mode; an operation pinned to a
+// configured session uses that session's mode instead. Written by
+// `XybridInit::resource_telemetry` and by installing a default session (its
+// configured mode); reads are cheap.
 static RESOURCE_TELEMETRY_MODE: RwLock<ResourceTelemetryMode> =
     RwLock::new(ResourceTelemetryMode::Off);
 
-fn set_resource_telemetry_mode(mode: ResourceTelemetryMode) {
+pub(crate) fn set_resource_telemetry_mode(mode: ResourceTelemetryMode) {
     if let Ok(mut guard) = RESOURCE_TELEMETRY_MODE.write() {
         *guard = mode;
     }
@@ -107,20 +109,29 @@ fn resolve_resource_telemetry_mode(configured: ResourceTelemetryMode) -> Resourc
     }
 }
 
-/// Pre-warm the global `ResourceMonitor` + publish the active mode to the
-/// process-wide state read by `begin_resource_run`. `Off` still stores the
-/// mode so a later rehydration can read a consistent value; the monitor
-/// just sits idle until something flips it on.
-pub(crate) fn activate_resource_telemetry(mode: ResourceTelemetryMode) {
+/// Resolve a configured mode against the env override and pre-warm the global
+/// `ResourceMonitor` when it samples, so the first run doesn't pay the cold
+/// read.
+pub(crate) fn prepare_resource_telemetry(mode: ResourceTelemetryMode) -> ResourceTelemetryMode {
     let mode = resolve_resource_telemetry_mode(mode);
     if !mode.is_off() {
         ResourceMonitor::global().prewarm();
     }
-    set_resource_telemetry_mode(mode);
+    mode
 }
 
-/// Current resource-telemetry mode for this process. `Off` until
-/// observability is initialized with a mode other than `Off`.
+/// Publish `mode` (after the env override) as the process-wide mode. `Off`
+/// still stores the mode so a later rehydration can read a consistent value;
+/// the monitor just sits idle until something flips it on.
+pub(crate) fn activate_resource_telemetry(mode: ResourceTelemetryMode) {
+    set_resource_telemetry_mode(prepare_resource_telemetry(mode));
+}
+
+/// Process-wide resource-telemetry mode: the one SDK operations that select
+/// no observability session sample with. `Off` until set by
+/// `XybridInit::resource_telemetry` or by installing a default session
+/// configured with another mode. An operation pinned to a session
+/// (`ObservationOptions::with_session`) uses that session's mode instead.
 pub fn resource_telemetry_mode() -> ResourceTelemetryMode {
     match RESOURCE_TELEMETRY_MODE.read() {
         Ok(g) => *g,
@@ -128,12 +139,16 @@ pub fn resource_telemetry_mode() -> ResourceTelemetryMode {
     }
 }
 
-/// Begin a resource-telemetry scope for one `Model::run*` / `Pipeline::run*`
-/// call. Returns a guard that produces the summary on `finish()`. Callers
-/// who want the summary attached to their outgoing `TelemetryEvent` can use
-/// [`attach_resource_summary`] at emit time.
+/// Begin a resource-telemetry scope. Returns a guard that produces the
+/// summary on `finish()`. Callers who want the summary attached to their
+/// outgoing `TelemetryEvent` can use [`attach_resource_summary`] at emit time.
+///
+/// On a thread running an SDK operation (for example in a streaming callback,
+/// or under a [`CapturedScope`](crate::observability::CapturedScope)) it
+/// samples with that operation's mode, which follows the session it is pinned
+/// to. Elsewhere it uses the process-wide [`resource_telemetry_mode`].
 pub fn begin_resource_run() -> xybrid_core::device::RunGuard {
-    ResourceMonitor::global().begin_run(resource_telemetry_mode())
+    ResourceMonitor::global().begin_run(crate::observability::current_resource_telemetry())
 }
 
 /// Mutate a `TelemetryEvent.data` JSON string to add `resource_summary`.
@@ -359,13 +374,13 @@ fn redact_secret_like_token(token: &str) -> String {
         || trimmed.starts_with("gho_")
         || trimmed.starts_with("xoxb-")
         || trimmed.starts_with("xoxp-")
-        // Xybrid's own key prefixes — the secret most likely to appear in a
-        // *xybrid* error / gateway-auth failure string, and previously the one
-        // provider key this redactor missed. Matched specifically (`xy_live_`
-        // / `xy_test_`, the only two formats used across the SDK docs and
-        // bindings) rather than a bare `xy_`, which would over-redact common
-        // identifiers like `xy_coords` / `xy_axis` and corrupt legitimate
-        // error messages.
+        // Legacy Xybrid key placeholders — older SDK docs and bindings showed
+        // `xy_live_` / `xy_test_` keys (the platform issues `sk_live_` /
+        // `sk_test_`, caught by the `sk_` arm above), so a key pasted in that
+        // shape can still reach a *xybrid* error / gateway-auth failure string.
+        // Matched specifically rather than a bare `xy_`, which would
+        // over-redact common identifiers like `xy_coords` / `xy_axis` and
+        // corrupt legitimate error messages.
         || trimmed.starts_with("xy_live_")
         || trimmed.starts_with("xy_test_")
     {
@@ -511,9 +526,13 @@ pub fn publish_cloud_retry(
 // First-inference dev nudge
 // ============================================================================
 
-/// Documentation for enabling observability export. Hard-coded rather than
+/// Documentation for enabling observability export (the API keys page, which
+/// separates cloud authentication from trace export). Hard-coded rather than
 /// wired through config because the nudge fires when no config was provided.
-const OBSERVABILITY_DOCS_URL: &str = "https://docs.xybrid.dev/sdk/observability";
+const OBSERVABILITY_DOCS_URL: &str = "https://docs.xybrid.dev/docs/concepts/api-keys";
+
+/// The console that issues project keys (the dashboard origin is retired).
+const CONSOLE_URL: &str = "https://console.xybrid.dev";
 
 /// Once-guard for [`maybe_emit_dev_nudge`].
 static DEV_NUDGE: std::sync::Once = std::sync::Once::new();
@@ -529,11 +548,7 @@ pub(crate) fn maybe_emit_dev_nudge() {
         if !should_emit_dev_nudge(crate::observability::is_enabled(), quiet.as_deref()) {
             return;
         }
-        log::info!(
-            target: "xybrid_sdk",
-            "observability export is not configured; traces stay local. See {} to send traces to Xybrid or any OpenTelemetry backend.",
-            OBSERVABILITY_DOCS_URL,
-        );
+        log::info!(target: "xybrid_sdk", "{}", dev_nudge_text());
     });
 }
 
@@ -542,9 +557,39 @@ fn should_emit_dev_nudge(observability_enabled: bool, quiet: Option<&str>) -> bo
     quiet != Some("1") && !observability_enabled
 }
 
+/// The nudge: export is explicit, and a key (from `xybrid connect` or the
+/// console) only authenticates until it is handed to the Xybrid preset. Every
+/// binding emits it (bolt forwards it to logcat / os_log), so it names no
+/// language's API.
+fn dev_nudge_text() -> String {
+    format!(
+        "observability export is not configured; traces stay local. To send them to Xybrid, \
+         get a project key with `xybrid connect` (or from {CONSOLE_URL}) and pass it to your \
+         SDK's Xybrid observability preset; a key alone exports nothing. Any OpenTelemetry \
+         backend works through the OTLP configuration. See {OBSERVABILITY_DOCS_URL}"
+    )
+}
+
 #[cfg(test)]
 mod dev_nudge_tests {
-    use super::should_emit_dev_nudge;
+    use super::{dev_nudge_text, should_emit_dev_nudge};
+
+    #[test]
+    fn the_nudge_points_at_connect_and_the_console_never_at_key_only_export() {
+        let text = dev_nudge_text();
+        assert!(text.contains("xybrid connect"), "{text}");
+        assert!(text.contains("https://console.xybrid.dev"), "{text}");
+        assert!(text.contains("Xybrid observability preset"), "{text}");
+        assert!(text.contains("a key alone exports nothing"), "{text}");
+        // Emitted by every binding: no Rust-only API names.
+        assert!(!text.contains("ObservabilityConfig"), "{text}");
+        assert!(!text.contains("dashboard.xybrid.dev"), "{text}");
+        // A page the docs site serves (`/sdk/...` paths 404 there).
+        assert!(
+            text.contains("https://docs.xybrid.dev/docs/concepts/api-keys"),
+            "{text}"
+        );
+    }
 
     #[test]
     fn emits_when_observability_is_not_configured() {
@@ -1269,6 +1314,7 @@ mod tests {
             available_mem_min_mb: Some(512),
             memory_pressure_peak: xybrid_core::device::MemoryPressure::Critical,
             thermal_state_peak: xybrid_core::device::ThermalState::Hot,
+            thermal_measured: true,
             battery_pct_end: Some(51),
             sample_count: 3,
             sampling_mode: "debug_local".to_string(),

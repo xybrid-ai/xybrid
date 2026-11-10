@@ -49,6 +49,9 @@ namespace Xybrid
         /// </summary>
         public InferenceMetrics Metrics { get; }
 
+        /// <summary>The reference for this stage's logical inference.</summary>
+        public XybridBolt.XybridObservationRef? Observation { get; }
+
         private StageResult(XybridBolt.XybridStageResult stage)
         {
             InferenceResult.DecodePayload(
@@ -61,6 +64,7 @@ namespace Xybrid
             LatencyMs = stage.LatencyMs;
             ExecutionTarget = stage.ExecutionTarget;
             Metrics = InferenceResult.MapMetrics(stage.Metrics);
+            Observation = stage.Observation;
         }
 
         internal static StageResult FromBolt(XybridBolt.XybridStageResult stage) =>
@@ -102,6 +106,9 @@ namespace Xybrid
         /// <summary>Gets every executed stage, in order.</summary>
         public IReadOnlyList<StageResult> Stages { get; }
 
+        /// <summary>The workflow reference for the whole pipeline.</summary>
+        public XybridBolt.XybridObservationRef? Observation { get; }
+
         private PipelineResult(XybridBolt.XybridPipelineResult result)
         {
             InferenceResult.DecodePayload(
@@ -111,6 +118,7 @@ namespace Xybrid
             AudioBytes = audio;
             Embedding = embedding;
             LatencyMs = result.LatencyMs;
+            Observation = result.Observation;
 
             var stages = new List<StageResult>(result.Stages.Length);
             foreach (XybridBolt.XybridStageResult stage in result.Stages)

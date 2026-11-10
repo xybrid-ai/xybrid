@@ -839,3 +839,19 @@ mod tests {
         }
     }
 }
+
+/// Terminal streamed-speech result. Audio packets are delivered through the sink.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TtsStreamResult {
+    /// Existing runtime delivery summary.
+    pub summary: xybrid_core::execution::TtsStreamResult,
+    /// Inference reference; absent for disabled or explicitly suppressed tracing.
+    pub observation: Option<crate::observability::ObservationRef>,
+}
+
+impl std::ops::Deref for TtsStreamResult {
+    type Target = xybrid_core::execution::TtsStreamResult;
+    fn deref(&self) -> &Self::Target {
+        &self.summary
+    }
+}

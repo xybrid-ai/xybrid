@@ -1,0 +1,256 @@
+{
+  "status": "agreed",
+  "agreed": {
+    "on": "2026-11-09",
+    "by": "workspace owner",
+    "evidence": "Apple M5 Max, Qwen3.5-0.8B Q4_K_M: e2e 10 and 20 rounds per mode, micro bench profile; every bound held at the median",
+    "gate": "within (median delta for e2e rows, the measured value for micro rows); a failed gate makes `e2e` and `micro` exit 1"
+  },
+  "note": "Agreed bounds. Relative bounds apply to the regression of a mode against 'off' (slower, later or larger is positive); with both max_abs and max_pct the larger allowance applies. The gate is `within` at the median delta. `within at CI worst case` is reported for information only: on a desktop the e2e noise floor is a few percent (the blocked mode, which does no telemetry work on the token path, spanned -1.9% to +3.7% tokens/s over 20 rounds), far above the per-token cost the micro benches measure (~0.003% of a token), so the interval end mostly measures the machine. The micro rows are the precise gate.",
+  "e2e": [
+    {
+      "id": "E1",
+      "metric": "runtime_tokens_per_s",
+      "modes": [
+        "metadata",
+        "content",
+        "blocked"
+      ],
+      "bound": {
+        "max_pct": 1.0
+      },
+      "rationale": "Telemetry never runs on the decode thread except record_chunk (~0.1-1 us) per token callback; at 5-10 ms per token that is <0.02%. 1% leaves room for run-to-run noise of the median while still catching a per-token cost of ~50-100 us."
+    },
+    {
+      "id": "E2",
+      "metric": "callback_decode_per_s",
+      "modes": [
+        "metadata",
+        "content",
+        "blocked"
+      ],
+      "bound": {
+        "max_pct": 1.0
+      },
+      "rationale": "Same budget as E1, measured where the application sees tokens (callback timestamps) rather than by the runtime."
+    },
+    {
+      "id": "E3",
+      "metric": "first_callback_ms",
+      "modes": [
+        "metadata",
+        "content",
+        "blocked"
+      ],
+      "bound": {
+        "max_abs": 2.0,
+        "max_pct": 2.0
+      },
+      "rationale": "Before the first token the SDK starts the operation and records input content once (preflight, clone, truncation: tens of microseconds for a 2 KiB prompt). 2 ms or 2% of TTFT, whichever is larger."
+    },
+    {
+      "id": "E4",
+      "metric": "callback_gap_p50_ms",
+      "modes": [
+        "metadata",
+        "content",
+        "blocked"
+      ],
+      "bound": {
+        "max_abs": 0.05,
+        "max_pct": 1.0
+      },
+      "rationale": "Median inter-token gap at the callback: the per-chunk cost lands here directly. 50 us or 1% of the gap."
+    },
+    {
+      "id": "E5",
+      "metric": "callback_gap_p99_ms",
+      "modes": [
+        "metadata",
+        "content",
+        "blocked"
+      ],
+      "bound": {
+        "max_abs": 0.5,
+        "max_pct": 5.0
+      },
+      "rationale": "Tail gaps catch blocking (a lock held by an exporter, an allocation storm, a flush on the hot path). 0.5 ms or 5%: a blocked exporter must look like any other enabled mode."
+    },
+    {
+      "id": "E6",
+      "metric": "peak_rss_mib",
+      "modes": [
+        "metadata",
+        "content",
+        "blocked"
+      ],
+      "bound": {
+        "max_abs": 16.0
+      },
+      "rationale": "Pipeline runtime threads, HTTP client and a few retained spans per process; content retained by an operation is bounded to 208 KiB by default (clamped to fit the 480 KiB request bound). The 32 MiB per-signal buffer cannot fill with a handful of operations, so 16 MiB catches leaks or unbounded retention without flagging the fixed cost."
+    },
+    {
+      "id": "E7",
+      "metric": "peak_footprint_mib",
+      "modes": [
+        "metadata",
+        "content",
+        "blocked"
+      ],
+      "bound": {
+        "max_abs": 16.0
+      },
+      "rationale": "As E6, on macOS's phys_footprint (includes compressed and Metal-visible memory)."
+    }
+  ],
+  "e2e_absolute": [
+    {
+      "id": "E8",
+      "metric": "shutdown_ms",
+      "modes": [
+        "blocked"
+      ],
+      "statistic": "max",
+      "bound": {
+        "max_abs": 2500
+      },
+      "plus_shutdown_timeout": true,
+      "rationale": "Shutdown against an endpoint that never answers is bounded by its timeout plus the pipeline's settle grace (2 x 1 s) and 250 ms scheduling slack."
+    },
+    {
+      "id": "E9",
+      "metric": "shutdown_ms",
+      "modes": [
+        "metadata",
+        "content"
+      ],
+      "statistic": "max",
+      "bound": {
+        "max_abs": 1000
+      },
+      "rationale": "A local endpoint that answers at once: shutdown is a final flush of a few spans plus a metrics collection."
+    }
+  ],
+  "micro": [
+    {
+      "id": "M1",
+      "kind": "chunk_overhead_vs_token",
+      "setups": [
+        "memory_metadata",
+        "memory_content",
+        "otlp_blackhole",
+        "otlp_blocked"
+      ],
+      "bound": {
+        "max_pct": 0.1
+      },
+      "rationale": "Per-chunk overhead (Criterion slope over N=1..256 minus the disabled slope) relative to the measured per-token time of the e2e off mode. Each token callback calls record_chunk once; 0.1% of a token is ~5-10 us at 100-200 tok/s, an order of magnitude above the expected cost."
+    },
+    {
+      "id": "M2",
+      "kind": "op_overhead_vs_ttft",
+      "setups": [
+        "memory_metadata",
+        "memory_content",
+        "otlp_blackhole",
+        "otlp_blocked"
+      ],
+      "bound": {
+        "max_pct": 0.5
+      },
+      "rationale": "Fixed per-operation cost (start, 1.5 KiB of content, usage, output, end) relative to the e2e time to first token."
+    },
+    {
+      "id": "M3",
+      "kind": "chunk_tail_ns",
+      "setups": [
+        "memory_metadata",
+        "memory_content",
+        "otlp_blackhole",
+        "otlp_blocked"
+      ],
+      "statistic": "p999",
+      "bound": {
+        "max_abs": 20000
+      },
+      "rationale": "No record_chunk call should wait: p99.9 under 20 us even while a pipeline exports or its endpoint hangs (timer overhead included)."
+    },
+    {
+      "id": "M4",
+      "kind": "content_tail_ns",
+      "policy": "rules",
+      "workloads": [
+        "hist_near_budget_4k",
+        "hist_near_budget_64b"
+      ],
+      "statistic": "p99",
+      "bound": {
+        "max_abs": 10000000
+      },
+      "rationale": "The largest accepted history (~480 KiB) is processed once per request; 10 ms at p99 stays below 1% of the prefill such a prompt needs on device."
+    },
+    {
+      "id": "M5",
+      "kind": "content_tail_ns",
+      "policy": "rules",
+      "workloads": [
+        "msg_1k",
+        "msg_4k",
+        "msg_15k",
+        "msg_17k"
+      ],
+      "statistic": "p99",
+      "bound": {
+        "max_abs": 250000
+      },
+      "rationale": "Typical prompts and answers: 250 us at p99 including declarative rules and truncation."
+    },
+    {
+      "id": "M6",
+      "kind": "saturation_bounds",
+      "bound": {
+        "must_hold": true
+      },
+      "rationale": "Invariant, not a tunable: queued plus in-flight bytes never exceed 32 MiB, pending never exceeds the 2048 queue, every offered span is accepted and counted."
+    },
+    {
+      "id": "M7",
+      "kind": "saturation_p99_ratio",
+      "scenarios": [
+        "blocked_small"
+      ],
+      "reference": "blackhole_small",
+      "bound": {
+        "max_ratio": 1.5
+      },
+      "rationale": "The caller never waits on export: operation p99 against a blocked endpoint stays within 1.5x of the same burst against an endpoint that answers at once."
+    },
+    {
+      "id": "J1",
+      "package": "js",
+      "kind": "chunk_overhead_vs_token",
+      "setups": [
+        "memory_metadata",
+        "memory_content"
+      ],
+      "bound": {
+        "max_pct": 0.1
+      },
+      "rationale": "As M1 for @xybrid/observability in Node (same e2e token reference)."
+    },
+    {
+      "id": "J2",
+      "package": "js",
+      "kind": "content_tail_ns",
+      "policy": "rules",
+      "workloads": [
+        "hist_near_budget_4k"
+      ],
+      "statistic": "p99",
+      "bound": {
+        "max_abs": 20000000
+      },
+      "rationale": "As M4 for Node; JS walks the value with its own preflight and JSON.stringify."
+    }
+  ]
+}

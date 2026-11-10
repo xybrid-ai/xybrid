@@ -151,6 +151,10 @@ pub enum XybridError {
     Cancelled {
         message: String,
     },
+    /// Telemetry delivery is incomplete or unknown; do not rerun inference.
+    TelemetryDelivery {
+        message: String,
+    },
 }
 
 impl XybridError {
@@ -198,6 +202,9 @@ impl From<XybridError> for facade::Error {
             }
             XybridError::InvalidImage { message } => facade::Error::InvalidImage { message },
             XybridError::Cancelled { message } => facade::Error::Cancelled { message },
+            XybridError::TelemetryDelivery { message } => {
+                facade::Error::TelemetryDelivery { message }
+            }
         }
     }
 }
@@ -236,6 +243,9 @@ impl From<facade::Error> for XybridError {
             }
             facade::Error::InvalidImage { message } => XybridError::InvalidImage { message },
             facade::Error::Cancelled { message } => XybridError::Cancelled { message },
+            facade::Error::TelemetryDelivery { message } => {
+                XybridError::TelemetryDelivery { message }
+            }
         }
     }
 }
@@ -1220,6 +1230,8 @@ pub struct XybridStageResult {
     /// Generation figures (TTFT, tokens per second) when this stage is a
     /// language model; `total_ms` is the stage latency.
     pub metrics: XybridInferenceMetrics,
+    /// The logical inference performed by this stage, when observed.
+    pub observation: Option<XybridObservationRef>,
 }
 
 impl From<facade::StageResult> for XybridStageResult {
@@ -1231,6 +1243,7 @@ impl From<facade::StageResult> for XybridStageResult {
             latency_ms: s.latency_ms,
             execution_target: s.execution_target.into(),
             metrics: XybridInferenceMetrics::from(&s.metrics),
+            observation: s.observation.map(Into::into),
         }
     }
 }
@@ -1249,6 +1262,8 @@ pub struct XybridPipelineResult {
     pub latency_ms: u32,
     /// Every executed stage, in order.
     pub stages: Vec<XybridStageResult>,
+    /// The workflow enclosing this execution, when observed.
+    pub observation: Option<XybridObservationRef>,
 }
 
 impl From<facade::PipelineResult> for XybridPipelineResult {
@@ -1258,6 +1273,7 @@ impl From<facade::PipelineResult> for XybridPipelineResult {
             output_type: r.output_type.into(),
             latency_ms: r.latency_ms,
             stages: r.stages.into_iter().map(Into::into).collect(),
+            observation: r.observation.map(Into::into),
         }
     }
 }
@@ -1880,6 +1896,28 @@ pub struct XybridStreamingConfig {
     pub language: Option<String>,
     /// Whisper encoder context in mel frames; null uses the model default.
     pub audio_ctx: Option<u32>,
+    pub observation: Option<XybridObservationOptions>,
+}
+
+/// W3C parent, suppression and conversation controls shared by execution APIs.
+#[data]
+#[derive(Clone, Debug)]
+pub struct XybridObservationOptions {
+    pub traceparent: Option<String>,
+    pub tracestate: Option<String>,
+    pub conversation_id: Option<String>,
+    pub suppress_trace: bool,
+}
+
+impl From<XybridObservationOptions> for facade::ObservationControls {
+    fn from(options: XybridObservationOptions) -> Self {
+        Self {
+            traceparent: options.traceparent,
+            tracestate: options.tracestate,
+            conversation_id: options.conversation_id,
+            suppress_trace: options.suppress_trace,
+        }
+    }
 }
 
 impl From<XybridStreamingConfig> for facade::StreamingConfig {
@@ -1890,6 +1928,7 @@ impl From<XybridStreamingConfig> for facade::StreamingConfig {
             vad_threshold: config.vad_threshold,
             language: config.language,
             audio_ctx: config.audio_ctx,
+            observation: config.observation.map(Into::into),
         }
     }
 }
@@ -1907,6 +1946,7 @@ pub struct XybridPartialResult {
     pub chunk_sequence: u64,
     /// Audio covered so far, in milliseconds.
     pub audio_duration_ms: u64,
+    pub decoder_observation: Option<XybridObservationRef>,
 }
 
 impl From<facade::PartialResult> for XybridPartialResult {
@@ -1916,6 +1956,27 @@ impl From<facade::PartialResult> for XybridPartialResult {
             is_stable: p.is_stable,
             chunk_sequence: p.chunk_sequence,
             audio_duration_ms: p.audio_duration_ms,
+            decoder_observation: p.decoder_observation.map(Into::into),
+        }
+    }
+}
+
+/// Final transcript and its ASR session workflow.
+#[data]
+#[derive(Clone)]
+pub struct XybridTranscriptionResult {
+    pub text: String,
+    pub duration_ms: u64,
+    pub chunks_processed: u64,
+    pub observation: Option<XybridObservationRef>,
+}
+impl From<facade::TranscriptionResult> for XybridTranscriptionResult {
+    fn from(result: facade::TranscriptionResult) -> Self {
+        Self {
+            text: result.text,
+            duration_ms: result.duration_ms,
+            chunks_processed: result.chunks_processed,
+            observation: result.observation.map(Into::into),
         }
     }
 }
@@ -1995,8 +2056,11 @@ impl XybridStreamingSession {
     /// The session is over afterwards — `feed` fails and the partial stream
     /// closes. Blocks until the last chunk is transcribed, so call it off the
     /// UI thread.
-    pub fn flush(&self) -> Result<String, XybridError> {
-        self.inner.flush().map_err(XybridError::from)
+    pub fn flush(&self) -> Result<XybridTranscriptionResult, XybridError> {
+        self.inner
+            .flush()
+            .map(Into::into)
+            .map_err(XybridError::from)
     }
 
     /// Reset to transcribe fresh audio without reloading the model.
@@ -2083,6 +2147,29 @@ pub struct XybridModel {
     next_stream_id: std::sync::atomic::AtomicU64,
 }
 
+/// Model source for the options-enabled load surface.
+#[data]
+#[derive(Clone, Debug)]
+pub enum XybridModelSource {
+    Registry {
+        id: String,
+        speculative: bool,
+    },
+    Directory {
+        path: String,
+    },
+    Bundle {
+        path: String,
+    },
+    HuggingFace {
+        repo: String,
+        revision: Option<String>,
+    },
+    ModelFile {
+        path: String,
+    },
+}
+
 struct StreamEntry {
     session: std::sync::Arc<facade::StreamingSession>,
     result: std::sync::Mutex<Option<facade::InferenceResult>>,
@@ -2100,6 +2187,45 @@ impl XybridModel {
 
 #[export]
 impl XybridModel {
+    /// The immutable observation of the load that created this model.
+    pub fn load_observation_ref(&self) -> Option<XybridObservationRef> {
+        self.inner.load_observation_ref().map(Into::into)
+    }
+
+    /// Load any supported source with explicit observation controls.
+    pub fn load(
+        source: XybridModelSource,
+        observation: Option<XybridObservationOptions>,
+    ) -> Result<Self, XybridError> {
+        set_platform_fallback_binding();
+        let loader = match source {
+            XybridModelSource::Registry {
+                id,
+                speculative: false,
+            } => facade::ModelLoader::from_registry(id),
+            XybridModelSource::Registry {
+                id,
+                speculative: true,
+            } => facade::ModelLoader::from_registry_speculative(id),
+            XybridModelSource::Directory { path } => facade::ModelLoader::from_directory(path)?,
+            XybridModelSource::Bundle { path } => facade::ModelLoader::from_bundle(path)?,
+            XybridModelSource::HuggingFace {
+                repo,
+                revision: None,
+            } => facade::ModelLoader::from_huggingface(repo),
+            XybridModelSource::HuggingFace {
+                repo,
+                revision: Some(revision),
+            } => facade::ModelLoader::from_huggingface_with_revision(repo, revision),
+            XybridModelSource::ModelFile { path } => facade::ModelLoader::from_model_file(path)?,
+        };
+        let loader = match observation {
+            Some(options) => loader.with_observation(options.into())?,
+            None => loader,
+        };
+        Ok(Self::new(loader.load()?))
+    }
+
     /// Load from the xybrid registry. Recommended path.
     pub fn from_registry(id: String) -> Result<Self, XybridError> {
         set_platform_fallback_binding();
@@ -2401,6 +2527,10 @@ impl XybridModel {
     }
 
     /// Forget a streaming session.
+    ///
+    /// Closing a session before its terminal event cancels its run: the run
+    /// stops at its next token and is recorded as a user cancellation
+    /// (`error.type` `cancelled`), not as an error.
     pub fn stream_close(&self, stream_id: u64) {
         self.streams
             .lock()
@@ -2521,7 +2651,7 @@ impl XybridPipeline {
     /// Execute every stage, downloading any missing models first, and return
     /// each stage's output alongside the final one.
     ///
-    /// Of `options`, only `correlation_id` applies to a pipeline run. Setting
+    /// Observation controls and `correlation_id` apply to a pipeline run. Setting
     /// `generation_config` or `abort_on` fails with `ConfigError` rather than
     /// being ignored; per-stage generation settings belong in the YAML.
     pub fn run(
@@ -2636,25 +2766,48 @@ pub fn observability_default_traces_endpoint() -> String {
     facade::observability_default_traces_endpoint()
 }
 
+/// Delivery counts for a single signal. Pending includes queued and in-flight items.
+#[data]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct XybridSignalStats {
+    pub accepted: u64,
+    pub exported: u64,
+    pub dropped: u64,
+    pub failed: u64,
+    pub pending: u64,
+}
+
+impl From<facade::SignalStats> for XybridSignalStats {
+    fn from(s: facade::SignalStats) -> Self {
+        Self {
+            accepted: s.accepted,
+            exported: s.exported,
+            dropped: s.dropped,
+            failed: s.failed,
+            pending: s.pending,
+        }
+    }
+}
+
 /// Delivery counters of the observability pipeline.
 #[data]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct XybridObservabilityStats {
     pub enabled: bool,
-    pub spans_exported: u64,
-    pub spans_dropped: u64,
-    pub export_failures: u64,
+    pub traces: XybridSignalStats,
+    pub logs: XybridSignalStats,
+    pub metrics: XybridSignalStats,
 }
 
-/// Current delivery counters (all zero when observability is off).
+/// Delivery counters: live while export runs, the final ones after shutdown until the next init.
 #[export]
 pub fn observability_stats() -> XybridObservabilityStats {
     let s = facade::observability_stats();
     XybridObservabilityStats {
         enabled: s.enabled,
-        spans_exported: s.spans_exported,
-        spans_dropped: s.spans_dropped,
-        export_failures: s.export_failures,
+        traces: s.traces.into(),
+        logs: s.logs.into(),
+        metrics: s.metrics.into(),
     }
 }
 
@@ -2774,9 +2927,47 @@ impl XybridObservabilityConfig {
         self.inner.set_metadata_only(metadata_only);
     }
 
-    /// Maximum bytes per captured content attribute.
+    /// Maximum bytes per captured content attribute, clamped to at most
+    /// 208 KiB so that a span's content leaves 64 KiB of the 480 KiB export
+    /// request for its other data.
     pub fn set_max_content_bytes(&self, bytes: u32) {
         self.inner.set_max_content_bytes(bytes);
+    }
+
+    /// Allows context propagation to one exact third-party HTTP(S) origin.
+    pub fn allow_provider_context(&self, origin: String) -> Result<(), XybridError> {
+        self.inner
+            .allow_provider_context(origin)
+            .map_err(Into::into)
+    }
+
+    /// Sets a caller-owned device identifier.
+    pub fn set_device_id(&self, id: String) {
+        self.inner.set_device_id(id);
+    }
+
+    /// Appends an ordered literal replacement of content string values.
+    ///
+    /// # Errors
+    /// For an empty search string.
+    pub fn add_literal_redaction(
+        &self,
+        find: String,
+        replacement: String,
+    ) -> Result<(), XybridError> {
+        self.inner
+            .add_literal_redaction(find, replacement)
+            .map_err(XybridError::from)
+    }
+
+    /// Omits an exact governed content attribute key.
+    ///
+    /// # Errors
+    /// For an empty key.
+    pub fn omit_content_attribute(&self, key: String) -> Result<(), XybridError> {
+        self.inner
+            .omit_content_attribute(key)
+            .map_err(XybridError::from)
     }
 
     /// Minimum interval between traced frames of one live session.
@@ -2911,6 +3102,105 @@ mod tests {
         // An SDK that registers after a native call still reports its name.
         facade::set_binding("unity".to_string());
         assert_eq!(facade::get_binding(), "unity");
+    }
+
+    /// A weightless model directory, removed on drop.
+    struct WeightlessModel(std::path::PathBuf);
+
+    impl WeightlessModel {
+        fn new(id: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("{id}-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("model_metadata.json"),
+                format!(
+                    r#"{{"model_id":"{id}","version":"1.0","execution_template":{{"type":"Onnx","model_file":"model.onnx"}},"files":[]}}"#
+                ),
+            )
+            .unwrap();
+            Self(dir)
+        }
+    }
+
+    impl Drop for WeightlessModel {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn closing_a_stream_mid_run_stops_the_run_at_the_next_token_as_a_user_cancellation() {
+        use std::sync::mpsc;
+        let dir = WeightlessModel::new("bolt-stream-close");
+        // Through the facade loader: a Bolt constructor would register the
+        // platform fallback binding, which the test above owns.
+        let model = XybridModel::new(
+            facade::ModelLoader::from_directory(dir.0.to_string_lossy().into_owned())
+                .unwrap()
+                .load()
+                .unwrap(),
+        );
+        // A run whose token `i` the test paces, standing in for the SDK run
+        // behind `run_stream`.
+        let (permit, permits) = mpsc::channel::<()>();
+        let (report, reported) = mpsc::channel();
+        let session = facade::StreamingSession::spawn_tokens_for_test(move |on_token| {
+            let mut callbacks = 0;
+            let mut stopped = None;
+            for index in 0..5 {
+                permits
+                    .recv_timeout(std::time::Duration::from_secs(30))
+                    .expect("the test paces every token");
+                callbacks += 1;
+                let token = xybrid_sdk::PartialToken {
+                    token: format!("t{index}"),
+                    token_id: None,
+                    index,
+                    cumulative_text: String::new(),
+                    finish_reason: None,
+                    tool_calls: Vec::new(),
+                    raw_text: None,
+                };
+                if let Err(error) = on_token(token) {
+                    stopped = Some(error);
+                    break;
+                }
+            }
+            report.send((callbacks, stopped)).unwrap();
+            Err(xybrid_sdk::SdkError::InferenceError {
+                message: "stopped".into(),
+                source: None,
+            })
+        });
+        let stream_id = 7;
+        model.streams.lock().unwrap().insert(
+            stream_id,
+            std::sync::Arc::new(StreamEntry {
+                session,
+                result: std::sync::Mutex::new(None),
+            }),
+        );
+        for index in 0..2 {
+            permit.send(()).unwrap();
+            let event = model.stream_next(stream_id).unwrap();
+            assert_eq!(event.token.map(|token| token.index), Some(index));
+        }
+
+        model.stream_close(stream_id);
+        // The next token finds no receiver.
+        permit.send(()).unwrap();
+        let (callbacks, stopped) = reported
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("the run returns");
+
+        assert_eq!(callbacks, 3, "it stops at the token after the close");
+        let stopped: xybrid_sdk::StreamingError = stopped.expect("the callback stopped the run");
+        // The SDK records this error as the caller's cancellation.
+        assert_eq!(
+            stopped.downcast_ref::<xybrid_sdk::AbortReason>(),
+            Some(&xybrid_sdk::AbortReason::UserCancelled),
+            "{stopped}"
+        );
     }
 
     #[test]
@@ -3055,6 +3345,7 @@ stages:
     #[test]
     fn pipeline_result_crosses_bolt_with_every_stage() {
         let stage = |id: &str, kind: facade::EnvelopeKind| facade::StageResult {
+            observation: None,
             stage_id: id.into(),
             envelope: facade::Envelope {
                 kind,
@@ -3078,6 +3369,7 @@ stages:
             },
         );
         let result = XybridPipelineResult::from(facade::PipelineResult {
+            observation: None,
             envelope: llm.envelope.clone(),
             output_type: facade::OutputType::Text,
             latency_ms: 20,
@@ -3100,6 +3392,18 @@ stages:
         // foreign-language consumer's switch-on-code logic from drift.
         let f: facade::Error = e.clone().into();
         assert_eq!(e.code(), f.code());
+    }
+
+    #[test]
+    fn telemetry_delivery_error_roundtrips() {
+        let error = XybridError::from(facade::Error::TelemetryDelivery {
+            message: "acknowledgement lost".into(),
+        });
+        assert_eq!(error.code(), 24);
+        let facade_error: facade::Error = error.into();
+        assert!(
+            matches!(facade_error, facade::Error::TelemetryDelivery { message } if message == "acknowledgement lost")
+        );
     }
 
     #[test]
@@ -3309,5 +3613,363 @@ stages:
             &history[0].kind,
             XybridEnvelopeKind::Text { text } if text == "hello"
         ));
+    }
+}
+
+// Manual observation records and handles. Translation stays in the facade.
+#[data]
+#[derive(Clone, Copy, Debug)]
+pub enum XybridExecutionLocation {
+    Local,
+    Remote,
+}
+impl From<XybridExecutionLocation> for facade::ExecutionLocation {
+    fn from(value: XybridExecutionLocation) -> Self {
+        match value {
+            XybridExecutionLocation::Local => Self::Local,
+            XybridExecutionLocation::Remote => Self::Remote,
+        }
+    }
+}
+
+/// Typed metadata for manual observations.
+#[data]
+#[derive(Clone, Debug)]
+pub struct XybridObservationContext {
+    pub traceparent: String,
+    pub tracestate: Option<String>,
+}
+impl From<facade::ObservationContext> for XybridObservationContext {
+    fn from(value: facade::ObservationContext) -> Self {
+        Self {
+            traceparent: value.traceparent,
+            tracestate: value.tracestate,
+        }
+    }
+}
+
+/// Typed metadata for manual observations.
+#[data]
+#[derive(Clone, Debug)]
+pub struct XybridInferenceRequest {
+    pub operation: String,
+    pub provider: String,
+    pub model: Option<String>,
+    pub location: XybridExecutionLocation,
+    pub runtime: Option<String>,
+    pub task: Option<String>,
+    pub stream: bool,
+    pub max_tokens: Option<i64>,
+    pub temperature: Option<f64>,
+    pub top_p: Option<f64>,
+    pub server_address: Option<String>,
+    pub server_port: Option<i64>,
+}
+impl From<XybridInferenceRequest> for facade::InferenceRequest {
+    fn from(value: XybridInferenceRequest) -> Self {
+        Self {
+            operation: value.operation,
+            provider: value.provider,
+            model: value.model,
+            location: value.location.into(),
+            runtime: value.runtime,
+            task: value.task,
+            stream: value.stream,
+            max_tokens: value.max_tokens,
+            temperature: value.temperature,
+            top_p: value.top_p,
+            server_address: value.server_address,
+            server_port: value.server_port,
+        }
+    }
+}
+
+/// Typed metadata for manual observations.
+#[data]
+#[derive(Clone, Debug)]
+pub struct XybridToolCallInfo {
+    pub name: String,
+    pub call_id: Option<String>,
+    pub tool_type: Option<String>,
+    pub description: Option<String>,
+    pub arguments_json: Option<String>,
+}
+impl From<XybridToolCallInfo> for facade::ToolCallInfo {
+    fn from(value: XybridToolCallInfo) -> Self {
+        Self {
+            name: value.name,
+            call_id: value.call_id,
+            tool_type: value.tool_type,
+            description: value.description,
+            arguments_json: value.arguments_json,
+        }
+    }
+}
+
+/// Typed metadata for manual observations.
+#[data]
+#[derive(Clone, Debug)]
+pub struct XybridUsage {
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub cache_read_input_tokens: Option<u64>,
+    pub cache_write_input_tokens: Option<u64>,
+    pub reasoning_output_tokens: Option<u64>,
+}
+impl From<XybridUsage> for facade::Usage {
+    fn from(value: XybridUsage) -> Self {
+        Self {
+            input_tokens: value.input_tokens,
+            output_tokens: value.output_tokens,
+            cache_read_input_tokens: value.cache_read_input_tokens,
+            cache_write_input_tokens: value.cache_write_input_tokens,
+            reasoning_output_tokens: value.reasoning_output_tokens,
+        }
+    }
+}
+
+/// Typed metadata for manual observations.
+#[data]
+#[derive(Clone, Debug)]
+pub struct XybridModelLoadInfo {
+    pub model: String,
+    pub provider: Option<String>,
+    pub runtime: Option<String>,
+    pub format: Option<String>,
+    pub size_bytes: Option<u64>,
+}
+impl From<XybridModelLoadInfo> for facade::ModelLoadInfo {
+    fn from(value: XybridModelLoadInfo) -> Self {
+        Self {
+            model: value.model,
+            provider: value.provider,
+            runtime: value.runtime,
+            format: value.format,
+            size_bytes: value.size_bytes,
+        }
+    }
+}
+
+/// Manual workflow operation; closing the final handle cancels unfinished work.
+pub struct XybridWorkflowObservation {
+    inner: std::sync::Arc<facade::WorkflowObservation>,
+}
+#[export]
+impl XybridWorkflowObservation {
+    /// Starts an operation using the configured SDK session and explicit parent controls.
+    pub fn new(
+        name: String,
+        options: Option<XybridObservationOptions>,
+    ) -> Result<Self, XybridError> {
+        facade::WorkflowObservation::start(name, options.map(Into::into).unwrap_or_default())
+            .map(|inner| Self { inner })
+            .map_err(Into::into)
+    }
+    /// Context for child operations, including valid unsampled spans.
+    pub fn context(&self) -> Option<XybridObservationContext> {
+        self.inner.context().map(Into::into)
+    }
+    /// Reference to this operation's own span.
+    pub fn observation_ref(&self) -> Option<XybridObservationRef> {
+        self.inner.observation_ref().map(Into::into)
+    }
+    /// Ends successfully. The first terminal call wins.
+    pub fn complete(&self) {
+        self.inner.complete();
+    }
+    /// Ends with a governed error message.
+    pub fn fail(&self, error_type: String, message: Option<String>) {
+        self.inner.fail(error_type, message);
+    }
+    /// Cancels without flushing.
+    pub fn cancel(&self) {
+        self.inner.cancel();
+    }
+    /// Whether any terminal transition has happened.
+    pub fn is_finished(&self) -> bool {
+        self.inner.is_finished()
+    }
+}
+
+/// Manual tool operation; closing the final handle cancels unfinished work.
+pub struct XybridToolObservation {
+    inner: std::sync::Arc<facade::ToolObservation>,
+}
+#[export]
+impl XybridToolObservation {
+    /// Starts an operation using the configured SDK session and explicit parent controls.
+    pub fn new(
+        call: XybridToolCallInfo,
+        options: Option<XybridObservationOptions>,
+    ) -> Result<Self, XybridError> {
+        facade::ToolObservation::start(call.into(), options.map(Into::into).unwrap_or_default())
+            .map(|inner| Self { inner })
+            .map_err(Into::into)
+    }
+    /// Context for child operations, including valid unsampled spans.
+    pub fn context(&self) -> Option<XybridObservationContext> {
+        self.inner.context().map(Into::into)
+    }
+    /// Reference to this operation's own span.
+    pub fn observation_ref(&self) -> Option<XybridObservationRef> {
+        self.inner.observation_ref().map(Into::into)
+    }
+    /// Ends successfully. The first terminal call wins.
+    pub fn complete(&self) {
+        self.inner.complete();
+    }
+    /// Ends with a governed error message.
+    pub fn fail(&self, error_type: String, message: Option<String>) {
+        self.inner.fail(error_type, message);
+    }
+    /// Cancels without flushing.
+    pub fn cancel(&self) {
+        self.inner.cancel();
+    }
+    /// Whether any terminal transition has happened.
+    pub fn is_finished(&self) -> bool {
+        self.inner.is_finished()
+    }
+    /// Records structured tool output through the content policy.
+    pub fn record_result(&self, result_json: String) -> Result<(), XybridError> {
+        self.inner.record_result(result_json).map_err(Into::into)
+    }
+}
+
+/// Manual inference operation; closing the final handle cancels unfinished work.
+pub struct XybridInferenceObservation {
+    inner: std::sync::Arc<facade::InferenceObservation>,
+}
+#[export]
+impl XybridInferenceObservation {
+    /// Starts an operation using the configured SDK session and explicit parent controls.
+    pub fn new(
+        request: XybridInferenceRequest,
+        options: Option<XybridObservationOptions>,
+    ) -> Result<Self, XybridError> {
+        facade::InferenceObservation::start(
+            request.into(),
+            options.map(Into::into).unwrap_or_default(),
+        )
+        .map(|inner| Self { inner })
+        .map_err(Into::into)
+    }
+    /// Context for child operations, including valid unsampled spans.
+    pub fn context(&self) -> Option<XybridObservationContext> {
+        self.inner.context().map(Into::into)
+    }
+    /// Reference to this operation's own span.
+    pub fn observation_ref(&self) -> Option<XybridObservationRef> {
+        self.inner.observation_ref().map(Into::into)
+    }
+    /// Ends successfully. The first terminal call wins.
+    pub fn complete(&self) {
+        self.inner.complete();
+    }
+    /// Ends with a governed error message.
+    pub fn fail(&self, error_type: String, message: Option<String>) {
+        self.inner.fail(error_type, message);
+    }
+    /// Cancels without flushing.
+    pub fn cancel(&self) {
+        self.inner.cancel();
+    }
+    /// Whether any terminal transition has happened.
+    pub fn is_finished(&self) -> bool {
+        self.inner.is_finished()
+    }
+    /// Records governed structured content.
+    pub fn record_system_instructions(&self, parts_json: String) -> Result<(), XybridError> {
+        self.inner
+            .record_system_instructions(parts_json)
+            .map_err(Into::into)
+    }
+    /// Records governed structured content.
+    pub fn record_input_messages(&self, messages_json: String) -> Result<(), XybridError> {
+        self.inner
+            .record_input_messages(messages_json)
+            .map_err(Into::into)
+    }
+    /// Records governed structured content.
+    pub fn record_output_messages(&self, messages_json: String) -> Result<(), XybridError> {
+        self.inner
+            .record_output_messages(messages_json)
+            .map_err(Into::into)
+    }
+    /// Records governed structured content.
+    pub fn record_tool_definitions(&self, definitions_json: String) -> Result<(), XybridError> {
+        self.inner
+            .record_tool_definitions(definitions_json)
+            .map_err(Into::into)
+    }
+    /// Records a chunk arrival; this does not estimate first-token time.
+    pub fn record_chunk(&self) {
+        self.inner.record_chunk();
+    }
+    /// Records a runtime-measured first token (epoch milliseconds, or now).
+    pub fn record_first_token(&self, at_epoch_ms: Option<u64>) -> Result<(), XybridError> {
+        self.inner
+            .record_first_token(at_epoch_ms)
+            .map_err(Into::into)
+    }
+    /// Replaces the cumulative usage snapshot, preserving unknown fields.
+    pub fn record_usage(&self, usage: XybridUsage) {
+        self.inner.record_usage(usage.into());
+    }
+    /// Records measured finish reasons.
+    pub fn record_finish_reasons(&self, reasons: Vec<String>) {
+        self.inner.record_finish_reasons(reasons);
+    }
+    /// Records provider-assigned response identifiers.
+    pub fn record_response(&self, response_id: Option<String>, model: Option<String>) {
+        self.inner.record_response(response_id, model);
+    }
+}
+
+/// Manual modelload operation; closing the final handle cancels unfinished work.
+pub struct XybridModelLoadObservation {
+    inner: std::sync::Arc<facade::ModelLoadObservation>,
+}
+#[export]
+impl XybridModelLoadObservation {
+    /// Starts an operation using the configured SDK session and explicit parent controls.
+    pub fn new(
+        info: XybridModelLoadInfo,
+        options: Option<XybridObservationOptions>,
+    ) -> Result<Self, XybridError> {
+        facade::ModelLoadObservation::start(
+            info.into(),
+            options.map(Into::into).unwrap_or_default(),
+        )
+        .map(|inner| Self { inner })
+        .map_err(Into::into)
+    }
+    /// Context for child operations, including valid unsampled spans.
+    pub fn context(&self) -> Option<XybridObservationContext> {
+        self.inner.context().map(Into::into)
+    }
+    /// Reference to this operation's own span.
+    pub fn observation_ref(&self) -> Option<XybridObservationRef> {
+        self.inner.observation_ref().map(Into::into)
+    }
+    /// Ends successfully. The first terminal call wins.
+    pub fn complete(&self) {
+        self.inner.complete();
+    }
+    /// Ends with a governed error message.
+    pub fn fail(&self, error_type: String, message: Option<String>) {
+        self.inner.fail(error_type, message);
+    }
+    /// Cancels without flushing.
+    pub fn cancel(&self) {
+        self.inner.cancel();
+    }
+    /// Whether any terminal transition has happened.
+    pub fn is_finished(&self) -> bool {
+        self.inner.is_finished()
+    }
+    /// Records the measured cache outcome.
+    pub fn record_cache_hit(&self, hit: bool) {
+        self.inner.record_cache_hit(hit);
     }
 }

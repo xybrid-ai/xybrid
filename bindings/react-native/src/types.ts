@@ -181,6 +181,14 @@ export type ExecutionTarget = 'local' | 'cloud';
 /** What kind of payload a model produces. */
 export type OutputType = 'text' | 'audio' | 'embedding' | 'unknown' | 'decisions';
 
+/** A PCM16 little-endian speech packet. Offsets count samples per channel. */
+export interface TtsAudioChunk {
+  pcmBase64: string;
+  sampleRate: number;
+  channels: number;
+  firstSample: number;
+}
+
 /** Latency of one pipeline stage. */
 export interface StageLatency {
   stageId: string;
@@ -211,18 +219,33 @@ export interface InferenceMetrics {
 /**
  * Trace and span ids (lowercase hex, 32 and 16 characters) of a traced run.
  * Pass it to `Observability.recordFeedback` / `recordEvaluation`.
+ *
+ * The member names are the portable reference shape every JavaScript package
+ * shares (`{ trace_id, span_id }`), so a reference from this SDK can be handed
+ * to `@xybrid/observability` or a server unchanged.
  */
 export interface ObservationRef {
-  traceId: string;
-  spanId: string;
+  trace_id: string;
+  span_id: string;
 }
 
-/** Delivery counters of the observability pipeline; all zero while it is off. */
+/**
+ * Delivery counters of one signal: live while export runs, the final ones after
+ * shutdown until the next init, all zero before any.
+ */
+export interface SignalStats {
+  accepted: number;
+  exported: number;
+  dropped: number;
+  failed: number;
+  pending: number;
+}
+
 export interface ObservabilityStats {
   enabled: boolean;
-  spansExported: number;
-  spansDropped: number;
-  exportFailures: number;
+  traces: SignalStats;
+  logs: SignalStats;
+  metrics: SignalStats;
 }
 
 /** The result of one inference. */
@@ -316,6 +339,8 @@ export interface VoiceInfo {
 
 /** Identity and capabilities of a loaded model. */
 export interface ModelInfo {
+  /** Immutable reference for the load that created this model. */
+  loadObservationRef: ObservationRef | null;
   /** Registry / metadata id — not the native handle. */
   modelId: string;
   version: string;
@@ -375,6 +400,7 @@ export interface StageResult {
   /** Stages of one pipeline can run in different places. */
   executionTarget: ExecutionTarget;
   metrics: InferenceMetrics;
+  observation?: ObservationRef;
 }
 
 /** Result of a pipeline run: the final output plus every stage's own. */
@@ -388,6 +414,7 @@ export interface PipelineResult {
   latencyMs: number;
   /** Every executed stage, in order. */
   stages: StageResult[];
+  observation?: ObservationRef;
 }
 
 /** Static description of a loaded pipeline. */
@@ -399,6 +426,7 @@ export interface PipelineInfo {
 
 /** Chunking options for a live ASR session. */
 export interface StreamingConfig {
+  observation?: ObservationOptions;
   /** Must be 16000 — the ASR backends are fixed there. Default 16000. */
   sampleRate?: number;
   /**
@@ -416,6 +444,8 @@ export interface StreamingConfig {
 
 /** A partial transcript from a live ASR session. */
 export interface PartialResult {
+  /** Most recent actual decoder execution; cached reads retain this reference. */
+  decoderObservation: ObservationRef | null;
   /** Transcript so far. Cumulative — replace the previous partial. */
   text: string;
   /** `true` once this span is committed and will not change. */
@@ -430,3 +460,19 @@ export interface PartialResult {
 export type DecisionContentKind = DecisionContent['kind'];
 export type DecisionQuestionType = DecisionQuestionKind['kind'];
 export type DecisionValueKind = DecisionValue['kind'];
+
+/** W3C parent, suppression and correlation shared by load and ASR APIs. */
+export interface ObservationOptions {
+  traceparent?: string;
+  tracestate?: string;
+  conversationId?: string;
+  suppressTrace?: boolean;
+}
+
+/** Final transcript and the workflow covering the utterance. */
+export interface TranscriptionResult {
+  text: string;
+  durationMs: number;
+  chunksProcessed: number;
+  observation: ObservationRef | null;
+}

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* Observation controls for loading and live ASR; decoder/session, pipeline and
+  streamed-TTS references. Typed manual workflow/tool/inference/load handles
+  support explicit completion, failure and cancellation.
+* Caller-owned device IDs, ordered native redaction rules and explicit provider
+  propagation origins. Generated FRB glue updated for these fields.
 * Added explicit OpenTelemetry export configuration, exporter stats, bounded
   flush/shutdown, and feedback/evaluation APIs through `XybridObservability`.
   `RunOptions.observation` forwards W3C context, conversation IDs and trace
@@ -17,6 +22,24 @@
   Exporter state now reflects shutdown; invalid configurations can be corrected/retried.
   Invalid resource modes/intervals fail before export is enabled or replaced.
   Resource sampling remains independent of export. See README for migration.
+* Breaking: `XybridStreamSession.flush()` returns an `FfiTranscriptionResult`
+  instead of a `String`. Read `.text` for the transcript; the record also
+  carries `durationMs`, `chunksProcessed` and the session's `observation`.
+* Breaking: `FfiTtsStreamEvent.complete` carries an `FfiTtsStreamResult`
+  (status, sample rate, channels, sample and chunk counts, `observation`).
+  Code that constructs the event (mocks, fakes) must pass one. `runTtsStreaming`
+  hands it to the new `onComplete` callback, and fails the stream with a
+  `StateError` after the partial audio when the status is `limited`.
+* Changed: an explicit `traceparent` that is not valid W3C now fails the call
+  (`XybridException`, an error token, or a thrown error for sessions, loaders
+  and manual handles) instead of being ignored.
+* `XybridPipeline.run` accepts `observation:`; pipeline results now carry the
+  workflow reference and each stage's reference in `metrics.stageLatenciesMs`.
+* Fixed: unsubscribing a token stream (`runStreaming`,
+  `runStreamingWithContext`, `runStreamingWithFallback`) that was started
+  without a `CancellationToken` now halts generation at the next token and
+  releases the model write lock, as the docs already said; the run used to
+  continue to the end. Observability records the run as cancelled.
 
 
 ## 0.17.0

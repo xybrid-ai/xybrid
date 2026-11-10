@@ -350,7 +350,7 @@ Xybrid 支持**任意** ONNX、GGUF 或 SafeTensors 模型，只需提供一个 
 
 ```sh
 # 将 xybrid skills 安装到你的项目中
-curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | sh
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | bash
 
 # 从 HuggingFace 模型生成 model_metadata.json
 claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX

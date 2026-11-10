@@ -59,6 +59,32 @@ metrics can still be recorded. Resource and trace sampling are independent.
 Conversation IDs, correlation IDs and prompt references are caller-supplied
 metadata; they are not trace IDs and should not contain secrets.
 
+### Async entry points without options
+
+`XybridModel::run_async`, `XybridModel::run_stream` and the facade's async
+`run_async` (and `warmup_async`) take no `RunOptions`, so they have no
+explicit parent, session, conversation id or trace suppression of their own.
+They take the caller's parent only from the ambient OpenTelemetry context:
+`run_async` where its future first runs, `run_stream` on the thread that calls
+it (wherever the stream is then drained). A context attached with `Context::attach` on the
+caller is not seen by a future `tokio::spawn` moves to another worker; wrap the
+future instead:
+
+```rust
+use opentelemetry::context::FutureExt as _;
+
+let run = async move { model.run_async(&input, None).await };
+tokio::spawn(run.with_context(parent_cx)); // the run is parent_cx's child
+```
+
+Polling the future on the thread that holds the attached context (for example
+`block_on` there) works too. For explicit controls use the options forms on a
+blocking worker (`run_with_options`, `run_streaming_with_options`);
+`run_tts_streaming_async` takes `RunOptions`, and `ModelLoader::load_async`
+uses the loader's `.observation(...)`, so an explicit parent there wins
+wherever the future runs. An options-carrying async form for LLM runs is a
+later API addition under the run-surface rule.
+
 Direct `xybrid_core` execution does not automatically acquire an SDK observer.
 A caller that bypasses the SDK must supply observation/scoped recorder plumbing;
 the CLI's direct-core adapter does this. Do not restore a global legacy event
@@ -71,10 +97,18 @@ trace/span reference needed by `record_feedback` and `record_evaluation`. It can
 be absent when tracing is disabled or suppressed. Those reporting APIs require
 a configured logs destination; the Xybrid preset configures only traces.
 
-Pipeline calls and TTS audio/chunk summaries are observed, but their public
-result shapes do not yet expose the same inference observation reference.
-Applications needing a durable reference for surrounding work can explicitly
-start an observed workflow with the portable API and retain its reference.
+Pipeline results expose the workflow reference; each stage result exposes its
+logical inference reference. SDK streamed-TTS results wrap the core summary and
+its inference reference. Models expose an immutable `load_observation_ref()`;
+reloads and lazy materialization create separate load observations under the
+operation that triggered them. ASR partials carry the actual decoder execution
+reference, while terminal transcription results carry the session workflow
+reference. Returning a cached partial does not count another inference.
+
+References use `{trace_id, span_id}`. A valid unsampled operation retains its
+reference; explicit trace suppression has none. References identify observations
+and do not prove that export succeeded. See the
+[binding and execution matrix](observability-coverage.md) for surface details.
 
 ## Local capture is independent
 

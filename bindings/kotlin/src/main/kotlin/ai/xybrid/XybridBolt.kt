@@ -927,6 +927,7 @@ private object Native {
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel(`receiver`: Long): Unit
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled(`receiver`: Long): Boolean
     @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_model(handle: Long): Unit
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_model_load(source: java.nio.ByteBuffer, __boltffi_source_len: Int, observation: java.nio.ByteBuffer, __boltffi_observation_len: Int): Long
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_model_from_registry(id: java.nio.ByteBuffer, __boltffi_id_len: Int): Long
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_model_from_registry_speculative(id: java.nio.ByteBuffer, __boltffi_id_len: Int): Long
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_model_from_directory(path: java.nio.ByteBuffer, __boltffi_path_len: Int): Long
@@ -934,6 +935,7 @@ private object Native {
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface(repo: java.nio.ByteBuffer, __boltffi_repo_len: Int): Long
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision(repo: java.nio.ByteBuffer, __boltffi_repo_len: Int, revision: java.nio.ByteBuffer, __boltffi_revision_len: Int): Long
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file(path: java.nio.ByteBuffer, __boltffi_path_len: Int): Long
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_ref(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_model_id(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_version(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_output_type(`receiver`: Long): Int
@@ -988,6 +990,10 @@ private object Native {
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_resource_attribute(`receiver`: Long, key: java.nio.ByteBuffer, __boltffi_key_len: Int, value: java.nio.ByteBuffer, __boltffi_value_len: Int): Unit
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_metadata_only(`receiver`: Long, metadata_only: Boolean): Unit
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_max_content_bytes(`receiver`: Long, bytes: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_allow_provider_context(`receiver`: Long, origin: java.nio.ByteBuffer, __boltffi_origin_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_device_id(`receiver`: Long, id: java.nio.ByteBuffer, __boltffi_id_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_add_literal_redaction(`receiver`: Long, find: java.nio.ByteBuffer, __boltffi_find_len: Int, replacement: java.nio.ByteBuffer, __boltffi_replacement_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_omit_content_attribute(`receiver`: Long, key: java.nio.ByteBuffer, __boltffi_key_len: Int): Unit
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_live_trace_interval_ms(`receiver`: Long, ms: Int): Unit
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_observability_config_init(`receiver`: Long): Unit
     @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_bundle(handle: Long): Unit
@@ -1002,6 +1008,49 @@ private object Native {
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_bundle_manifest_json(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_bundle_metadata_json(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_bundle_extract(`receiver`: Long, output_dir: java.nio.ByteBuffer, __boltffi_output_dir_len: Int): Unit
+    @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_workflow_observation(handle: Long): Unit
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_workflow_observation_new(name: java.nio.ByteBuffer, __boltffi_name_len: Int, options: java.nio.ByteBuffer, __boltffi_options_len: Int): Long
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_context(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_observation_ref(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_complete(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_fail(`receiver`: Long, error_type: java.nio.ByteBuffer, __boltffi_error_type_len: Int, message: java.nio.ByteBuffer, __boltffi_message_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_cancel(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_is_finished(`receiver`: Long): Boolean
+    @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_tool_observation(handle: Long): Unit
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_tool_observation_new(call: java.nio.ByteBuffer, __boltffi_call_len: Int, options: java.nio.ByteBuffer, __boltffi_options_len: Int): Long
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_tool_observation_context(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_tool_observation_observation_ref(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_tool_observation_complete(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_tool_observation_fail(`receiver`: Long, error_type: java.nio.ByteBuffer, __boltffi_error_type_len: Int, message: java.nio.ByteBuffer, __boltffi_message_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_tool_observation_cancel(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_tool_observation_is_finished(`receiver`: Long): Boolean
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_tool_observation_record_result(`receiver`: Long, result_json: java.nio.ByteBuffer, __boltffi_result_json_len: Int): Unit
+    @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_inference_observation(handle: Long): Unit
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_inference_observation_new(request: java.nio.ByteBuffer, __boltffi_request_len: Int, options: java.nio.ByteBuffer, __boltffi_options_len: Int): Long
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_inference_observation_context(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_inference_observation_observation_ref(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_inference_observation_complete(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_inference_observation_fail(`receiver`: Long, error_type: java.nio.ByteBuffer, __boltffi_error_type_len: Int, message: java.nio.ByteBuffer, __boltffi_message_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_inference_observation_cancel(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_inference_observation_is_finished(`receiver`: Long): Boolean
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_system_instructions(`receiver`: Long, parts_json: java.nio.ByteBuffer, __boltffi_parts_json_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_input_messages(`receiver`: Long, messages_json: java.nio.ByteBuffer, __boltffi_messages_json_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_output_messages(`receiver`: Long, messages_json: java.nio.ByteBuffer, __boltffi_messages_json_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_tool_definitions(`receiver`: Long, definitions_json: java.nio.ByteBuffer, __boltffi_definitions_json_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_chunk(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_first_token(`receiver`: Long, at_epoch_ms: java.nio.ByteBuffer, __boltffi_at_epoch_ms_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_usage(`receiver`: Long, usage: java.nio.ByteBuffer, __boltffi_usage_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_finish_reasons(`receiver`: Long, reasons: java.nio.ByteBuffer, __boltffi_reasons_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_response(`receiver`: Long, response_id: java.nio.ByteBuffer, __boltffi_response_id_len: Int, model: java.nio.ByteBuffer, __boltffi_model_len: Int): Unit
+    @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_model_load_observation(handle: Long): Unit
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_model_load_observation_new(info: java.nio.ByteBuffer, __boltffi_info_len: Int, options: java.nio.ByteBuffer, __boltffi_options_len: Int): Long
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_context(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_observation_ref(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_complete(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_fail(`receiver`: Long, error_type: java.nio.ByteBuffer, __boltffi_error_type_len: Int, message: java.nio.ByteBuffer, __boltffi_message_len: Int): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_cancel(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_is_finished(`receiver`: Long): Boolean
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_record_cache_hit(`receiver`: Long, hit: Boolean): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_decision_request_envelope(request: java.nio.ByteBuffer, __boltffi_request_len: Int): ByteArray?
     @JvmStatic external fun boltffi_function_xybrid_bolt_decision_request_json_envelope(json: java.nio.ByteBuffer, __boltffi_json_len: Int): ByteArray?
     @JvmStatic external fun boltffi_function_xybrid_bolt_tool_results_envelope(user_text: java.nio.ByteBuffer, __boltffi_user_text_len: Int, prior_assistant_text: java.nio.ByteBuffer, __boltffi_prior_assistant_text_len: Int, results: java.nio.ByteBuffer, __boltffi_results_len: Int): ByteArray?
@@ -2089,10 +2138,14 @@ data class XybridStageResult(
      * Generation figures (TTFT, tokens per second) when this stage is a
      * language model; `total_ms` is the stage latency.
      */
-    val metrics: XybridInferenceMetrics
+    val metrics: XybridInferenceMetrics,
+    /**
+     * The logical inference performed by this stage, when observed.
+     */
+    val observation: XybridObservationRef? = null
 ) {
     internal fun wireSize(): Int {
-        return 4 + Utf8Codec.maxBytes(this.stageId) + this.envelope.wireSize() + 4 + 4 + 4 + this.metrics.wireSize()
+        return 4 + Utf8Codec.maxBytes(this.stageId) + this.envelope.wireSize() + 4 + 4 + 4 + this.metrics.wireSize() + 1 + (this.observation?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0)
     }
 
     internal fun writeTo(writer: WireWriter) {
@@ -2102,6 +2155,7 @@ data class XybridStageResult(
         writer.writeU32(this.latencyMs)
         writer.writeI32(this.executionTarget.value)
         this.metrics.writeTo(writer)
+        writer.writeOptionalValue(this.observation, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
     }
 
     internal fun toByteArray(): ByteArray {
@@ -2123,7 +2177,8 @@ data class XybridStageResult(
                 XybridOutputType.fromValue(reader.readI32()),
                 reader.readU32(),
                 XybridExecutionTarget.fromValue(reader.readI32()),
-                XybridInferenceMetrics.fromReader(reader)
+                XybridInferenceMetrics.fromReader(reader),
+                reader.readOptionalValue({ reader -> XybridObservationRef.fromReader(reader) })
             )
         }
 
@@ -2154,10 +2209,14 @@ data class XybridPipelineResult(
     /**
      * Every executed stage, in order.
      */
-    val stages: List<XybridStageResult>
+    val stages: List<XybridStageResult>,
+    /**
+     * The workflow enclosing this execution, when observed.
+     */
+    val observation: XybridObservationRef? = null
 ) {
     internal fun wireSize(): Int {
-        return this.envelope.wireSize() + 4 + 4 + 4 + this.stages.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() }
+        return this.envelope.wireSize() + 4 + 4 + 4 + this.stages.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() } + 1 + (this.observation?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0)
     }
 
     internal fun writeTo(writer: WireWriter) {
@@ -2165,6 +2224,7 @@ data class XybridPipelineResult(
         writer.writeI32(this.outputType.value)
         writer.writeU32(this.latencyMs)
         writer.writeSequence(this.stages, this.stages.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+        writer.writeOptionalValue(this.observation, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
     }
 
     internal fun toByteArray(): ByteArray {
@@ -2184,7 +2244,8 @@ data class XybridPipelineResult(
                 XybridEnvelope.fromReader(reader),
                 XybridOutputType.fromValue(reader.readI32()),
                 reader.readU32(),
-                reader.readSequence({ reader -> XybridStageResult.fromReader(reader) })
+                reader.readSequence({ reader -> XybridStageResult.fromReader(reader) }),
+                reader.readOptionalValue({ reader -> XybridObservationRef.fromReader(reader) })
             )
         }
 
@@ -2546,10 +2607,11 @@ data class XybridStreamingConfig(
     /**
      * Whisper encoder context in mel frames; null uses the model default.
      */
-    val audioCtx: UInt?
+    val audioCtx: UInt?,
+    val observation: XybridObservationOptions? = null
 ) {
     internal fun wireSize(): Int {
-        return 4 + this.vad.wireSize() + 4 + 1 + (this.language?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.audioCtx?.let { __boltffi_value_0 -> 4 } ?: 0)
+        return 4 + this.vad.wireSize() + 4 + 1 + (this.language?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.audioCtx?.let { __boltffi_value_0 -> 4 } ?: 0) + 1 + (this.observation?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0)
     }
 
     internal fun writeTo(writer: WireWriter) {
@@ -2558,6 +2620,7 @@ data class XybridStreamingConfig(
         writer.writeF32(this.vadThreshold)
         writer.writeOptionalValue(this.language, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
         writer.writeOptionalValue(this.audioCtx, { writer, __boltffi_value_0 -> writer.writeU32(__boltffi_value_0) })
+        writer.writeOptionalValue(this.observation, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
     }
 
     internal fun toByteArray(): ByteArray {
@@ -2578,11 +2641,61 @@ data class XybridStreamingConfig(
                 XybridVadMode.fromReader(reader),
                 reader.readF32(),
                 reader.readOptionalValue({ reader -> reader.readString() }),
-                reader.readOptionalValue({ reader -> reader.readU32() })
+                reader.readOptionalValue({ reader -> reader.readU32() }),
+                reader.readOptionalValue({ reader -> XybridObservationOptions.fromReader(reader) })
             )
         }
 
         internal fun fromByteArray(bytes: ByteArray): XybridStreamingConfig {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * W3C parent, suppression and conversation controls shared by execution APIs.
+ */
+data class XybridObservationOptions(
+    val traceparent: String?,
+    val tracestate: String?,
+    val conversationId: String?,
+    val suppressTrace: Boolean
+) {
+    internal fun wireSize(): Int {
+        return 1 + (this.traceparent?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.tracestate?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.conversationId?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeOptionalValue(this.traceparent, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.tracestate, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.conversationId, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeBool(this.suppressTrace)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridObservationOptions {
+            return XybridObservationOptions(
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readBool()
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridObservationOptions {
             val reader = WireReader(bytes)
             return fromReader(reader)
         }
@@ -2610,10 +2723,11 @@ data class XybridPartialResult(
     /**
      * Audio covered so far, in milliseconds.
      */
-    val audioDurationMs: ULong
+    val audioDurationMs: ULong,
+    val decoderObservation: XybridObservationRef? = null
 ) {
     internal fun wireSize(): Int {
-        return 4 + Utf8Codec.maxBytes(this.text) + 1 + 8 + 8
+        return 4 + Utf8Codec.maxBytes(this.text) + 1 + 8 + 8 + 1 + (this.decoderObservation?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0)
     }
 
     internal fun writeTo(writer: WireWriter) {
@@ -2621,6 +2735,7 @@ data class XybridPartialResult(
         writer.writeBool(this.isStable)
         writer.writeU64(this.chunkSequence)
         writer.writeU64(this.audioDurationMs)
+        writer.writeOptionalValue(this.decoderObservation, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
     }
 
     internal fun toByteArray(): ByteArray {
@@ -2640,7 +2755,8 @@ data class XybridPartialResult(
                 reader.readString(),
                 reader.readBool(),
                 reader.readU64(),
-                reader.readU64()
+                reader.readU64(),
+                reader.readOptionalValue({ reader -> XybridObservationRef.fromReader(reader) })
             )
         }
 
@@ -2653,23 +2769,150 @@ data class XybridPartialResult(
 
 
 /**
+ * Final transcript and its ASR session workflow.
+ */
+data class XybridTranscriptionResult(
+    val text: String,
+    val durationMs: ULong,
+    val chunksProcessed: ULong,
+    val observation: XybridObservationRef? = null
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.text) + 8 + 8 + 1 + (this.observation?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.text)
+        writer.writeU64(this.durationMs)
+        writer.writeU64(this.chunksProcessed)
+        writer.writeOptionalValue(this.observation, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridTranscriptionResult {
+            return XybridTranscriptionResult(
+                reader.readString(),
+                reader.readU64(),
+                reader.readU64(),
+                reader.readOptionalValue({ reader -> XybridObservationRef.fromReader(reader) })
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridTranscriptionResult {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Delivery counts for a single signal. Pending includes queued and in-flight items.
+ */
+data class XybridSignalStats(
+    val accepted: ULong,
+    val exported: ULong,
+    val dropped: ULong,
+    val failed: ULong,
+    val pending: ULong
+) {
+    internal fun wireSize(): Int {
+        return 40
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeU64(accepted)
+        writer.writeU64(exported)
+        writer.writeU64(dropped)
+        writer.writeU64(failed)
+        writer.writeU64(pending)
+    }
+    internal fun toByteArray(): ByteArray {
+        val buffer = java.nio.ByteBuffer
+            .allocate(STRUCT_SIZE)
+            .order(java.nio.ByteOrder.nativeOrder())
+        writeTo(buffer, 0)
+        return buffer.array()
+    }
+
+    internal fun toDirectBuffer(): java.nio.ByteBuffer {
+        val buffer = java.nio.ByteBuffer
+            .allocateDirect(STRUCT_SIZE)
+            .order(java.nio.ByteOrder.nativeOrder())
+        writeTo(buffer, 0)
+        return buffer
+    }
+
+    internal fun writeTo(buffer: java.nio.ByteBuffer, offset: Int) {
+        buffer.putLong(offset, accepted.toLong())
+        buffer.putLong(offset + 8, exported.toLong())
+        buffer.putLong(offset + 16, dropped.toLong())
+        buffer.putLong(offset + 24, failed.toLong())
+        buffer.putLong(offset + 32, pending.toLong())
+    }
+
+    companion object {
+        internal const val STRUCT_SIZE: Int = 40
+        internal fun fromReader(reader: WireReader): XybridSignalStats {
+            return XybridSignalStats(
+                reader.readU64(),
+                reader.readU64(),
+                reader.readU64(),
+                reader.readU64(),
+                reader.readU64()
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridSignalStats {
+            require(bytes.size == STRUCT_SIZE)
+            val buffer = java.nio.ByteBuffer
+                .wrap(bytes)
+                .order(java.nio.ByteOrder.nativeOrder())
+            return fromBuffer(buffer, 0)
+        }
+
+        internal fun fromBuffer(buffer: java.nio.ByteBuffer, offset: Int): XybridSignalStats {
+            return XybridSignalStats(
+                buffer.getLong(offset).toULong(),
+                buffer.getLong(offset + 8).toULong(),
+                buffer.getLong(offset + 16).toULong(),
+                buffer.getLong(offset + 24).toULong(),
+                buffer.getLong(offset + 32).toULong()
+            )
+        }
+    }
+}
+
+
+/**
  * Delivery counters of the observability pipeline.
  */
 data class XybridObservabilityStats(
     val enabled: Boolean,
-    val spansExported: ULong,
-    val spansDropped: ULong,
-    val exportFailures: ULong
+    val traces: XybridSignalStats,
+    val logs: XybridSignalStats,
+    val metrics: XybridSignalStats
 ) {
     internal fun wireSize(): Int {
-        return 1 + 8 + 8 + 8
+        return 1 + this.traces.wireSize() + this.logs.wireSize() + this.metrics.wireSize()
     }
 
     internal fun writeTo(writer: WireWriter) {
         writer.writeBool(this.enabled)
-        writer.writeU64(this.spansExported)
-        writer.writeU64(this.spansDropped)
-        writer.writeU64(this.exportFailures)
+        this.traces.writeTo(writer)
+        this.logs.writeTo(writer)
+        this.metrics.writeTo(writer)
     }
 
     internal fun toByteArray(): ByteArray {
@@ -2687,13 +2930,285 @@ data class XybridObservabilityStats(
         internal fun fromReader(reader: WireReader): XybridObservabilityStats {
             return XybridObservabilityStats(
                 reader.readBool(),
-                reader.readU64(),
-                reader.readU64(),
-                reader.readU64()
+                XybridSignalStats.fromReader(reader),
+                XybridSignalStats.fromReader(reader),
+                XybridSignalStats.fromReader(reader)
             )
         }
 
         internal fun fromByteArray(bytes: ByteArray): XybridObservabilityStats {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Typed metadata for manual observations.
+ */
+data class XybridObservationContext(
+    val traceparent: String,
+    val tracestate: String?
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.traceparent) + 1 + (this.tracestate?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.traceparent)
+        writer.writeOptionalValue(this.tracestate, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridObservationContext {
+            return XybridObservationContext(
+                reader.readString(),
+                reader.readOptionalValue({ reader -> reader.readString() })
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridObservationContext {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Typed metadata for manual observations.
+ */
+data class XybridInferenceRequest(
+    val operation: String,
+    val provider: String,
+    val model: String?,
+    val location: XybridExecutionLocation,
+    val runtime: String?,
+    val task: String?,
+    val stream: Boolean,
+    val maxTokens: Long?,
+    val temperature: Double?,
+    val topP: Double?,
+    val serverAddress: String?,
+    val serverPort: Long?
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.operation) + 4 + Utf8Codec.maxBytes(this.provider) + 1 + (this.model?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 4 + 1 + (this.runtime?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.task?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + 1 + (this.maxTokens?.let { __boltffi_value_0 -> 8 } ?: 0) + 1 + (this.temperature?.let { __boltffi_value_0 -> 8 } ?: 0) + 1 + (this.topP?.let { __boltffi_value_0 -> 8 } ?: 0) + 1 + (this.serverAddress?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.serverPort?.let { __boltffi_value_0 -> 8 } ?: 0)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.operation)
+        writer.writeString(this.provider)
+        writer.writeOptionalValue(this.model, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeI32(this.location.value)
+        writer.writeOptionalValue(this.runtime, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.task, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeBool(this.stream)
+        writer.writeOptionalValue(this.maxTokens, { writer, __boltffi_value_0 -> writer.writeI64(__boltffi_value_0) })
+        writer.writeOptionalValue(this.temperature, { writer, __boltffi_value_0 -> writer.writeF64(__boltffi_value_0) })
+        writer.writeOptionalValue(this.topP, { writer, __boltffi_value_0 -> writer.writeF64(__boltffi_value_0) })
+        writer.writeOptionalValue(this.serverAddress, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.serverPort, { writer, __boltffi_value_0 -> writer.writeI64(__boltffi_value_0) })
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridInferenceRequest {
+            return XybridInferenceRequest(
+                reader.readString(),
+                reader.readString(),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                XybridExecutionLocation.fromValue(reader.readI32()),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readBool(),
+                reader.readOptionalValue({ reader -> reader.readI64() }),
+                reader.readOptionalValue({ reader -> reader.readF64() }),
+                reader.readOptionalValue({ reader -> reader.readF64() }),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readI64() })
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridInferenceRequest {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Typed metadata for manual observations.
+ */
+data class XybridToolCallInfo(
+    val name: String,
+    val callId: String?,
+    val toolType: String?,
+    val description: String?,
+    val argumentsJson: String?
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.name) + 1 + (this.callId?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.toolType?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.description?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.argumentsJson?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.name)
+        writer.writeOptionalValue(this.callId, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.toolType, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.description, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.argumentsJson, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridToolCallInfo {
+            return XybridToolCallInfo(
+                reader.readString(),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readString() })
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridToolCallInfo {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Typed metadata for manual observations.
+ */
+data class XybridUsage(
+    val inputTokens: ULong?,
+    val outputTokens: ULong?,
+    val cacheReadInputTokens: ULong?,
+    val cacheWriteInputTokens: ULong?,
+    val reasoningOutputTokens: ULong?
+) {
+    internal fun wireSize(): Int {
+        return 1 + (this.inputTokens?.let { __boltffi_value_0 -> 8 } ?: 0) + 1 + (this.outputTokens?.let { __boltffi_value_0 -> 8 } ?: 0) + 1 + (this.cacheReadInputTokens?.let { __boltffi_value_0 -> 8 } ?: 0) + 1 + (this.cacheWriteInputTokens?.let { __boltffi_value_0 -> 8 } ?: 0) + 1 + (this.reasoningOutputTokens?.let { __boltffi_value_0 -> 8 } ?: 0)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeOptionalValue(this.inputTokens, { writer, __boltffi_value_0 -> writer.writeU64(__boltffi_value_0) })
+        writer.writeOptionalValue(this.outputTokens, { writer, __boltffi_value_0 -> writer.writeU64(__boltffi_value_0) })
+        writer.writeOptionalValue(this.cacheReadInputTokens, { writer, __boltffi_value_0 -> writer.writeU64(__boltffi_value_0) })
+        writer.writeOptionalValue(this.cacheWriteInputTokens, { writer, __boltffi_value_0 -> writer.writeU64(__boltffi_value_0) })
+        writer.writeOptionalValue(this.reasoningOutputTokens, { writer, __boltffi_value_0 -> writer.writeU64(__boltffi_value_0) })
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridUsage {
+            return XybridUsage(
+                reader.readOptionalValue({ reader -> reader.readU64() }),
+                reader.readOptionalValue({ reader -> reader.readU64() }),
+                reader.readOptionalValue({ reader -> reader.readU64() }),
+                reader.readOptionalValue({ reader -> reader.readU64() }),
+                reader.readOptionalValue({ reader -> reader.readU64() })
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridUsage {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Typed metadata for manual observations.
+ */
+data class XybridModelLoadInfo(
+    val model: String,
+    val provider: String?,
+    val runtime: String?,
+    val format: String?,
+    val sizeBytes: ULong?
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.model) + 1 + (this.provider?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.runtime?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.format?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.sizeBytes?.let { __boltffi_value_0 -> 8 } ?: 0)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.model)
+        writer.writeOptionalValue(this.provider, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.runtime, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.format, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.sizeBytes, { writer, __boltffi_value_0 -> writer.writeU64(__boltffi_value_0) })
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridModelLoadInfo {
+            return XybridModelLoadInfo(
+                reader.readString(),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readU64() })
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridModelLoadInfo {
             val reader = WireReader(bytes)
             return fromReader(reader)
         }
@@ -3008,6 +3523,21 @@ sealed class XybridError : Exception() {
             writer.writeString(this.message)
         }
     }
+    /**
+     * Telemetry delivery is incomplete or unknown; do not rerun inference.
+     */
+    data class TelemetryDelivery(
+        override val message: String
+    ) : XybridError() {
+        internal override fun wireSize(): Int {
+            return 4 + 4 + Utf8Codec.maxBytes(this.message)
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(23.toUInt())
+            writer.writeString(this.message)
+        }
+    }
 
     companion object {
         internal fun fromReader(reader: WireReader): XybridError {
@@ -3036,6 +3566,7 @@ sealed class XybridError : Exception() {
                 20.toUInt() -> UnsupportedBackendCapability(reader.readString())
                 21.toUInt() -> InvalidImage(reader.readString())
                 22.toUInt() -> Cancelled(reader.readString())
+                23.toUInt() -> TelemetryDelivery(reader.readString())
                 else -> throw IllegalArgumentException("unknown XybridError tag: $tag")
             }
         }
@@ -3608,6 +4139,123 @@ sealed class XybridVadMode {
     }
 }
 
+
+/**
+ * Model source for the options-enabled load surface.
+ */
+sealed class XybridModelSource {
+    internal abstract fun wireSize(): Int
+
+    internal abstract fun writeTo(writer: WireWriter)
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+
+    data class Registry(
+        val id: String,
+        val speculative: Boolean
+    ) : XybridModelSource() {
+        internal override fun wireSize(): Int {
+            return 4 + 4 + Utf8Codec.maxBytes(this.id) + 1
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(0.toUInt())
+            writer.writeString(this.id)
+            writer.writeBool(this.speculative)
+        }
+    }
+    data class Directory(
+        val path: String
+    ) : XybridModelSource() {
+        internal override fun wireSize(): Int {
+            return 4 + 4 + Utf8Codec.maxBytes(this.path)
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(1.toUInt())
+            writer.writeString(this.path)
+        }
+    }
+    data class Bundle(
+        val path: String
+    ) : XybridModelSource() {
+        internal override fun wireSize(): Int {
+            return 4 + 4 + Utf8Codec.maxBytes(this.path)
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(2.toUInt())
+            writer.writeString(this.path)
+        }
+    }
+    data class HuggingFace(
+        val repo: String,
+        val revision: String?
+    ) : XybridModelSource() {
+        internal override fun wireSize(): Int {
+            return 4 + 4 + Utf8Codec.maxBytes(this.repo) + 1 + (this.revision?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0)
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(3.toUInt())
+            writer.writeString(this.repo)
+            writer.writeOptionalValue(this.revision, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        }
+    }
+    data class ModelFile(
+        val path: String
+    ) : XybridModelSource() {
+        internal override fun wireSize(): Int {
+            return 4 + 4 + Utf8Codec.maxBytes(this.path)
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(4.toUInt())
+            writer.writeString(this.path)
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridModelSource {
+            val tag = reader.readU32()
+            return when (tag) {
+                0.toUInt() -> Registry(reader.readString(), reader.readBool())
+                1.toUInt() -> Directory(reader.readString())
+                2.toUInt() -> Bundle(reader.readString())
+                3.toUInt() -> HuggingFace(reader.readString(), reader.readOptionalValue({ reader -> reader.readString() }))
+                4.toUInt() -> ModelFile(reader.readString())
+                else -> throw IllegalArgumentException("unknown XybridModelSource tag: $tag")
+            }
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridModelSource {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+enum class XybridExecutionLocation(val value: Int) {
+    LOCAL(0),
+    REMOTE(1);
+
+    companion object {
+        fun fromValue(value: Int): XybridExecutionLocation =
+            entries.first { it.value == value }
+    }
+}
+
 class XybridDownload internal constructor(internal val handle: Long) : AutoCloseable {
     private val __boltffi_closed = java.util.concurrent.atomic.AtomicBoolean(false)
 
@@ -3765,10 +4413,10 @@ class XybridStreamingSession internal constructor(internal val handle: Long) : A
      * closes. Blocks until the last chunk is transcribed, so call it off the
      * UI thread.
      */
-    fun flush(): String {
+    fun flush(): XybridTranscriptionResult {
         val __boltffi_result = try { Native.boltffi_method_class_xybrid_bolt_xybrid_streaming_session_flush(this.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
-        return __boltffi_reader.readString()
+        return XybridTranscriptionResult.fromReader(__boltffi_reader)
     }
 
     /**
@@ -3856,6 +4504,11 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
     }
 
     /**
+     * Load any supported source with explicit observation controls.
+     */
+    constructor(source: XybridModelSource, observation: XybridObservationOptions?) : this(load(source, observation).handle)
+
+    /**
      * Load from the xybrid registry. Recommended path.
      */
     constructor(id: String) : this(fromRegistry(id).handle)
@@ -3866,6 +4519,23 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
     constructor(repo: String, revision: String) : this(fromHuggingfaceWithRevision(repo, revision).handle)
 
     companion object {
+        /**
+         * Load any supported source with explicit observation controls.
+         */
+        fun load(source: XybridModelSource, observation: XybridObservationOptions?): XybridModel {
+            val __boltffi_source_wire = WireWriterPool.acquire(source.wireSize())
+            val __boltffi_source_writer = __boltffi_source_wire.writer
+            source.writeTo(__boltffi_source_writer)
+            val __boltffi_observation_wire = WireWriterPool.acquire(1 + (observation?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0))
+            val __boltffi_observation_writer = __boltffi_observation_wire.writer
+            __boltffi_observation_writer.writeOptionalValue(observation, { __boltffi_observation_writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(__boltffi_observation_writer) })
+            try {
+                return XybridModel(try { Native.boltffi_init_class_xybrid_bolt_xybrid_model_load(__boltffi_source_wire.directBuffer(), __boltffi_source_wire.size(), __boltffi_observation_wire.directBuffer(), __boltffi_observation_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } })
+            } finally {
+                __boltffi_source_wire.close()
+                __boltffi_observation_wire.close()
+            }
+        }
         /**
          * Load from the xybrid registry. Recommended path.
          */
@@ -3970,6 +4640,15 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
                 __boltffi_path_wire.close()
             }
         }
+    }
+
+    /**
+     * The immutable observation of the load that created this model.
+     */
+    fun loadObservationRef(): XybridObservationRef? {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_ref(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readOptionalValue({ __boltffi_reader -> XybridObservationRef.fromReader(__boltffi_reader) })
     }
 
     fun modelId(): String {
@@ -4158,6 +4837,10 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
 
     /**
      * Forget a streaming session.
+     *
+     * Closing a session before its terminal event cancels its run: the run
+     * stops at its next token and is recorded as a user cancellation
+     * (`error.type` `cancelled`), not as an error.
      */
     fun streamClose(streamId: ULong) {
         Native.boltffi_method_class_xybrid_bolt_xybrid_model_stream_close(this.boltffiHandle(), streamId.toLong())
@@ -4288,7 +4971,7 @@ class XybridPipeline internal constructor(internal val handle: Long) : AutoClose
      * Execute every stage, downloading any missing models first, and return
      * each stage's output alongside the final one.
      *
-     * Of `options`, only `correlation_id` applies to a pipeline run. Setting
+     * Observation controls and `correlation_id` apply to a pipeline run. Setting
      * `generation_config` or `abort_on` fails with `ConfigError` rather than
      * being ignored; per-stage generation settings belong in the YAML.
      */
@@ -4590,10 +5273,78 @@ class XybridObservabilityConfig internal constructor(internal val handle: Long) 
     }
 
     /**
-     * Maximum bytes per captured content attribute.
+     * Maximum bytes per captured content attribute, clamped to at most
+     * 208 KiB so that a span's content leaves 64 KiB of the 480 KiB export
+     * request for its other data.
      */
     fun setMaxContentBytes(bytes: UInt) {
         Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_max_content_bytes(this.boltffiHandle(), bytes.toInt())
+    }
+
+    /**
+     * Allows context propagation to one exact third-party HTTP(S) origin.
+     */
+    fun allowProviderContext(origin: String) {
+        val __boltffi_origin_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(origin))
+        val __boltffi_origin_writer = __boltffi_origin_wire.writer
+        __boltffi_origin_writer.writeString(origin)
+        try {
+            try { Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_allow_provider_context(this.boltffiHandle(), __boltffi_origin_wire.directBuffer(), __boltffi_origin_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+        } finally {
+            __boltffi_origin_wire.close()
+        }
+    }
+
+    /**
+     * Sets a caller-owned device identifier.
+     */
+    fun setDeviceId(id: String) {
+        val __boltffi_id_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(id))
+        val __boltffi_id_writer = __boltffi_id_wire.writer
+        __boltffi_id_writer.writeString(id)
+        try {
+            Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_device_id(this.boltffiHandle(), __boltffi_id_wire.directBuffer(), __boltffi_id_wire.size())
+        } finally {
+            __boltffi_id_wire.close()
+        }
+    }
+
+    /**
+     * Appends an ordered literal replacement of content string values.
+     *
+     * # Errors
+     * For an empty search string.
+     */
+    fun addLiteralRedaction(find: String, replacement: String) {
+        val __boltffi_find_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(find))
+        val __boltffi_find_writer = __boltffi_find_wire.writer
+        __boltffi_find_writer.writeString(find)
+        val __boltffi_replacement_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(replacement))
+        val __boltffi_replacement_writer = __boltffi_replacement_wire.writer
+        __boltffi_replacement_writer.writeString(replacement)
+        try {
+            try { Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_add_literal_redaction(this.boltffiHandle(), __boltffi_find_wire.directBuffer(), __boltffi_find_wire.size(), __boltffi_replacement_wire.directBuffer(), __boltffi_replacement_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+        } finally {
+            __boltffi_find_wire.close()
+            __boltffi_replacement_wire.close()
+        }
+    }
+
+    /**
+     * Omits an exact governed content attribute key.
+     *
+     * # Errors
+     * For an empty key.
+     */
+    fun omitContentAttribute(key: String) {
+        val __boltffi_key_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(key))
+        val __boltffi_key_writer = __boltffi_key_wire.writer
+        __boltffi_key_writer.writeString(key)
+        try {
+            try { Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_omit_content_attribute(this.boltffiHandle(), __boltffi_key_wire.directBuffer(), __boltffi_key_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+        } finally {
+            __boltffi_key_wire.close()
+        }
     }
 
     /**
@@ -4743,6 +5494,538 @@ class XybridBundle internal constructor(internal val handle: Long) : AutoCloseab
         } finally {
             __boltffi_outputDir_wire.close()
         }
+    }
+}
+
+class XybridWorkflowObservation internal constructor(internal val handle: Long) : AutoCloseable {
+    private val __boltffi_closed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    override fun close() {
+        if (__boltffi_closed.compareAndSet(false, true)) {
+            Native.boltffi_release_class_xybrid_bolt_xybrid_workflow_observation(handle)
+        }
+    }
+
+    internal fun boltffiHandle(): Long {
+        check(!__boltffi_closed.get()) { "XybridWorkflowObservation is closed" }
+        return handle
+    }
+
+    /**
+     * Starts an operation using the configured SDK session and explicit parent controls.
+     */
+    constructor(name: String, options: XybridObservationOptions?) : this(new(name, options).handle)
+
+    companion object {
+        /**
+         * Starts an operation using the configured SDK session and explicit parent controls.
+         */
+        fun new(name: String, options: XybridObservationOptions?): XybridWorkflowObservation {
+            val __boltffi_name_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(name))
+            val __boltffi_name_writer = __boltffi_name_wire.writer
+            __boltffi_name_writer.writeString(name)
+            val __boltffi_options_wire = WireWriterPool.acquire(1 + (options?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0))
+            val __boltffi_options_writer = __boltffi_options_wire.writer
+            __boltffi_options_writer.writeOptionalValue(options, { __boltffi_options_writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(__boltffi_options_writer) })
+            try {
+                return XybridWorkflowObservation(try { Native.boltffi_init_class_xybrid_bolt_xybrid_workflow_observation_new(__boltffi_name_wire.directBuffer(), __boltffi_name_wire.size(), __boltffi_options_wire.directBuffer(), __boltffi_options_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } })
+            } finally {
+                __boltffi_name_wire.close()
+                __boltffi_options_wire.close()
+            }
+        }
+    }
+
+    /**
+     * Context for child operations, including valid unsampled spans.
+     */
+    fun context(): XybridObservationContext? {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_context(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readOptionalValue({ __boltffi_reader -> XybridObservationContext.fromReader(__boltffi_reader) })
+    }
+
+    /**
+     * Reference to this operation's own span.
+     */
+    fun observationRef(): XybridObservationRef? {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_observation_ref(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readOptionalValue({ __boltffi_reader -> XybridObservationRef.fromReader(__boltffi_reader) })
+    }
+
+    /**
+     * Ends successfully. The first terminal call wins.
+     */
+    fun complete() {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_complete(this.boltffiHandle())
+    }
+
+    /**
+     * Ends with a governed error message.
+     */
+    fun fail(errorType: String, message: String?) {
+        val __boltffi_errorType_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(errorType))
+        val __boltffi_errorType_writer = __boltffi_errorType_wire.writer
+        __boltffi_errorType_writer.writeString(errorType)
+        val __boltffi_message_wire = WireWriterPool.acquire(1 + (message?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0))
+        val __boltffi_message_writer = __boltffi_message_wire.writer
+        __boltffi_message_writer.writeOptionalValue(message, { __boltffi_message_writer, __boltffi_value_0 -> __boltffi_message_writer.writeString(__boltffi_value_0) })
+        try {
+            Native.boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_fail(this.boltffiHandle(), __boltffi_errorType_wire.directBuffer(), __boltffi_errorType_wire.size(), __boltffi_message_wire.directBuffer(), __boltffi_message_wire.size())
+        } finally {
+            __boltffi_errorType_wire.close()
+            __boltffi_message_wire.close()
+        }
+    }
+
+    /**
+     * Cancels without flushing.
+     */
+    fun cancel() {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_cancel(this.boltffiHandle())
+    }
+
+    /**
+     * Whether any terminal transition has happened.
+     */
+    fun isFinished(): Boolean {
+        return Native.boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_is_finished(this.boltffiHandle())
+    }
+}
+
+class XybridToolObservation internal constructor(internal val handle: Long) : AutoCloseable {
+    private val __boltffi_closed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    override fun close() {
+        if (__boltffi_closed.compareAndSet(false, true)) {
+            Native.boltffi_release_class_xybrid_bolt_xybrid_tool_observation(handle)
+        }
+    }
+
+    internal fun boltffiHandle(): Long {
+        check(!__boltffi_closed.get()) { "XybridToolObservation is closed" }
+        return handle
+    }
+
+    /**
+     * Starts an operation using the configured SDK session and explicit parent controls.
+     */
+    constructor(call: XybridToolCallInfo, options: XybridObservationOptions?) : this(new(call, options).handle)
+
+    companion object {
+        /**
+         * Starts an operation using the configured SDK session and explicit parent controls.
+         */
+        fun new(call: XybridToolCallInfo, options: XybridObservationOptions?): XybridToolObservation {
+            val __boltffi_call_wire = WireWriterPool.acquire(call.wireSize())
+            val __boltffi_call_writer = __boltffi_call_wire.writer
+            call.writeTo(__boltffi_call_writer)
+            val __boltffi_options_wire = WireWriterPool.acquire(1 + (options?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0))
+            val __boltffi_options_writer = __boltffi_options_wire.writer
+            __boltffi_options_writer.writeOptionalValue(options, { __boltffi_options_writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(__boltffi_options_writer) })
+            try {
+                return XybridToolObservation(try { Native.boltffi_init_class_xybrid_bolt_xybrid_tool_observation_new(__boltffi_call_wire.directBuffer(), __boltffi_call_wire.size(), __boltffi_options_wire.directBuffer(), __boltffi_options_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } })
+            } finally {
+                __boltffi_call_wire.close()
+                __boltffi_options_wire.close()
+            }
+        }
+    }
+
+    /**
+     * Context for child operations, including valid unsampled spans.
+     */
+    fun context(): XybridObservationContext? {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_tool_observation_context(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readOptionalValue({ __boltffi_reader -> XybridObservationContext.fromReader(__boltffi_reader) })
+    }
+
+    /**
+     * Reference to this operation's own span.
+     */
+    fun observationRef(): XybridObservationRef? {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_tool_observation_observation_ref(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readOptionalValue({ __boltffi_reader -> XybridObservationRef.fromReader(__boltffi_reader) })
+    }
+
+    /**
+     * Ends successfully. The first terminal call wins.
+     */
+    fun complete() {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_tool_observation_complete(this.boltffiHandle())
+    }
+
+    /**
+     * Ends with a governed error message.
+     */
+    fun fail(errorType: String, message: String?) {
+        val __boltffi_errorType_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(errorType))
+        val __boltffi_errorType_writer = __boltffi_errorType_wire.writer
+        __boltffi_errorType_writer.writeString(errorType)
+        val __boltffi_message_wire = WireWriterPool.acquire(1 + (message?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0))
+        val __boltffi_message_writer = __boltffi_message_wire.writer
+        __boltffi_message_writer.writeOptionalValue(message, { __boltffi_message_writer, __boltffi_value_0 -> __boltffi_message_writer.writeString(__boltffi_value_0) })
+        try {
+            Native.boltffi_method_class_xybrid_bolt_xybrid_tool_observation_fail(this.boltffiHandle(), __boltffi_errorType_wire.directBuffer(), __boltffi_errorType_wire.size(), __boltffi_message_wire.directBuffer(), __boltffi_message_wire.size())
+        } finally {
+            __boltffi_errorType_wire.close()
+            __boltffi_message_wire.close()
+        }
+    }
+
+    /**
+     * Cancels without flushing.
+     */
+    fun cancel() {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_tool_observation_cancel(this.boltffiHandle())
+    }
+
+    /**
+     * Whether any terminal transition has happened.
+     */
+    fun isFinished(): Boolean {
+        return Native.boltffi_method_class_xybrid_bolt_xybrid_tool_observation_is_finished(this.boltffiHandle())
+    }
+
+    /**
+     * Records structured tool output through the content policy.
+     */
+    fun recordResult(resultJson: String) {
+        val __boltffi_resultJson_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(resultJson))
+        val __boltffi_resultJson_writer = __boltffi_resultJson_wire.writer
+        __boltffi_resultJson_writer.writeString(resultJson)
+        try {
+            try { Native.boltffi_method_class_xybrid_bolt_xybrid_tool_observation_record_result(this.boltffiHandle(), __boltffi_resultJson_wire.directBuffer(), __boltffi_resultJson_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+        } finally {
+            __boltffi_resultJson_wire.close()
+        }
+    }
+}
+
+class XybridInferenceObservation internal constructor(internal val handle: Long) : AutoCloseable {
+    private val __boltffi_closed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    override fun close() {
+        if (__boltffi_closed.compareAndSet(false, true)) {
+            Native.boltffi_release_class_xybrid_bolt_xybrid_inference_observation(handle)
+        }
+    }
+
+    internal fun boltffiHandle(): Long {
+        check(!__boltffi_closed.get()) { "XybridInferenceObservation is closed" }
+        return handle
+    }
+
+    /**
+     * Starts an operation using the configured SDK session and explicit parent controls.
+     */
+    constructor(request: XybridInferenceRequest, options: XybridObservationOptions?) : this(new(request, options).handle)
+
+    companion object {
+        /**
+         * Starts an operation using the configured SDK session and explicit parent controls.
+         */
+        fun new(request: XybridInferenceRequest, options: XybridObservationOptions?): XybridInferenceObservation {
+            val __boltffi_request_wire = WireWriterPool.acquire(request.wireSize())
+            val __boltffi_request_writer = __boltffi_request_wire.writer
+            request.writeTo(__boltffi_request_writer)
+            val __boltffi_options_wire = WireWriterPool.acquire(1 + (options?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0))
+            val __boltffi_options_writer = __boltffi_options_wire.writer
+            __boltffi_options_writer.writeOptionalValue(options, { __boltffi_options_writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(__boltffi_options_writer) })
+            try {
+                return XybridInferenceObservation(try { Native.boltffi_init_class_xybrid_bolt_xybrid_inference_observation_new(__boltffi_request_wire.directBuffer(), __boltffi_request_wire.size(), __boltffi_options_wire.directBuffer(), __boltffi_options_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } })
+            } finally {
+                __boltffi_request_wire.close()
+                __boltffi_options_wire.close()
+            }
+        }
+    }
+
+    /**
+     * Context for child operations, including valid unsampled spans.
+     */
+    fun context(): XybridObservationContext? {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_inference_observation_context(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readOptionalValue({ __boltffi_reader -> XybridObservationContext.fromReader(__boltffi_reader) })
+    }
+
+    /**
+     * Reference to this operation's own span.
+     */
+    fun observationRef(): XybridObservationRef? {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_inference_observation_observation_ref(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readOptionalValue({ __boltffi_reader -> XybridObservationRef.fromReader(__boltffi_reader) })
+    }
+
+    /**
+     * Ends successfully. The first terminal call wins.
+     */
+    fun complete() {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_inference_observation_complete(this.boltffiHandle())
+    }
+
+    /**
+     * Ends with a governed error message.
+     */
+    fun fail(errorType: String, message: String?) {
+        val __boltffi_errorType_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(errorType))
+        val __boltffi_errorType_writer = __boltffi_errorType_wire.writer
+        __boltffi_errorType_writer.writeString(errorType)
+        val __boltffi_message_wire = WireWriterPool.acquire(1 + (message?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0))
+        val __boltffi_message_writer = __boltffi_message_wire.writer
+        __boltffi_message_writer.writeOptionalValue(message, { __boltffi_message_writer, __boltffi_value_0 -> __boltffi_message_writer.writeString(__boltffi_value_0) })
+        try {
+            Native.boltffi_method_class_xybrid_bolt_xybrid_inference_observation_fail(this.boltffiHandle(), __boltffi_errorType_wire.directBuffer(), __boltffi_errorType_wire.size(), __boltffi_message_wire.directBuffer(), __boltffi_message_wire.size())
+        } finally {
+            __boltffi_errorType_wire.close()
+            __boltffi_message_wire.close()
+        }
+    }
+
+    /**
+     * Cancels without flushing.
+     */
+    fun cancel() {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_inference_observation_cancel(this.boltffiHandle())
+    }
+
+    /**
+     * Whether any terminal transition has happened.
+     */
+    fun isFinished(): Boolean {
+        return Native.boltffi_method_class_xybrid_bolt_xybrid_inference_observation_is_finished(this.boltffiHandle())
+    }
+
+    /**
+     * Records governed structured content.
+     */
+    fun recordSystemInstructions(partsJson: String) {
+        val __boltffi_partsJson_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(partsJson))
+        val __boltffi_partsJson_writer = __boltffi_partsJson_wire.writer
+        __boltffi_partsJson_writer.writeString(partsJson)
+        try {
+            try { Native.boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_system_instructions(this.boltffiHandle(), __boltffi_partsJson_wire.directBuffer(), __boltffi_partsJson_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+        } finally {
+            __boltffi_partsJson_wire.close()
+        }
+    }
+
+    /**
+     * Records governed structured content.
+     */
+    fun recordInputMessages(messagesJson: String) {
+        val __boltffi_messagesJson_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(messagesJson))
+        val __boltffi_messagesJson_writer = __boltffi_messagesJson_wire.writer
+        __boltffi_messagesJson_writer.writeString(messagesJson)
+        try {
+            try { Native.boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_input_messages(this.boltffiHandle(), __boltffi_messagesJson_wire.directBuffer(), __boltffi_messagesJson_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+        } finally {
+            __boltffi_messagesJson_wire.close()
+        }
+    }
+
+    /**
+     * Records governed structured content.
+     */
+    fun recordOutputMessages(messagesJson: String) {
+        val __boltffi_messagesJson_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(messagesJson))
+        val __boltffi_messagesJson_writer = __boltffi_messagesJson_wire.writer
+        __boltffi_messagesJson_writer.writeString(messagesJson)
+        try {
+            try { Native.boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_output_messages(this.boltffiHandle(), __boltffi_messagesJson_wire.directBuffer(), __boltffi_messagesJson_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+        } finally {
+            __boltffi_messagesJson_wire.close()
+        }
+    }
+
+    /**
+     * Records governed structured content.
+     */
+    fun recordToolDefinitions(definitionsJson: String) {
+        val __boltffi_definitionsJson_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(definitionsJson))
+        val __boltffi_definitionsJson_writer = __boltffi_definitionsJson_wire.writer
+        __boltffi_definitionsJson_writer.writeString(definitionsJson)
+        try {
+            try { Native.boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_tool_definitions(this.boltffiHandle(), __boltffi_definitionsJson_wire.directBuffer(), __boltffi_definitionsJson_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+        } finally {
+            __boltffi_definitionsJson_wire.close()
+        }
+    }
+
+    /**
+     * Records a chunk arrival; this does not estimate first-token time.
+     */
+    fun recordChunk() {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_chunk(this.boltffiHandle())
+    }
+
+    /**
+     * Records a runtime-measured first token (epoch milliseconds, or now).
+     */
+    fun recordFirstToken(atEpochMs: ULong?) {
+        val __boltffi_atEpochMs_wire = WireWriterPool.acquire(if (atEpochMs == null) 1 else 9)
+        val __boltffi_atEpochMs_writer = __boltffi_atEpochMs_wire.writer
+        __boltffi_atEpochMs_writer.writeOptionalU64(atEpochMs)
+        try {
+            try { Native.boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_first_token(this.boltffiHandle(), __boltffi_atEpochMs_wire.directBuffer(), __boltffi_atEpochMs_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+        } finally {
+            __boltffi_atEpochMs_wire.close()
+        }
+    }
+
+    /**
+     * Replaces the cumulative usage snapshot, preserving unknown fields.
+     */
+    fun recordUsage(usage: XybridUsage) {
+        val __boltffi_usage_wire = WireWriterPool.acquire(usage.wireSize())
+        val __boltffi_usage_writer = __boltffi_usage_wire.writer
+        usage.writeTo(__boltffi_usage_writer)
+        try {
+            Native.boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_usage(this.boltffiHandle(), __boltffi_usage_wire.directBuffer(), __boltffi_usage_wire.size())
+        } finally {
+            __boltffi_usage_wire.close()
+        }
+    }
+
+    /**
+     * Records measured finish reasons.
+     */
+    fun recordFinishReasons(reasons: List<String>) {
+        val __boltffi_reasons_wire = WireWriterPool.acquire(4 + reasons.sumOf { __boltffi_value_0 -> (4 + Utf8Codec.maxBytes(__boltffi_value_0)).toInt() })
+        val __boltffi_reasons_writer = __boltffi_reasons_wire.writer
+        __boltffi_reasons_writer.writeSequence(reasons, reasons.size, { __boltffi_reasons_writer, __boltffi_value_0 -> __boltffi_reasons_writer.writeString(__boltffi_value_0) })
+        try {
+            Native.boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_finish_reasons(this.boltffiHandle(), __boltffi_reasons_wire.directBuffer(), __boltffi_reasons_wire.size())
+        } finally {
+            __boltffi_reasons_wire.close()
+        }
+    }
+
+    /**
+     * Records provider-assigned response identifiers.
+     */
+    fun recordResponse(responseId: String?, model: String?) {
+        val __boltffi_responseId_wire = WireWriterPool.acquire(1 + (responseId?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0))
+        val __boltffi_responseId_writer = __boltffi_responseId_wire.writer
+        __boltffi_responseId_writer.writeOptionalValue(responseId, { __boltffi_responseId_writer, __boltffi_value_0 -> __boltffi_responseId_writer.writeString(__boltffi_value_0) })
+        val __boltffi_model_wire = WireWriterPool.acquire(1 + (model?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0))
+        val __boltffi_model_writer = __boltffi_model_wire.writer
+        __boltffi_model_writer.writeOptionalValue(model, { __boltffi_model_writer, __boltffi_value_0 -> __boltffi_model_writer.writeString(__boltffi_value_0) })
+        try {
+            Native.boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_response(this.boltffiHandle(), __boltffi_responseId_wire.directBuffer(), __boltffi_responseId_wire.size(), __boltffi_model_wire.directBuffer(), __boltffi_model_wire.size())
+        } finally {
+            __boltffi_responseId_wire.close()
+            __boltffi_model_wire.close()
+        }
+    }
+}
+
+class XybridModelLoadObservation internal constructor(internal val handle: Long) : AutoCloseable {
+    private val __boltffi_closed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    override fun close() {
+        if (__boltffi_closed.compareAndSet(false, true)) {
+            Native.boltffi_release_class_xybrid_bolt_xybrid_model_load_observation(handle)
+        }
+    }
+
+    internal fun boltffiHandle(): Long {
+        check(!__boltffi_closed.get()) { "XybridModelLoadObservation is closed" }
+        return handle
+    }
+
+    /**
+     * Starts an operation using the configured SDK session and explicit parent controls.
+     */
+    constructor(info: XybridModelLoadInfo, options: XybridObservationOptions?) : this(new(info, options).handle)
+
+    companion object {
+        /**
+         * Starts an operation using the configured SDK session and explicit parent controls.
+         */
+        fun new(info: XybridModelLoadInfo, options: XybridObservationOptions?): XybridModelLoadObservation {
+            val __boltffi_info_wire = WireWriterPool.acquire(info.wireSize())
+            val __boltffi_info_writer = __boltffi_info_wire.writer
+            info.writeTo(__boltffi_info_writer)
+            val __boltffi_options_wire = WireWriterPool.acquire(1 + (options?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0))
+            val __boltffi_options_writer = __boltffi_options_wire.writer
+            __boltffi_options_writer.writeOptionalValue(options, { __boltffi_options_writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(__boltffi_options_writer) })
+            try {
+                return XybridModelLoadObservation(try { Native.boltffi_init_class_xybrid_bolt_xybrid_model_load_observation_new(__boltffi_info_wire.directBuffer(), __boltffi_info_wire.size(), __boltffi_options_wire.directBuffer(), __boltffi_options_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } })
+            } finally {
+                __boltffi_info_wire.close()
+                __boltffi_options_wire.close()
+            }
+        }
+    }
+
+    /**
+     * Context for child operations, including valid unsampled spans.
+     */
+    fun context(): XybridObservationContext? {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_context(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readOptionalValue({ __boltffi_reader -> XybridObservationContext.fromReader(__boltffi_reader) })
+    }
+
+    /**
+     * Reference to this operation's own span.
+     */
+    fun observationRef(): XybridObservationRef? {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_observation_ref(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readOptionalValue({ __boltffi_reader -> XybridObservationRef.fromReader(__boltffi_reader) })
+    }
+
+    /**
+     * Ends successfully. The first terminal call wins.
+     */
+    fun complete() {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_complete(this.boltffiHandle())
+    }
+
+    /**
+     * Ends with a governed error message.
+     */
+    fun fail(errorType: String, message: String?) {
+        val __boltffi_errorType_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(errorType))
+        val __boltffi_errorType_writer = __boltffi_errorType_wire.writer
+        __boltffi_errorType_writer.writeString(errorType)
+        val __boltffi_message_wire = WireWriterPool.acquire(1 + (message?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0))
+        val __boltffi_message_writer = __boltffi_message_wire.writer
+        __boltffi_message_writer.writeOptionalValue(message, { __boltffi_message_writer, __boltffi_value_0 -> __boltffi_message_writer.writeString(__boltffi_value_0) })
+        try {
+            Native.boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_fail(this.boltffiHandle(), __boltffi_errorType_wire.directBuffer(), __boltffi_errorType_wire.size(), __boltffi_message_wire.directBuffer(), __boltffi_message_wire.size())
+        } finally {
+            __boltffi_errorType_wire.close()
+            __boltffi_message_wire.close()
+        }
+    }
+
+    /**
+     * Cancels without flushing.
+     */
+    fun cancel() {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_cancel(this.boltffiHandle())
+    }
+
+    /**
+     * Whether any terminal transition has happened.
+     */
+    fun isFinished(): Boolean {
+        return Native.boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_is_finished(this.boltffiHandle())
+    }
+
+    /**
+     * Records the measured cache outcome.
+     */
+    fun recordCacheHit(hit: Boolean) {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_record_cache_hit(this.boltffiHandle(), hit)
     }
 }
 
@@ -5223,7 +6506,7 @@ fun observabilityDefaultTracesEndpoint(): String {
 }
 
 /**
- * Current delivery counters (all zero when observability is off).
+ * Delivery counters: live while export runs, the final ones after shutdown until the next init.
  */
 fun observabilityStats(): XybridObservabilityStats {
     val __boltffi_result = Native.boltffi_function_xybrid_bolt_observability_stats() ?: throw IllegalStateException("null buffer returned")

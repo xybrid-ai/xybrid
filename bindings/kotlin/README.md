@@ -204,6 +204,8 @@ result.reasoningContent?.let { println("Reasoning: $it") }
 Export is off until you start it; an API key passed to `Xybrid.init` does not
 enable it. Once started, each run is exported as an OpenTelemetry trace, with
 prompts and outputs included unless you call `.metadataOnly()`.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
 
 ```kotlin
 import ai.xybrid.metadataOnly
@@ -211,7 +213,7 @@ import ai.xybrid.runOptions
 import ai.xybrid.service
 import ai.xybrid.start
 
-// Traces to the Xybrid dashboard (free key at dashboard.xybrid.dev)
+// Traces to Xybrid (get a key at console.xybrid.dev)
 Xybrid.Observability.xybrid(apiKey)
     .service("MyApp", version = BuildConfig.VERSION_NAME)
     .start()
@@ -236,8 +238,34 @@ result.observation?.let {
 Xybrid.Observability.flushAsync()
 ```
 
-`Xybrid.Observability.stats` reports spans exported, dropped, and failed.
-`suppressTrace = true` in `runOptions` skips the detailed trace for one run.
+`Xybrid.Observability.stats` reports accepted, exported, dropped, failed, and
+pending counts per signal (`traces`, `logs`, `metrics`); after `shutdown` they are
+the session's final counters (what the shutdown failed or dropped included)
+until the next `start()`. A flush or shutdown that
+cannot deliver everything throws `XybridError.TelemetryDelivery`; the inference
+already succeeded, so do not rerun it. `suppressTrace = true` in `runOptions`
+skips the detailed trace for one run. Pipelines take the same trace fields and
+return `observation` references for the workflow and each stage; ASR sessions
+take them through `streamingConfigWithVad(..., observation = ...)` or the
+config's `observation`.
+
+Record work Xybrid does not run itself (a tool, another runtime's inference)
+with a manual operation. Pass `context()?.childOptions` to its children. The
+first terminal call wins, and closing an unfinished one cancels it without
+flushing:
+
+```kotlin
+Xybrid.Observability.withWorkflow("answer-question") { workflow ->
+    val call = XybridToolCallInfo("search", null, null, null, "{\"q\":\"otel\"}")
+    Xybrid.Observability.startTool(call, workflow.context()?.childOptions).use { tool ->
+        tool.recordResult("{\"hits\":3}")
+        tool.complete()
+    }
+}
+```
+
+`withWorkflow` completes on return, cancels on `CancellationException`, and
+fails with the label `application_error` (never the exception text) otherwise.
 
 ### Error Handling
 

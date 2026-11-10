@@ -441,11 +441,13 @@ See the [full API documentation](https://docs.xybrid.dev/en/docs/sdks/unity) for
 Model loads, runs, and pipelines can be exported as OpenTelemetry (OTLP/HTTP)
 traces. Export is off until you configure it; an API key passed to
 `XybridClient.Initialize` does not enable it.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
 
 ```csharp
-// Traces to the Xybrid dashboard...
+// Traces to Xybrid (get a key at console.xybrid.dev)...
 XybridClient.InitializeObservability(
-    ObservabilityConfig.Xybrid("xy_live_...")
+    ObservabilityConfig.Xybrid("sk_live_...")
         .WithService(Application.productName, Application.version));
 
 // ...or traces, metrics, and logs to an OpenTelemetry Collector.
@@ -471,10 +473,58 @@ XybridClient.ShutdownObservability();
 
 Prompts and outputs are captured once export is enabled. Other setters:
 `WithTracesEndpoint`, `WithHeader`, `WithJsonProtocol`,
-`WithResourceAttribute`, `WithMaxContentBytes`, `WithLiveTraceInterval`.
-`XybridClient.ObservabilityStats()` reports delivery counters. See
+`WithResourceAttribute`, `WithMaxContentBytes`, `WithLiveTraceInterval`,
+`AllowProviderContext`, `WithDeviceId`, `WithLiteralRedaction`,
+`WithoutContentAttribute`.
+
+The same `ObservationOptions` go to `Pipeline.Run(envelope, observation)`
+(`PipelineResult.Observation` and each `StageResult.Observation` hold the
+references), `ModelLoader.Load(observation)` (`Model.LoadObservation`),
+`Model.Stream(config, observation)` for live ASR (`Flush()` returns the
+session's reference) and `RunTtsStreaming(..., observation)`.
+
+Record work Xybrid does not run itself with a manual operation. Each is
+`IDisposable`: the first terminal call wins, and disposing an unfinished one
+cancels it without flushing.
+
+```csharp
+using (var workflow = WorkflowObservation.Start("answer-question"))
+{
+    var children = workflow.Context is XybridBolt.XybridObservationContext context
+        ? new ObservationOptions { Traceparent = context.Traceparent, Tracestate = context.Tracestate }
+        : null;
+    using (var tool = ToolObservation.Start(
+               new XybridBolt.XybridToolCallInfo("search", null, null, null, "{\"q\":\"otel\"}"), children))
+    {
+        tool.RecordResult("{\"hits\":3}");
+        tool.Complete();
+    }
+    workflow.Complete();
+}
+```
+
+`XybridClient.ObservabilityStats()` reports delivery counters per signal
+(`Traces`, `Logs`, `Metrics`); after `ShutdownObservability` they are the
+session's final counters (what the shutdown failed or dropped included) until
+the next `InitializeObservability`. See
 [examples/unity/Observability](../../examples/unity/Observability/README.md)
 for the mobile lifecycle wiring.
+
+For contributors: `Tests/Editor/ObservabilityRuntimeScenarioTests.cs` runs the
+repository's shared observability scenario
+([`tools/scripts/observability_capture/scenario.md`](../../tools/scripts/observability_capture/scenario.md))
+through this API in the Editor. It is ignored unless it is given a receiver,
+through `XYBRID_SCENARIO_*` environment variables or `-xybridScenario*` Editor
+arguments. `.github/workflows/unity-editor.yml` runs it on Linux. To run it on
+your machine, stage the host native as that workflow does, then let the driver
+start the receiver, launch the Editor and check the capture:
+
+```bash
+python3 tools/scripts/observability_capture/run_scenario.py --binding unity --out-dir out/unity -- \
+  <path-to-Unity-editor> -batchmode -projectPath tools/unity-runtime-smoke \
+  -runTests -testPlatform EditMode -testCategory ObservabilityRuntimeScenario \
+  -testResults "$PWD/out/unity/editmode-results.xml"
+```
 
 ## Registry Telemetry
 

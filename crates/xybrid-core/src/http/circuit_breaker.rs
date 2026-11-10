@@ -156,6 +156,14 @@ impl CircuitBreaker {
     /// Returns `false` if:
     /// - Circuit is OPEN and timeout hasn't expired
     /// - Circuit is HALF-OPEN and max test requests exceeded
+    ///
+    /// A `true` from a HALF-OPEN circuit takes one of its test requests, so
+    /// call this right before the request it allows, and settle that request
+    /// with [`record_success`](Self::record_success),
+    /// [`record_failure`](Self::record_failure) or [`release`](Self::release).
+    /// A test request taken and never settled leaves the circuit refusing
+    /// every later call. To fail fast without taking one, use
+    /// [`is_refusing`](Self::is_refusing).
     pub fn can_execute(&self) -> bool {
         let current_state = self.state.load(Ordering::SeqCst);
 
@@ -163,11 +171,7 @@ impl CircuitBreaker {
             STATE_CLOSED => true,
             STATE_OPEN => {
                 // Check if we should transition to half-open
-                let opened_at = self.opened_at_ms.load(Ordering::SeqCst);
-                let now_ms = current_time_ms();
-                let elapsed_ms = now_ms.saturating_sub(opened_at);
-
-                if elapsed_ms >= self.config.open_duration_ms {
+                if self.open_duration_over() {
                     // Transition to half-open
                     if self
                         .state
@@ -182,18 +186,81 @@ impl CircuitBreaker {
                         self.half_open_requests.store(0, Ordering::SeqCst);
                     }
                     // Allow this request as the first half-open test
-                    self.half_open_requests.fetch_add(1, Ordering::SeqCst)
-                        < self.config.half_open_max
+                    self.take_test_request()
                 } else {
                     false
                 }
             }
-            STATE_HALF_OPEN => {
-                // Allow limited requests in half-open state
-                self.half_open_requests.fetch_add(1, Ordering::SeqCst) < self.config.half_open_max
-            }
+            // Allow limited requests in half-open state
+            STATE_HALF_OPEN => self.take_test_request(),
             _ => false,
         }
+    }
+
+    /// Whether [`can_execute`](Self::can_execute) would refuse a request now.
+    ///
+    /// Takes nothing and never moves the circuit to HALF-OPEN, so it suits a
+    /// fail-fast check ahead of code that calls `can_execute` for each
+    /// attempt itself, such as [`with_retry`](super::with_retry). Checking
+    /// with `can_execute` there would take a half-open test request that no
+    /// attempt then gets.
+    pub fn is_refusing(&self) -> bool {
+        match self.state.load(Ordering::SeqCst) {
+            STATE_CLOSED => false,
+            STATE_OPEN => !self.open_duration_over(),
+            STATE_HALF_OPEN => {
+                self.half_open_requests.load(Ordering::SeqCst) >= self.config.half_open_max
+            }
+            _ => true,
+        }
+    }
+
+    /// Give back a request [`can_execute`](Self::can_execute) allowed, when
+    /// its outcome says nothing about the endpoint (it never reached it: the
+    /// device is offline, say).
+    ///
+    /// In a HALF-OPEN circuit this frees the test request for the next
+    /// caller; in any other state it does nothing. Call it at most once per
+    /// allowed request, and only instead of recording an outcome.
+    pub fn release(&self) {
+        if self.state.load(Ordering::SeqCst) == STATE_HALF_OPEN {
+            // Nothing taken leaves the count at zero.
+            self.update_test_requests(|taken| taken.checked_sub(1));
+        }
+    }
+
+    /// Whether an OPEN circuit has stayed open for its whole open duration.
+    fn open_duration_over(&self) -> bool {
+        let opened_at = self.opened_at_ms.load(Ordering::SeqCst);
+        current_time_ms().saturating_sub(opened_at) >= self.config.open_duration_ms
+    }
+
+    /// Take one of a HALF-OPEN circuit's test requests, if one is left.
+    ///
+    /// A refusal takes nothing, so the count is exactly the requests allowed
+    /// and [`release`](Self::release) always makes one available again.
+    fn take_test_request(&self) -> bool {
+        self.update_test_requests(|taken| (taken < self.config.half_open_max).then_some(taken + 1))
+    }
+
+    /// Set the test request count to `step(count)`, unless that is `None`;
+    /// returns whether it did.
+    fn update_test_requests(&self, step: impl Fn(u32) -> Option<u32>) -> bool {
+        // `fetch_update` is deprecated from Rust 1.99 and its `try_update`
+        // rename needs 1.95, newer than Bazel's pinned 1.92.
+        let mut current = self.half_open_requests.load(Ordering::SeqCst);
+        while let Some(next) = step(current) {
+            match self.half_open_requests.compare_exchange_weak(
+                current,
+                next,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => return true,
+                Err(actual) => current = actual,
+            }
+        }
+        false
     }
 
     /// Record a successful operation.
@@ -493,5 +560,66 @@ mod tests {
 
         // Third should be blocked
         assert!(!circuit.can_execute());
+    }
+
+    #[test]
+    fn is_refusing_takes_no_test_request() {
+        let circuit = CircuitBreaker::new(CircuitConfig {
+            failure_threshold: 1,
+            open_duration_ms: 0,
+            half_open_max: 1,
+        });
+        assert!(!circuit.is_refusing());
+
+        // Open, with the open duration already over: not refusing, and
+        // asking moves nothing, so the circuit is still open.
+        circuit.record_failure();
+        assert!(!circuit.is_refusing());
+        assert!(circuit.is_open());
+
+        // The test request is still there for the request itself.
+        assert!(circuit.can_execute());
+        assert_eq!(circuit.state(), CircuitState::HalfOpen);
+        // Now taken.
+        assert!(circuit.is_refusing());
+        assert!(!circuit.can_execute());
+
+        // Inside the open duration, refusing.
+        let waiting = CircuitBreaker::with_defaults();
+        waiting.record_rate_limited();
+        assert!(waiting.is_refusing());
+        assert!(!waiting.can_execute());
+    }
+
+    #[test]
+    fn release_frees_the_half_open_test_request() {
+        let circuit = CircuitBreaker::new(CircuitConfig {
+            failure_threshold: 1,
+            open_duration_ms: 0,
+            half_open_max: 1,
+        });
+        circuit.record_failure();
+        assert!(circuit.can_execute());
+
+        // Callers refused meanwhile take nothing, so one release is enough.
+        for _ in 0..3 {
+            assert!(!circuit.can_execute());
+        }
+        circuit.release();
+        assert_eq!(circuit.state(), CircuitState::HalfOpen);
+        assert!(circuit.can_execute());
+        assert!(!circuit.can_execute());
+
+        // Releasing twice gives back only the one request taken.
+        circuit.release();
+        circuit.release();
+        assert!(circuit.can_execute());
+        assert!(!circuit.can_execute());
+
+        // Closed: nothing to give back.
+        circuit.record_success();
+        circuit.release();
+        assert!(circuit.is_closed());
+        assert!(circuit.can_execute());
     }
 }

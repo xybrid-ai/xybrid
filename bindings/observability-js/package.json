@@ -32,12 +32,14 @@
   ],
   "scripts": {
     "build": "bun run scripts/build.ts",
+    "bench": "node --expose-gc scripts/bench.mjs",
     "example": "bun run examples/node-basic.ts",
     "fixtures:dump": "bun run scripts/dump-fixtures.ts",
     "lint": "biome check .",
     "pack:release": "node scripts/check-pack.mjs",
     "test": "bun test test/",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:families": "node scripts/check-families.mjs"
   },
   "repository": {
     "type": "git",
@@ -57,12 +59,12 @@
   },
   "peerDependencies": {
     "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/core": "3.0.0",
-    "@opentelemetry/otlp-transformer": "0.300.0",
-    "@opentelemetry/resources": "3.0.0",
-    "@opentelemetry/sdk-logs": "3.0.0",
-    "@opentelemetry/sdk-metrics": "3.0.0",
-    "@opentelemetry/sdk-trace": "3.0.0"
+    "@opentelemetry/core": "~3.0.0 || ~3.1.0",
+    "@opentelemetry/otlp-transformer": "~0.300.0 || ~0.301.0",
+    "@opentelemetry/resources": "~3.0.0 || ~3.1.0",
+    "@opentelemetry/sdk-logs": "~3.0.0 || ~3.1.0",
+    "@opentelemetry/sdk-metrics": "~3.0.0 || ~3.1.0",
+    "@opentelemetry/sdk-trace": "~3.0.0 || ~3.1.0"
   },
   "peerDependenciesMeta": {
     "@opentelemetry/core": {
@@ -98,5 +100,8 @@
     "@types/node": "^24.19.2",
     "tsdown": "^0.15.12",
     "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.15.0"
   }
 }

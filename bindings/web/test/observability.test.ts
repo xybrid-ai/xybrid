@@ -2,11 +2,22 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { type ContextManager, context, ROOT_CONTEXT, TraceFlags, trace } from "@opentelemetry/api";
 import { LoggerProvider } from "@opentelemetry/sdk-logs";
 import {
+  type DataPoint,
+  type Histogram,
+  MeterProvider,
+  MetricReader,
+} from "@opentelemetry/sdk-metrics";
+import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
   TracerProvider,
 } from "@opentelemetry/sdk-trace";
-import { type ContentOptions, ObservationContext, Observer } from "@xybrid/observability";
+import {
+  type ContentOptions,
+  ObservationContext,
+  Observer,
+  serializeContext,
+} from "@xybrid/observability";
 import {
   InferenceError,
   InputValidationError,
@@ -41,18 +52,34 @@ const loadedMetrics: LoadMetrics = {
   memory,
 };
 
+/** Collects on demand only. */
+class CollectingReader extends MetricReader {
+  protected override async onForceFlush(): Promise<void> {}
+  protected override async onShutdown(): Promise<void> {}
+}
+
 const observe = (content?: ContentOptions) => {
   const spans = new InMemorySpanExporter();
   const tracerProvider = new TracerProvider({
     spanProcessors: [new SimpleSpanProcessor({ exporter: spans })],
   });
+  const reader = new CollectingReader();
   const observer = new Observer({
     tracerProvider,
-    meterProvider: null,
+    meterProvider: new MeterProvider({ readers: [reader] }),
     loggerProvider: new LoggerProvider(),
     ...(content === undefined ? {} : { content }),
   });
-  return { observer, spans };
+  /** `[error.type, count]` of every data point of the histogram `name`. */
+  const points = async (name: string) => {
+    const { resourceMetrics } = await reader.collect();
+    return resourceMetrics.scopeMetrics
+      .flatMap((scope) => scope.metrics)
+      .filter((metric) => metric.descriptor.name === name)
+      .flatMap((metric) => metric.dataPoints as DataPoint<Histogram>[])
+      .map((point) => [point.attributes["error.type"], point.value.count]);
+  };
+  return { observer, spans, points };
 };
 
 /** An arbitrary observer can fail even when the library's own hooks are guarded. */
@@ -199,8 +226,33 @@ describe("observed loads", () => {
       "xybrid.genai.resource.memory.used_bytes": 2048,
     });
     expect(span?.spanContext().traceId).toBe("4bf92f3577b34da6a3ce929d0e0e4736");
-    expect(session.loaded.observation?.spanId).toBe(span?.spanContext().spanId ?? "");
+    expect(session.loaded.observation?.span_id).toBe(span?.spanContext().spanId ?? "");
   });
+
+  const parentContext = ObservationContext.fromTraceparent(PARENT);
+  if (parentContext === undefined) throw new Error("invalid test parent");
+  for (const [name, parent] of [
+    ["serialized", serializeContext(parentContext)],
+    ["structured clone", structuredClone(parentContext)],
+    [
+      "parentContext fields",
+      { traceId: parentContext.traceId, spanId: parentContext.spanId, traceFlags: 1 },
+    ],
+  ] as const) {
+    test(`load and generation accept ${name} parent parentContexts`, async () => {
+      const { observer, spans } = observe();
+      const { runtime } = scriptedRuntime({ deltas: ["hello"] }, false);
+      const session = await load(runtime, { observer, observation: { parent } });
+      await drain(session.generateStream("hi", { observation: { parent } }));
+      const finished = spans.getFinishedSpans();
+      expect(finished).toHaveLength(2);
+      for (const span of finished) {
+        expect(span.spanContext().traceId).toBe(parentContext.traceId);
+        expect(span.parentSpanContext?.spanId).toBe(parentContext.spanId);
+      }
+      await session.dispose();
+    });
+  }
 
   for (const fails of [false, true]) {
     for (const explicit of [false, true]) {
@@ -291,9 +343,14 @@ describe("observed loads", () => {
 describe("observed generation", () => {
   test("worker-measured times, usage, content and the observation ref", async () => {
     const { observer, spans } = observe();
-    const t0 = performance.timeOrigin + performance.now();
     const script: Script = {
       deltas: ["Hel", "lo", "!"],
+      run: runMetrics({ generatedTokens: 3 }),
+    };
+    const { runtime, calls } = scriptedRuntime(script, true);
+    const session = await load(runtime, { observer });
+    const t0 = Date.now();
+    Object.assign(script, {
       // The first token decodes to an incomplete character: first token precedes first chunk.
       tokens: [
         [t0 + 40, ""],
@@ -301,10 +358,7 @@ describe("observed generation", () => {
         [t0 + 70, "!"],
       ],
       completedAtMs: t0 + 90,
-      run: runMetrics({ generatedTokens: 3 }),
-    };
-    const { runtime, calls } = scriptedRuntime(script, true);
-    const session = await load(runtime, { observer });
+    });
     const text = await drain(
       session.generateStream("Say hello", {
         maxOutputTokens: 3,
@@ -356,8 +410,8 @@ describe("observed generation", () => {
       inference?.spanContext().spanId ?? "",
     );
     expect(session.lastRun?.observation).toEqual({
-      traceId: inference?.spanContext().traceId ?? "",
-      spanId: inference?.spanContext().spanId ?? "",
+      trace_id: inference?.spanContext().traceId ?? "",
+      span_id: inference?.spanContext().spanId ?? "",
     });
   });
 
@@ -387,7 +441,7 @@ describe("observed generation", () => {
   });
 
   test("abandoning the stream records a cancellation", async () => {
-    const { observer, spans } = observe();
+    const { observer, spans, points } = observe();
     const { runtime } = scriptedRuntime({ deltas: ["a", "b", "c"] }, true);
     const session = await load(runtime, { observer });
     for await (const _delta of session.generateStream("hi")) break;
@@ -395,6 +449,10 @@ describe("observed generation", () => {
     expect(inference?.attributes["error.type"]).toBe("cancelled");
     expect(inference?.status.message).toBe("cancelled");
     expect(inference?.attributes["gen_ai.usage.output_tokens"]).toBe(1);
+    // The duration metric records the span's outcome, once.
+    expect(await points("gen_ai.client.inference.duration")).toEqual([
+      [inference?.attributes["error.type"], 1],
+    ]);
   });
 
   test("a runtime failure records the error", async () => {

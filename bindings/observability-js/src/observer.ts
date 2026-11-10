@@ -4,6 +4,7 @@ import {
   type Context,
   type Counter,
   context as contextApi,
+  diag,
   type Histogram,
   type Meter,
   type MeterProvider,
@@ -23,26 +24,31 @@ import {
   ATTR,
   BUCKET_BOUNDARIES,
   type ContentCapture,
+  CUSTOM_INFERENCE_OPERATION,
   DEFAULTS,
   ENUMS,
   ENV,
   EVENTS,
+  INFERENCE_OPERATIONS,
   INSTRUMENTATION_SCOPE_NAME,
   METRICS,
+  type MemoryPressure,
   type MetricName,
   OPERATIONS,
 } from "./catalog.ts";
 import {
+  boundCodePoints,
   boundJson,
-  canonicalInputMessages,
-  canonicalOutputMessages,
-  canonicalParts,
+  ContentProcessor,
+  type ContentShape,
   type InputMessage,
   type JsonValue,
+  jsonCost,
   type MessagePart,
   type OutputMessage,
+  type RedactionRule,
   type Redactor,
-  toJson,
+  toRedactionRules,
   truncateString,
   utf8Length,
 } from "./content.ts";
@@ -51,6 +57,7 @@ import {
   type ObservationRef,
   type ParentInput,
   resolveParent,
+  toObservationRef,
 } from "./trace-context.ts";
 import { VERSION } from "./version.ts";
 
@@ -71,39 +78,79 @@ export type LogRecordLike = {
   attributes?: Record<string, AnyValue>;
   context?: Context;
 };
-export type LoggerLike = { emit(record: LogRecordLike): void };
+/**
+ * Structural logger. A logger without `enabled()` counts as enabled; one whose `enabled()`
+ * returns `false` receives nothing.
+ */
+export type LoggerLike = {
+  emit(record: LogRecordLike): void;
+  enabled?(options?: { context?: Context; severityNumber?: number; eventName?: string }): boolean;
+};
 /** Structural logger provider: `@opentelemetry/sdk-logs` of either the 0.2xx or 3.x line fits. */
 export type LoggerProviderLike = {
   getLogger(name: string, version?: string, options?: { schemaUrl?: string }): LoggerLike;
 };
 
+/** A content capture mode; explicit values are trimmed and case-insensitive. */
+export type ContentCaptureInput = ContentCapture | Uppercase<ContentCapture>;
+
 export type ContentOptions = {
-  /** Where content goes. Explicit value wins over `OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT`. */
-  readonly capture?: ContentCapture;
-  /** UTF-8 byte budget per content attribute (default 16384). */
-  readonly maxAttributeBytes?: number;
-  /** Runs before truncation and serialization; a thrown error omits that content. */
-  readonly redact?: Redactor;
+  /**
+   * Where content goes. An explicit value (trimmed, case-insensitive) wins over
+   * `OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT`; any other value throws `RangeError`.
+   */
+  readonly capture?: ContentCaptureInput | undefined;
+  /**
+   * UTF-8 byte budget per content attribute (default 16384, integer >= 1); clamped to the
+   * effective `maxRetainedOperationBytes`.
+   */
+  readonly maxAttributeBytes?: number | undefined;
+  /**
+   * Content retained by one operation until it ends (default 212992 = 208 KiB, integer >= 1);
+   * clamped to `(maxRequestBodyBytes - 65536) / 2` (at least 1) so that one span's content cannot
+   * push its export request past `maxRequestBodyBytes` (CONTRACT.md "Content pipeline").
+   */
+  readonly maxRetainedOperationBytes?: number | undefined;
+  /**
+   * `maxRequestBodyBytes` of the exporter that sends this observer's spans (default 491520 =
+   * 480 KiB, integer >= 1), which the content budgets are clamped to fit. `OtlpPipeline.observer`
+   * applies its own bound (the smaller one wins); set it for providers the application owns.
+   */
+  readonly maxRequestBodyBytes?: number | undefined;
+  /** Preflight cost bound of one content value (default 491520 = 480 KiB). */
+  readonly maxTraversalBytes?: number | undefined;
+  /** Callback redactor; runs on a canonical copy before the declarative rules. */
+  readonly redact?: Redactor | undefined;
+  /** Declarative rules applied after `redact` (validated; invalid rules throw `TypeError`). */
+  readonly rules?: readonly RedactionRule[] | undefined;
+};
+
+/** Effective content budgets of an observer (CONTRACT.md "Content pipeline", budgets). */
+export type ContentBudgets = {
+  readonly maxAttributeBytes: number;
+  readonly maxRetainedOperationBytes: number;
+  readonly maxRequestBodyBytes: number;
 };
 
 export type ObserverOptions = {
   /** Application-owned providers. `undefined` reads the API globals; `null` disables the signal. */
-  readonly tracerProvider?: TracerProvider | null;
-  readonly meterProvider?: MeterProvider | null;
-  readonly loggerProvider?: LoggerProviderLike | null;
-  readonly content?: ContentOptions;
-  /** Epoch milliseconds; tests inject a manual clock. */
-  readonly clock?: () => number;
+  readonly tracerProvider?: TracerProvider | null | undefined;
+  readonly meterProvider?: MeterProvider | null | undefined;
+  readonly loggerProvider?: LoggerProviderLike | null | undefined;
+  readonly content?: ContentOptions | undefined;
+  /** Epoch milliseconds, used verbatim (tests inject a manual clock). */
+  readonly clock?: (() => number) | undefined;
 };
 
 export type TraceMode = "default" | "suppress";
 
 export type StartOptions = {
-  /** Explicit parent; always wins over the ambient OpenTelemetry context. */
-  readonly parent?: ParentInput | undefined;
+  /** Explicit parent; always wins over the ambient OpenTelemetry context. Invalid throws. */
+  readonly parent?: ParentInput;
   /** `tracestate` accompanying a `traceparent` string parent. */
   readonly tracestate?: string | undefined;
   readonly trace?: TraceMode | undefined;
+  /** Explicit start time in epoch milliseconds; a non-finite value is ignored. */
   readonly startTimeMs?: number | undefined;
   readonly attributes?: Attributes | undefined;
 };
@@ -132,6 +179,8 @@ export type InferenceRequest = {
   readonly topP?: number | undefined;
   readonly topK?: number | undefined;
   readonly seed?: number | undefined;
+  readonly frequencyPenalty?: number | undefined;
+  readonly presencePenalty?: number | undefined;
   readonly stopSequences?: readonly string[] | undefined;
   readonly outputType?: string | undefined;
   readonly conversationId?: string | undefined;
@@ -149,6 +198,7 @@ export type InferenceRequest = {
   readonly embeddingDimensions?: number | undefined;
 };
 
+/** Token counts: non-negative safe integers; anything else is ignored. */
 export type Usage = {
   readonly inputTokens?: number | undefined;
   readonly outputTokens?: number | undefined;
@@ -163,9 +213,20 @@ export type Usage = {
   readonly audioOutputTokens?: number | undefined;
 };
 
+/**
+ * A host-measured resource sample. Omit what was not measured; peak, minimum and state fields
+ * describe the operation's measurement window (CONTRACT.md "Resource samples").
+ */
 export type ResourceSample = {
+  /** CPU utilization, 0–1. */
   readonly cpuUtilization?: number | undefined;
+  /** Highest CPU utilization observed in the window, 0–1. */
+  readonly cpuPeakUtilization?: number | undefined;
   readonly memoryUsedBytes?: number | undefined;
+  /** Lowest system memory available for allocation in the window, bytes. */
+  readonly memoryMinAvailableBytes?: number | undefined;
+  /** Most severe memory pressure in the window; any other value is ignored. */
+  readonly memoryPressure?: MemoryPressure | undefined;
   readonly processRssBytes?: number | undefined;
   readonly processPeakRssBytes?: number | undefined;
   readonly thermalState?: "nominal" | "fair" | "serious" | "critical" | (string & {}) | undefined;
@@ -198,6 +259,7 @@ export type ToolCall = {
 
 export type ModelLoadInfo = {
   readonly model: string;
+  /** Who serves the model; defaults to `runtime`, and is absent when neither is known. */
   readonly provider?: string | undefined;
   readonly runtime?: string | undefined;
   readonly format?: string | undefined;
@@ -232,19 +294,85 @@ const USAGE_ATTRIBUTES: readonly (readonly [keyof Usage, string])[] = [
   ["audioOutputTokens", ATTR.USAGE_AUDIO_OUTPUT_TOKENS],
 ];
 
-const RESOURCE_ATTRIBUTES: readonly (readonly [keyof ResourceSample, string])[] = [
-  ["cpuUtilization", ATTR.RESOURCE_CPU_UTILIZATION],
-  ["memoryUsedBytes", ATTR.RESOURCE_MEMORY_USED_BYTES],
-  ["processRssBytes", ATTR.RESOURCE_PROCESS_RSS_BYTES],
-  ["processPeakRssBytes", ATTR.RESOURCE_PROCESS_PEAK_RSS_BYTES],
-  ["thermalState", ATTR.RESOURCE_THERMAL_STATE],
-  ["batteryLevel", ATTR.RESOURCE_BATTERY_LEVEL],
-  ["batteryCharging", ATTR.RESOURCE_BATTERY_CHARGING],
-  ["acceleratorUtilization", ATTR.RESOURCE_ACCELERATOR_UTILIZATION],
-  ["acceleratorMemoryUsedBytes", ATTR.RESOURCE_ACCELERATOR_MEMORY_USED_BYTES],
+type Check = "count" | "finite" | "string" | "boolean" | "memory_pressure";
+
+const RESOURCE_ATTRIBUTES: readonly (readonly [keyof ResourceSample, string, Check])[] = [
+  ["cpuUtilization", ATTR.RESOURCE_CPU_UTILIZATION, "finite"],
+  ["cpuPeakUtilization", ATTR.RESOURCE_CPU_PEAK_UTILIZATION, "finite"],
+  ["memoryUsedBytes", ATTR.RESOURCE_MEMORY_USED_BYTES, "count"],
+  ["memoryMinAvailableBytes", ATTR.RESOURCE_MEMORY_MIN_AVAILABLE_BYTES, "count"],
+  ["memoryPressure", ATTR.RESOURCE_MEMORY_PRESSURE, "memory_pressure"],
+  ["processRssBytes", ATTR.RESOURCE_PROCESS_RSS_BYTES, "count"],
+  ["processPeakRssBytes", ATTR.RESOURCE_PROCESS_PEAK_RSS_BYTES, "count"],
+  ["thermalState", ATTR.RESOURCE_THERMAL_STATE, "string"],
+  ["batteryLevel", ATTR.RESOURCE_BATTERY_LEVEL, "finite"],
+  ["batteryCharging", ATTR.RESOURCE_BATTERY_CHARGING, "boolean"],
+  ["acceleratorUtilization", ATTR.RESOURCE_ACCELERATOR_UTILIZATION, "finite"],
+  ["acceleratorMemoryUsedBytes", ATTR.RESOURCE_ACCELERATOR_MEMORY_USED_BYTES, "count"],
 ];
 
 const TOKEN_MODALITIES = ["text", "image", "audio"] as const;
+
+// ---------------------------------------------------------------------------------------------
+// Value checks (CONTRACT.md "Usage" and "Timing"): invalid measurements are absent, never zero.
+
+const ignored = (key: string): undefined => {
+  diag.debug(`xybrid-observability: ignored an invalid value for ${key}`);
+  return undefined;
+};
+
+/** A non-negative safe integer (token and byte counts). */
+const count = (value: unknown, key: string): number | undefined => {
+  if (value === undefined || value === null) return undefined;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : ignored(key);
+};
+
+/** A safe integer (request integers, ports, indexes). */
+const integer = (value: unknown, key: string): number | undefined => {
+  if (value === undefined || value === null) return undefined;
+  return typeof value === "number" && Number.isSafeInteger(value) ? value : ignored(key);
+};
+
+/** A finite double. */
+const finite = (value: unknown, key: string): number | undefined => {
+  if (value === undefined || value === null) return undefined;
+  return typeof value === "number" && Number.isFinite(value) ? value : ignored(key);
+};
+
+const text = (value: unknown): string | undefined =>
+  typeof value === "string" ? value : undefined;
+
+/** A non-empty string array copy; empty or missing arrays are absent. */
+const strings = (value: unknown): string[] | undefined =>
+  Array.isArray(value) && value.length > 0 ? value.map(String) : undefined;
+
+/** A level of the closed `memory.pressure` vocabulary; an unknown level is not a measurement. */
+const memoryPressure = (value: unknown, key: string): MemoryPressure | undefined => {
+  if (value === undefined || value === null) return undefined;
+  const levels: readonly unknown[] = ENUMS[ATTR.RESOURCE_MEMORY_PRESSURE];
+  return levels.includes(value) ? (value as MemoryPressure) : ignored(key);
+};
+
+const checked = (value: unknown, check: Check, key: string): AttributeValue | undefined => {
+  switch (check) {
+    case "count":
+      return count(value, key);
+    case "finite":
+      return finite(value, key);
+    case "string":
+      return text(value);
+    case "memory_pressure":
+      return memoryPressure(value, key);
+    default:
+      return typeof value === "boolean" ? value : undefined;
+  }
+};
+
+/** An explicit time when it is a finite number, else `undefined`. */
+const explicitTime = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
 const msToHrTime = (ms: number): otel.HrTime => {
   let seconds = Math.floor(ms / 1000);
@@ -256,47 +384,113 @@ const msToHrTime = (ms: number): otel.HrTime => {
   return [seconds, nanos];
 };
 
-const defaultClock = (): number =>
-  typeof performance !== "undefined" && typeof performance.timeOrigin === "number"
-    ? performance.timeOrigin + performance.now()
-    : Date.now();
+/** Seconds between two epoch-millisecond times, clamped at zero. */
+const elapsedSeconds = (fromMs: number, toMs: number): number => Math.max(0, toMs - fromMs) / 1000;
 
-const readEnv = (name: string): string | undefined => {
-  const process = (globalThis as { process?: { env?: Record<string, string | undefined> } })
-    .process;
-  return process?.env?.[name];
+/** Orders strings by Unicode code point (equivalently UTF-8 bytes), not UTF-16 units. */
+const compareCodePoints = (a: string, b: string): number => {
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    const x = a.codePointAt(i) ?? 0;
+    const y = b.codePointAt(j) ?? 0;
+    if (x !== y) return x - y;
+    i += x > 0xffff ? 2 : 1;
+    j += y > 0xffff ? 2 : 1;
+  }
+  return a.length - i - (b.length - j);
 };
 
-/** Resolves the capture mode: explicit, then the environment variable, then `span_only`. */
-export const resolveContentCapture = (explicit?: ContentCapture): ContentCapture => {
-  if (explicit !== undefined) return explicit;
-  const fromEnv = readEnv(ENV.content_capture);
-  if (fromEnv === undefined) return DEFAULTS.content_capture;
-  const normalized = fromEnv.trim().toLowerCase();
+// ---------------------------------------------------------------------------------------------
+// Configuration.
+
+const ENV_FAILED: unique symbol = Symbol("environment unreadable");
+
+/** An environment variable: trimmed; empty means unset; a throwing lookup is reported. */
+const readEnv = (name: string): string | undefined | typeof ENV_FAILED => {
+  try {
+    const process = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+      .process;
+    const value = process?.env?.[name];
+    if (value === undefined || value === null) return undefined;
+    const trimmed = String(value).trim();
+    return trimmed.length === 0 ? undefined : trimmed;
+  } catch {
+    return ENV_FAILED;
+  }
+};
+
+const captureMode = (value: string): ContentCapture | undefined => {
+  const normalized = value.trim().toLowerCase();
   return (ENUMS.content_capture as readonly string[]).includes(normalized)
     ? (normalized as ContentCapture)
-    : "no_content";
+    : undefined;
 };
 
-const globalLoggerProvider = (): LoggerProviderLike => {
-  // @opentelemetry/api >= 1.10 carries the logs API; older versions use @opentelemetry/api-logs.
-  const builtIn = (otel as unknown as { logs?: { getLoggerProvider(): LoggerProviderLike } }).logs;
-  return builtIn?.getLoggerProvider() ?? (legacyLogs.getLoggerProvider() as LoggerProviderLike);
+/**
+ * Resolves the capture mode: an explicit value (trimmed, case-insensitive; anything else throws
+ * `RangeError`), else `OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT`, else the legacy
+ * `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` (`true` = `span_only`), else `span_only`.
+ * An unknown or unreadable environment value means `no_content`.
+ */
+export const resolveContentCapture = (explicit?: ContentCaptureInput | string): ContentCapture => {
+  if (explicit !== undefined) {
+    const mode = typeof explicit === "string" ? captureMode(explicit) : undefined;
+    if (mode === undefined) {
+      throw new RangeError(
+        "content.capture must be no_content, span_only, event_only or span_and_event.",
+      );
+    }
+    return mode;
+  }
+  const current = readEnv(ENV.content_capture);
+  if (current === ENV_FAILED) return "no_content";
+  if (current !== undefined) return captureMode(current) ?? "no_content";
+  const legacy = readEnv(ENV.content_capture_legacy);
+  if (legacy === ENV_FAILED) return "no_content";
+  if (legacy !== undefined) {
+    const normalized = legacy.toLowerCase();
+    if (normalized === "true") return "span_only";
+    return captureMode(normalized) ?? "no_content";
+  }
+  return DEFAULTS.content_capture;
 };
+
+const positiveInteger = (value: unknown, fallback: number, name: string): number => {
+  if (value === undefined) return fallback;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new RangeError(`${name} must be an integer >= 1.`);
+  }
+  return value;
+};
+
+/**
+ * The largest retained-operation (and so attribute) budget that keeps one span's content within
+ * `maxRequestBodyBytes` less `span_envelope_allowance_bytes`: `(request - allowance) / growth`,
+ * at least 1.
+ */
+export const spanContentCeiling = (maxRequestBodyBytes: number): number =>
+  Math.max(
+    1,
+    Math.floor(
+      Math.max(0, maxRequestBodyBytes - DEFAULTS.span_envelope_allowance_bytes) /
+        DEFAULTS.span_content_encoding_growth,
+    ),
+  );
 
 type Instrument = Histogram | Counter;
-
-// Distinct from every callback result, including an intentional null or undefined.
-const REDACTION_FAILED = Symbol("redaction failed");
 
 /** Shared, immutable state behind an {@link Observer} and its operations. */
 class ObserverCore {
   readonly capture: ContentCapture;
   readonly budget: number;
-  readonly redactor: Redactor | undefined;
-  readonly clock: () => number;
+  readonly maxRetained: number;
+  readonly maxRequestBodyBytes: number;
+  readonly content: ContentProcessor;
   readonly tracer: otel.Tracer | undefined;
-  readonly logger: LoggerLike | undefined;
+  readonly #clock: (() => number) | undefined;
+  readonly #logger: LoggerLike | null | undefined;
+  #globalLoggers: readonly LoggerLike[] | undefined;
   readonly #meterProvider: MeterProvider | null | undefined;
   #meter:
     | { provider: MeterProvider; meter: Meter; instruments: Map<string, Instrument> }
@@ -305,19 +499,52 @@ class ObserverCore {
   constructor(options: ObserverOptions) {
     const content = options.content ?? {};
     this.capture = resolveContentCapture(content.capture);
-    const budget = content.maxAttributeBytes ?? DEFAULTS.max_content_attribute_bytes;
-    if (!Number.isSafeInteger(budget) || budget <= 0) {
-      throw new RangeError("content.maxAttributeBytes must be a positive integer.");
+    this.budget = positiveInteger(
+      content.maxAttributeBytes,
+      DEFAULTS.max_content_attribute_bytes,
+      "content.maxAttributeBytes",
+    );
+    const maxRequestBodyBytes = positiveInteger(
+      content.maxRequestBodyBytes,
+      DEFAULTS.max_request_body_bytes,
+      "content.maxRequestBodyBytes",
+    );
+    this.maxRequestBodyBytes = maxRequestBodyBytes;
+    // Budgets are clamped, never rejected: the attribute budget fits the retained budget, which
+    // fits the span content ceiling of the request bound.
+    this.maxRetained = Math.min(
+      positiveInteger(
+        content.maxRetainedOperationBytes,
+        DEFAULTS.max_retained_operation_bytes,
+        "content.maxRetainedOperationBytes",
+      ),
+      spanContentCeiling(maxRequestBodyBytes),
+    );
+    this.budget = Math.min(this.budget, this.maxRetained);
+    const maxTraversalBytes = positiveInteger(
+      content.maxTraversalBytes,
+      DEFAULTS.max_traversal_bytes,
+      "content.maxTraversalBytes",
+    );
+    if (content.redact !== undefined && typeof content.redact !== "function") {
+      throw new TypeError("content.redact must be a function.");
     }
-    this.budget = budget;
-    this.redactor = content.redact;
-    this.clock = options.clock ?? defaultClock;
+    this.content = new ContentProcessor({
+      redactor: content.redact,
+      rules: content.rules === undefined ? [] : toRedactionRules(content.rules),
+      maxTraversalBytes,
+    });
+    if (options.clock !== undefined && typeof options.clock !== "function") {
+      throw new TypeError("clock must be a function.");
+    }
+    this.#clock = options.clock;
     const tracerProvider =
       options.tracerProvider === undefined ? traceApi.getTracerProvider() : options.tracerProvider;
     this.tracer = tracerProvider?.getTracer(INSTRUMENTATION_SCOPE_NAME, VERSION);
-    const loggerProvider =
-      options.loggerProvider === undefined ? globalLoggerProvider() : options.loggerProvider;
-    this.logger = loggerProvider?.getLogger(INSTRUMENTATION_SCOPE_NAME, VERSION);
+    this.#logger =
+      options.loggerProvider === undefined || options.loggerProvider === null
+        ? options.loggerProvider
+        : options.loggerProvider.getLogger(INSTRUMENTATION_SCOPE_NAME, VERSION);
     this.#meterProvider = options.meterProvider;
   }
 
@@ -325,29 +552,86 @@ class ObserverCore {
     return this.capture === "span_only" || this.capture === "span_and_event";
   }
 
+  /** The effective content budgets, after clamping. */
+  get budgets(): ContentBudgets {
+    return Object.freeze({
+      maxAttributeBytes: this.budget,
+      maxRetainedOperationBytes: this.maxRetained,
+      maxRequestBodyBytes: this.maxRequestBodyBytes,
+    });
+  }
+
   get eventContent(): boolean {
     return this.capture === "event_only" || this.capture === "span_and_event";
   }
 
-  redact(kind: string, value: unknown): unknown {
-    try {
-      return this.redactor === undefined ? value : this.redactor(kind, value);
-    } catch {
-      // Never fall back to the original value or report the exception: either may contain content.
-      return REDACTION_FAILED;
-    }
+  /**
+   * Whether events have a destination: `false` only for an explicit `loggerProvider: null`. The
+   * global loggers (no provider given) stay open, since a provider may be registered later.
+   */
+  get eventDestination(): boolean {
+    return this.#logger !== null;
   }
 
-  /** Redacted, bounded error message (code points, not UTF-16 units). */
+  /** Wall-clock epoch milliseconds for calls without an operation. */
+  wallNow(): number {
+    return this.#clock === undefined ? Date.now() : this.#clock();
+  }
+
+  /**
+   * The default clock of one operation: wall-clock anchored at its start and monotonic within
+   * it (`Date.now()` at start plus `performance.now()` elapsed). An injected clock wins.
+   */
+  operationClock(): () => number {
+    if (this.#clock !== undefined) return this.#clock;
+    const wallStart = Date.now();
+    const performance = (globalThis as { performance?: { now?: () => number } }).performance;
+    const now = performance?.now;
+    if (performance === undefined || typeof now !== "function") return Date.now;
+    const monotonicStart = now.call(performance);
+    return () => wallStart + Math.max(0, now.call(performance) - monotonicStart);
+  }
+
+  /** Redacted, rule-applied error message bounded to 256 code points; `undefined` if dropped. */
   errorMessage(message: string | undefined): string | undefined {
     if (message === undefined) return undefined;
-    const redacted = this.redact("error.message", message);
-    if (redacted === REDACTION_FAILED) return undefined;
-    const text = typeof redacted === "string" ? redacted : JSON.stringify(toJson(redacted));
-    const chars = Array.from(text);
-    return chars.length <= DEFAULTS.max_error_message_chars
-      ? text
-      : chars.slice(0, DEFAULTS.max_error_message_chars).join("");
+    const outcome = this.content.process(ATTR_ERROR_MESSAGE, message, "string");
+    if (outcome.kind !== "value" || typeof outcome.value !== "string") {
+      if (outcome.kind === "failed") diag.debug(`xybrid-observability: error.message omitted`);
+      return undefined;
+    }
+    return boundCodePoints(outcome.value, DEFAULTS.max_error_message_chars);
+  }
+
+  #loggers(): readonly LoggerLike[] {
+    if (this.#logger !== undefined) return this.#logger === null ? [] : [this.#logger];
+    if (this.#globalLoggers === undefined) {
+      // @opentelemetry/api >= 1.10 carries the logs API; older setups register through api-logs.
+      // Both return proxy loggers when nothing is registered yet, so late registration works.
+      const builtIn = (otel as unknown as { logs?: LoggerProviderLike }).logs;
+      this.#globalLoggers = [
+        ...(builtIn === undefined ? [] : [builtIn.getLogger(INSTRUMENTATION_SCOPE_NAME, VERSION)]),
+        legacyLogs.getLogger(INSTRUMENTATION_SCOPE_NAME, VERSION) as LoggerLike,
+      ];
+    }
+    return this.#globalLoggers;
+  }
+
+  /** The first logger that reports itself enabled for this event, if any. */
+  #enabledLogger(
+    eventName: keyof typeof EVENTS,
+    severityNumber: number,
+    ctx: Context,
+  ): LoggerLike | undefined {
+    for (const logger of this.#loggers()) {
+      try {
+        if (typeof logger.enabled !== "function") return logger;
+        if (logger.enabled({ context: ctx, severityNumber, eventName })) return logger;
+      } catch {
+        // A throwing enabled() counts as disabled.
+      }
+    }
+    return undefined;
   }
 
   #instrument(name: MetricName): Instrument | undefined {
@@ -384,26 +668,58 @@ class ObserverCore {
     else instrument.add(value, attributes);
   }
 
+  /**
+   * Emits one event; `true` only when an enabled logger received it. Never throws. `attributes`
+   * may be a builder, called only once an enabled logger is found, so content that no logger
+   * receives is never processed.
+   */
   emit(
     eventName: keyof typeof EVENTS,
     atMs: number,
-    attributes: Record<string, AnyValue>,
-    ctx: Context | undefined,
+    attributes: Record<string, AnyValue> | (() => Record<string, AnyValue>),
+    ctx: Context,
   ): boolean {
-    if (this.logger === undefined) return false;
     const event = EVENTS[eventName];
-    this.logger.emit({
-      eventName,
-      timestamp: msToHrTime(atMs),
-      observedTimestamp: msToHrTime(atMs),
-      severityNumber: event.severity_number,
-      severityText: event.severity_text,
-      attributes,
-      ...(ctx === undefined ? {} : { context: ctx }),
-    });
-    return true;
+    const logger = this.#enabledLogger(eventName, event.severity_number, ctx);
+    if (logger === undefined) return false;
+    try {
+      logger.emit({
+        eventName,
+        timestamp: msToHrTime(atMs),
+        observedTimestamp: msToHrTime(atMs),
+        severityNumber: event.severity_number,
+        severityText: event.severity_text,
+        attributes: typeof attributes === "function" ? attributes() : attributes,
+        context: ctx,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Validated start state; an invalid explicit parent throws before any work. */
+  start(options: StartOptions): StartState {
+    const parent = resolveParent(options.parent, options.tracestate);
+    return {
+      parent,
+      suppressed: options.trace === "suppress",
+      startTimeMs: explicitTime(options.startTimeMs),
+      attributes: options.attributes,
+    };
   }
 }
+
+const ATTR_ERROR_MESSAGE = "error.message";
+
+type StartState = {
+  readonly parent: ObservationContext | undefined;
+  readonly suppressed: boolean;
+  readonly startTimeMs: number | undefined;
+  readonly attributes?: Attributes | undefined;
+  /** Attempts: the logical span's context (already resolved). */
+  readonly parentContext?: Context | undefined;
+};
 
 const pick = (
   source: Readonly<Record<string, unknown>>,
@@ -417,67 +733,76 @@ const pick = (
   return result;
 };
 
-const COMMON_DIMENSIONS = [
-  ATTR.OPERATION_NAME,
-  ATTR.PROVIDER_NAME,
-  ATTR.REQUEST_MODEL,
-  ATTR.RESPONSE_MODEL,
-  ATTR.SERVER_ADDRESS,
-  ATTR.SERVER_PORT,
-  ATTR.EXECUTION_LOCATION,
-] as const;
+const defined = (values: Record<string, AttributeValue | undefined>): otel.Attributes => {
+  const result: otel.Attributes = {};
+  for (const [key, value] of Object.entries(values)) if (value !== undefined) result[key] = value;
+  return result;
+};
+
+/** Content retained on an operation until it ends. */
+type Retained = {
+  readonly span: string | undefined;
+  readonly event: JsonValue | undefined;
+  readonly bytes: number;
+};
 
 /** Lifecycle shared by every operation handle. */
 abstract class Operation {
   protected readonly core: ObserverCore;
+  /** The operation's own span (sampled or not); `undefined` without one. */
   protected readonly span: Span | undefined;
   protected readonly startMs: number;
+  protected readonly clock: () => number;
   protected readonly suppressed: boolean;
-  /** Every non-content attribute recorded, mirrored for metrics and events. */
+  /** Every non-content attribute recorded, mirrored for events. */
   protected readonly attributes: Record<string, AttributeValue> = {};
-  /** Structured, bounded content destined for the details event. */
-  protected readonly eventContent: Record<string, AnyValue> = {};
-  protected readonly truncated: string[] = [];
+  /** Metric dimensions from typed inputs only (CONTRACT.md "Metric dimensions"). */
+  protected readonly dims: Record<string, AttributeValue>;
   protected errorType: string | undefined;
+  readonly #content = new Map<string, Retained>();
+  #retained = 0;
+  readonly #truncated: string[] = [];
   #ended = false;
   readonly #context: ObservationContext | undefined;
-  readonly #recorded: boolean;
+  readonly #ownSpan: boolean;
 
   protected constructor(
     core: ObserverCore,
     name: string,
     kind: SpanKind,
     initial: Record<string, AttributeValue | undefined>,
-    options: StartOptions,
-    parentOverride?: Context,
+    dims: Record<string, AttributeValue | undefined>,
+    state: StartState,
   ) {
     this.core = core;
-    this.startMs = options.startTimeMs ?? core.clock();
-    this.suppressed = options.trace === "suppress";
-    for (const [key, value] of Object.entries({ ...initial, ...(options.attributes ?? {}) })) {
+    this.clock = core.operationClock();
+    this.startMs = state.startTimeMs ?? this.clock();
+    this.suppressed = state.suppressed;
+    this.dims = defined(dims) as Record<string, AttributeValue>;
+    for (const [key, value] of Object.entries({ ...initial, ...(state.attributes ?? {}) })) {
       if (value !== undefined) this.attributes[key] = value;
     }
     if (this.suppressed || core.tracer === undefined) {
       this.span = undefined;
       this.#context = undefined;
-      this.#recorded = false;
+      this.#ownSpan = false;
       return;
     }
-    const parentContext = parentOverride ?? Operation.parentContext(options);
-    this.span = core.tracer.startSpan(
+    const active = contextApi.active();
+    const parentContext =
+      state.parentContext ??
+      (state.parent === undefined ? active : state.parent.toOtelContext(active));
+    const parentSpanId = traceApi.getSpanContext(parentContext)?.spanId;
+    const span = core.tracer.startSpan(
       name,
       { kind, attributes: { ...this.attributes }, startTime: msToHrTime(this.startMs) },
       parentContext,
     );
-    this.#context = ObservationContext.fromSpanContext(this.span.spanContext());
-    // Captured now: an ended span no longer reports isRecording().
-    this.#recorded = this.span.isRecording();
-  }
-
-  private static parentContext(options: StartOptions): Context {
-    const explicit = resolveParent(options.parent, options.tracestate);
-    const active = contextApi.active();
-    return explicit === undefined ? active : explicit.toOtelContext(active);
+    const context = ObservationContext.fromSpanContext(span.spanContext());
+    // API-only tracers return the parent's context: no span of its own, only propagation.
+    this.#ownSpan = context !== undefined && context.spanId !== parentSpanId;
+    this.span = this.#ownSpan ? span : undefined;
+    this.#context = context;
   }
 
   /** Context to pass explicitly to children across workers, threads and processes. */
@@ -485,15 +810,19 @@ abstract class Operation {
     return this.#context;
   }
 
-  /** Ids of the recorded span; `undefined` when the operation is not traced. */
+  /**
+   * `{trace_id, span_id}` of the operation's own span, sampled or not; `undefined` when the
+   * operation is suppressed or has no span of its own (no tracer, or an API-only tracer).
+   */
   observationRef(): ObservationRef | undefined {
-    return this.#recorded ? this.#context?.toRef() : undefined;
+    return this.#ownSpan ? this.#context?.toRef() : undefined;
   }
 
   get ended(): boolean {
     return this.#ended;
   }
 
+  /** Sets a span attribute; it never changes metric dimensions. */
   setAttribute(key: string, value: AttributeValue | undefined): void {
     if (this.#ended || value === undefined) return;
     this.attributes[key] = value;
@@ -504,56 +833,114 @@ abstract class Operation {
     for (const [key, value] of Object.entries(values)) this.setAttribute(key, value);
   }
 
-  protected markTruncated(key: string): void {
-    if (!this.truncated.includes(key)) this.truncated.push(key);
+  /** Whether the operation emits a details event that carries content. */
+  protected get hasDetailsEvent(): boolean {
+    return false;
+  }
+
+  protected get truncated(): readonly string[] {
+    return this.#truncated;
+  }
+
+  /** Content destined for the details event, by key, in recording order. */
+  protected eventContent(): Record<string, AnyValue> {
+    const result: Record<string, AnyValue> = {};
+    for (const [key, entry] of this.#content) {
+      if (entry.event !== undefined) result[key] = entry.event;
+    }
+    return result;
+  }
+
+  #mark(key: string): void {
+    if (!this.#truncated.includes(key)) this.#truncated.push(key);
+  }
+
+  #release(key: string): void {
+    const previous = this.#content.get(key);
+    if (previous === undefined) return;
+    this.#retained -= previous.bytes;
+    this.#content.delete(key);
   }
 
   /**
-   * Records one JSON content attribute: redaction, then truncation, then span (JSON string)
-   * and/or details event (structured) per the capture mode. Schema content ignores the mode
-   * for spans.
+   * Records one content attribute through the pipeline (CONTRACT.md "Content pipeline"):
+   * capture gate, omit rules, preflight, clone, redactor, rules, truncation, retained budget.
+   * The value is written once at the end; a later record of the same key replaces it. Schema
+   * content goes to spans in every capture mode.
    */
-  protected recordJsonContent(key: string, value: JsonValue, governed: boolean): void {
+  protected recordContent(key: string, raw: unknown, shape: ContentShape, governed: boolean): void {
     if (this.#ended) return;
-    if (governed && this.core.capture === "no_content") return;
-    const toSpan = !governed || this.core.spanContent;
-    const toEvent = this.core.eventContent;
+    // Content for a span that does not record (unsampled, suppressed, no tracer) is never
+    // processed; the event destination does not depend on the span, only on a logger.
+    const toSpan = (!governed || this.core.spanContent) && this.span?.isRecording() === true;
+    const toEvent = this.hasDetailsEvent && this.core.eventContent && this.core.eventDestination;
     if (!toSpan && !toEvent) return;
-    const redacted = this.core.redact(key, value);
-    if (redacted === REDACTION_FAILED) return;
-    const bounded = boundJson(toJson(redacted), this.core.budget);
-    if (bounded.kind === "omitted" || bounded.truncated) this.markTruncated(key);
-    if (bounded.kind === "omitted") return;
-    if (toSpan) this.span?.setAttribute(key, bounded.json);
-    if (toEvent) this.eventContent[key] = bounded.value;
+    const outcome = this.core.content.process(key, raw, shape);
+    if (outcome.kind === "dropped") {
+      this.#release(key);
+      return;
+    }
+    if (outcome.kind === "failed") {
+      diag.debug(`xybrid-observability: ${key} omitted (${outcome.reason})`);
+      this.#release(key);
+      this.#mark(key);
+      return;
+    }
+    let spanValue: string | undefined;
+    let eventValue: JsonValue | undefined;
+    if (shape === "string") {
+      const value = outcome.value as string;
+      if (utf8Length(value) > this.core.budget) this.#mark(key);
+      const bounded = truncateString(value, this.core.budget);
+      spanValue = toSpan ? bounded : undefined;
+      eventValue = toEvent ? bounded : undefined;
+    } else {
+      const bounded = boundJson(outcome.value, this.core.budget);
+      if (bounded.kind === "omitted") {
+        this.#release(key);
+        this.#mark(key);
+        return;
+      }
+      if (bounded.truncated) this.#mark(key);
+      spanValue = toSpan ? bounded.json : undefined;
+      eventValue = toEvent ? bounded.value : undefined;
+    }
+    const keyBytes = DEFAULTS.preflight_node_bytes + utf8Length(key);
+    // Plain text is charged as OTLP/JSON writes it (escapes counted), so no span value grows more
+    // than twofold when encoded.
+    const spanBytes = (value: string): number =>
+      shape === "string" ? utf8Length(JSON.stringify(value)) - 2 : utf8Length(value);
+    const bytes =
+      (spanValue === undefined ? 0 : keyBytes + spanBytes(spanValue)) +
+      (eventValue === undefined ? 0 : keyBytes + jsonCost(eventValue));
+    this.#release(key);
+    if (this.#retained + bytes > this.core.maxRetained) {
+      diag.debug(`xybrid-observability: ${key} omitted (retained budget)`);
+      this.#mark(key);
+      return;
+    }
+    this.#content.set(key, { span: spanValue, event: eventValue, bytes });
+    this.#retained += bytes;
   }
 
-  /** Records a plain-string content attribute with the `K = B` prefix rule. */
-  protected recordStringContent(key: string, value: string): string | undefined {
-    if (this.core.capture === "no_content") return undefined;
-    const redacted = this.core.redact(key, value);
-    if (redacted === REDACTION_FAILED) return undefined;
-    const text = typeof redacted === "string" ? redacted : JSON.stringify(toJson(redacted));
-    if (utf8Length(text) > this.core.budget) this.markTruncated(key);
-    const bounded = truncateString(text, this.core.budget);
-    if (this.core.spanContent) this.span?.setAttribute(key, bounded);
-    if (this.core.eventContent) this.eventContent[key] = bounded;
-    return bounded;
+  /** The time of a timing call: a finite explicit time verbatim, else the operation clock. */
+  protected time(atMs: number | undefined): number {
+    return explicitTime(atMs) ?? this.clock();
   }
 
   end(atMs?: number): void {
-    this.finish(atMs ?? this.core.clock(), undefined);
+    this.#finish(atMs, undefined);
   }
 
   endWithError(error: ErrorInfo, atMs?: number): void {
-    this.finish(atMs ?? this.core.clock(), error);
+    this.#finish(atMs, error);
   }
 
   cancel(atMs?: number): void {
     this.endWithError({ errorType: "cancelled" }, atMs);
   }
 
-  /** Hook: final attributes before the span ends (an error, when any, is already recorded). */
+  /** Hook: final measurement attributes before content and the end (error already recorded). */
   protected beforeEnd(_endMs: number): void {}
 
   /** Hook: metrics, recorded once whether or not the span is sampled. */
@@ -562,33 +949,59 @@ abstract class Operation {
   /** Hook: log events at the end. */
   protected emitEvents(_endMs: number, _error: ErrorInfo | undefined, _message?: string): void {}
 
-  protected spanContextForEvents(): Context | undefined {
-    return this.span === undefined ? undefined : traceApi.setSpan(ROOT_CONTEXT, this.span);
+  /** The record context of this operation's events: its own span, else explicitly none. */
+  protected eventContext(): Context {
+    return this.span === undefined ? ROOT_CONTEXT : traceApi.setSpan(ROOT_CONTEXT, this.span);
   }
 
-  private finish(endMs: number, error: ErrorInfo | undefined): void {
+  /** Writes a derived measurement at the end (mirror and span). */
+  protected setDerived(key: string, value: AttributeValue | undefined): void {
+    if (value === undefined) return;
+    this.attributes[key] = value;
+    this.span?.setAttribute(key, value);
+  }
+
+  #finish(atMs: number | undefined, error: ErrorInfo | undefined): void {
     if (this.#ended) return;
+    // A span never ends before it starts; every derived duration is clamped.
+    const endMs = Math.max(this.time(atMs), this.startMs);
     let message: string | undefined;
     if (error !== undefined) {
-      this.errorType = error.errorType;
+      const errorType = String(error.errorType);
+      this.errorType = errorType;
       message = this.core.errorMessage(error.message);
-      this.attributes[ATTR.ERROR_TYPE] = error.errorType;
-      this.span?.setAttribute(ATTR.ERROR_TYPE, error.errorType);
-      this.span?.setStatus({ code: SpanStatusCode.ERROR, message: message ?? error.errorType });
+      this.setDerived(ATTR.ERROR_TYPE, errorType);
+      this.span?.setStatus({ code: SpanStatusCode.ERROR, message: message ?? errorType });
     }
     this.beforeEnd(endMs);
-    if (this.truncated.length > 0) {
-      this.attributes[ATTR.CONTENT_TRUNCATED_ATTRIBUTES] = [...this.truncated];
-      this.span?.setAttribute(ATTR.CONTENT_TRUNCATED_ATTRIBUTES, [...this.truncated]);
+    if (this.#truncated.length > 0) {
+      this.setDerived(ATTR.CONTENT_TRUNCATED_ATTRIBUTES, [...this.#truncated]);
+    }
+    // Content last, so attribute-count limits drop content before metadata.
+    for (const [key, entry] of this.#content) {
+      if (entry.span !== undefined) this.span?.setAttribute(key, entry.span);
     }
     this.#ended = true;
     this.recordMetrics(endMs);
     this.emitEvents(endMs, error, message);
-    this.span?.end(msToHrTime(endMs));
+    try {
+      this.span?.end(msToHrTime(endMs));
+    } catch {
+      // A span processor threw in onEnd: contained, like a Rust processor's panic. The operation
+      // has ended; processors after the throwing one never see this span.
+      diag.debug("xybrid-observability: a span processor threw while a span ended");
+    }
   }
 
   protected durationSeconds(endMs: number): number {
-    return (endMs - this.startMs) / 1000;
+    return elapsedSeconds(this.startMs, endMs);
+  }
+
+  /** Dimensions plus `error.type` when the operation failed. */
+  protected dimsWithError(): otel.Attributes {
+    return this.errorType === undefined
+      ? { ...this.dims }
+      : { ...this.dims, [ATTR.ERROR_TYPE]: this.errorType };
   }
 }
 
@@ -596,30 +1009,29 @@ abstract class Operation {
 abstract class UsageOperation extends Operation {
   protected usage: Usage = {};
 
+  /** Replaces usage field by field; invalid counts are ignored. */
   recordUsage(usage: Usage): void {
-    if (this.ended) return;
+    if (this.ended || typeof usage !== "object" || usage === null) return;
     const merged: Record<string, number | undefined> = { ...this.usage };
     for (const [field, key] of USAGE_ATTRIBUTES) {
-      const value = usage[field];
-      if (value === undefined || value === null) continue;
-      merged[field] = value as number;
-      this.setAttribute(key, value as number);
+      const value = count(usage[field], key);
+      if (value === undefined) continue;
+      merged[field] = value;
+      this.setAttribute(key, value);
     }
     this.usage = merged as Usage;
   }
 
   recordResource(sample: ResourceSample): void {
-    for (const [field, key] of RESOURCE_ATTRIBUTES) {
-      const value = sample[field];
-      if (value !== undefined && value !== null) this.setAttribute(key, value);
+    if (typeof sample !== "object" || sample === null) return;
+    for (const [field, key, check] of RESOURCE_ATTRIBUTES) {
+      this.setAttribute(key, checked(sample[field], check, key));
     }
   }
 }
 
 /** One concrete execution attempt (initial try, retry, or fallback) of a logical request. */
 export class AttemptOperation extends UsageOperation {
-  readonly #operationName: string;
-
   /** @internal */
   constructor(
     core: ObserverCore,
@@ -629,148 +1041,233 @@ export class AttemptOperation extends UsageOperation {
     suppressed: boolean,
     parentContext: Context | undefined,
   ) {
+    const index = integer(info.index, ATTR.ATTEMPT_INDEX);
+    const location = text(info.location);
     super(
       core,
-      ATTEMPT_SPAN_NAME.replace("{index}", String(info.index)),
-      info.location === "remote" ? SpanKind.CLIENT : SpanKind.INTERNAL,
+      ATTEMPT_SPAN_NAME.replace("{index}", () => String(index ?? info.index)),
+      location === "remote" ? SpanKind.CLIENT : SpanKind.INTERNAL,
       {
-        [ATTR.ATTEMPT_INDEX]: info.index,
-        [ATTR.ATTEMPT_REASON]: info.reason,
-        [ATTR.PROVIDER_NAME]: info.provider,
-        [ATTR.REQUEST_MODEL]: info.model,
-        [ATTR.EXECUTION_LOCATION]: info.location,
-        [ATTR.RUNTIME_NAME]: info.runtime,
-        [ATTR.SERVER_ADDRESS]: info.serverAddress,
-        [ATTR.SERVER_PORT]: info.serverPort,
+        [ATTR.ATTEMPT_INDEX]: index,
+        [ATTR.ATTEMPT_REASON]: text(info.reason),
+        [ATTR.PROVIDER_NAME]: text(info.provider),
+        [ATTR.REQUEST_MODEL]: text(info.model),
+        [ATTR.EXECUTION_LOCATION]: location,
+        [ATTR.RUNTIME_NAME]: text(info.runtime),
+        [ATTR.SERVER_ADDRESS]: text(info.serverAddress),
+        [ATTR.SERVER_PORT]: integer(info.serverPort, ATTR.SERVER_PORT),
       },
       {
-        trace: suppressed ? "suppress" : "default",
-        startTimeMs,
+        [ATTR.OPERATION_NAME]: operationName,
+        [ATTR.PROVIDER_NAME]: text(info.provider),
+        [ATTR.REQUEST_MODEL]: text(info.model),
+        [ATTR.EXECUTION_LOCATION]: location,
+        [ATTR.ATTEMPT_REASON]: text(info.reason),
       },
-      parentContext,
+      {
+        parent: undefined,
+        suppressed,
+        startTimeMs: explicitTime(startTimeMs),
+        parentContext,
+      },
     );
-    this.#operationName = operationName;
   }
 
   protected recordMetrics(): void {
-    this.core.record("xybrid.genai.client.inference.attempts", 1, {
-      [ATTR.OPERATION_NAME]: this.#operationName,
-      ...pick(this.attributes, [
-        ATTR.PROVIDER_NAME,
-        ATTR.REQUEST_MODEL,
-        ATTR.EXECUTION_LOCATION,
-        ATTR.ATTEMPT_REASON,
-        ATTR.ERROR_TYPE,
-      ]),
-    });
+    this.core.record("xybrid.genai.client.inference.attempts", 1, this.dimsWithError());
   }
 }
 
-const spanName = (template: string, value: string | undefined, operation: string): string =>
-  value === undefined || value.length === 0 ? operation : template.replace(/\{[a-z]+\}/, value);
+/** Span name from a catalog template, substituting the subject literally. */
+const spanName = (template: string, subject: string | undefined, operation: string): string =>
+  subject === undefined || subject.length === 0
+    ? operation
+    : template.replace(/\{[a-z]+\}/, () => subject);
 
 /** A logical inference request: chat, completion, content generation, embeddings, predict. */
 export class InferenceOperation extends UsageOperation {
   readonly #request: InferenceRequest;
-  #chunks: number[] = [];
+  readonly #category: string;
+  readonly #durationMetric: MetricName;
+  #firstChunkMs: number | undefined;
+  #previousChunkMs: number | undefined;
+  #chunkCount = 0;
   #firstTokenMs: number | undefined;
   #attempts = 0;
   #outputRecorded = false;
   #finishReasonsRecorded = false;
 
   /** @internal */
-  constructor(core: ObserverCore, request: InferenceRequest, options: StartOptions) {
-    const template =
-      (OPERATIONS as Record<string, { span_name: string }>)[request.operation]?.span_name ??
-      `${request.operation} {model}`;
+  constructor(core: ObserverCore, request: InferenceRequest, state: StartState) {
+    const operation = String(request.operation);
+    const catalog = (INFERENCE_OPERATIONS as readonly string[]).includes(operation);
+    const spec = catalog
+      ? OPERATIONS[operation as (typeof INFERENCE_OPERATIONS)[number]]
+      : CUSTOM_INFERENCE_OPERATION;
+    const model = text(request.model);
+    const location = text(request.location);
+    const serverPort = integer(request.serverPort, ATTR.SERVER_PORT);
     super(
       core,
-      spanName(template, request.model, request.operation),
-      request.location === "remote" ? SpanKind.CLIENT : SpanKind.INTERNAL,
+      catalog
+        ? spanName(spec.span_name, model, operation)
+        : model
+          ? `${operation} ${model}`
+          : operation,
+      location === "remote" ? SpanKind.CLIENT : SpanKind.INTERNAL,
       {
-        [ATTR.OPERATION_NAME]: request.operation,
-        [ATTR.PROVIDER_NAME]: request.provider,
-        [ATTR.REQUEST_MODEL]: request.model,
-        [ATTR.EXECUTION_LOCATION]: request.location,
-        [ATTR.RUNTIME_NAME]: request.runtime,
-        [ATTR.RUNTIME_VERSION]: request.runtimeVersion,
-        [ATTR.ACCELERATOR]: request.accelerator,
-        [ATTR.TASK]: request.task,
+        [ATTR.OPERATION_NAME]: operation,
+        [ATTR.PROVIDER_NAME]: text(request.provider),
+        [ATTR.REQUEST_MODEL]: model,
+        [ATTR.EXECUTION_LOCATION]: location,
+        [ATTR.RUNTIME_NAME]: text(request.runtime),
+        [ATTR.RUNTIME_VERSION]: text(request.runtimeVersion),
+        [ATTR.ACCELERATOR]: text(request.accelerator),
+        [ATTR.TASK]: text(request.task),
         [ATTR.REQUEST_STREAM]: request.stream === true ? true : undefined,
-        [ATTR.REQUEST_MAX_TOKENS]: request.maxTokens,
-        [ATTR.REQUEST_TEMPERATURE]: request.temperature,
-        [ATTR.REQUEST_TOP_P]: request.topP,
-        [ATTR.REQUEST_TOP_K]: request.topK,
-        [ATTR.REQUEST_SEED]: request.seed,
-        [ATTR.REQUEST_STOP_SEQUENCES]:
-          request.stopSequences === undefined ? undefined : [...request.stopSequences],
-        [ATTR.OUTPUT_TYPE]: request.outputType,
-        [ATTR.CONVERSATION_ID]: request.conversationId,
-        [ATTR.PROMPT_NAME]: request.prompt?.name,
-        [ATTR.PROMPT_VERSION]: request.prompt?.version,
-        [ATTR.INPUT_MODALITIES]:
-          request.inputModalities === undefined ? undefined : [...request.inputModalities],
-        [ATTR.OUTPUT_MODALITIES]:
-          request.outputModalities === undefined ? undefined : [...request.outputModalities],
-        [ATTR.SERVER_ADDRESS]: request.serverAddress,
-        [ATTR.SERVER_PORT]: request.serverPort,
-        [ATTR.EMBEDDINGS_DIMENSION_COUNT]: request.embeddingDimensions,
+        [ATTR.REQUEST_MAX_TOKENS]: integer(request.maxTokens, ATTR.REQUEST_MAX_TOKENS),
+        [ATTR.REQUEST_TEMPERATURE]: finite(request.temperature, ATTR.REQUEST_TEMPERATURE),
+        [ATTR.REQUEST_TOP_P]: finite(request.topP, ATTR.REQUEST_TOP_P),
+        [ATTR.REQUEST_TOP_K]: integer(request.topK, ATTR.REQUEST_TOP_K),
+        [ATTR.REQUEST_SEED]: integer(request.seed, ATTR.REQUEST_SEED),
+        [ATTR.REQUEST_FREQUENCY_PENALTY]: finite(
+          request.frequencyPenalty,
+          ATTR.REQUEST_FREQUENCY_PENALTY,
+        ),
+        [ATTR.REQUEST_PRESENCE_PENALTY]: finite(
+          request.presencePenalty,
+          ATTR.REQUEST_PRESENCE_PENALTY,
+        ),
+        [ATTR.REQUEST_STOP_SEQUENCES]: strings(request.stopSequences),
+        [ATTR.OUTPUT_TYPE]: text(request.outputType),
+        [ATTR.CONVERSATION_ID]: text(request.conversationId),
+        [ATTR.PROMPT_NAME]: text(request.prompt?.name),
+        [ATTR.PROMPT_VERSION]: text(request.prompt?.version),
+        [ATTR.INPUT_MODALITIES]: strings(request.inputModalities),
+        [ATTR.OUTPUT_MODALITIES]: strings(request.outputModalities),
+        [ATTR.SERVER_ADDRESS]: text(request.serverAddress),
+        [ATTR.SERVER_PORT]: serverPort,
+        [ATTR.EMBEDDINGS_DIMENSION_COUNT]: integer(
+          request.embeddingDimensions,
+          ATTR.EMBEDDINGS_DIMENSION_COUNT,
+        ),
       },
-      options,
+      {
+        [ATTR.OPERATION_NAME]: operation,
+        [ATTR.PROVIDER_NAME]: text(request.provider),
+        [ATTR.REQUEST_MODEL]: model,
+        [ATTR.SERVER_ADDRESS]: text(request.serverAddress),
+        [ATTR.SERVER_PORT]: serverPort,
+        [ATTR.EXECUTION_LOCATION]: location,
+      },
+      state,
     );
     this.#request = request;
-    for (const [name, value] of Object.entries(request.prompt?.variables ?? {})) {
-      this.recordStringContent(`${ATTR.PROMPT_VARIABLE_PREFIX}${name}`, value);
+    this.#category = spec.category;
+    this.#durationMetric = spec.duration_metric;
+    const variables = request.prompt?.variables;
+    if (typeof variables === "object" && variables !== null) {
+      for (const name of Object.keys(variables).sort(compareCodePoints)) {
+        this.recordContent(
+          `${ATTR.PROMPT_VARIABLE_PREFIX}${name}`,
+          (variables as Record<string, unknown>)[name],
+          "string",
+          true,
+        );
+      }
     }
   }
 
+  protected override get hasDetailsEvent(): boolean {
+    return true;
+  }
+
   recordSystemInstructions(parts: readonly MessagePart[]): void {
-    this.recordJsonContent(ATTR.SYSTEM_INSTRUCTIONS, canonicalParts(parts), true);
+    this.recordContent(ATTR.SYSTEM_INSTRUCTIONS, parts, "parts", true);
   }
 
   recordInputMessages(messages: readonly InputMessage[]): void {
-    this.recordJsonContent(ATTR.INPUT_MESSAGES, canonicalInputMessages(messages), true);
+    this.recordContent(ATTR.INPUT_MESSAGES, messages, "input_messages", true);
   }
 
   /** Tool schemas: recorded in every capture mode, still redacted and bounded. */
   recordToolDefinitions(definitions: readonly unknown[]): void {
-    this.recordJsonContent(ATTR.TOOL_DEFINITIONS, toJson(definitions), false);
+    this.recordContent(ATTR.TOOL_DEFINITIONS, definitions, "json", false);
   }
 
   recordOutputMessages(messages: readonly OutputMessage[]): void {
     if (this.ended) return;
     this.#outputRecorded = true;
-    this.recordJsonContent(ATTR.OUTPUT_MESSAGES, canonicalOutputMessages(messages), true);
+    this.recordContent(ATTR.OUTPUT_MESSAGES, messages, "output_messages", true);
   }
 
-  /** Marks one decoded output chunk carrying new non-empty output. */
+  /**
+   * Marks one delivered output chunk carrying new non-empty output. It never sets or influences
+   * first-token time. The first chunk records time to first chunk; each later chunk records the
+   * time since the previous call (clamped at zero). Points are recorded immediately.
+   */
   recordChunk(atMs?: number): void {
     if (this.ended) return;
-    this.#chunks.push(atMs ?? this.core.clock());
+    const at = this.time(atMs);
+    if (this.#firstChunkMs === undefined) {
+      this.#firstChunkMs = at;
+      this.core.record(
+        "gen_ai.client.inference.time_to_first_chunk",
+        elapsedSeconds(this.startMs, at),
+        { ...this.dims },
+      );
+    } else {
+      this.core.record(
+        "gen_ai.client.inference.time_per_output_chunk",
+        elapsedSeconds(this.#previousChunkMs ?? at, at),
+        { ...this.dims },
+      );
+    }
+    this.#previousChunkMs = at;
+    this.#chunkCount += 1;
   }
 
-  /** Marks the runtime's first output token; later calls are ignored. */
+  /**
+   * Records the runtime-measured time of the first output token. Pass only measured timestamps,
+   * never a chunk-callback time used as an estimate. The first call wins.
+   */
   recordFirstToken(atMs?: number): void {
     if (this.ended || this.#firstTokenMs !== undefined) return;
-    this.#firstTokenMs = atMs ?? this.core.clock();
+    const at = this.time(atMs);
+    this.#firstTokenMs = at;
+    this.core.record(
+      "xybrid.genai.client.inference.time_to_first_token",
+      elapsedSeconds(this.startMs, at),
+      { ...this.dims },
+    );
   }
 
-  /** A runtime-measured mean inter-token time. */
+  /** A runtime-measured mean inter-token time; non-finite values are ignored. */
   recordTokenTiming(timing: { readonly timePerOutputTokenS: number }): void {
-    this.setAttribute(ATTR.RESPONSE_TIME_PER_OUTPUT_TOKEN, timing.timePerOutputTokenS);
+    this.setAttribute(
+      ATTR.RESPONSE_TIME_PER_OUTPUT_TOKEN,
+      finite(timing?.timePerOutputTokenS, ATTR.RESPONSE_TIME_PER_OUTPUT_TOKEN),
+    );
   }
 
+  /** Finish reasons; an empty list is absent and does not count as recorded. */
   recordFinishReasons(reasons: readonly string[]): void {
     if (this.ended) return;
+    const values = strings(reasons);
+    if (values === undefined) return;
     this.#finishReasonsRecorded = true;
-    this.setAttribute(ATTR.RESPONSE_FINISH_REASONS, [...reasons]);
+    this.setAttribute(ATTR.RESPONSE_FINISH_REASONS, values);
   }
 
+  /** The response id and model; the model joins the metric dimensions (last value wins). */
   recordResponse(response: { readonly responseId?: string; readonly model?: string }): void {
+    if (this.ended || typeof response !== "object" || response === null) return;
+    const model = text(response.model);
     this.setAttributes({
-      [ATTR.RESPONSE_ID]: response.responseId,
-      [ATTR.RESPONSE_MODEL]: response.model,
+      [ATTR.RESPONSE_ID]: text(response.responseId),
+      [ATTR.RESPONSE_MODEL]: model,
     });
+    if (model !== undefined) this.dims[ATTR.RESPONSE_MODEL] = model;
   }
 
   /** Starts a child attempt span; the logical span keeps the request totals. */
@@ -780,7 +1277,7 @@ export class InferenceOperation extends UsageOperation {
       this.span === undefined ? undefined : traceApi.setSpan(contextApi.active(), this.span);
     return new AttemptOperation(
       this.core,
-      this.#request.operation,
+      String(this.#request.operation),
       info,
       startTimeMs,
       this.suppressed || this.span === undefined,
@@ -790,76 +1287,40 @@ export class InferenceOperation extends UsageOperation {
 
   protected override beforeEnd(): void {
     if (this.errorType !== undefined && this.#outputRecorded && !this.#finishReasonsRecorded) {
-      this.attributes[ATTR.RESPONSE_FINISH_REASONS] = ["error"];
-      this.span?.setAttribute(ATTR.RESPONSE_FINISH_REASONS, ["error"]);
+      this.setDerived(ATTR.RESPONSE_FINISH_REASONS, ["error"]);
     }
-    const first = this.#chunks[0];
-    const derived: Record<string, AttributeValue | undefined> = {
-      [ATTR.RESPONSE_TIME_TO_FIRST_CHUNK]:
-        first === undefined ? undefined : (first - this.startMs) / 1000,
-      [ATTR.RESPONSE_TIME_TO_FIRST_TOKEN]:
-        this.#firstTokenMs === undefined ? undefined : (this.#firstTokenMs - this.startMs) / 1000,
-      [ATTR.RESPONSE_CHUNK_COUNT]: this.#chunks.length > 0 ? this.#chunks.length : undefined,
-      [ATTR.ATTEMPT_COUNT]: this.#attempts > 0 ? this.#attempts : undefined,
-    };
-    for (const [key, value] of Object.entries(derived)) {
-      if (value === undefined) continue;
-      this.attributes[key] = value;
-      this.span?.setAttribute(key, value);
+    if (this.#firstChunkMs !== undefined) {
+      this.setDerived(
+        ATTR.RESPONSE_TIME_TO_FIRST_CHUNK,
+        elapsedSeconds(this.startMs, this.#firstChunkMs),
+      );
     }
+    if (this.#firstTokenMs !== undefined) {
+      this.setDerived(
+        ATTR.RESPONSE_TIME_TO_FIRST_TOKEN,
+        elapsedSeconds(this.startMs, this.#firstTokenMs),
+      );
+    }
+    if (this.#chunkCount > 0) this.setDerived(ATTR.RESPONSE_CHUNK_COUNT, this.#chunkCount);
+    if (this.#attempts > 0) this.setDerived(ATTR.ATTEMPT_COUNT, this.#attempts);
   }
 
   protected recordMetrics(endMs: number): void {
-    const operation = this.#request.operation;
-    const spec = (OPERATIONS as Record<string, { duration_metric: MetricName; category: string }>)[
-      operation
-    ];
-    const common = pick(this.attributes, COMMON_DIMENSIONS);
-    const withError =
-      this.errorType === undefined ? common : { ...common, [ATTR.ERROR_TYPE]: this.errorType };
-    this.core.record(
-      spec?.duration_metric ?? "gen_ai.client.operation.duration",
-      this.durationSeconds(endMs),
-      withError,
-    );
-    const [first, ...rest] = this.#chunks;
-    if (first !== undefined) {
-      this.core.record(
-        "gen_ai.client.inference.time_to_first_chunk",
-        (first - this.startMs) / 1000,
-        common,
-      );
-      let previous = first;
-      for (const chunk of rest) {
-        this.core.record(
-          "gen_ai.client.inference.time_per_output_chunk",
-          (chunk - previous) / 1000,
-          common,
-        );
-        previous = chunk;
-      }
-    }
-    if (this.#firstTokenMs !== undefined) {
-      this.core.record(
-        "xybrid.genai.client.inference.time_to_first_token",
-        (this.#firstTokenMs - this.startMs) / 1000,
-        common,
-      );
-    }
-    const category = spec?.category;
+    const withError = this.dimsWithError();
+    this.core.record(this.#durationMetric, this.durationSeconds(endMs), withError);
     const usage = this.usage;
-    if (category === "embeddings" && usage.inputTokens !== undefined) {
+    if (this.#category === "embeddings" && usage.inputTokens !== undefined) {
       this.core.record(
         "gen_ai.client.embeddings.operation.input_tokens",
         usage.inputTokens,
         withError,
       );
     }
-    if (category === "inference") this.recordUsageMetrics(common, withError);
+    if (this.#category === "inference") this.#recordUsageMetrics({ ...this.dims }, withError);
   }
 
   /** Token histograms (with `error.type`) and per-modality usage counters (without). */
-  private recordUsageMetrics(common: otel.Attributes, withError: otel.Attributes): void {
+  #recordUsageMetrics(common: otel.Attributes, withError: otel.Attributes): void {
     const usage = this.usage;
     if (usage.inputTokens !== undefined) {
       this.core.record(
@@ -882,10 +1343,10 @@ export class InferenceOperation extends UsageOperation {
     ): void => {
       let covered = 0;
       for (const modality of TOKEN_MODALITIES) {
-        const count = counts[modality];
-        if (count === undefined || count <= 0) continue;
-        covered += count;
-        this.core.record(metric, count, { ...common, [ATTR.TOKEN_MODALITY]: modality });
+        const value = counts[modality];
+        if (value === undefined || value <= 0) continue;
+        covered += value;
+        this.core.record(metric, value, { ...common, [ATTR.TOKEN_MODALITY]: modality });
       }
       if (total !== undefined && total - covered > 0) {
         this.core.record(metric, total - covered, { ...common, [ATTR.TOKEN_MODALITY]: "unknown" });
@@ -902,7 +1363,7 @@ export class InferenceOperation extends UsageOperation {
       audio: usage.audioOutputTokens,
     });
     const single = (modalities: readonly string[] | undefined): string => {
-      const only = modalities?.length === 1 ? modalities[0] : undefined;
+      const only = Array.isArray(modalities) && modalities.length === 1 ? modalities[0] : undefined;
       return only !== undefined && (TOKEN_MODALITIES as readonly string[]).includes(only)
         ? only
         : "unknown";
@@ -933,20 +1394,20 @@ export class InferenceOperation extends UsageOperation {
 
   /**
    * The exception event (not for cancellations) and, when content goes to events, the details
-   * event. Both are emitted for suppressed operations too, without a span.
+   * event. Both are emitted for suppressed operations too, without a trace context.
    */
   protected override emitEvents(
     endMs: number,
     error: ErrorInfo | undefined,
     message: string | undefined,
   ): void {
-    const ctx = this.spanContextForEvents();
-    if (error !== undefined && error.errorType !== "cancelled") {
+    const ctx = this.eventContext();
+    if (error !== undefined && this.errorType !== "cancelled") {
       this.core.emit(
         "gen_ai.client.operation.exception",
         endMs,
         {
-          [ATTR.EXCEPTION_TYPE]: error.errorType,
+          [ATTR.EXCEPTION_TYPE]: this.errorType,
           ...(message === undefined ? {} : { [ATTR.EXCEPTION_MESSAGE]: message }),
         },
         ctx,
@@ -969,7 +1430,7 @@ export class InferenceOperation extends UsageOperation {
       endMs,
       {
         ...summary,
-        ...this.eventContent,
+        ...this.eventContent(),
         ...(this.truncated.length > 0
           ? { [ATTR.CONTENT_TRUNCATED_ATTRIBUTES]: [...this.truncated] }
           : {}),
@@ -982,31 +1443,43 @@ export class InferenceOperation extends UsageOperation {
 /** A tool execution; arguments and results are governed content. */
 export class ToolOperation extends Operation {
   /** @internal */
-  constructor(core: ObserverCore, call: ToolCall, options: StartOptions) {
+  constructor(core: ObserverCore, call: ToolCall, state: StartState) {
+    const name = text(call.name);
+    const toolType = text(call.toolType);
     super(
       core,
-      spanName(OPERATIONS.execute_tool.span_name, call.name, "execute_tool"),
+      spanName(OPERATIONS.execute_tool.span_name, name, "execute_tool"),
       SpanKind.INTERNAL,
       {
         [ATTR.OPERATION_NAME]: "execute_tool",
-        [ATTR.TOOL_NAME]: call.name,
-        [ATTR.TOOL_CALL_ID]: call.callId,
-        [ATTR.TOOL_TYPE]: call.toolType,
-        [ATTR.TOOL_DESCRIPTION]: call.description,
+        [ATTR.TOOL_NAME]: name,
+        [ATTR.TOOL_CALL_ID]: text(call.callId),
+        [ATTR.TOOL_TYPE]: toolType,
+        [ATTR.TOOL_DESCRIPTION]: text(call.description),
       },
-      options,
+      {
+        [ATTR.OPERATION_NAME]: "execute_tool",
+        [ATTR.TOOL_NAME]: name,
+        [ATTR.TOOL_TYPE]: toolType,
+      },
+      state,
     );
     if (call.arguments !== undefined) {
-      this.recordJsonContent(ATTR.TOOL_CALL_ARGUMENTS, toJson(call.arguments), true);
+      this.recordContent(ATTR.TOOL_CALL_ARGUMENTS, call.arguments, "json", true);
     }
   }
 
+  protected override get hasDetailsEvent(): boolean {
+    return true;
+  }
+
   recordResult(value: unknown): void {
-    this.recordJsonContent(ATTR.TOOL_CALL_RESULT, toJson(value), true);
+    this.recordContent(ATTR.TOOL_CALL_RESULT, value, "json", true);
   }
 
   protected override emitEvents(endMs: number): void {
-    if (!this.core.eventContent || Object.keys(this.eventContent).length === 0) return;
+    const content = this.eventContent();
+    if (!this.core.eventContent || Object.keys(content).length === 0) return;
     this.core.emit(
       "gen_ai.execute_tool.operation.details",
       endMs,
@@ -1017,12 +1490,12 @@ export class ToolOperation extends Operation {
           ATTR.TOOL_TYPE,
           ATTR.ERROR_TYPE,
         ]),
-        ...this.eventContent,
+        ...content,
         ...(this.truncated.length === 0
           ? {}
           : { [ATTR.CONTENT_TRUNCATED_ATTRIBUTES]: [...this.truncated] }),
       },
-      this.spanContextForEvents(),
+      this.eventContext(),
     );
   }
 
@@ -1030,7 +1503,7 @@ export class ToolOperation extends Operation {
     this.core.record(
       "gen_ai.execute_tool.duration",
       this.durationSeconds(endMs),
-      pick(this.attributes, [ATTR.OPERATION_NAME, ATTR.TOOL_NAME, ATTR.TOOL_TYPE, ATTR.ERROR_TYPE]),
+      this.dimsWithError(),
     );
   }
 }
@@ -1038,13 +1511,15 @@ export class ToolOperation extends Operation {
 /** A multi-step workflow (agent loop, pipeline) that parents inferences and tools. */
 export class WorkflowOperation extends Operation {
   /** @internal */
-  constructor(core: ObserverCore, name: string, options: StartOptions) {
+  constructor(core: ObserverCore, name: string, state: StartState) {
+    const workflow = text(name);
     super(
       core,
-      spanName(OPERATIONS.invoke_workflow.span_name, name, "invoke_workflow"),
+      spanName(OPERATIONS.invoke_workflow.span_name, workflow, "invoke_workflow"),
       SpanKind.INTERNAL,
-      { [ATTR.OPERATION_NAME]: "invoke_workflow", [ATTR.WORKFLOW_NAME]: name },
-      options,
+      { [ATTR.OPERATION_NAME]: "invoke_workflow", [ATTR.WORKFLOW_NAME]: workflow },
+      { [ATTR.OPERATION_NAME]: "invoke_workflow", [ATTR.WORKFLOW_NAME]: workflow },
+      state,
     );
   }
 
@@ -1052,7 +1527,7 @@ export class WorkflowOperation extends Operation {
     this.core.record(
       "gen_ai.invoke_workflow.duration",
       this.durationSeconds(endMs),
-      pick(this.attributes, [ATTR.OPERATION_NAME, ATTR.WORKFLOW_NAME, ATTR.ERROR_TYPE]),
+      this.dimsWithError(),
     );
   }
 }
@@ -1060,40 +1535,47 @@ export class WorkflowOperation extends Operation {
 /** Loading a model into a runtime. */
 export class ModelLoadOperation extends Operation {
   /** @internal */
-  constructor(core: ObserverCore, info: ModelLoadInfo, options: StartOptions) {
+  constructor(core: ObserverCore, info: ModelLoadInfo, state: StartState) {
+    const model = text(info.model);
+    // The runtime serves a local load when no provider is named; never "unknown".
+    const provider = text(info.provider) ?? text(info.runtime);
     super(
       core,
-      spanName(OPERATIONS.load_model.span_name, info.model, "load_model"),
+      spanName(OPERATIONS.load_model.span_name, model, "load_model"),
       SpanKind.INTERNAL,
       {
         [ATTR.OPERATION_NAME]: "load_model",
-        [ATTR.REQUEST_MODEL]: info.model,
-        [ATTR.PROVIDER_NAME]: info.provider,
-        [ATTR.RUNTIME_NAME]: info.runtime,
-        [ATTR.MODEL_FORMAT]: info.format,
-        [ATTR.MODEL_SIZE_BYTES]: info.sizeBytes,
+        [ATTR.REQUEST_MODEL]: model,
+        [ATTR.PROVIDER_NAME]: provider,
+        [ATTR.RUNTIME_NAME]: text(info.runtime),
+        [ATTR.MODEL_FORMAT]: text(info.format),
+        [ATTR.MODEL_SIZE_BYTES]: count(info.sizeBytes, ATTR.MODEL_SIZE_BYTES),
       },
-      options,
+      {
+        [ATTR.OPERATION_NAME]: "load_model",
+        [ATTR.PROVIDER_NAME]: provider,
+        [ATTR.REQUEST_MODEL]: model,
+      },
+      state,
     );
   }
 
   recordCacheHit(hit: boolean): void {
-    this.setAttribute(ATTR.MODEL_CACHE_HIT, hit);
+    if (typeof hit === "boolean") this.setAttribute(ATTR.MODEL_CACHE_HIT, hit);
   }
 
   recordResource(sample: ResourceSample): void {
-    for (const [field, key] of RESOURCE_ATTRIBUTES) {
-      const value = sample[field];
-      if (value !== undefined && value !== null) this.setAttribute(key, value);
+    if (typeof sample !== "object" || sample === null) return;
+    for (const [field, key, check] of RESOURCE_ATTRIBUTES) {
+      this.setAttribute(key, checked(sample[field], check, key));
     }
   }
 
   protected recordMetrics(endMs: number): void {
-    const common = pick(this.attributes, COMMON_DIMENSIONS);
     this.core.record(
       "gen_ai.client.operation.duration",
       this.durationSeconds(endMs),
-      this.errorType === undefined ? common : { ...common, [ATTR.ERROR_TYPE]: this.errorType },
+      this.dimsWithError(),
     );
   }
 }
@@ -1105,26 +1587,19 @@ export class ModelLoadOperation extends Operation {
  */
 export class SpanOperation extends Operation {
   /** @internal */
-  constructor(core: ObserverCore, name: string, attributes: Attributes, options: StartOptions) {
-    super(core, name, SpanKind.INTERNAL, { ...attributes }, options);
+  constructor(core: ObserverCore, name: string, attributes: Attributes, state: StartState) {
+    super(core, String(name), SpanKind.INTERNAL, { ...attributes }, {}, state);
   }
 
   protected recordMetrics(): void {}
 }
 
-const isRef = (value: unknown): value is ObservationRef =>
-  typeof value === "object" &&
-  value !== null &&
-  typeof (value as ObservationRef).traceId === "string" &&
-  /^[0-9a-f]{32}$/.test((value as ObservationRef).traceId) &&
-  typeof (value as ObservationRef).spanId === "string" &&
-  /^[0-9a-f]{16}$/.test((value as ObservationRef).spanId);
-
+/** The record context of an evaluation: the reference's ids with trace flags 0. */
 const refContext = (target: ObservationRef): Context =>
   traceApi.setSpanContext(ROOT_CONTEXT, {
-    traceId: target.traceId,
-    spanId: target.spanId,
-    traceFlags: TraceFlags.SAMPLED,
+    traceId: target.trace_id,
+    spanId: target.span_id,
+    traceFlags: TraceFlags.NONE,
     isRemote: true,
   });
 
@@ -1135,13 +1610,25 @@ const refContext = (target: ObservationRef): Context =>
 export class Observer {
   readonly #core: ObserverCore;
 
+  /**
+   * Validates options: an invalid content capture or budget throws `RangeError`; invalid
+   * redaction rules, redactor or clock throw `TypeError`.
+   */
   constructor(options: ObserverOptions = {}) {
     this.#core = new ObserverCore(options);
   }
 
-  /** The effective content capture mode. */
+  /** The effective content capture mode (lowercase). */
   get contentCapture(): ContentCapture {
     return this.#core.capture;
+  }
+
+  /**
+   * The effective content budgets: `maxRetainedOperationBytes` at most the span content ceiling
+   * of `maxRequestBodyBytes`, `maxAttributeBytes` at most `maxRetainedOperationBytes`.
+   */
+  get contentBudgets(): ContentBudgets {
+    return this.#core.budgets;
   }
 
   /**
@@ -1155,67 +1642,79 @@ export class Observer {
     return (...args: Args) => contextApi.with(captured, callback, undefined, ...args);
   }
 
+  /** Starts an inference. An invalid explicit parent throws `TypeError` before any work. */
   startInference(request: InferenceRequest, options: StartOptions = {}): InferenceOperation {
-    return new InferenceOperation(this.#core, request, options);
+    return new InferenceOperation(this.#core, request, this.#core.start(options));
   }
 
   startWorkflow(name: string, options: StartOptions = {}): WorkflowOperation {
-    return new WorkflowOperation(this.#core, name, options);
+    return new WorkflowOperation(this.#core, name, this.#core.start(options));
   }
 
   startTool(call: ToolCall, options: StartOptions = {}): ToolOperation {
-    return new ToolOperation(this.#core, call, options);
+    return new ToolOperation(this.#core, call, this.#core.start(options));
   }
 
   startModelLoad(info: ModelLoadInfo, options: StartOptions = {}): ModelLoadOperation {
-    return new ModelLoadOperation(this.#core, info, options);
+    return new ModelLoadOperation(this.#core, info, this.#core.start(options));
   }
 
   /** A generic internal span (no GenAI semantics, no metrics) for runtime stages. */
   startSpan(name: string, attributes: Attributes = {}, options: StartOptions = {}): SpanOperation {
-    return new SpanOperation(this.#core, name, attributes, options);
+    const state = this.#core.start(options);
+    return new SpanOperation(this.#core, name, attributes, state);
   }
 
-  /** Emits `gen_ai.evaluation.result` parented to `target`; `false` without a logger. */
+  /**
+   * Emits `gen_ai.evaluation.result` linked to `target` (trace flags 0). Returns `true` only when
+   * an enabled logger received it; `false` (recording nothing) without one or for an invalid
+   * reference. References of unsampled spans are valid.
+   */
   recordEvaluation(target: ObservationRef, evaluation: Evaluation): boolean {
-    if (this.#core.logger === undefined || !isRef(target)) return false;
-    const attributes: Record<string, AnyValue> = { [ATTR.EVALUATION_NAME]: evaluation.name };
-    if (evaluation.scoreValue !== undefined) {
-      attributes[ATTR.EVALUATION_SCORE_VALUE] = evaluation.scoreValue;
-    }
-    if (evaluation.scoreLabel !== undefined) {
-      attributes[ATTR.EVALUATION_SCORE_LABEL] = evaluation.scoreLabel;
-    }
-    if (evaluation.explanation !== undefined) {
-      attributes[ATTR.EVALUATION_EXPLANATION] = evaluation.explanation;
-    }
-    if (evaluation.responseId !== undefined) attributes[ATTR.RESPONSE_ID] = evaluation.responseId;
+    const ref = toObservationRef(target);
+    if (ref === undefined || typeof evaluation !== "object" || evaluation === null) return false;
+    const attributes: Record<string, AnyValue> = {
+      [ATTR.EVALUATION_NAME]: String(evaluation.name),
+    };
+    const score = finite(evaluation.scoreValue, ATTR.EVALUATION_SCORE_VALUE);
+    if (score !== undefined) attributes[ATTR.EVALUATION_SCORE_VALUE] = score;
+    const label = text(evaluation.scoreLabel);
+    if (label !== undefined) attributes[ATTR.EVALUATION_SCORE_LABEL] = label;
+    const explanation = text(evaluation.explanation);
+    if (explanation !== undefined) attributes[ATTR.EVALUATION_EXPLANATION] = explanation;
+    const responseId = text(evaluation.responseId);
+    if (responseId !== undefined) attributes[ATTR.RESPONSE_ID] = responseId;
     return this.#core.emit(
       "gen_ai.evaluation.result",
-      this.#core.clock(),
+      this.#core.wallNow(),
       attributes,
-      refContext(target),
+      refContext(ref),
     );
   }
 
-  /** User feedback as `gen_ai.evaluation.result` named `user_feedback`; the comment is content. */
+  /**
+   * User feedback as `gen_ai.evaluation.result` named `user_feedback`. The comment is governed
+   * content (capture mode, redaction, rules, `K = B` truncation). Returns as `recordEvaluation`.
+   * Without an enabled logger the comment is not processed (the redactor is not called).
+   */
   recordFeedback(target: ObservationRef, feedback: Feedback): boolean {
-    if (this.#core.logger === undefined || !isRef(target)) return false;
-    const attributes: Record<string, AnyValue> = { [ATTR.EVALUATION_NAME]: "user_feedback" };
-    if (feedback.score !== undefined) attributes[ATTR.EVALUATION_SCORE_VALUE] = feedback.score;
-    if (feedback.label !== undefined) attributes[ATTR.EVALUATION_SCORE_LABEL] = feedback.label;
-    if (feedback.comment !== undefined && this.#core.capture !== "no_content") {
-      const redacted = this.#core.redact(ATTR.FEEDBACK_COMMENT, feedback.comment);
-      if (redacted !== REDACTION_FAILED) {
-        const text = typeof redacted === "string" ? redacted : JSON.stringify(toJson(redacted));
-        attributes[ATTR.FEEDBACK_COMMENT] = truncateString(text, this.#core.budget);
+    const ref = toObservationRef(target);
+    if (ref === undefined || typeof feedback !== "object" || feedback === null) return false;
+    const core = this.#core;
+    const attributes = (): Record<string, AnyValue> => {
+      const built: Record<string, AnyValue> = { [ATTR.EVALUATION_NAME]: "user_feedback" };
+      const score = finite(feedback.score, ATTR.EVALUATION_SCORE_VALUE);
+      if (score !== undefined) built[ATTR.EVALUATION_SCORE_VALUE] = score;
+      const label = text(feedback.label);
+      if (label !== undefined) built[ATTR.EVALUATION_SCORE_LABEL] = label;
+      if (feedback.comment !== undefined && core.capture !== "no_content") {
+        const outcome = core.content.process(ATTR.FEEDBACK_COMMENT, feedback.comment, "string");
+        if (outcome.kind === "value" && typeof outcome.value === "string") {
+          built[ATTR.FEEDBACK_COMMENT] = truncateString(outcome.value, core.budget);
+        }
       }
-    }
-    return this.#core.emit(
-      "gen_ai.evaluation.result",
-      this.#core.clock(),
-      attributes,
-      refContext(target),
-    );
+      return built;
+    };
+    return core.emit("gen_ai.evaluation.result", core.wallNow(), attributes, refContext(ref));
   }
 }

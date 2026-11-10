@@ -134,9 +134,7 @@ impl LlmClient {
 
         let url = format!("{}/chat/completions", self.config.effective_base_url());
 
-        let response = self
-            .agent
-            .post(&url)
+        let response = crate::tracing::inject_provider_trace_headers(self.agent.post(&url))
             .set("Authorization", &format!("Bearer {}", api_key))
             .set("Content-Type", "application/json")
             .send_json(&body);
@@ -150,11 +148,21 @@ impl LlmClient {
             }
             Err(ureq::Error::Status(status, resp)) => {
                 let error_body: Result<OpenAIError, _> = resp.into_json();
-                let message = error_body
-                    .map(|e| e.error.message)
-                    .unwrap_or_else(|_| "Unknown error".into());
+                let (message, spent_quota) = match error_body {
+                    Ok(e) => {
+                        let spent_quota = crate::cloud::is_insufficient_quota(
+                            e.error.code.as_deref(),
+                            e.error.error_type.as_deref(),
+                        );
+                        (e.error.message, spent_quota)
+                    }
+                    Err(_) => ("Unknown error".into(), false),
+                };
 
-                if status == 429 {
+                // A spent quota (`insufficient_quota`) is not a rate limit:
+                // it stays an `ApiError` so its message reaches the caller
+                // and nothing retries it.
+                if status == 429 && !spent_quota {
                     return Err(LlmError::RateLimited {
                         retry_after_secs: 60,
                     });
@@ -216,9 +224,7 @@ impl LlmClient {
 
         let url = format!("{}/messages", self.config.effective_base_url());
 
-        let response = self
-            .agent
-            .post(&url)
+        let response = crate::tracing::inject_provider_trace_headers(self.agent.post(&url))
             .set("x-api-key", &api_key)
             .set("anthropic-version", "2023-06-01")
             .set("Content-Type", "application/json")
@@ -410,5 +416,60 @@ mod tests {
         // Should only have user message (system is handled separately)
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0]["role"], "user");
+    }
+
+    /// OpenAI answers a spent quota with 429 `insufficient_quota`: that is
+    /// reported with its message (not as a rate limit), while an ordinary 429
+    /// stays `RateLimited`.
+    #[test]
+    fn openai_429_insufficient_quota_is_an_api_error_not_a_rate_limit() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let mut config = ProviderConfig::new(IntegrationProvider::OpenAI);
+        config.api_key = Some("test-key".to_string());
+        config.base_url = Some(server.base_url());
+        let client = LlmClient::with_config(config).unwrap();
+
+        let mut quota = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(429)
+                .header("content-type", "application/json")
+                .body(
+                    json!({ "error": {
+                        "message": "You exceeded your current quota.",
+                        "type": "insufficient_quota",
+                        "code": "insufficient_quota",
+                    } })
+                    .to_string(),
+                );
+        });
+        match client.complete(LlmRequest::prompt("hello")) {
+            Err(LlmError::ApiError { status, message }) => {
+                assert_eq!(status, 429);
+                assert_eq!(message, "You exceeded your current quota.");
+            }
+            other => panic!("expected ApiError, got {other:?}"),
+        }
+        quota.assert_hits(1);
+        quota.delete();
+
+        server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(429)
+                .header("content-type", "application/json")
+                .body(
+                    json!({ "error": {
+                        "message": "Rate limit reached.",
+                        "type": "requests",
+                        "code": "rate_limit_exceeded",
+                    } })
+                    .to_string(),
+                );
+        });
+        assert!(matches!(
+            client.complete(LlmRequest::prompt("hello")),
+            Err(LlmError::RateLimited { .. })
+        ));
     }
 }

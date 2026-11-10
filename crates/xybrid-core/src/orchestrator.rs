@@ -105,6 +105,34 @@ pub enum ExecutionMode {
     Streaming,
 }
 
+/// Routing outcome of one stage, reported by
+/// [`Orchestrator::execute_stage_routed`] before the stage is dispatched.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct StageRoute<'a> {
+    /// The decision the stage executes under (target, free-text reason).
+    pub decision: &'a RoutingDecision,
+    /// Who made the decision.
+    pub source: DecisionSource,
+    /// Whether policy allowed the stage to run.
+    pub policy_allowed: bool,
+}
+
+impl<'a> StageRoute<'a> {
+    /// A route report (for layers that test their handling of it).
+    pub fn new(
+        decision: &'a RoutingDecision,
+        source: DecisionSource,
+        policy_allowed: bool,
+    ) -> Self {
+        Self {
+            decision,
+            source,
+            policy_allowed,
+        }
+    }
+}
+
 /// Main orchestrator struct that coordinates pipeline execution.
 ///
 /// ## Authority-Based Decisions
@@ -268,6 +296,24 @@ impl Orchestrator {
         metrics: &DeviceMetrics,
         availability: &LocalAvailability,
     ) -> OrchestratorResult<StageExecutionResult> {
+        self.execute_stage_routed(stage, input, metrics, availability, &mut |_| {})
+    }
+
+    /// [`Self::execute_stage`], reporting the routing outcome to `on_routed`
+    /// after policy and routing and before dispatch, on the executing thread.
+    ///
+    /// Lets a higher layer open its own scope around the execution once the
+    /// target is known (for example a client span for a cloud route) without
+    /// core depending on that layer's types. `on_routed` is not called when the
+    /// stage fails before routing (input preparation).
+    pub fn execute_stage_routed(
+        &mut self,
+        stage: &StageDescriptor,
+        input: &Envelope,
+        metrics: &DeviceMetrics,
+        availability: &LocalAvailability,
+        on_routed: &mut dyn FnMut(&StageRoute<'_>),
+    ) -> OrchestratorResult<StageExecutionResult> {
         let _start_time = std::time::Instant::now();
 
         // Step 1: Prepare the input once (shared generation options), then
@@ -347,6 +393,12 @@ impl Orchestrator {
             routing_decision.local_reliability_hint.recent_abort_rate,
             routing_decision.local_reliability_hint.sample_size,
         );
+
+        on_routed(&StageRoute {
+            decision: &routing_decision,
+            source: target_resolution.decision.source.clone(),
+            policy_allowed,
+        });
 
         // Step 4: Execute model based on routing decision
         self.event_bus.publish(OrchestratorEvent::ExecutionStarted {
@@ -462,6 +514,36 @@ impl Orchestrator {
         metrics: &DeviceMetrics,
         availability_fn: &dyn Fn(&str) -> LocalAvailability,
     ) -> OrchestratorResult<Vec<StageExecutionResult>> {
+        self.execute_pipeline_with_stage(
+            stages,
+            initial_input,
+            metrics,
+            availability_fn,
+            |orchestrator, stage, input, metrics, availability| {
+                orchestrator.execute_stage(stage, input, metrics, availability)
+            },
+        )
+    }
+
+    /// Execute a pipeline with a caller-owned scope around each stage.
+    ///
+    /// The callback delegates execution to [`Self::execute_stage`]; the engine
+    /// retains ordering, events and input chaining. This lets higher layers
+    /// observe executions without adding their observation types to core.
+    pub fn execute_pipeline_with_stage(
+        &mut self,
+        stages: &[StageDescriptor],
+        initial_input: &Envelope,
+        metrics: &DeviceMetrics,
+        availability_fn: &dyn Fn(&str) -> LocalAvailability,
+        mut execute: impl FnMut(
+            &mut Self,
+            &StageDescriptor,
+            &Envelope,
+            &DeviceMetrics,
+            &LocalAvailability,
+        ) -> OrchestratorResult<StageExecutionResult>,
+    ) -> OrchestratorResult<Vec<StageExecutionResult>> {
         let pipeline_start = std::time::Instant::now();
         let stage_names: Vec<String> = stages.iter().map(|s| s.name.clone()).collect();
 
@@ -481,7 +563,7 @@ impl Orchestrator {
 
         for stage in stages {
             let availability = availability_fn(&stage.name);
-            let result = self.execute_stage(stage, &current_input, metrics, &availability)?;
+            let result = execute(self, stage, &current_input, metrics, &availability)?;
             current_input = result.output.clone();
             results.push(result);
         }
@@ -1291,6 +1373,54 @@ mod tests {
             .with_model("functiongemma-270m-it")
             .with_target(ExecutionTarget::Device)
             .with_options(options)
+    }
+
+    #[test]
+    fn execute_stage_routed_reports_the_route_before_dispatch_only_once_routed() {
+        let mut orchestrator = Orchestrator::new();
+        let mut cloud = MockRuntimeAdapter::with_text_output("cloud output").with_name("cloud");
+        cloud.load_model("/mock/cloud").unwrap();
+        orchestrator
+            .executor_mut()
+            .register_adapter(Arc::new(cloud));
+        let subscription = orchestrator.event_bus().subscribe();
+        let mut routes = Vec::new();
+        let result = orchestrator.execute_stage_routed(
+            &StageDescriptor::new("routed"),
+            &text_envelope("Text"),
+            &DeviceMetrics::default(),
+            &LocalAvailability::new(false),
+            &mut |route| {
+                // Routing is decided, dispatch has not started yet.
+                let events: Vec<_> = std::iter::from_fn(|| subscription.try_recv().ok()).collect();
+                assert!(events
+                    .iter()
+                    .any(|e| matches!(e, OrchestratorEvent::RoutingDecided { .. })));
+                assert!(!events
+                    .iter()
+                    .any(|e| matches!(e, OrchestratorEvent::ExecutionStarted { .. })));
+                routes.push((
+                    route.decision.target.as_str().to_owned(),
+                    route.policy_allowed,
+                ));
+            },
+        );
+        assert_eq!(result.unwrap().routing_decision.target.as_str(), "cloud");
+        assert_eq!(routes, [("cloud".to_owned(), true)]);
+
+        let mut called = false;
+        let failed = orchestrator.execute_stage_routed(
+            &invalid_generation_options_stage(),
+            &text_envelope("hello"),
+            &local_routing_metrics(),
+            &LocalAvailability::new(true),
+            &mut |_| called = true,
+        );
+        assert!(failed.is_err());
+        assert!(
+            !called,
+            "a stage that fails before routing reports no route"
+        );
     }
 
     #[test]

@@ -28,6 +28,7 @@
 use crate::api::context::*;
 use crate::api::device::*;
 use crate::api::envelope::*;
+use crate::api::manual_observation::*;
 use crate::api::model::*;
 use crate::api::pipeline::*;
 use crate::api::sdk_client::*;
@@ -44,7 +45,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1460738039;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 695889194;
 
 // Section: executor
 
@@ -1227,6 +1228,1104 @@ fn wire__crate__api__envelope__FfiEnvelope_with_role_impl(
         },
     )
 }
+fn wire__crate__api__manual_observation__FfiInferenceObservation_cancel_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiInferenceObservation_cancel",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::manual_observation::FfiInferenceObservation::cancel(
+                            &*api_that_guard,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiInferenceObservation_complete_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiInferenceObservation_complete",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::manual_observation::FfiInferenceObservation::complete(
+                            &*api_that_guard,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiInferenceObservation_context_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiInferenceObservation_context",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::api::manual_observation::FfiInferenceObservation::context(
+                            &*api_that_guard,
+                        ),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiInferenceObservation_fail_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiInferenceObservation_fail",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>,
+            >>::sse_decode(&mut deserializer);
+            let api_error_type = <String>::sse_decode(&mut deserializer);
+            let api_message = <Option<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::manual_observation::FfiInferenceObservation::fail(
+                            &*api_that_guard,
+                            api_error_type,
+                            api_message,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiInferenceObservation_is_finished_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiInferenceObservation_is_finished",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::api::manual_observation::FfiInferenceObservation::is_finished(
+                            &*api_that_guard,
+                        ),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiInferenceObservation_new_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiInferenceObservation_new",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_request = <crate::api::manual_observation::FfiInferenceRequest>::sse_decode(
+                &mut deserializer,
+            );
+            let api_options =
+                <Option<crate::api::observability::FfiObservationOptions>>::sse_decode(
+                    &mut deserializer,
+                );
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::manual_observation::FfiInferenceObservation::new(
+                        api_request,
+                        api_options,
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiInferenceObservation_observation_ref_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiInferenceObservation_observation_ref",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::api::manual_observation::FfiInferenceObservation::observation_ref(
+                            &*api_that_guard,
+                        ),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiInferenceObservation_record_chunk_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiInferenceObservation_record_chunk",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::manual_observation::FfiInferenceObservation::record_chunk(
+                            &*api_that_guard,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiInferenceObservation_record_finish_reasons_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "FfiInferenceObservation_record_finish_reasons", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || {
+            let message = unsafe { flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_) };
+            let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>>>::sse_decode(&mut deserializer);
+let api_reasons = <Vec<String>>::sse_decode(&mut deserializer);deserializer.end(); move |context|  {
+                    transform_result_sse::<_, ()>((move ||  {
+                        let mut api_that_guard = None;
+let decode_indices_ = flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(&api_that, 0, false)]);
+        for i in decode_indices_ {
+            match i {
+                0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                _ => unreachable!(),
+            }
+        }
+        let api_that_guard = api_that_guard.unwrap();
+ let output_ok = Result::<_,()>::Ok({ crate::api::manual_observation::FfiInferenceObservation::record_finish_reasons(&*api_that_guard, api_reasons); })?;   Ok(output_ok)
+                    })())
+                } })
+}
+fn wire__crate__api__manual_observation__FfiInferenceObservation_record_first_token_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "FfiInferenceObservation_record_first_token", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || {
+            let message = unsafe { flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_) };
+            let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>>>::sse_decode(&mut deserializer);
+let api_at_epoch_ms = <Option<u64>>::sse_decode(&mut deserializer);deserializer.end(); move |context|  {
+                    transform_result_sse::<_, String>((move ||  {
+                        let mut api_that_guard = None;
+let decode_indices_ = flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(&api_that, 0, false)]);
+        for i in decode_indices_ {
+            match i {
+                0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                _ => unreachable!(),
+            }
+        }
+        let api_that_guard = api_that_guard.unwrap();
+ let output_ok = crate::api::manual_observation::FfiInferenceObservation::record_first_token(&*api_that_guard, api_at_epoch_ms)?;   Ok(output_ok)
+                    })())
+                } })
+}
+fn wire__crate__api__manual_observation__FfiInferenceObservation_record_input_messages_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "FfiInferenceObservation_record_input_messages", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || {
+            let message = unsafe { flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_) };
+            let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>>>::sse_decode(&mut deserializer);
+let api_messages_json = <String>::sse_decode(&mut deserializer);deserializer.end(); move |context|  {
+                    transform_result_sse::<_, String>((move ||  {
+                        let mut api_that_guard = None;
+let decode_indices_ = flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(&api_that, 0, false)]);
+        for i in decode_indices_ {
+            match i {
+                0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                _ => unreachable!(),
+            }
+        }
+        let api_that_guard = api_that_guard.unwrap();
+ let output_ok = crate::api::manual_observation::FfiInferenceObservation::record_input_messages(&*api_that_guard, api_messages_json)?;   Ok(output_ok)
+                    })())
+                } })
+}
+fn wire__crate__api__manual_observation__FfiInferenceObservation_record_output_messages_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "FfiInferenceObservation_record_output_messages", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || {
+            let message = unsafe { flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_) };
+            let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>>>::sse_decode(&mut deserializer);
+let api_messages_json = <String>::sse_decode(&mut deserializer);deserializer.end(); move |context|  {
+                    transform_result_sse::<_, String>((move ||  {
+                        let mut api_that_guard = None;
+let decode_indices_ = flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(&api_that, 0, false)]);
+        for i in decode_indices_ {
+            match i {
+                0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                _ => unreachable!(),
+            }
+        }
+        let api_that_guard = api_that_guard.unwrap();
+ let output_ok = crate::api::manual_observation::FfiInferenceObservation::record_output_messages(&*api_that_guard, api_messages_json)?;   Ok(output_ok)
+                    })())
+                } })
+}
+fn wire__crate__api__manual_observation__FfiInferenceObservation_record_response_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiInferenceObservation_record_response",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>,
+            >>::sse_decode(&mut deserializer);
+            let api_response_id = <Option<String>>::sse_decode(&mut deserializer);
+            let api_model = <Option<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::manual_observation::FfiInferenceObservation::record_response(
+                            &*api_that_guard,
+                            api_response_id,
+                            api_model,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiInferenceObservation_record_system_instructions_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "FfiInferenceObservation_record_system_instructions", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || {
+            let message = unsafe { flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_) };
+            let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>>>::sse_decode(&mut deserializer);
+let api_parts_json = <String>::sse_decode(&mut deserializer);deserializer.end(); move |context|  {
+                    transform_result_sse::<_, String>((move ||  {
+                        let mut api_that_guard = None;
+let decode_indices_ = flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(&api_that, 0, false)]);
+        for i in decode_indices_ {
+            match i {
+                0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                _ => unreachable!(),
+            }
+        }
+        let api_that_guard = api_that_guard.unwrap();
+ let output_ok = crate::api::manual_observation::FfiInferenceObservation::record_system_instructions(&*api_that_guard, api_parts_json)?;   Ok(output_ok)
+                    })())
+                } })
+}
+fn wire__crate__api__manual_observation__FfiInferenceObservation_record_tool_definitions_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "FfiInferenceObservation_record_tool_definitions", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || {
+            let message = unsafe { flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_) };
+            let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>>>::sse_decode(&mut deserializer);
+let api_definitions_json = <String>::sse_decode(&mut deserializer);deserializer.end(); move |context|  {
+                    transform_result_sse::<_, String>((move ||  {
+                        let mut api_that_guard = None;
+let decode_indices_ = flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(&api_that, 0, false)]);
+        for i in decode_indices_ {
+            match i {
+                0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                _ => unreachable!(),
+            }
+        }
+        let api_that_guard = api_that_guard.unwrap();
+ let output_ok = crate::api::manual_observation::FfiInferenceObservation::record_tool_definitions(&*api_that_guard, api_definitions_json)?;   Ok(output_ok)
+                    })())
+                } })
+}
+fn wire__crate__api__manual_observation__FfiInferenceObservation_record_usage_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiInferenceObservation_record_usage",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>,
+            >>::sse_decode(&mut deserializer);
+            let api_usage =
+                <crate::api::manual_observation::FfiUsage>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::manual_observation::FfiInferenceObservation::record_usage(
+                            &*api_that_guard,
+                            api_usage,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiModelLoadObservation_cancel_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiModelLoadObservation_cancel",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoadObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::manual_observation::FfiModelLoadObservation::cancel(
+                            &*api_that_guard,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiModelLoadObservation_complete_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiModelLoadObservation_complete",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoadObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::manual_observation::FfiModelLoadObservation::complete(
+                            &*api_that_guard,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiModelLoadObservation_context_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiModelLoadObservation_context",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoadObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::api::manual_observation::FfiModelLoadObservation::context(
+                            &*api_that_guard,
+                        ),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiModelLoadObservation_fail_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiModelLoadObservation_fail",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoadObservation>,
+            >>::sse_decode(&mut deserializer);
+            let api_error_type = <String>::sse_decode(&mut deserializer);
+            let api_message = <Option<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::manual_observation::FfiModelLoadObservation::fail(
+                            &*api_that_guard,
+                            api_error_type,
+                            api_message,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiModelLoadObservation_is_finished_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiModelLoadObservation_is_finished",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoadObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::api::manual_observation::FfiModelLoadObservation::is_finished(
+                            &*api_that_guard,
+                        ),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiModelLoadObservation_new_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiModelLoadObservation_new",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_info =
+                <crate::api::manual_observation::FfiModelLoadInfo>::sse_decode(&mut deserializer);
+            let api_options =
+                <Option<crate::api::observability::FfiObservationOptions>>::sse_decode(
+                    &mut deserializer,
+                );
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::manual_observation::FfiModelLoadObservation::new(
+                        api_info,
+                        api_options,
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiModelLoadObservation_observation_ref_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiModelLoadObservation_observation_ref",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoadObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::api::manual_observation::FfiModelLoadObservation::observation_ref(
+                            &*api_that_guard,
+                        ),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiModelLoadObservation_record_cache_hit_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiModelLoadObservation_record_cache_hit",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoadObservation>,
+            >>::sse_decode(&mut deserializer);
+            let api_hit = <bool>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::manual_observation::FfiModelLoadObservation::record_cache_hit(
+                            &*api_that_guard,
+                            api_hit,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__model__FfiModelLoader_from_bundle_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -1545,6 +2644,57 @@ fn wire__crate__api__model__FfiModelLoader_will_speculate_impl(
         },
     )
 }
+fn wire__crate__api__model__FfiModelLoader_with_observation_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiModelLoader_with_observation",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoader>,
+            >>::sse_decode(&mut deserializer);
+            let api_options =
+                <crate::api::observability::FfiObservationOptions>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let mut api_that_guard = None;
+                let decode_indices_ =
+                    flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                        flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                            &api_that, 0, false,
+                        ),
+                    ]);
+                for i in decode_indices_ {
+                    match i {
+                        0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                        _ => unreachable!(),
+                    }
+                }
+                let api_that_guard = api_that_guard.unwrap();
+                let output_ok = crate::api::model::FfiModelLoader::with_observation(
+                    &*api_that_guard,
+                    api_options,
+                )?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
 fn wire__crate__api__model__FfiModel_download_progress_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1690,6 +2840,54 @@ fn wire__crate__api__model__FfiModel_is_cloud_serving_impl(
                 let api_that_guard = api_that_guard.unwrap();
                 let output_ok = Result::<_, ()>::Ok(
                     crate::api::model::FfiModel::is_cloud_serving(&*api_that_guard),
+                )?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__model__FfiModel_load_observation_ref_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiModel_load_observation_ref",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModel>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let mut api_that_guard = None;
+                let decode_indices_ =
+                    flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                        flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                            &api_that, 0, false,
+                        ),
+                    ]);
+                for i in decode_indices_ {
+                    match i {
+                        0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                        _ => unreachable!(),
+                    }
+                }
+                let api_that_guard = api_that_guard.unwrap();
+                let output_ok = Result::<_, ()>::Ok(
+                    crate::api::model::FfiModel::load_observation_ref(&*api_that_guard),
                 )?;
                 Ok(output_ok)
             })())
@@ -2485,6 +3683,10 @@ fn wire__crate__api__pipeline__FfiPipeline_run_impl(
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>,
             >>::sse_decode(&mut deserializer);
             let api_envelope = <FfiEnvelope>::sse_decode(&mut deserializer);
+            let api_observation =
+                <Option<crate::api::observability::FfiObservationOptions>>::sse_decode(
+                    &mut deserializer,
+                );
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
@@ -2502,8 +3704,11 @@ fn wire__crate__api__pipeline__FfiPipeline_run_impl(
                         }
                     }
                     let api_that_guard = api_that_guard.unwrap();
-                    let output_ok =
-                        crate::api::pipeline::FfiPipeline::run(&*api_that_guard, api_envelope)?;
+                    let output_ok = crate::api::pipeline::FfiPipeline::run(
+                        &*api_that_guard,
+                        api_envelope,
+                        api_observation,
+                    )?;
                     Ok(output_ok)
                 })())
             }
@@ -2820,6 +4025,785 @@ fn wire__crate__api__streaming__FfiStreamSession_subscribe_impl(
                             api_sink,
                         );
                     })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiToolObservation_cancel_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiToolObservation_cancel",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiToolObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::manual_observation::FfiToolObservation::cancel(
+                            &*api_that_guard,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiToolObservation_complete_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiToolObservation_complete",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiToolObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::manual_observation::FfiToolObservation::complete(
+                            &*api_that_guard,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiToolObservation_context_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiToolObservation_context",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiToolObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::api::manual_observation::FfiToolObservation::context(
+                            &*api_that_guard,
+                        ),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiToolObservation_fail_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiToolObservation_fail",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiToolObservation>,
+            >>::sse_decode(&mut deserializer);
+            let api_error_type = <String>::sse_decode(&mut deserializer);
+            let api_message = <Option<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::manual_observation::FfiToolObservation::fail(
+                            &*api_that_guard,
+                            api_error_type,
+                            api_message,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiToolObservation_is_finished_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiToolObservation_is_finished",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiToolObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::api::manual_observation::FfiToolObservation::is_finished(
+                            &*api_that_guard,
+                        ),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiToolObservation_new_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiToolObservation_new",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_call =
+                <crate::api::manual_observation::FfiToolCallInfo>::sse_decode(&mut deserializer);
+            let api_options =
+                <Option<crate::api::observability::FfiObservationOptions>>::sse_decode(
+                    &mut deserializer,
+                );
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::manual_observation::FfiToolObservation::new(
+                        api_call,
+                        api_options,
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiToolObservation_observation_ref_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiToolObservation_observation_ref",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiToolObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::api::manual_observation::FfiToolObservation::observation_ref(
+                            &*api_that_guard,
+                        ),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiToolObservation_record_result_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiToolObservation_record_result",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiToolObservation>,
+            >>::sse_decode(&mut deserializer);
+            let api_result_json = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok =
+                        crate::api::manual_observation::FfiToolObservation::record_result(
+                            &*api_that_guard,
+                            api_result_json,
+                        )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiWorkflowObservation_cancel_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiWorkflowObservation_cancel",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiWorkflowObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::manual_observation::FfiWorkflowObservation::cancel(
+                            &*api_that_guard,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiWorkflowObservation_complete_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiWorkflowObservation_complete",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiWorkflowObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::manual_observation::FfiWorkflowObservation::complete(
+                            &*api_that_guard,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiWorkflowObservation_context_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiWorkflowObservation_context",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiWorkflowObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::api::manual_observation::FfiWorkflowObservation::context(
+                            &*api_that_guard,
+                        ),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiWorkflowObservation_fail_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiWorkflowObservation_fail",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiWorkflowObservation>,
+            >>::sse_decode(&mut deserializer);
+            let api_error_type = <String>::sse_decode(&mut deserializer);
+            let api_message = <Option<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::manual_observation::FfiWorkflowObservation::fail(
+                            &*api_that_guard,
+                            api_error_type,
+                            api_message,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiWorkflowObservation_is_finished_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiWorkflowObservation_is_finished",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiWorkflowObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::api::manual_observation::FfiWorkflowObservation::is_finished(
+                            &*api_that_guard,
+                        ),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiWorkflowObservation_new_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiWorkflowObservation_new",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_name = <String>::sse_decode(&mut deserializer);
+            let api_options =
+                <Option<crate::api::observability::FfiObservationOptions>>::sse_decode(
+                    &mut deserializer,
+                );
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::manual_observation::FfiWorkflowObservation::new(
+                        api_name,
+                        api_options,
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__manual_observation__FfiWorkflowObservation_observation_ref_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FfiWorkflowObservation_observation_ref",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiWorkflowObservation>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_that_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_that, 0, false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_that_guard = api_that_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::api::manual_observation::FfiWorkflowObservation::observation_ref(
+                            &*api_that_guard,
+                        ),
+                    )?;
                     Ok(output_ok)
                 })())
             }
@@ -3879,6 +5863,40 @@ fn wire__crate__api__model__ffi_generation_config_greedy_impl(
         },
     )
 }
+fn wire__crate__api__observability__ffi_observation_options_default_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "ffi_observation_options_default",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::api::observability::FfiObservationOptions::default(),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__model__ffi_run_options_default_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -4197,7 +6215,13 @@ flutter_rust_bridge::frb_generated_moi_arc_impl_value!(
     flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiEnvelope>
 );
 flutter_rust_bridge::frb_generated_moi_arc_impl_value!(
+    flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>
+);
+flutter_rust_bridge::frb_generated_moi_arc_impl_value!(
     flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModel>
+);
+flutter_rust_bridge::frb_generated_moi_arc_impl_value!(
+    flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoadObservation>
 );
 flutter_rust_bridge::frb_generated_moi_arc_impl_value!(
     flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoader>
@@ -4207,6 +6231,12 @@ flutter_rust_bridge::frb_generated_moi_arc_impl_value!(
 );
 flutter_rust_bridge::frb_generated_moi_arc_impl_value!(
     flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiStreamSession>
+);
+flutter_rust_bridge::frb_generated_moi_arc_impl_value!(
+    flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiToolObservation>
+);
+flutter_rust_bridge::frb_generated_moi_arc_impl_value!(
+    flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiWorkflowObservation>
 );
 flutter_rust_bridge::frb_generated_moi_arc_impl_value!(
     flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridDevice>
@@ -4255,11 +6285,31 @@ impl SseDecode for FfiEnvelope {
     }
 }
 
+impl SseDecode for FfiInferenceObservation {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <RustOpaqueMoi<
+            flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>,
+        >>::sse_decode(deserializer);
+        return flutter_rust_bridge::for_generated::rust_auto_opaque_decode_owned(inner);
+    }
+}
+
 impl SseDecode for FfiModel {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut inner = <RustOpaqueMoi<
             flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModel>,
+        >>::sse_decode(deserializer);
+        return flutter_rust_bridge::for_generated::rust_auto_opaque_decode_owned(inner);
+    }
+}
+
+impl SseDecode for FfiModelLoadObservation {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <RustOpaqueMoi<
+            flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoadObservation>,
         >>::sse_decode(deserializer);
         return flutter_rust_bridge::for_generated::rust_auto_opaque_decode_owned(inner);
     }
@@ -4290,6 +6340,26 @@ impl SseDecode for FfiStreamSession {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut inner = <RustOpaqueMoi<
             flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiStreamSession>,
+        >>::sse_decode(deserializer);
+        return flutter_rust_bridge::for_generated::rust_auto_opaque_decode_owned(inner);
+    }
+}
+
+impl SseDecode for FfiToolObservation {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <RustOpaqueMoi<
+            flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiToolObservation>,
+        >>::sse_decode(deserializer);
+        return flutter_rust_bridge::for_generated::rust_auto_opaque_decode_owned(inner);
+    }
+}
+
+impl SseDecode for FfiWorkflowObservation {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <RustOpaqueMoi<
+            flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiWorkflowObservation>,
         >>::sse_decode(deserializer);
         return flutter_rust_bridge::for_generated::rust_auto_opaque_decode_owned(inner);
     }
@@ -4348,7 +6418,31 @@ impl SseDecode
 }
 
 impl SseDecode
+    for RustOpaqueMoi<
+        flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>,
+    >
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <usize>::sse_decode(deserializer);
+        return decode_rust_opaque_moi(inner);
+    }
+}
+
+impl SseDecode
     for RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModel>>
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <usize>::sse_decode(deserializer);
+        return decode_rust_opaque_moi(inner);
+    }
+}
+
+impl SseDecode
+    for RustOpaqueMoi<
+        flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoadObservation>,
+    >
 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4379,6 +6473,28 @@ impl SseDecode
 
 impl SseDecode
     for RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiStreamSession>>
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <usize>::sse_decode(deserializer);
+        return decode_rust_opaque_moi(inner);
+    }
+}
+
+impl SseDecode
+    for RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiToolObservation>>
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <usize>::sse_decode(deserializer);
+        return decode_rust_opaque_moi(inner);
+    }
+}
+
+impl SseDecode
+    for RustOpaqueMoi<
+        flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiWorkflowObservation>,
+    >
 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4660,6 +6776,18 @@ impl SseDecode for crate::api::model::FfiDownloadStatus {
     }
 }
 
+impl SseDecode for crate::api::manual_observation::FfiExecutionLocation {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::manual_observation::FfiExecutionLocation::Local,
+            1 => crate::api::manual_observation::FfiExecutionLocation::Remote,
+            _ => unreachable!("Invalid variant for FfiExecutionLocation: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::api::result::FfiExecutionTarget {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4742,6 +6870,39 @@ impl SseDecode for crate::api::result::FfiInferenceMetrics {
     }
 }
 
+impl SseDecode for crate::api::manual_observation::FfiInferenceRequest {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_operation = <String>::sse_decode(deserializer);
+        let mut var_provider = <String>::sse_decode(deserializer);
+        let mut var_model = <Option<String>>::sse_decode(deserializer);
+        let mut var_location =
+            <crate::api::manual_observation::FfiExecutionLocation>::sse_decode(deserializer);
+        let mut var_runtime = <Option<String>>::sse_decode(deserializer);
+        let mut var_task = <Option<String>>::sse_decode(deserializer);
+        let mut var_stream = <bool>::sse_decode(deserializer);
+        let mut var_maxTokens = <Option<i64>>::sse_decode(deserializer);
+        let mut var_temperature = <Option<f64>>::sse_decode(deserializer);
+        let mut var_topP = <Option<f64>>::sse_decode(deserializer);
+        let mut var_serverAddress = <Option<String>>::sse_decode(deserializer);
+        let mut var_serverPort = <Option<i64>>::sse_decode(deserializer);
+        return crate::api::manual_observation::FfiInferenceRequest {
+            operation: var_operation,
+            provider: var_provider,
+            model: var_model,
+            location: var_location,
+            runtime: var_runtime,
+            task: var_task,
+            stream: var_stream,
+            max_tokens: var_maxTokens,
+            temperature: var_temperature,
+            top_p: var_topP,
+            server_address: var_serverAddress,
+            server_port: var_serverPort,
+        };
+    }
+}
+
 impl SseDecode for crate::api::model::FfiLoadEvent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4793,6 +6954,24 @@ impl SseDecode for crate::api::context::FfiMessageRole {
     }
 }
 
+impl SseDecode for crate::api::manual_observation::FfiModelLoadInfo {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_model = <String>::sse_decode(deserializer);
+        let mut var_provider = <Option<String>>::sse_decode(deserializer);
+        let mut var_runtime = <Option<String>>::sse_decode(deserializer);
+        let mut var_format = <Option<String>>::sse_decode(deserializer);
+        let mut var_sizeBytes = <Option<u64>>::sse_decode(deserializer);
+        return crate::api::manual_observation::FfiModelLoadInfo {
+            model: var_model,
+            provider: var_provider,
+            runtime: var_runtime,
+            format: var_format,
+            size_bytes: var_sizeBytes,
+        };
+    }
+}
+
 impl SseDecode for crate::api::observability::FfiObservabilityConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4807,6 +6986,10 @@ impl SseDecode for crate::api::observability::FfiObservabilityConfig {
         let mut var_metadataOnly = <bool>::sse_decode(deserializer);
         let mut var_maxContentBytes = <Option<u32>>::sse_decode(deserializer);
         let mut var_liveTraceIntervalMs = <Option<u32>>::sse_decode(deserializer);
+        let mut var_deviceId = <Option<String>>::sse_decode(deserializer);
+        let mut var_redactionRules =
+            <Vec<crate::api::observability::FfiRedactionRule>>::sse_decode(deserializer);
+        let mut var_providerOrigins = <Vec<String>>::sse_decode(deserializer);
         return crate::api::observability::FfiObservabilityConfig {
             api_key: var_apiKey,
             endpoint: var_endpoint,
@@ -4819,6 +7002,9 @@ impl SseDecode for crate::api::observability::FfiObservabilityConfig {
             metadata_only: var_metadataOnly,
             max_content_bytes: var_maxContentBytes,
             live_trace_interval_ms: var_liveTraceIntervalMs,
+            device_id: var_deviceId,
+            redaction_rules: var_redactionRules,
+            provider_origins: var_providerOrigins,
         };
     }
 }
@@ -4827,14 +7013,42 @@ impl SseDecode for crate::api::observability::FfiObservabilityStats {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_enabled = <bool>::sse_decode(deserializer);
-        let mut var_spansExported = <u64>::sse_decode(deserializer);
-        let mut var_spansDropped = <u64>::sse_decode(deserializer);
-        let mut var_exportFailures = <u64>::sse_decode(deserializer);
+        let mut var_traces = <crate::api::observability::FfiSignalStats>::sse_decode(deserializer);
+        let mut var_logs = <crate::api::observability::FfiSignalStats>::sse_decode(deserializer);
+        let mut var_metrics = <crate::api::observability::FfiSignalStats>::sse_decode(deserializer);
         return crate::api::observability::FfiObservabilityStats {
             enabled: var_enabled,
-            spans_exported: var_spansExported,
-            spans_dropped: var_spansDropped,
-            export_failures: var_exportFailures,
+            traces: var_traces,
+            logs: var_logs,
+            metrics: var_metrics,
+        };
+    }
+}
+
+impl SseDecode for crate::api::manual_observation::FfiObservationContext {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_traceparent = <String>::sse_decode(deserializer);
+        let mut var_tracestate = <Option<String>>::sse_decode(deserializer);
+        return crate::api::manual_observation::FfiObservationContext {
+            traceparent: var_traceparent,
+            tracestate: var_tracestate,
+        };
+    }
+}
+
+impl SseDecode for crate::api::observability::FfiObservationOptions {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_traceparent = <Option<String>>::sse_decode(deserializer);
+        let mut var_tracestate = <Option<String>>::sse_decode(deserializer);
+        let mut var_conversationId = <Option<String>>::sse_decode(deserializer);
+        let mut var_suppressTrace = <bool>::sse_decode(deserializer);
+        return crate::api::observability::FfiObservationOptions {
+            traceparent: var_traceparent,
+            tracestate: var_tracestate,
+            conversation_id: var_conversationId,
+            suppress_trace: var_suppressTrace,
         };
     }
 }
@@ -4858,11 +7072,14 @@ impl SseDecode for crate::api::streaming::FfiPartialResult {
         let mut var_isStable = <bool>::sse_decode(deserializer);
         let mut var_chunkSequence = <u64>::sse_decode(deserializer);
         let mut var_audioDurationMs = <u64>::sse_decode(deserializer);
+        let mut var_decoderObservation =
+            <Option<crate::api::observability::FfiObservationRef>>::sse_decode(deserializer);
         return crate::api::streaming::FfiPartialResult {
             text: var_text,
             is_stable: var_isStable,
             chunk_sequence: var_chunkSequence,
             audio_duration_ms: var_audioDurationMs,
+            decoder_observation: var_decoderObservation,
         };
     }
 }
@@ -4880,6 +7097,30 @@ impl SseDecode for crate::api::envelope::FfiPixelFormat {
             5 => crate::api::envelope::FfiPixelFormat::I420,
             _ => unreachable!("Invalid variant for FfiPixelFormat: {}", inner),
         };
+    }
+}
+
+impl SseDecode for crate::api::observability::FfiRedactionRule {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_find = <String>::sse_decode(deserializer);
+                let mut var_replacement = <String>::sse_decode(deserializer);
+                return crate::api::observability::FfiRedactionRule::ReplaceLiteral {
+                    find: var_find,
+                    replacement: var_replacement,
+                };
+            }
+            1 => {
+                let mut var_key = <String>::sse_decode(deserializer);
+                return crate::api::observability::FfiRedactionRule::OmitAttribute { key: var_key };
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
     }
 }
 
@@ -5005,14 +7246,35 @@ impl SseDecode for crate::api::result::FfiScoreStatistic {
     }
 }
 
+impl SseDecode for crate::api::observability::FfiSignalStats {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_accepted = <u64>::sse_decode(deserializer);
+        let mut var_exported = <u64>::sse_decode(deserializer);
+        let mut var_dropped = <u64>::sse_decode(deserializer);
+        let mut var_failed = <u64>::sse_decode(deserializer);
+        let mut var_pending = <u64>::sse_decode(deserializer);
+        return crate::api::observability::FfiSignalStats {
+            accepted: var_accepted,
+            exported: var_exported,
+            dropped: var_dropped,
+            failed: var_failed,
+            pending: var_pending,
+        };
+    }
+}
+
 impl SseDecode for crate::api::result::FfiStageLatency {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_stageId = <String>::sse_decode(deserializer);
         let mut var_latencyMs = <u32>::sse_decode(deserializer);
+        let mut var_observation =
+            <Option<crate::api::observability::FfiObservationRef>>::sse_decode(deserializer);
         return crate::api::result::FfiStageLatency {
             stage_id: var_stageId,
             latency_ms: var_latencyMs,
+            observation: var_observation,
         };
     }
 }
@@ -5070,11 +7332,14 @@ impl SseDecode for crate::api::streaming::FfiStreamingConfig {
         let mut var_vad = <crate::api::streaming::FfiVadMode>::sse_decode(deserializer);
         let mut var_language = <Option<String>>::sse_decode(deserializer);
         let mut var_audioCtx = <Option<u32>>::sse_decode(deserializer);
+        let mut var_observation =
+            <Option<crate::api::observability::FfiObservationOptions>>::sse_decode(deserializer);
         return crate::api::streaming::FfiStreamingConfig {
             sample_rate: var_sampleRate,
             vad: var_vad,
             language: var_language,
             audio_ctx: var_audioCtx,
+            observation: var_observation,
         };
     }
 }
@@ -5102,6 +7367,24 @@ impl SseDecode for crate::api::model::FfiToolCall {
         return crate::api::model::FfiToolCall {
             id: var_id,
             name: var_name,
+            arguments_json: var_argumentsJson,
+        };
+    }
+}
+
+impl SseDecode for crate::api::manual_observation::FfiToolCallInfo {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_name = <String>::sse_decode(deserializer);
+        let mut var_callId = <Option<String>>::sse_decode(deserializer);
+        let mut var_toolType = <Option<String>>::sse_decode(deserializer);
+        let mut var_description = <Option<String>>::sse_decode(deserializer);
+        let mut var_argumentsJson = <Option<String>>::sse_decode(deserializer);
+        return crate::api::manual_observation::FfiToolCallInfo {
+            name: var_name,
+            call_id: var_callId,
+            tool_type: var_toolType,
+            description: var_description,
             arguments_json: var_argumentsJson,
         };
     }
@@ -5135,6 +7418,36 @@ impl SseDecode for crate::api::model::FfiToolResult {
     }
 }
 
+impl SseDecode for crate::api::streaming::FfiTranscriptionResult {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_text = <String>::sse_decode(deserializer);
+        let mut var_durationMs = <u64>::sse_decode(deserializer);
+        let mut var_chunksProcessed = <u64>::sse_decode(deserializer);
+        let mut var_observation =
+            <Option<crate::api::observability::FfiObservationRef>>::sse_decode(deserializer);
+        return crate::api::streaming::FfiTranscriptionResult {
+            text: var_text,
+            duration_ms: var_durationMs,
+            chunks_processed: var_chunksProcessed,
+            observation: var_observation,
+        };
+    }
+}
+
+impl SseDecode for crate::api::model::FfiTtsStatus {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::model::FfiTtsStatus::Completed,
+            1 => crate::api::model::FfiTtsStatus::Cancelled,
+            2 => crate::api::model::FfiTtsStatus::Limited,
+            _ => unreachable!("Invalid variant for FfiTtsStatus: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::api::model::FfiTtsStreamEvent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -5149,7 +7462,9 @@ impl SseDecode for crate::api::model::FfiTtsStreamEvent {
                 };
             }
             1 => {
-                return crate::api::model::FfiTtsStreamEvent::Complete;
+                let mut var_field0 =
+                    <crate::api::model::FfiTtsStreamResult>::sse_decode(deserializer);
+                return crate::api::model::FfiTtsStreamEvent::Complete(var_field0);
             }
             2 => {
                 let mut var_field0 = <String>::sse_decode(deserializer);
@@ -5159,6 +7474,47 @@ impl SseDecode for crate::api::model::FfiTtsStreamEvent {
                 unimplemented!("");
             }
         }
+    }
+}
+
+impl SseDecode for crate::api::model::FfiTtsStreamResult {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_status = <crate::api::model::FfiTtsStatus>::sse_decode(deserializer);
+        let mut var_sampleRate = <u32>::sse_decode(deserializer);
+        let mut var_channels = <u32>::sse_decode(deserializer);
+        let mut var_samples = <u64>::sse_decode(deserializer);
+        let mut var_chunks = <u32>::sse_decode(deserializer);
+        let mut var_limitedChunks = <u32>::sse_decode(deserializer);
+        let mut var_observation =
+            <Option<crate::api::observability::FfiObservationRef>>::sse_decode(deserializer);
+        return crate::api::model::FfiTtsStreamResult {
+            status: var_status,
+            sample_rate: var_sampleRate,
+            channels: var_channels,
+            samples: var_samples,
+            chunks: var_chunks,
+            limited_chunks: var_limitedChunks,
+            observation: var_observation,
+        };
+    }
+}
+
+impl SseDecode for crate::api::manual_observation::FfiUsage {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_inputTokens = <Option<u64>>::sse_decode(deserializer);
+        let mut var_outputTokens = <Option<u64>>::sse_decode(deserializer);
+        let mut var_cacheReadInputTokens = <Option<u64>>::sse_decode(deserializer);
+        let mut var_cacheWriteInputTokens = <Option<u64>>::sse_decode(deserializer);
+        let mut var_reasoningOutputTokens = <Option<u64>>::sse_decode(deserializer);
+        return crate::api::manual_observation::FfiUsage {
+            input_tokens: var_inputTokens,
+            output_tokens: var_outputTokens,
+            cache_read_input_tokens: var_cacheReadInputTokens,
+            cache_write_input_tokens: var_cacheWriteInputTokens,
+            reasoning_output_tokens: var_reasoningOutputTokens,
+        };
     }
 }
 
@@ -5310,6 +7666,20 @@ impl SseDecode for Vec<crate::api::envelope::FfiImagePlane> {
         let mut ans_ = vec![];
         for idx_ in 0..len_ {
             ans_.push(<crate::api::envelope::FfiImagePlane>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::observability::FfiRedactionRule> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::observability::FfiRedactionRule>::sse_decode(
                 deserializer,
             ));
         }
@@ -5480,6 +7850,32 @@ impl SseDecode for Option<crate::api::context::FfiMessageRole> {
             return Some(<crate::api::context::FfiMessageRole>::sse_decode(
                 deserializer,
             ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::manual_observation::FfiObservationContext> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(
+                <crate::api::manual_observation::FfiObservationContext>::sse_decode(deserializer),
+            );
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::observability::FfiObservationOptions> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(
+                <crate::api::observability::FfiObservationOptions>::sse_decode(deserializer),
+            );
         } else {
             return None;
         }
@@ -5664,130 +8060,76 @@ fn pde_ffi_dispatcher_primary_impl(
 ) {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        2 => wire__crate__api__model__FfiCancellationToken_default_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        34 => wire__crate__api__model__FfiModelLoader_load_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__model__FfiModelLoader_load_with_progress_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        37 => wire__crate__api__model__FfiModel_download_progress_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        40 => wire__crate__api__model__FfiModel_run_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__model__FfiModel_run_stream_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__model__FfiModel_run_stream_with_context_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        43 => wire__crate__api__model__FfiModel_run_stream_with_fallback_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        44 => {
-            wire__crate__api__model__FfiModel_run_tts_stream_impl(port, ptr, rust_vec_len, data_len)
-        }
-        45 => wire__crate__api__model__FfiModel_run_with_context_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        46 => wire__crate__api__model__FfiModel_stream_impl(port, ptr, rust_vec_len, data_len),
-        48 => wire__crate__api__model__FfiModel_unload_impl(port, ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__model__FfiModel_warmup_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__pipeline__FfiPipeline_run_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__streaming__FfiStreamSession_flush_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        59 => wire__crate__api__streaming__FfiStreamSession_reset_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        60 => wire__crate__api__streaming__FfiStreamSession_subscribe_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        68 => wire__crate__api__sdk_client__XybridSdkClient_cache_entries_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        69 => wire__crate__api__sdk_client__XybridSdkClient_cache_status_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        70 => wire__crate__api__sdk_client__XybridSdkClient_cached_model_path_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        71 => wire__crate__api__sdk_client__XybridSdkClient_clear_model_cache_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        75 => wire__crate__api__sdk_client__XybridSdkClient_has_cached_model_data_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        82 => wire__crate__api__sdk_client__XybridSdkClient_list_extracted_model_ids_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        84 => wire__crate__api__sdk_client__XybridSdkClient_remove_cached_model_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        94 => {
-            wire__crate__api__model__ffi_run_options_default_impl(port, ptr, rust_vec_len, data_len)
-        }
-        95 => wire__crate__api__observability__flush_observability_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        96 => wire__crate__api__sdk_client__init_app_impl(port, ptr, rust_vec_len, data_len),
-        102 => wire__crate__api__observability__shutdown_observability_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        _ => unreachable!(),
-    }
+                        2 => wire__crate__api__model__FfiCancellationToken_default_impl(port, ptr, rust_vec_len, data_len),
+29 => wire__crate__api__manual_observation__FfiInferenceObservation_cancel_impl(port, ptr, rust_vec_len, data_len),
+30 => wire__crate__api__manual_observation__FfiInferenceObservation_complete_impl(port, ptr, rust_vec_len, data_len),
+31 => wire__crate__api__manual_observation__FfiInferenceObservation_context_impl(port, ptr, rust_vec_len, data_len),
+32 => wire__crate__api__manual_observation__FfiInferenceObservation_fail_impl(port, ptr, rust_vec_len, data_len),
+33 => wire__crate__api__manual_observation__FfiInferenceObservation_is_finished_impl(port, ptr, rust_vec_len, data_len),
+34 => wire__crate__api__manual_observation__FfiInferenceObservation_new_impl(port, ptr, rust_vec_len, data_len),
+35 => wire__crate__api__manual_observation__FfiInferenceObservation_observation_ref_impl(port, ptr, rust_vec_len, data_len),
+36 => wire__crate__api__manual_observation__FfiInferenceObservation_record_chunk_impl(port, ptr, rust_vec_len, data_len),
+37 => wire__crate__api__manual_observation__FfiInferenceObservation_record_finish_reasons_impl(port, ptr, rust_vec_len, data_len),
+38 => wire__crate__api__manual_observation__FfiInferenceObservation_record_first_token_impl(port, ptr, rust_vec_len, data_len),
+39 => wire__crate__api__manual_observation__FfiInferenceObservation_record_input_messages_impl(port, ptr, rust_vec_len, data_len),
+40 => wire__crate__api__manual_observation__FfiInferenceObservation_record_output_messages_impl(port, ptr, rust_vec_len, data_len),
+41 => wire__crate__api__manual_observation__FfiInferenceObservation_record_response_impl(port, ptr, rust_vec_len, data_len),
+42 => wire__crate__api__manual_observation__FfiInferenceObservation_record_system_instructions_impl(port, ptr, rust_vec_len, data_len),
+43 => wire__crate__api__manual_observation__FfiInferenceObservation_record_tool_definitions_impl(port, ptr, rust_vec_len, data_len),
+44 => wire__crate__api__manual_observation__FfiInferenceObservation_record_usage_impl(port, ptr, rust_vec_len, data_len),
+45 => wire__crate__api__manual_observation__FfiModelLoadObservation_cancel_impl(port, ptr, rust_vec_len, data_len),
+46 => wire__crate__api__manual_observation__FfiModelLoadObservation_complete_impl(port, ptr, rust_vec_len, data_len),
+47 => wire__crate__api__manual_observation__FfiModelLoadObservation_context_impl(port, ptr, rust_vec_len, data_len),
+48 => wire__crate__api__manual_observation__FfiModelLoadObservation_fail_impl(port, ptr, rust_vec_len, data_len),
+49 => wire__crate__api__manual_observation__FfiModelLoadObservation_is_finished_impl(port, ptr, rust_vec_len, data_len),
+50 => wire__crate__api__manual_observation__FfiModelLoadObservation_new_impl(port, ptr, rust_vec_len, data_len),
+51 => wire__crate__api__manual_observation__FfiModelLoadObservation_observation_ref_impl(port, ptr, rust_vec_len, data_len),
+52 => wire__crate__api__manual_observation__FfiModelLoadObservation_record_cache_hit_impl(port, ptr, rust_vec_len, data_len),
+58 => wire__crate__api__model__FfiModelLoader_load_impl(port, ptr, rust_vec_len, data_len),
+59 => wire__crate__api__model__FfiModelLoader_load_with_progress_impl(port, ptr, rust_vec_len, data_len),
+62 => wire__crate__api__model__FfiModel_download_progress_impl(port, ptr, rust_vec_len, data_len),
+66 => wire__crate__api__model__FfiModel_run_impl(port, ptr, rust_vec_len, data_len),
+67 => wire__crate__api__model__FfiModel_run_stream_impl(port, ptr, rust_vec_len, data_len),
+68 => wire__crate__api__model__FfiModel_run_stream_with_context_impl(port, ptr, rust_vec_len, data_len),
+69 => wire__crate__api__model__FfiModel_run_stream_with_fallback_impl(port, ptr, rust_vec_len, data_len),
+70 => wire__crate__api__model__FfiModel_run_tts_stream_impl(port, ptr, rust_vec_len, data_len),
+71 => wire__crate__api__model__FfiModel_run_with_context_impl(port, ptr, rust_vec_len, data_len),
+72 => wire__crate__api__model__FfiModel_stream_impl(port, ptr, rust_vec_len, data_len),
+74 => wire__crate__api__model__FfiModel_unload_impl(port, ptr, rust_vec_len, data_len),
+75 => wire__crate__api__model__FfiModel_warmup_impl(port, ptr, rust_vec_len, data_len),
+80 => wire__crate__api__pipeline__FfiPipeline_run_impl(port, ptr, rust_vec_len, data_len),
+84 => wire__crate__api__streaming__FfiStreamSession_flush_impl(port, ptr, rust_vec_len, data_len),
+85 => wire__crate__api__streaming__FfiStreamSession_reset_impl(port, ptr, rust_vec_len, data_len),
+86 => wire__crate__api__streaming__FfiStreamSession_subscribe_impl(port, ptr, rust_vec_len, data_len),
+87 => wire__crate__api__manual_observation__FfiToolObservation_cancel_impl(port, ptr, rust_vec_len, data_len),
+88 => wire__crate__api__manual_observation__FfiToolObservation_complete_impl(port, ptr, rust_vec_len, data_len),
+89 => wire__crate__api__manual_observation__FfiToolObservation_context_impl(port, ptr, rust_vec_len, data_len),
+90 => wire__crate__api__manual_observation__FfiToolObservation_fail_impl(port, ptr, rust_vec_len, data_len),
+91 => wire__crate__api__manual_observation__FfiToolObservation_is_finished_impl(port, ptr, rust_vec_len, data_len),
+92 => wire__crate__api__manual_observation__FfiToolObservation_new_impl(port, ptr, rust_vec_len, data_len),
+93 => wire__crate__api__manual_observation__FfiToolObservation_observation_ref_impl(port, ptr, rust_vec_len, data_len),
+94 => wire__crate__api__manual_observation__FfiToolObservation_record_result_impl(port, ptr, rust_vec_len, data_len),
+95 => wire__crate__api__manual_observation__FfiWorkflowObservation_cancel_impl(port, ptr, rust_vec_len, data_len),
+96 => wire__crate__api__manual_observation__FfiWorkflowObservation_complete_impl(port, ptr, rust_vec_len, data_len),
+97 => wire__crate__api__manual_observation__FfiWorkflowObservation_context_impl(port, ptr, rust_vec_len, data_len),
+98 => wire__crate__api__manual_observation__FfiWorkflowObservation_fail_impl(port, ptr, rust_vec_len, data_len),
+99 => wire__crate__api__manual_observation__FfiWorkflowObservation_is_finished_impl(port, ptr, rust_vec_len, data_len),
+100 => wire__crate__api__manual_observation__FfiWorkflowObservation_new_impl(port, ptr, rust_vec_len, data_len),
+101 => wire__crate__api__manual_observation__FfiWorkflowObservation_observation_ref_impl(port, ptr, rust_vec_len, data_len),
+109 => wire__crate__api__sdk_client__XybridSdkClient_cache_entries_impl(port, ptr, rust_vec_len, data_len),
+110 => wire__crate__api__sdk_client__XybridSdkClient_cache_status_impl(port, ptr, rust_vec_len, data_len),
+111 => wire__crate__api__sdk_client__XybridSdkClient_cached_model_path_impl(port, ptr, rust_vec_len, data_len),
+112 => wire__crate__api__sdk_client__XybridSdkClient_clear_model_cache_impl(port, ptr, rust_vec_len, data_len),
+116 => wire__crate__api__sdk_client__XybridSdkClient_has_cached_model_data_impl(port, ptr, rust_vec_len, data_len),
+123 => wire__crate__api__sdk_client__XybridSdkClient_list_extracted_model_ids_impl(port, ptr, rust_vec_len, data_len),
+125 => wire__crate__api__sdk_client__XybridSdkClient_remove_cached_model_impl(port, ptr, rust_vec_len, data_len),
+135 => wire__crate__api__observability__ffi_observation_options_default_impl(port, ptr, rust_vec_len, data_len),
+136 => wire__crate__api__model__ffi_run_options_default_impl(port, ptr, rust_vec_len, data_len),
+137 => wire__crate__api__observability__flush_observability_impl(port, ptr, rust_vec_len, data_len),
+138 => wire__crate__api__sdk_client__init_app_impl(port, ptr, rust_vec_len, data_len),
+144 => wire__crate__api__observability__shutdown_observability_impl(port, ptr, rust_vec_len, data_len),
+                        _ => unreachable!(),
+                    }
 }
 
 fn pde_ffi_dispatcher_sync_impl(
@@ -5879,175 +8221,185 @@ fn pde_ffi_dispatcher_sync_impl(
             wire__crate__api__envelope__FfiEnvelope_user_message_impl(ptr, rust_vec_len, data_len)
         }
         28 => wire__crate__api__envelope__FfiEnvelope_with_role_impl(ptr, rust_vec_len, data_len),
-        29 => wire__crate__api__model__FfiModelLoader_from_bundle_impl(ptr, rust_vec_len, data_len),
-        30 => {
+        53 => wire__crate__api__model__FfiModelLoader_from_bundle_impl(ptr, rust_vec_len, data_len),
+        54 => {
             wire__crate__api__model__FfiModelLoader_from_directory_impl(ptr, rust_vec_len, data_len)
         }
-        31 => wire__crate__api__model__FfiModelLoader_from_huggingface_impl(
+        55 => wire__crate__api__model__FfiModelLoader_from_huggingface_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        32 => {
+        56 => {
             wire__crate__api__model__FfiModelLoader_from_registry_impl(ptr, rust_vec_len, data_len)
         }
-        33 => wire__crate__api__model__FfiModelLoader_from_registry_speculative_impl(
+        57 => wire__crate__api__model__FfiModelLoader_from_registry_speculative_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        36 => {
+        60 => {
             wire__crate__api__model__FfiModelLoader_will_speculate_impl(ptr, rust_vec_len, data_len)
         }
-        38 => wire__crate__api__model__FfiModel_download_status_impl(ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__model__FfiModel_is_cloud_serving_impl(ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__model__FfiModel_supports_tool_calling_impl(
+        61 => wire__crate__api__model__FfiModelLoader_with_observation_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        50 => wire__crate__api__pipeline__FfiPipeline_from_bundle_impl(ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__pipeline__FfiPipeline_from_file_impl(ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__pipeline__FfiPipeline_from_yaml_impl(ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__pipeline__FfiPipeline_name_impl(ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__pipeline__FfiPipeline_stage_count_impl(ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__pipeline__FfiPipeline_stage_names_impl(ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__streaming__FfiStreamSession_feed_impl(ptr, rust_vec_len, data_len),
-        61 => wire__crate__api__device__XybridDevice_apply_debug_memory_pressure_impl(
+        63 => wire__crate__api__model__FfiModel_download_status_impl(ptr, rust_vec_len, data_len),
+        64 => wire__crate__api__model__FfiModel_is_cloud_serving_impl(ptr, rust_vec_len, data_len),
+        65 => {
+            wire__crate__api__model__FfiModel_load_observation_ref_impl(ptr, rust_vec_len, data_len)
+        }
+        73 => wire__crate__api__model__FfiModel_supports_tool_calling_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        62 => wire__crate__api__device__XybridDevice_clear_battery_level_impl(
+        76 => wire__crate__api__pipeline__FfiPipeline_from_bundle_impl(ptr, rust_vec_len, data_len),
+        77 => wire__crate__api__pipeline__FfiPipeline_from_file_impl(ptr, rust_vec_len, data_len),
+        78 => wire__crate__api__pipeline__FfiPipeline_from_yaml_impl(ptr, rust_vec_len, data_len),
+        79 => wire__crate__api__pipeline__FfiPipeline_name_impl(ptr, rust_vec_len, data_len),
+        81 => wire__crate__api__pipeline__FfiPipeline_stage_count_impl(ptr, rust_vec_len, data_len),
+        82 => wire__crate__api__pipeline__FfiPipeline_stage_names_impl(ptr, rust_vec_len, data_len),
+        83 => wire__crate__api__streaming__FfiStreamSession_feed_impl(ptr, rust_vec_len, data_len),
+        102 => wire__crate__api__device__XybridDevice_apply_debug_memory_pressure_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        63 => wire__crate__api__device__XybridDevice_clear_debug_memory_pressure_impl(
+        103 => wire__crate__api__device__XybridDevice_clear_battery_level_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        64 => wire__crate__api__device__XybridDevice_clear_thermal_state_impl(
+        104 => wire__crate__api__device__XybridDevice_clear_debug_memory_pressure_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        65 => wire__crate__api__device__XybridDevice_current_snapshot_impl(
+        105 => wire__crate__api__device__XybridDevice_clear_thermal_state_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        66 => wire__crate__api__device__XybridDevice_set_battery_level_impl(
+        106 => wire__crate__api__device__XybridDevice_current_snapshot_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        67 => wire__crate__api__device__XybridDevice_set_thermal_state_impl(
+        107 => wire__crate__api__device__XybridDevice_set_battery_level_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        72 => wire__crate__api__sdk_client__XybridSdkClient_configure_platform_telemetry_impl(
+        108 => wire__crate__api__device__XybridDevice_set_thermal_state_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        73 => wire__crate__api__sdk_client__XybridSdkClient_configure_resource_telemetry_impl(
+        113 => wire__crate__api__sdk_client__XybridSdkClient_configure_platform_telemetry_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        74 => wire__crate__api__sdk_client__XybridSdkClient_flush_platform_telemetry_impl(
+        114 => wire__crate__api__sdk_client__XybridSdkClient_configure_resource_telemetry_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        76 => wire__crate__api__sdk_client__XybridSdkClient_init_sdk_cache_dir_impl(
+        115 => wire__crate__api__sdk_client__XybridSdkClient_flush_platform_telemetry_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        77 => wire__crate__api__sdk_client__XybridSdkClient_init_telemetry_impl(
+        117 => wire__crate__api__sdk_client__XybridSdkClient_init_sdk_cache_dir_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        78 => wire__crate__api__sdk_client__XybridSdkClient_is_auto_release_enabled_impl(
+        118 => wire__crate__api__sdk_client__XybridSdkClient_init_telemetry_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        79 => wire__crate__api__sdk_client__XybridSdkClient_is_model_cached_impl(
+        119 => wire__crate__api__sdk_client__XybridSdkClient_is_auto_release_enabled_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        80 => wire__crate__api__sdk_client__XybridSdkClient_is_speculative_cloud_enabled_impl(
+        120 => wire__crate__api__sdk_client__XybridSdkClient_is_model_cached_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        81 => wire__crate__api__sdk_client__XybridSdkClient_is_telemetry_initialized_impl(
+        121 => wire__crate__api__sdk_client__XybridSdkClient_is_speculative_cloud_enabled_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        83 => wire__crate__api__sdk_client__XybridSdkClient_release_memory_impl(
+        122 => wire__crate__api__sdk_client__XybridSdkClient_is_telemetry_initialized_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        85 => wire__crate__api__sdk_client__XybridSdkClient_runtime_features_impl(
+        124 => wire__crate__api__sdk_client__XybridSdkClient_release_memory_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        86 => wire__crate__api__sdk_client__XybridSdkClient_set_api_key_impl(
+        126 => wire__crate__api__sdk_client__XybridSdkClient_runtime_features_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        87 => wire__crate__api__sdk_client__XybridSdkClient_set_auto_release_impl(
+        127 => wire__crate__api__sdk_client__XybridSdkClient_set_api_key_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        88 => wire__crate__api__sdk_client__XybridSdkClient_set_gateway_url_impl(
+        128 => wire__crate__api__sdk_client__XybridSdkClient_set_auto_release_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        89 => wire__crate__api__sdk_client__XybridSdkClient_set_platform_url_impl(
+        129 => wire__crate__api__sdk_client__XybridSdkClient_set_gateway_url_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        90 => wire__crate__api__sdk_client__XybridSdkClient_set_speculative_cloud_impl(
+        130 => wire__crate__api__sdk_client__XybridSdkClient_set_platform_url_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        91 => wire__crate__api__sdk_client__XybridSdkClient_validate_resource_telemetry_impl(
+        131 => wire__crate__api__sdk_client__XybridSdkClient_set_speculative_cloud_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        92 => wire__crate__api__model__ffi_generation_config_creative_impl(
+        132 => wire__crate__api__sdk_client__XybridSdkClient_validate_resource_telemetry_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        93 => {
+        133 => wire__crate__api__model__ffi_generation_config_creative_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        134 => {
             wire__crate__api__model__ffi_generation_config_greedy_impl(ptr, rust_vec_len, data_len)
         }
-        97 => wire__crate__api__observability__init_observability_impl(ptr, rust_vec_len, data_len),
-        98 => wire__crate__api__model__json_schema_to_gbnf_impl(ptr, rust_vec_len, data_len),
-        99 => {
+        139 => {
+            wire__crate__api__observability__init_observability_impl(ptr, rust_vec_len, data_len)
+        }
+        140 => wire__crate__api__model__json_schema_to_gbnf_impl(ptr, rust_vec_len, data_len),
+        141 => {
             wire__crate__api__observability__observability_stats_impl(ptr, rust_vec_len, data_len)
         }
-        100 => wire__crate__api__observability__record_evaluation_impl(ptr, rust_vec_len, data_len),
-        101 => wire__crate__api__observability__record_feedback_impl(ptr, rust_vec_len, data_len),
+        142 => wire__crate__api__observability__record_evaluation_impl(ptr, rust_vec_len, data_len),
+        143 => wire__crate__api__observability__record_feedback_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -6108,6 +8460,26 @@ impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<FfiEnvelope>> for FfiEnvelope 
 }
 
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<FfiInferenceObservation> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self.0)
+            .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for FrbWrapper<FfiInferenceObservation>
+{
+}
+
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<FfiInferenceObservation>>
+    for FfiInferenceObservation
+{
+    fn into_into_dart(self) -> FrbWrapper<FfiInferenceObservation> {
+        self.into()
+    }
+}
+
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for FrbWrapper<FfiModel> {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self.0)
@@ -6118,6 +8490,26 @@ impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<
 
 impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<FfiModel>> for FfiModel {
     fn into_into_dart(self) -> FrbWrapper<FfiModel> {
+        self.into()
+    }
+}
+
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<FfiModelLoadObservation> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self.0)
+            .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for FrbWrapper<FfiModelLoadObservation>
+{
+}
+
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<FfiModelLoadObservation>>
+    for FfiModelLoadObservation
+{
+    fn into_into_dart(self) -> FrbWrapper<FfiModelLoadObservation> {
         self.into()
     }
 }
@@ -6163,6 +8555,44 @@ impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<
 
 impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<FfiStreamSession>> for FfiStreamSession {
     fn into_into_dart(self) -> FrbWrapper<FfiStreamSession> {
+        self.into()
+    }
+}
+
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<FfiToolObservation> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self.0)
+            .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for FrbWrapper<FfiToolObservation>
+{
+}
+
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<FfiToolObservation>> for FfiToolObservation {
+    fn into_into_dart(self) -> FrbWrapper<FfiToolObservation> {
+        self.into()
+    }
+}
+
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<FfiWorkflowObservation> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self.0)
+            .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for FrbWrapper<FfiWorkflowObservation>
+{
+}
+
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<FfiWorkflowObservation>>
+    for FfiWorkflowObservation
+{
+    fn into_into_dart(self) -> FrbWrapper<FfiWorkflowObservation> {
         self.into()
     }
 }
@@ -6440,6 +8870,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::model::FfiDownloadStatus>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::manual_observation::FfiExecutionLocation {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Local => 0.into_dart(),
+            Self::Remote => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::manual_observation::FfiExecutionLocation
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::manual_observation::FfiExecutionLocation>
+    for crate::api::manual_observation::FfiExecutionLocation
+{
+    fn into_into_dart(self) -> crate::api::manual_observation::FfiExecutionLocation {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::result::FfiExecutionTarget {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
@@ -6540,6 +8991,37 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::result::FfiInferenceMetrics>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::manual_observation::FfiInferenceRequest {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.operation.into_into_dart().into_dart(),
+            self.provider.into_into_dart().into_dart(),
+            self.model.into_into_dart().into_dart(),
+            self.location.into_into_dart().into_dart(),
+            self.runtime.into_into_dart().into_dart(),
+            self.task.into_into_dart().into_dart(),
+            self.stream.into_into_dart().into_dart(),
+            self.max_tokens.into_into_dart().into_dart(),
+            self.temperature.into_into_dart().into_dart(),
+            self.top_p.into_into_dart().into_dart(),
+            self.server_address.into_into_dart().into_dart(),
+            self.server_port.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::manual_observation::FfiInferenceRequest
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::manual_observation::FfiInferenceRequest>
+    for crate::api::manual_observation::FfiInferenceRequest
+{
+    fn into_into_dart(self) -> crate::api::manual_observation::FfiInferenceRequest {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::model::FfiLoadEvent {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
@@ -6613,6 +9095,30 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::context::FfiMessageRole>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::manual_observation::FfiModelLoadInfo {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.model.into_into_dart().into_dart(),
+            self.provider.into_into_dart().into_dart(),
+            self.runtime.into_into_dart().into_dart(),
+            self.format.into_into_dart().into_dart(),
+            self.size_bytes.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::manual_observation::FfiModelLoadInfo
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::manual_observation::FfiModelLoadInfo>
+    for crate::api::manual_observation::FfiModelLoadInfo
+{
+    fn into_into_dart(self) -> crate::api::manual_observation::FfiModelLoadInfo {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::observability::FfiObservabilityConfig {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -6627,6 +9133,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::observability::FfiObservabili
             self.metadata_only.into_into_dart().into_dart(),
             self.max_content_bytes.into_into_dart().into_dart(),
             self.live_trace_interval_ms.into_into_dart().into_dart(),
+            self.device_id.into_into_dart().into_dart(),
+            self.redaction_rules.into_into_dart().into_dart(),
+            self.provider_origins.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -6647,9 +9156,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::observability::FfiObservabili
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.enabled.into_into_dart().into_dart(),
-            self.spans_exported.into_into_dart().into_dart(),
-            self.spans_dropped.into_into_dart().into_dart(),
-            self.export_failures.into_into_dart().into_dart(),
+            self.traces.into_into_dart().into_dart(),
+            self.logs.into_into_dart().into_dart(),
+            self.metrics.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -6662,6 +9171,50 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::observability::FfiObservabili
     for crate::api::observability::FfiObservabilityStats
 {
     fn into_into_dart(self) -> crate::api::observability::FfiObservabilityStats {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::manual_observation::FfiObservationContext {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.traceparent.into_into_dart().into_dart(),
+            self.tracestate.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::manual_observation::FfiObservationContext
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::manual_observation::FfiObservationContext>
+    for crate::api::manual_observation::FfiObservationContext
+{
+    fn into_into_dart(self) -> crate::api::manual_observation::FfiObservationContext {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::observability::FfiObservationOptions {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.traceparent.into_into_dart().into_dart(),
+            self.tracestate.into_into_dart().into_dart(),
+            self.conversation_id.into_into_dart().into_dart(),
+            self.suppress_trace.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::observability::FfiObservationOptions
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::observability::FfiObservationOptions>
+    for crate::api::observability::FfiObservationOptions
+{
+    fn into_into_dart(self) -> crate::api::observability::FfiObservationOptions {
         self
     }
 }
@@ -6694,6 +9247,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::streaming::FfiPartialResult {
             self.is_stable.into_into_dart().into_dart(),
             self.chunk_sequence.into_into_dart().into_dart(),
             self.audio_duration_ms.into_into_dart().into_dart(),
+            self.decoder_observation.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -6731,6 +9285,36 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::envelope::FfiPixelFormat>
     for crate::api::envelope::FfiPixelFormat
 {
     fn into_into_dart(self) -> crate::api::envelope::FfiPixelFormat {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::observability::FfiRedactionRule {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            crate::api::observability::FfiRedactionRule::ReplaceLiteral { find, replacement } => [
+                0.into_dart(),
+                find.into_into_dart().into_dart(),
+                replacement.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            crate::api::observability::FfiRedactionRule::OmitAttribute { key } => {
+                [1.into_dart(), key.into_into_dart().into_dart()].into_dart()
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::observability::FfiRedactionRule
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::observability::FfiRedactionRule>
+    for crate::api::observability::FfiRedactionRule
+{
+    fn into_into_dart(self) -> crate::api::observability::FfiRedactionRule {
         self
     }
 }
@@ -6870,11 +9454,36 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::result::FfiScoreStatistic>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::observability::FfiSignalStats {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.accepted.into_into_dart().into_dart(),
+            self.exported.into_into_dart().into_dart(),
+            self.dropped.into_into_dart().into_dart(),
+            self.failed.into_into_dart().into_dart(),
+            self.pending.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::observability::FfiSignalStats
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::observability::FfiSignalStats>
+    for crate::api::observability::FfiSignalStats
+{
+    fn into_into_dart(self) -> crate::api::observability::FfiSignalStats {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::result::FfiStageLatency {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.stage_id.into_into_dart().into_dart(),
             self.latency_ms.into_into_dart().into_dart(),
+            self.observation.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -6954,6 +9563,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::streaming::FfiStreamingConfig
             self.vad.into_into_dart().into_dart(),
             self.language.into_into_dart().into_dart(),
             self.audio_ctx.into_into_dart().into_dart(),
+            self.observation.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -7015,6 +9625,30 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::model::FfiToolCall>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::manual_observation::FfiToolCallInfo {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.name.into_into_dart().into_dart(),
+            self.call_id.into_into_dart().into_dart(),
+            self.tool_type.into_into_dart().into_dart(),
+            self.description.into_into_dart().into_dart(),
+            self.arguments_json.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::manual_observation::FfiToolCallInfo
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::manual_observation::FfiToolCallInfo>
+    for crate::api::manual_observation::FfiToolCallInfo
+{
+    fn into_into_dart(self) -> crate::api::manual_observation::FfiToolCallInfo {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::model::FfiToolDefinition {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -7059,6 +9693,51 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::model::FfiToolResult>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::streaming::FfiTranscriptionResult {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.text.into_into_dart().into_dart(),
+            self.duration_ms.into_into_dart().into_dart(),
+            self.chunks_processed.into_into_dart().into_dart(),
+            self.observation.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::streaming::FfiTranscriptionResult
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::streaming::FfiTranscriptionResult>
+    for crate::api::streaming::FfiTranscriptionResult
+{
+    fn into_into_dart(self) -> crate::api::streaming::FfiTranscriptionResult {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::model::FfiTtsStatus {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Completed => 0.into_dart(),
+            Self::Cancelled => 1.into_dart(),
+            Self::Limited => 2.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::model::FfiTtsStatus
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::model::FfiTtsStatus>
+    for crate::api::model::FfiTtsStatus
+{
+    fn into_into_dart(self) -> crate::api::model::FfiTtsStatus {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::model::FfiTtsStreamEvent {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
@@ -7068,7 +9747,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::model::FfiTtsStreamEvent {
                 sample_rate.into_into_dart().into_dart(),
             ]
             .into_dart(),
-            crate::api::model::FfiTtsStreamEvent::Complete => [1.into_dart()].into_dart(),
+            crate::api::model::FfiTtsStreamEvent::Complete(field0) => {
+                [1.into_dart(), field0.into_into_dart().into_dart()].into_dart()
+            }
             crate::api::model::FfiTtsStreamEvent::Error(field0) => {
                 [2.into_dart(), field0.into_into_dart().into_dart()].into_dart()
             }
@@ -7086,6 +9767,56 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::model::FfiTtsStreamEvent>
     for crate::api::model::FfiTtsStreamEvent
 {
     fn into_into_dart(self) -> crate::api::model::FfiTtsStreamEvent {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::model::FfiTtsStreamResult {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.status.into_into_dart().into_dart(),
+            self.sample_rate.into_into_dart().into_dart(),
+            self.channels.into_into_dart().into_dart(),
+            self.samples.into_into_dart().into_dart(),
+            self.chunks.into_into_dart().into_dart(),
+            self.limited_chunks.into_into_dart().into_dart(),
+            self.observation.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::model::FfiTtsStreamResult
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::model::FfiTtsStreamResult>
+    for crate::api::model::FfiTtsStreamResult
+{
+    fn into_into_dart(self) -> crate::api::model::FfiTtsStreamResult {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::manual_observation::FfiUsage {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.input_tokens.into_into_dart().into_dart(),
+            self.output_tokens.into_into_dart().into_dart(),
+            self.cache_read_input_tokens.into_into_dart().into_dart(),
+            self.cache_write_input_tokens.into_into_dart().into_dart(),
+            self.reasoning_output_tokens.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::manual_observation::FfiUsage
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::manual_observation::FfiUsage>
+    for crate::api::manual_observation::FfiUsage
+{
+    fn into_into_dart(self) -> crate::api::manual_observation::FfiUsage {
         self
     }
 }
@@ -7218,10 +9949,34 @@ impl SseEncode for FfiEnvelope {
     }
 }
 
+impl SseEncode for FfiInferenceObservation {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <RustOpaqueMoi<
+            flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>,
+        >>::sse_encode(
+            flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self),
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for FfiModel {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModel>>>::sse_encode(flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self), serializer);
+    }
+}
+
+impl SseEncode for FfiModelLoadObservation {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <RustOpaqueMoi<
+            flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoadObservation>,
+        >>::sse_encode(
+            flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self),
+            serializer,
+        );
     }
 }
 
@@ -7243,6 +9998,25 @@ impl SseEncode for FfiStreamSession {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner< FfiStreamSession>>>::sse_encode(flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self), serializer);
+    }
+}
+
+impl SseEncode for FfiToolObservation {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiToolObservation>>>::sse_encode(flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self), serializer);
+    }
+}
+
+impl SseEncode for FfiWorkflowObservation {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <RustOpaqueMoi<
+            flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiWorkflowObservation>,
+        >>::sse_encode(
+            flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self),
+            serializer,
+        );
     }
 }
 
@@ -7296,7 +10070,33 @@ impl SseEncode
 }
 
 impl SseEncode
+    for RustOpaqueMoi<
+        flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>,
+    >
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        let (ptr, size) = self.sse_encode_raw();
+        <usize>::sse_encode(ptr, serializer);
+        <i32>::sse_encode(size, serializer);
+    }
+}
+
+impl SseEncode
     for RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModel>>
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        let (ptr, size) = self.sse_encode_raw();
+        <usize>::sse_encode(ptr, serializer);
+        <i32>::sse_encode(size, serializer);
+    }
+}
+
+impl SseEncode
+    for RustOpaqueMoi<
+        flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoadObservation>,
+    >
 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -7330,6 +10130,30 @@ impl SseEncode
 
 impl SseEncode
     for RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiStreamSession>>
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        let (ptr, size) = self.sse_encode_raw();
+        <usize>::sse_encode(ptr, serializer);
+        <i32>::sse_encode(size, serializer);
+    }
+}
+
+impl SseEncode
+    for RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiToolObservation>>
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        let (ptr, size) = self.sse_encode_raw();
+        <usize>::sse_encode(ptr, serializer);
+        <i32>::sse_encode(size, serializer);
+    }
+}
+
+impl SseEncode
+    for RustOpaqueMoi<
+        flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiWorkflowObservation>,
+    >
 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -7574,6 +10398,22 @@ impl SseEncode for crate::api::model::FfiDownloadStatus {
     }
 }
 
+impl SseEncode for crate::api::manual_observation::FfiExecutionLocation {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::manual_observation::FfiExecutionLocation::Local => 0,
+                crate::api::manual_observation::FfiExecutionLocation::Remote => 1,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::api::result::FfiExecutionTarget {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -7627,6 +10467,27 @@ impl SseEncode for crate::api::result::FfiInferenceMetrics {
         <Option<u32>>::sse_encode(self.tokens_out, serializer);
         <Option<u32>>::sse_encode(self.image_preprocess_ms, serializer);
         <Vec<crate::api::result::FfiStageLatency>>::sse_encode(self.stage_latencies_ms, serializer);
+    }
+}
+
+impl SseEncode for crate::api::manual_observation::FfiInferenceRequest {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.operation, serializer);
+        <String>::sse_encode(self.provider, serializer);
+        <Option<String>>::sse_encode(self.model, serializer);
+        <crate::api::manual_observation::FfiExecutionLocation>::sse_encode(
+            self.location,
+            serializer,
+        );
+        <Option<String>>::sse_encode(self.runtime, serializer);
+        <Option<String>>::sse_encode(self.task, serializer);
+        <bool>::sse_encode(self.stream, serializer);
+        <Option<i64>>::sse_encode(self.max_tokens, serializer);
+        <Option<f64>>::sse_encode(self.temperature, serializer);
+        <Option<f64>>::sse_encode(self.top_p, serializer);
+        <Option<String>>::sse_encode(self.server_address, serializer);
+        <Option<i64>>::sse_encode(self.server_port, serializer);
     }
 }
 
@@ -7687,6 +10548,17 @@ impl SseEncode for crate::api::context::FfiMessageRole {
     }
 }
 
+impl SseEncode for crate::api::manual_observation::FfiModelLoadInfo {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.model, serializer);
+        <Option<String>>::sse_encode(self.provider, serializer);
+        <Option<String>>::sse_encode(self.runtime, serializer);
+        <Option<String>>::sse_encode(self.format, serializer);
+        <Option<u64>>::sse_encode(self.size_bytes, serializer);
+    }
+}
+
 impl SseEncode for crate::api::observability::FfiObservabilityConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -7701,6 +10573,12 @@ impl SseEncode for crate::api::observability::FfiObservabilityConfig {
         <bool>::sse_encode(self.metadata_only, serializer);
         <Option<u32>>::sse_encode(self.max_content_bytes, serializer);
         <Option<u32>>::sse_encode(self.live_trace_interval_ms, serializer);
+        <Option<String>>::sse_encode(self.device_id, serializer);
+        <Vec<crate::api::observability::FfiRedactionRule>>::sse_encode(
+            self.redaction_rules,
+            serializer,
+        );
+        <Vec<String>>::sse_encode(self.provider_origins, serializer);
     }
 }
 
@@ -7708,9 +10586,27 @@ impl SseEncode for crate::api::observability::FfiObservabilityStats {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <bool>::sse_encode(self.enabled, serializer);
-        <u64>::sse_encode(self.spans_exported, serializer);
-        <u64>::sse_encode(self.spans_dropped, serializer);
-        <u64>::sse_encode(self.export_failures, serializer);
+        <crate::api::observability::FfiSignalStats>::sse_encode(self.traces, serializer);
+        <crate::api::observability::FfiSignalStats>::sse_encode(self.logs, serializer);
+        <crate::api::observability::FfiSignalStats>::sse_encode(self.metrics, serializer);
+    }
+}
+
+impl SseEncode for crate::api::manual_observation::FfiObservationContext {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.traceparent, serializer);
+        <Option<String>>::sse_encode(self.tracestate, serializer);
+    }
+}
+
+impl SseEncode for crate::api::observability::FfiObservationOptions {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<String>>::sse_encode(self.traceparent, serializer);
+        <Option<String>>::sse_encode(self.tracestate, serializer);
+        <Option<String>>::sse_encode(self.conversation_id, serializer);
+        <bool>::sse_encode(self.suppress_trace, serializer);
     }
 }
 
@@ -7729,6 +10625,10 @@ impl SseEncode for crate::api::streaming::FfiPartialResult {
         <bool>::sse_encode(self.is_stable, serializer);
         <u64>::sse_encode(self.chunk_sequence, serializer);
         <u64>::sse_encode(self.audio_duration_ms, serializer);
+        <Option<crate::api::observability::FfiObservationRef>>::sse_encode(
+            self.decoder_observation,
+            serializer,
+        );
     }
 }
 
@@ -7749,6 +10649,26 @@ impl SseEncode for crate::api::envelope::FfiPixelFormat {
             },
             serializer,
         );
+    }
+}
+
+impl SseEncode for crate::api::observability::FfiRedactionRule {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {
+            crate::api::observability::FfiRedactionRule::ReplaceLiteral { find, replacement } => {
+                <i32>::sse_encode(0, serializer);
+                <String>::sse_encode(find, serializer);
+                <String>::sse_encode(replacement, serializer);
+            }
+            crate::api::observability::FfiRedactionRule::OmitAttribute { key } => {
+                <i32>::sse_encode(1, serializer);
+                <String>::sse_encode(key, serializer);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
     }
 }
 
@@ -7839,11 +10759,26 @@ impl SseEncode for crate::api::result::FfiScoreStatistic {
     }
 }
 
+impl SseEncode for crate::api::observability::FfiSignalStats {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <u64>::sse_encode(self.accepted, serializer);
+        <u64>::sse_encode(self.exported, serializer);
+        <u64>::sse_encode(self.dropped, serializer);
+        <u64>::sse_encode(self.failed, serializer);
+        <u64>::sse_encode(self.pending, serializer);
+    }
+}
+
 impl SseEncode for crate::api::result::FfiStageLatency {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.stage_id, serializer);
         <u32>::sse_encode(self.latency_ms, serializer);
+        <Option<crate::api::observability::FfiObservationRef>>::sse_encode(
+            self.observation,
+            serializer,
+        );
     }
 }
 
@@ -7890,6 +10825,10 @@ impl SseEncode for crate::api::streaming::FfiStreamingConfig {
         <crate::api::streaming::FfiVadMode>::sse_encode(self.vad, serializer);
         <Option<String>>::sse_encode(self.language, serializer);
         <Option<u32>>::sse_encode(self.audio_ctx, serializer);
+        <Option<crate::api::observability::FfiObservationOptions>>::sse_encode(
+            self.observation,
+            serializer,
+        );
     }
 }
 
@@ -7920,6 +10859,17 @@ impl SseEncode for crate::api::model::FfiToolCall {
     }
 }
 
+impl SseEncode for crate::api::manual_observation::FfiToolCallInfo {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.name, serializer);
+        <Option<String>>::sse_encode(self.call_id, serializer);
+        <Option<String>>::sse_encode(self.tool_type, serializer);
+        <Option<String>>::sse_encode(self.description, serializer);
+        <Option<String>>::sse_encode(self.arguments_json, serializer);
+    }
+}
+
 impl SseEncode for crate::api::model::FfiToolDefinition {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -7938,6 +10888,36 @@ impl SseEncode for crate::api::model::FfiToolResult {
     }
 }
 
+impl SseEncode for crate::api::streaming::FfiTranscriptionResult {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.text, serializer);
+        <u64>::sse_encode(self.duration_ms, serializer);
+        <u64>::sse_encode(self.chunks_processed, serializer);
+        <Option<crate::api::observability::FfiObservationRef>>::sse_encode(
+            self.observation,
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::model::FfiTtsStatus {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::model::FfiTtsStatus::Completed => 0,
+                crate::api::model::FfiTtsStatus::Cancelled => 1,
+                crate::api::model::FfiTtsStatus::Limited => 2,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::api::model::FfiTtsStreamEvent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -7947,8 +10927,9 @@ impl SseEncode for crate::api::model::FfiTtsStreamEvent {
                 <Vec<u8>>::sse_encode(pcm, serializer);
                 <u32>::sse_encode(sample_rate, serializer);
             }
-            crate::api::model::FfiTtsStreamEvent::Complete => {
+            crate::api::model::FfiTtsStreamEvent::Complete(field0) => {
                 <i32>::sse_encode(1, serializer);
+                <crate::api::model::FfiTtsStreamResult>::sse_encode(field0, serializer);
             }
             crate::api::model::FfiTtsStreamEvent::Error(field0) => {
                 <i32>::sse_encode(2, serializer);
@@ -7958,6 +10939,33 @@ impl SseEncode for crate::api::model::FfiTtsStreamEvent {
                 unimplemented!("");
             }
         }
+    }
+}
+
+impl SseEncode for crate::api::model::FfiTtsStreamResult {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::model::FfiTtsStatus>::sse_encode(self.status, serializer);
+        <u32>::sse_encode(self.sample_rate, serializer);
+        <u32>::sse_encode(self.channels, serializer);
+        <u64>::sse_encode(self.samples, serializer);
+        <u32>::sse_encode(self.chunks, serializer);
+        <u32>::sse_encode(self.limited_chunks, serializer);
+        <Option<crate::api::observability::FfiObservationRef>>::sse_encode(
+            self.observation,
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::manual_observation::FfiUsage {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<u64>>::sse_encode(self.input_tokens, serializer);
+        <Option<u64>>::sse_encode(self.output_tokens, serializer);
+        <Option<u64>>::sse_encode(self.cache_read_input_tokens, serializer);
+        <Option<u64>>::sse_encode(self.cache_write_input_tokens, serializer);
+        <Option<u64>>::sse_encode(self.reasoning_output_tokens, serializer);
     }
 }
 
@@ -8093,6 +11101,16 @@ impl SseEncode for Vec<crate::api::envelope::FfiImagePlane> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::envelope::FfiImagePlane>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::observability::FfiRedactionRule> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::observability::FfiRedactionRule>::sse_encode(item, serializer);
         }
     }
 }
@@ -8233,6 +11251,26 @@ impl SseEncode for Option<crate::api::context::FfiMessageRole> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::context::FfiMessageRole>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::manual_observation::FfiObservationContext> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::manual_observation::FfiObservationContext>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::observability::FfiObservationOptions> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::observability::FfiObservationOptions>::sse_encode(value, serializer);
         }
     }
 }
@@ -8402,6 +11440,7 @@ mod io {
     use crate::api::context::*;
     use crate::api::device::*;
     use crate::api::envelope::*;
+    use crate::api::manual_observation::*;
     use crate::api::model::*;
     use crate::api::pipeline::*;
     use crate::api::sdk_client::*;
@@ -8459,6 +11498,20 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>>::increment_strong_count(ptr as _);
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>>::decrement_strong_count(ptr as _);
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
         ptr: *const std::ffi::c_void,
     ) {
@@ -8470,6 +11523,20 @@ mod io {
         ptr: *const std::ffi::c_void,
     ) {
         MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModel>>::decrement_strong_count(ptr as _);
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoadObservation>>::increment_strong_count(ptr as _);
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoadObservation>>::decrement_strong_count(ptr as _);
     }
 
     #[unsafe(no_mangle)]
@@ -8515,6 +11582,34 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiToolObservation>>::increment_strong_count(ptr as _);
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiToolObservation>>::decrement_strong_count(ptr as _);
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiWorkflowObservation>>::increment_strong_count(ptr as _);
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_xybrid_flutter_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiWorkflowObservation>>::decrement_strong_count(ptr as _);
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_xybrid_flutter_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerXybridDevice(
         ptr: *const std::ffi::c_void,
     ) {
@@ -8557,6 +11652,7 @@ mod web {
     use crate::api::context::*;
     use crate::api::device::*;
     use crate::api::envelope::*;
+    use crate::api::manual_observation::*;
     use crate::api::model::*;
     use crate::api::pipeline::*;
     use crate::api::sdk_client::*;
@@ -8616,6 +11712,20 @@ mod web {
     }
 
     #[wasm_bindgen]
+    pub fn rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>>::increment_strong_count(ptr as _);
+    }
+
+    #[wasm_bindgen]
+    pub fn rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiInferenceObservation(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiInferenceObservation>>::decrement_strong_count(ptr as _);
+    }
+
+    #[wasm_bindgen]
     pub fn rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
         ptr: *const std::ffi::c_void,
     ) {
@@ -8627,6 +11737,20 @@ mod web {
         ptr: *const std::ffi::c_void,
     ) {
         MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModel>>::decrement_strong_count(ptr as _);
+    }
+
+    #[wasm_bindgen]
+    pub fn rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoadObservation>>::increment_strong_count(ptr as _);
+    }
+
+    #[wasm_bindgen]
+    pub fn rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoadObservation(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModelLoadObservation>>::decrement_strong_count(ptr as _);
     }
 
     #[wasm_bindgen]
@@ -8669,6 +11793,34 @@ mod web {
         ptr: *const std::ffi::c_void,
     ) {
         MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner< FfiStreamSession>>::decrement_strong_count(ptr as _);
+    }
+
+    #[wasm_bindgen]
+    pub fn rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiToolObservation>>::increment_strong_count(ptr as _);
+    }
+
+    #[wasm_bindgen]
+    pub fn rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiToolObservation(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiToolObservation>>::decrement_strong_count(ptr as _);
+    }
+
+    #[wasm_bindgen]
+    pub fn rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiWorkflowObservation>>::increment_strong_count(ptr as _);
+    }
+
+    #[wasm_bindgen]
+    pub fn rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiWorkflowObservation(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiWorkflowObservation>>::decrement_strong_count(ptr as _);
     }
 
     #[wasm_bindgen]

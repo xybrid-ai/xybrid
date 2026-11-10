@@ -59,12 +59,14 @@ Xybrid.initialize(
 )
 ```
 
+Key prefixes and scopes, what gets exported, and provisional workspaces: see [API keys](/docs/concepts/api-keys).
+
 ## Observability
 
 Trace export is off until you configure it — an API key alone does not enable it. Start it once, after `initialize()`, with one of two presets:
 
 ```swift
-// Traces to the Xybrid dashboard
+// Traces to Xybrid
 try Xybrid.Observability.xybrid(apiKey: key)
     .service("MyApp", version: "1.4.0")
     .start()
@@ -74,7 +76,7 @@ try Xybrid.Observability.otlp(endpoint: "http://collector:4318")
     .start()
 ```
 
-Prompts and outputs are captured by default; add `.metadataOnly()` to export metadata only. `.tracesEndpoint(_:)` points the dashboard preset at a self-hosted endpoint. Until export is configured, the first inference logs a one-shot hint (suppress with `XYBRID_QUIET=1`). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+Prompts and outputs are captured by default; add `.metadataOnly()` to export metadata only. `.tracesEndpoint(_:)` points the Xybrid preset at a self-hosted endpoint. Until export is configured, the first inference logs a one-shot hint (suppress with `XYBRID_QUIET=1`). Get a key at [console.xybrid.dev](https://console.xybrid.dev).
 
 Run options carry per-run trace context, and each result's `observation` identifies its trace:
 
@@ -89,7 +91,7 @@ if let observation = result.observation {
 try await Xybrid.Observability.flushAsync()
 ```
 
-Feedback and evaluations (`recordEvaluation(for:name:...)`) need a logs signal, so they return `false` with the dashboard preset, which sends traces only.
+Feedback and evaluations (`recordEvaluation(for:name:...)`) need a logs signal, so they return `false` with the Xybrid preset, which sends traces only.
 
 ---
 
@@ -202,17 +204,24 @@ Task {
 try session.feed(samples: pcm)
 
 // When the user stops talking:
-let transcript = try session.flush()
+let result = try session.flush()
+let transcript = result.text
 ```
 
 Partial text is **cumulative, not a delta**: render each one in place of the
 previous rather than appending. A partial produced before you subscribe is
 delivered immediately, so the opening words of an utterance are never lost.
 
-`flush()` ends the session and returns the full transcript — and reports an
-error if any chunk failed to transcribe, because that audio is gone and the
-transcript would otherwise look complete. `cancel()` ends the session and
-discards queued audio.
+`flush()` ends the session and returns an `XybridTranscriptionResult`: the full
+transcript in `text`, plus `durationMs`, `chunksProcessed` and the session's
+`observation` reference. It throws if any chunk failed to transcribe, because
+that audio is gone and the transcript would otherwise look complete.
+`cancel()` ends the session and discards queued audio.
+
+<Callout type="warn">
+Earlier releases returned the transcript as a `String`. Read `.text` from the
+result instead.
+</Callout>
 
 Voice-activity detection cuts chunks on speech boundaries instead of a fixed
 clock, which avoids the stutter you get when a window lands mid-word. It needs

@@ -57,8 +57,8 @@ fn xybrid_preset_sends_only_traces_with_bearer_auth() {
     traces.assert_hits(1);
     anything_else.assert_hits(0);
     let stats = pipeline.stats();
-    assert_eq!(stats.spans_exported, 1);
-    assert_eq!(stats.spans_dropped, 0);
+    assert_eq!(stats.traces.exported, 1);
+    assert_eq!(stats.traces.dropped, 0);
 }
 
 #[test]
@@ -94,6 +94,7 @@ fn queue_saturation_drops_and_counts_without_blocking() {
             max_export_batch_size: 512,
             scheduled_delay: Duration::from_secs(60),
             export_timeout: Duration::from_millis(200),
+            ..BatchLimits::default()
         })
         .with_retry(RetryLimits {
             max_retries: 0,
@@ -113,20 +114,27 @@ fn queue_saturation_drops_and_counts_without_blocking() {
     );
 
     let stats = pipeline.stats();
-    assert_eq!(stats.spans_queued, 8);
-    assert_eq!(stats.spans_dropped, 92);
+    assert_eq!(stats.traces.pending, 8);
+    assert_eq!(stats.traces.dropped, 92);
 
     // Shutdown is bounded even though the destination never answers.
     let started = Instant::now();
-    let _ = pipeline.shutdown(Duration::from_secs(2));
+    let first = pipeline.shutdown(Duration::from_secs(2));
+    assert!(first.is_err());
     assert!(started.elapsed() < Duration::from_secs(3));
     assert!(
-        pipeline.shutdown(Duration::from_secs(2)).is_ok(),
-        "second shutdown is a no-op"
+        pipeline
+            .shutdown(Duration::from_secs(2))
+            .map_err(|e| e.to_string())
+            == first.as_ref().map(|_| ()).map_err(|e| e.to_string()),
+        "second shutdown returns the original result"
     );
     assert!(
-        pipeline.force_flush(Duration::from_secs(2)).is_ok(),
-        "flush after shutdown is a no-op"
+        pipeline
+            .force_flush(Duration::from_secs(2))
+            .map_err(|e| e.to_string())
+            == first.as_ref().map(|_| ()).map_err(|e| e.to_string()),
+        "flush after shutdown returns the original result"
     );
 }
 
@@ -153,9 +161,8 @@ fn unavailable_exporter_counts_failures() {
     pipeline.shutdown(Duration::from_secs(5)).ok();
     failing.assert_hits(1);
     let stats = pipeline.stats();
-    assert_eq!(stats.export_failures, 1);
-    assert_eq!(stats.spans_failed, 3);
-    assert_eq!(stats.spans_exported, 0);
+    assert_eq!(stats.traces.failed, 3);
+    assert_eq!(stats.traces.exported, 0);
 }
 
 #[test]
@@ -179,7 +186,7 @@ fn retries_are_bounded() {
     let _ = pipeline.force_flush(Duration::from_secs(5));
     pipeline.shutdown(Duration::from_secs(5)).ok();
     unavailable.assert_hits(3);
-    assert_eq!(pipeline.stats().export_failures, 1);
+    assert_eq!(pipeline.stats().traces.failed, 1);
 }
 
 #[test]

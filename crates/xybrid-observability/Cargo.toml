@@ -10,7 +10,7 @@ readme = "README.md"
 documentation = "https://docs.rs/xybrid-observability"
 keywords = ["opentelemetry", "observability", "genai", "llm", "tracing"]
 categories = ["development-tools::debugging", "development-tools::profiling"]
-include = ["src/**", "contract/**", "collector/**", "examples/**", "tests/**", "README.md", "CONTRACT.md"]
+include = ["src/**", "contract/**", "collector/**", "examples/**", "tests/**", "benches/**", "README.md", "CONTRACT.md"]
 
 [lib]
 name = "xybrid_observability"
@@ -23,21 +23,39 @@ serde_json = "1.0"
 thiserror = "1.0"
 log = "0.4"
 
-# OTLP/HTTP pipeline (feature `otlp`). The transport is a small ureq client so
-# applications do not inherit a second HTTP/TLS stack.
+# OTLP/HTTP pipeline and paired exporters (feature `otlp`). The package owns
+# its transport end to end: opentelemetry-proto messages encoded with prost or
+# serde, sent by reqwest (rustls, no OpenSSL) on a private Tokio runtime.
 opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "metrics", "logs"], optional = true }
-opentelemetry-otlp = { version = "0.33", default-features = false, features = ["http-proto", "http-json", "trace", "metrics", "logs"], optional = true }
-opentelemetry-http = { version = "0.33", default-features = false, optional = true }
-ureq = { version = "2.9", default-features = false, features = ["tls"], optional = true }
-async-trait = { version = "0.1", optional = true }
+opentelemetry-proto = { version = "0.33", default-features = false, features = ["gen-tonic-messages", "trace", "logs", "metrics", "with-serde"], optional = true }
+prost = { version = "0.14", default-features = false, features = ["std"], optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"], optional = true }
+tokio = { version = "1.0", default-features = false, features = ["rt", "rt-multi-thread", "time", "sync", "net"], optional = true }
+tokio-util = { version = "0.7", default-features = false, optional = true }
+httpdate = { version = "1", optional = true }
 
 [dev-dependencies]
 opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "metrics", "logs", "testing"] }
 httpmock = "0.7"
+tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "macros", "time"] }
+criterion = { version = "0.5", features = ["html_reports"] }  # Benchmarks (benches/)
+
+# The benches read process memory on macOS through proc_pidinfo/getrusage
+# (benches/support), which std does not expose.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+libc = "0.2"
 
 [features]
 default = ["otlp"]
-otlp = ["dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:opentelemetry-http", "dep:ureq", "dep:async-trait"]
+otlp = [
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-proto",
+    "dep:prost",
+    "dep:reqwest",
+    "dep:tokio",
+    "dep:tokio-util",
+    "dep:httpdate",
+]
 # Manual clock for deterministic tests (M-TEST-UTIL).
 test-util = []
 
@@ -49,6 +67,23 @@ required-features = ["test-util"]
 [[test]]
 name = "pipeline"
 path = "tests/pipeline.rs"
+required-features = ["otlp"]
+
+# Overhead and memory benchmarks (tools/scripts/observability_perf/README.md).
+# `cargo bench -p xybrid-observability` runs all three.
+[[bench]]
+name = "stream_overhead"
+harness = false
+required-features = ["otlp"]
+
+[[bench]]
+name = "content_pipeline"
+harness = false
+
+# Peak library-owned bytes come from `SignalStats::buffered_bytes`.
+[[bench]]
+name = "saturation"
+harness = false
 required-features = ["otlp"]
 
 [[example]]

@@ -19,10 +19,14 @@ import 'utils/audio.dart';
 class XybridStageLatency {
   XybridStageLatency.fromFfi(FfiStageLatency inner)
       : stageId = inner.stageId,
-        latencyMs = inner.latencyMs;
+        latencyMs = inner.latencyMs,
+        observation = inner.observation;
 
   final String stageId;
   final int latencyMs;
+
+  /// Inference reference of this pipeline stage, when tracing is available.
+  final ObservationRef? observation;
 }
 
 /// Typed inference metrics surfaced on every [XybridResult].

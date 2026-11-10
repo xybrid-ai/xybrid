@@ -210,6 +210,12 @@ You can also set XYBRID_TEST_MODELS environment variable to a custom path.
 /// Returns `None` and prints a skip message if the model is not available.
 /// Useful for tests that should be skipped rather than fail when models are missing.
 ///
+/// # Panics
+///
+/// Panics when [`ENV_REQUIRE_MODELS`] is set and the model is not available,
+/// as [`staged_artifact`] does: where models are required, a missing one
+/// fails the test instead of letting it pass without running.
+///
 /// # Example
 ///
 /// ```no_run
@@ -228,11 +234,9 @@ pub fn model_or_skip(model_name: &str) -> Option<PathBuf> {
         }
     }
 
-    eprintln!(
-        "Skipping test: model '{}' not downloaded. Run: ./integration-tests/download.sh {}",
-        model_name, model_name
-    );
-    None
+    skip_or_require(format!(
+        "model '{model_name}' not downloaded. Run: ./integration-tests/download.sh {model_name}"
+    ))
 }
 
 /// Environment variable that turns a missing test model into a failure.
@@ -481,9 +485,59 @@ mod tests {
         drop(models);
     }
 
+    /// The test [`model_or_skip_fails_only_when_models_are_required`] runs in
+    /// a child process.
+    const MISSING_MODEL_CHILD: &str = "testing::model_fixtures::tests::missing_model_child_process";
+
+    /// Set only in that child. `--ignored` and `--include-ignored` also run
+    /// the child test in-process (as `just test-models` does), where it would
+    /// fail by design whenever [`ENV_REQUIRE_MODELS`] is set.
+    const CHILD_MARKER: &str = "XYBRID_MODEL_FIXTURES_CHILD";
+
     #[test]
-    fn test_model_or_skip_returns_none_for_missing() {
-        let result = model_or_skip("definitely-not-a-real-model");
-        assert!(result.is_none());
+    #[ignore = "run by model_or_skip_fails_only_when_models_are_required"]
+    fn missing_model_child_process() {
+        if std::env::var_os(CHILD_MARKER).is_none() {
+            return;
+        }
+        assert!(model_or_skip("definitely-not-a-real-model").is_none());
+    }
+
+    /// Runs [`missing_model_child_process`] with or without
+    /// [`ENV_REQUIRE_MODELS`]. The variable is process-wide and read by tests
+    /// running in parallel, so only a child process sets it.
+    fn missing_model_in_child(required: bool) -> (bool, String) {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+        child.args(["--exact", MISSING_MODEL_CHILD, "--ignored", "--nocapture"]);
+        child.env(CHILD_MARKER, "1");
+        if required {
+            child.env(ENV_REQUIRE_MODELS, "1");
+        } else {
+            child.env_remove(ENV_REQUIRE_MODELS);
+        }
+        let output = child.output().expect("run the test binary");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("1 passed") || stdout.contains("1 failed"),
+            "the child ran the test: {stdout}"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        (output.status.success(), stderr)
+    }
+
+    #[test]
+    fn model_or_skip_fails_only_when_models_are_required() {
+        let (passed, stderr) = missing_model_in_child(false);
+        assert!(passed, "{stderr}");
+        assert!(stderr.contains("Skipping test: model 'definitely-not-a-real-model'"));
+
+        let (passed, stderr) = missing_model_in_child(true);
+        assert!(!passed, "a required missing model must fail: {stderr}");
+        assert!(
+            stderr.contains(&format!(
+                "{ENV_REQUIRE_MODELS} is set but model 'definitely-not-a-real-model'"
+            )),
+            "{stderr}"
+        );
     }
 }

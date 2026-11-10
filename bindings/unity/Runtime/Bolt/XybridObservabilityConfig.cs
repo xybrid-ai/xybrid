@@ -178,7 +178,9 @@ namespace XybridBolt
 
 
         /// <summary>
-        /// Maximum bytes per captured content attribute.
+        /// Maximum bytes per captured content attribute, clamped to at most
+        /// 208 KiB so that a span's content leaves 64 KiB of the 480 KiB export
+        /// request for its other data.
         /// </summary>
         public void SetMaxContentBytes(uint bytes)
         {
@@ -187,6 +189,117 @@ namespace XybridBolt
             if (status.code != 0)
             {
                 throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
+        }
+
+
+        /// <summary>
+        /// Allows context propagation to one exact third-party HTTP(S) origin.
+        /// </summary>
+        public void AllowProviderContext(string origin)
+        {
+            ThrowIfDisposed();
+            WireWriter originWriter = new WireWriter();
+            {
+                originWriter.WriteString(origin);
+            }
+            byte[] originBytes = originWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridObservabilityConfigAllowProviderContext(this.Handle, originBytes, (nuint)originBytes.Length);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+        }
+
+
+        /// <summary>
+        /// Sets a caller-owned device identifier.
+        /// </summary>
+        public void SetDeviceId(string id)
+        {
+            ThrowIfDisposed();
+            WireWriter idWriter = new WireWriter();
+            {
+                idWriter.WriteString(id);
+            }
+            byte[] idBytes = idWriter.ToArray();
+            FfiStatus status = NativeMethods.NativeXybridObservabilityConfigSetDeviceId(this.Handle, idBytes, (nuint)idBytes.Length);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
+        }
+
+
+        /// <summary>
+        /// Appends an ordered literal replacement of content string values.
+        ///
+        /// # Errors
+        /// For an empty search string.
+        /// </summary>
+        public void AddLiteralRedaction(string find, string replacement)
+        {
+            ThrowIfDisposed();
+            WireWriter findWriter = new WireWriter();
+            {
+                findWriter.WriteString(find);
+            }
+            byte[] findBytes = findWriter.ToArray();
+            WireWriter replacementWriter = new WireWriter();
+            {
+                replacementWriter.WriteString(replacement);
+            }
+            byte[] replacementBytes = replacementWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridObservabilityConfigAddLiteralRedaction(this.Handle, findBytes, (nuint)findBytes.Length, replacementBytes, (nuint)replacementBytes.Length);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+        }
+
+
+        /// <summary>
+        /// Omits an exact governed content attribute key.
+        ///
+        /// # Errors
+        /// For an empty key.
+        /// </summary>
+        public void OmitContentAttribute(string key)
+        {
+            ThrowIfDisposed();
+            WireWriter keyWriter = new WireWriter();
+            {
+                keyWriter.WriteString(key);
+            }
+            byte[] keyBytes = keyWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridObservabilityConfigOmitContentAttribute(this.Handle, keyBytes, (nuint)keyBytes.Length);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
             }
         }
 

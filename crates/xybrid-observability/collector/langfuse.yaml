@@ -3,14 +3,15 @@
 # Instrumentation stays canonical (gen_ai.* + xybrid.genai.*); this profile
 # adds the Langfuse-specific attributes at export time only.
 #
-# Requires otelcol-contrib (transform processor). Tested with the version
-# pinned in collector/README.md.
+# Requires otelcol-contrib (transform processor). Validated with the otelcol-contrib
+# release pinned in collector/README.md.
 #
 # Environment:
 #   LANGFUSE_OTLP_ENDPOINT  e.g. https://cloud.langfuse.com/api/public/otel
 #   LANGFUSE_AUTH           base64("<public key>:<secret key>")
-#   METRICS_OTLP_ENDPOINT   where metrics go (Langfuse accepts traces only)
-#   LOGS_OTLP_ENDPOINT      where log events (evaluations, details) go
+#
+# Langfuse accepts traces only. Metrics and log events (evaluations, details)
+# are discarded unless you add sinks.yaml: --config langfuse.yaml --config sinks.yaml
 
 receivers:
   otlp:
@@ -27,12 +28,19 @@ processors:
         statements:
           # One generation per logical request. Attempt and model-load spans
           # carry a model name, which Langfuse would otherwise treat as a
-          # generation and double count.
+          # generation and double count. The observation's model is the
+          # response model when there is one (Langfuse's own priority).
           - set(attributes["langfuse.observation.type"], "generation") where attributes["gen_ai.operation.name"] == "chat" or attributes["gen_ai.operation.name"] == "text_completion" or attributes["gen_ai.operation.name"] == "generate_content"
           - set(attributes["langfuse.observation.type"], "embedding") where attributes["gen_ai.operation.name"] == "embeddings"
           - set(attributes["langfuse.observation.type"], "tool") where attributes["gen_ai.operation.name"] == "execute_tool"
           - set(attributes["langfuse.observation.type"], "chain") where attributes["gen_ai.operation.name"] == "invoke_workflow"
           - set(attributes["langfuse.observation.type"], "span") where attributes["gen_ai.operation.name"] == "load_model" or attributes["gen_ai.operation.name"] == "predict" or attributes["xybrid.genai.attempt.index"] != nil
+          # Langfuse reads gen_ai.usage.* on every observation type and sums
+          # usage over all observations of a trace, so an attempt's tokens
+          # would count again next to its request's generation. An explicit
+          # empty usage_details takes precedence; the canonical gen_ai.usage.*
+          # attributes stay under metadata.attributes.
+          - set(attributes["langfuse.observation.usage_details"], "{}") where attributes["xybrid.genai.attempt.index"] != nil
           # Content: GenAI message attributes → observation input/output.
           - set(attributes["langfuse.observation.input"], attributes["gen_ai.input.messages"]) where attributes["gen_ai.input.messages"] != nil
           - set(attributes["langfuse.observation.output"], attributes["gen_ai.output.messages"]) where attributes["gen_ai.output.messages"] != nil
@@ -49,10 +57,9 @@ exporters:
     headers:
       Authorization: "Basic ${env:LANGFUSE_AUTH}"
       x-langfuse-ingestion-version: "4"
-  otlphttp/metrics:
-    endpoint: ${env:METRICS_OTLP_ENDPOINT}
-  otlphttp/logs:
-    endpoint: ${env:LOGS_OTLP_ENDPOINT}
+  # Metrics and log events are discarded unless sinks.yaml is added
+  # (--config <profile> --config sinks.yaml); a traces-only setup still starts.
+  nop: {}
 
 service:
   pipelines:
@@ -63,8 +70,8 @@ service:
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlphttp/metrics]
+      exporters: [nop]
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlphttp/logs]
+      exporters: [nop]

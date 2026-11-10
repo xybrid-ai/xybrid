@@ -1,0 +1,99 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": [],
+    "tracer": "none"
+  },
+  "description": "Without a tracer provider no span, context or reference exists, even with an explicit parent; metrics are still recorded, an invalid explicit parent is still rejected, and feedback for a literal reference still reaches the logger.",
+  "expect": {
+    "logs": [
+      {
+        "attributes": {
+          "gen_ai.evaluation.name": "user_feedback",
+          "gen_ai.evaluation.score.label": "thumbs_down"
+        },
+        "event_name": "gen_ai.evaluation.result",
+        "severity_number": 9,
+        "span": "00f067aa0ba902b7"
+      }
+    ],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.01
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": []
+  },
+  "name": "refs_without_tracer",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "start_inference",
+      "parent_traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+      "request": {
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp"
+      }
+    },
+    {
+      "at_ms": 0,
+      "op": "assert_ref",
+      "present": false,
+      "target": "chat"
+    },
+    {
+      "at_ms": 0,
+      "op": "assert_context",
+      "present": false,
+      "target": "chat"
+    },
+    {
+      "at_ms": 1,
+      "expect_error": "invalid_parent",
+      "id": "bad",
+      "op": "start_inference",
+      "parent_traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7",
+      "request": {
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp"
+      }
+    },
+    {
+      "at_ms": 10,
+      "id": "chat",
+      "op": "end"
+    },
+    {
+      "at_ms": 11,
+      "expect_result": true,
+      "label": "thumbs_down",
+      "op": "feedback",
+      "target_ref": {
+        "span_id": "00f067aa0ba902b7",
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+      }
+    }
+  ]
+}
