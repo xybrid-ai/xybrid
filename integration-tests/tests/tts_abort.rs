@@ -1,7 +1,8 @@
 //! Resource-policy interruption and terminal outcomes through real TTS streams.
 //!
 //! Uses `kitten-tts-2` fixtures or `XYBRID_KITTEN_TEST_BUNDLE`, skipping when
-//! unavailable. Run with `--features tts-zzz --test tts_abort` and a verified
+//! unavailable unless `XYBRID_REQUIRE_MODELS` is set, where a missing model
+//! fails instead. Run with `--features tts-zzz --test tts_abort` and a verified
 //! native slice. The bundle should enable sentence chunks and prepared voices.
 //! ONNX checks use `kokoro-82m` fixtures or `XYBRID_ONNX_TTS_TEST_BUNDLE`.
 
@@ -39,7 +40,7 @@ impl ResourceSnapshotProvider for PressureProvider {
 fn kitten_resource_abort_interrupts_compute_and_keeps_the_session_reusable() {
     let bundle = std::env::var_os("XYBRID_KITTEN_TEST_BUNDLE")
         .map(std::path::PathBuf::from)
-        .or_else(|| integration_tests::fixtures::model_if_available("kitten-tts-2"));
+        .or_else(|| integration_tests::fixtures::model_for_test("kitten-tts-2"));
     let Some(bundle) = bundle else {
         eprintln!("Skipping Kitten resource-abort test: prepared bundle unavailable");
         return;
@@ -195,7 +196,7 @@ fn kitten_resource_abort_interrupts_compute_and_keeps_the_session_reusable() {
 fn onnx_final_packet_pressure_keeps_completion_but_remaining_work_can_abort() {
     let bundle = std::env::var_os("XYBRID_ONNX_TTS_TEST_BUNDLE")
         .map(std::path::PathBuf::from)
-        .or_else(|| integration_tests::fixtures::model_if_available("kokoro-82m"));
+        .or_else(|| integration_tests::fixtures::model_for_test("kokoro-82m"));
     let Some(bundle) = bundle else {
         eprintln!("Skipping ONNX terminal TTS test: Kokoro bundle unavailable");
         return;

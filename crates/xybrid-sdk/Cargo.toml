@@ -146,9 +146,10 @@ dev-tools = ["xybrid-core/dev-tools"]
 
 [dev-dependencies]
 httpmock = "0.7"
-# In-memory span capture through an application-owned provider in tests.
+# In-memory span, metric and log capture through application-owned providers
+# in tests (`testing` provides the in-memory metric and log exporters).
 opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
-opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "metrics", "logs", "testing"] }
 
 # Re-export the macro
 [package.metadata.docs.rs]

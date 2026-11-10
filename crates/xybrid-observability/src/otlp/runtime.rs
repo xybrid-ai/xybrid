@@ -291,6 +291,25 @@ mod tests {
     }
 
     #[test]
+    fn transport_work_runs_with_telemetry_suppressed_across_awaits() {
+        // D26.8: a span or log record created by export work (an instrumented
+        // HTTP client, a log bridge) must not feed back into the pipeline.
+        let rt = TransportRuntime::start().unwrap();
+        let c = Completion::<(bool, bool)>::new();
+        let done = c.clone();
+        spawn(rt.handle(), async move {
+            let before = Context::is_current_telemetry_suppressed();
+            // The context is re-attached on every poll, not only the first.
+            tokio::task::yield_now().await;
+            done.complete((before, Context::is_current_telemetry_suppressed()));
+        });
+        assert_eq!(c.wait_timeout(Duration::from_secs(10)), Some((true, true)));
+        // The caller's own context is untouched.
+        assert!(!Context::is_current_telemetry_suppressed());
+        rt.teardown();
+    }
+
+    #[test]
     fn runtime_teardown_cancels_tokens_and_is_idempotent() {
         let rt = TransportRuntime::start().unwrap();
         let token = rt.token();

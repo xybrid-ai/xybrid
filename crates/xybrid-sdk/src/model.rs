@@ -5896,6 +5896,17 @@ mod registry_load_tests;
 mod tests {
     use super::*;
 
+    /// Runs observed under failing networks and telemetry (`model/tests/`).
+    mod telemetry_failures;
+
+    /// Suppressed, unsampled and live-sampled runs still counted in metrics
+    /// (`model/tests/`).
+    mod sampling;
+
+    /// Capture modes, declarative rules and fail-closed budgets on the
+    /// content automatic runs record (`model/tests/`).
+    mod content_controls;
+
     #[cfg(feature = "huggingface")]
     #[test]
     fn blob_ids_prefer_lfs_sha256_and_skip_non_files() {
@@ -7496,6 +7507,8 @@ mod tests {
     struct FakeCloudAdapter {
         response_text: String,
         calls: Mutex<Vec<xybrid_core::ir::Envelope>>,
+        /// Cancelled once the request is in flight, before its first chunk.
+        cancel_in_flight: Option<CancellationToken>,
     }
 
     impl FakeCloudAdapter {
@@ -7503,7 +7516,14 @@ mod tests {
             Self {
                 response_text: response.to_string(),
                 calls: Mutex::new(Vec::new()),
+                cancel_in_flight: None,
             }
+        }
+
+        /// The caller cancels `token` while this adapter's request is in flight.
+        fn cancelling(mut self, token: &CancellationToken) -> Self {
+            self.cancel_in_flight = Some(token.clone());
+            self
         }
 
         fn call_count(&self) -> usize {
@@ -7522,6 +7542,9 @@ mod tests {
             mut on_token: xybrid_core::runtime_adapter::types::StreamingCallback<'_>,
         ) -> xybrid_core::runtime_adapter::AdapterResult<xybrid_core::ir::Envelope> {
             self.calls.lock().unwrap().push(input.clone());
+            if let Some(cancel) = &self.cancel_in_flight {
+                cancel.cancel();
+            }
 
             let token = xybrid_core::runtime_adapter::types::PartialToken {
                 token: self.response_text.clone(),
@@ -9168,6 +9191,657 @@ mod tests {
             acquired,
             "the HELD model write lock must be released after a mid-stream cancellation"
         );
+    }
+
+    // ------------------------------------------------------------------------
+    // Exported outcome of a user cancellation (A3 / E3.4): a run its caller
+    // cancels through `RunOptions::cancellation_token` ends as `cancelled` on
+    // the span and in the duration metric, and is never an exception.
+    // ------------------------------------------------------------------------
+
+    /// Name of the logical span of a run of `model`.
+    fn run_span_name(model: &XybridModel) -> String {
+        let handle = model.handle.read().unwrap();
+        let subject = RunSubject::from_metadata(&model.model_id, &handle.metadata);
+        format!("{} {}", subject.operation, model.model_id)
+    }
+
+    /// `model` as a text-generation model, so its runs are `chat` inferences
+    /// counted in `gen_ai.client.inference.duration`.
+    fn as_chat(model: XybridModel) -> XybridModel {
+        model
+            .handle
+            .write()
+            .unwrap()
+            .metadata
+            .metadata
+            .insert("task".into(), serde_json::json!("text-generation"));
+        model
+    }
+
+    fn observed(
+        options: RunOptions,
+        signals: &crate::observability::test_support::Signals,
+    ) -> RunOptions {
+        options.with_observation(
+            crate::observability::ObservationOptions::default().with_session(&signals.session),
+        )
+    }
+
+    /// The span named `name` ended as `expected` (status ERROR).
+    fn assert_span_outcome(
+        signals: &crate::observability::test_support::Signals,
+        name: &str,
+        expected: &str,
+    ) {
+        use crate::observability::test_support::attr;
+        let span = signals.spans.named(name);
+        assert!(
+            matches!(span.status, opentelemetry::trace::Status::Error { .. }),
+            "{name}: {:?}",
+            span.status
+        );
+        assert_eq!(
+            attr(&span, "error.type").as_deref(),
+            Some(expected),
+            "{name}"
+        );
+    }
+
+    /// No log record is an operation exception: a cancellation is not one.
+    fn assert_no_exception(signals: &crate::observability::test_support::Signals) {
+        let events = signals.log_events();
+        assert!(
+            !events
+                .iter()
+                .any(|e| e == crate::observability::semconv::event::OPERATION_EXCEPTION),
+            "{events:?}"
+        );
+    }
+
+    /// The only `gen_ai.client.inference.duration` point has `error.type`
+    /// `expected` and counts one run.
+    fn assert_one_duration_point(
+        signals: &crate::observability::test_support::Signals,
+        expected: &str,
+    ) {
+        let points = signals.points(crate::observability::semconv::metric::INFERENCE_DURATION);
+        assert_eq!(points.len(), 1, "{points:?}");
+        assert_eq!(
+            (points[0].attr("error.type"), points[0].count),
+            (Some(expected), 1)
+        );
+    }
+
+    #[test]
+    fn mid_stream_user_cancel_is_exported_cancelled() {
+        use crate::run_options::{AbortPolicy, AbortSignal};
+        use std::sync::mpsc;
+
+        let signals = crate::observability::test_support::memory_session_with_signals();
+        let (entered_tx, entered_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let model = as_chat(test_model_with_runtime(Box::new(BlockingFakeRuntime {
+            entered_tx: Mutex::new(Some(entered_tx)),
+            release_rx: Mutex::new(release_rx),
+        })));
+        let span_name = run_span_name(&model);
+        let token = CancellationToken::new();
+        let options = observed(
+            RunOptions::new()
+                .with_cancellation_token(token.clone())
+                .with_abort_policy(AbortPolicy::default().stop_on(AbortSignal::UserCancelled)),
+            &signals,
+        );
+        let delivered = Arc::new(AtomicUsize::new(0));
+        let worker = {
+            let model = model.clone();
+            let delivered = delivered.clone();
+            std::thread::spawn(move || {
+                model.run_streaming_with_options(
+                    &text_envelope("tell me a long story"),
+                    &options,
+                    move |_token| {
+                        delivered.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        Ok(())
+                    },
+                )
+            })
+        };
+
+        // The run is inside the runtime: cancel before its first token.
+        entered_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the run enters the runtime");
+        token.cancel();
+        release_tx.send(()).expect("release the runtime");
+        let error = worker
+            .join()
+            .expect("no panic")
+            .expect_err("a cancelled run fails");
+
+        // The caller's error is unchanged; only its telemetry outcome is.
+        assert!(
+            matches!(&error, SdkError::InferenceError { message, .. } if message == "Streaming callback failed"),
+            "{error:?}"
+        );
+        assert_eq!(delivered.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_span_outcome(&signals, &span_name, "cancelled");
+        assert_one_duration_point(&signals, "cancelled");
+        assert_no_exception(&signals);
+    }
+
+    #[test]
+    fn a_token_cancel_the_runtime_erased_to_text_is_exported_cancelled() {
+        use crate::run_options::AbortReason;
+        use xybrid_core::runtime_adapter::AdapterError;
+
+        // An LLM runtime reports the callback's abort as text only.
+        let erased = streaming_execution_error(AdapterError::from_streaming_callback_error(
+            Box::new(AbortReason::UserCancelled),
+        ));
+        let cause = std::error::Error::source(&erased).expect("cause");
+        assert!(cause.downcast_ref::<AbortReason>().is_none());
+        assert!(cause.to_string().contains("user_cancelled"), "{cause}");
+        let failed = streaming_execution_error(AdapterError::RuntimeError("decoder failed".into()));
+
+        for (error, cancel, expected) in [
+            (erased, true, "cancelled"),
+            // A failure of a run nobody cancelled is still an error.
+            (failed, false, "inference_error"),
+        ] {
+            let signals = crate::observability::test_support::memory_session_with_signals();
+            let model = as_chat(test_loaded_model(true));
+            let token = CancellationToken::new();
+            if cancel {
+                token.cancel();
+            }
+            let options = observed(RunOptions::new().with_cancellation_token(token), &signals);
+            model
+                .observe(&text_envelope("hi"), &[], Some(&options), None, true, None)
+                .fail(&error);
+            assert_span_outcome(&signals, &run_span_name(&model), expected);
+            assert_one_duration_point(&signals, expected);
+        }
+    }
+
+    #[test]
+    fn user_cancel_during_the_cloud_fallback_leg_is_exported_cancelled() {
+        use crate::observability::test_support::attr;
+        use crate::run_options::{AbortPolicy, AbortSignal};
+
+        let signals = crate::observability::test_support::memory_session_with_signals();
+        let model = as_chat(test_loaded_model(true));
+        let span_name = run_span_name(&model);
+        let token = CancellationToken::new();
+        // Memory pressure stops the local leg before it runs; the caller
+        // cancels while the cloud retry is in flight.
+        let cloud = FakeCloudAdapter::new("never delivered").cancelling(&token);
+        let mut critical = xybrid_core::device::ResourceSnapshot::unknown();
+        critical.memory_pressure = xybrid_core::device::MemoryPressure::Critical;
+        let options = observed(
+            RunOptions::new()
+                .with_cancellation_token(token.clone())
+                .with_abort_policy(
+                    AbortPolicy::default()
+                        .stop_on(AbortSignal::UserCancelled)
+                        .stop_on(AbortSignal::MemoryPressureCritical)
+                        .with_cloud_fallback(true),
+                )
+                .with_resource_provider(Arc::new(FixedUnitResourceProvider::new(critical))),
+            &signals,
+        );
+        let delivered = Arc::new(AtomicUsize::new(0));
+        let counted = delivered.clone();
+        let mut on_token = move |_token: xybrid_core::runtime_adapter::types::PartialToken| {
+            counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+        };
+
+        let error = model
+            .run_streaming_with_fallback(
+                &text_envelope("write me a haiku"),
+                &options,
+                &cloud,
+                &mut on_token,
+                &mut |_seam: SeamInfo| {},
+            )
+            .expect_err("the cloud leg stops at its first chunk");
+
+        assert!(
+            matches!(error, SdkError::InferenceError { .. }),
+            "{error:?}"
+        );
+        assert_eq!(cloud.call_count(), 1);
+        assert_eq!(delivered.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_span_outcome(&signals, &span_name, "cancelled");
+        assert_span_outcome(&signals, "attempt 0", "cancelled");
+        assert_eq!(
+            attr(
+                &signals.spans.named("attempt 0"),
+                "xybrid.genai.attempt.reason"
+            )
+            .as_deref(),
+            Some("fallback")
+        );
+        assert_one_duration_point(&signals, "cancelled");
+        let attempts = signals.points(crate::observability::semconv::metric::ATTEMPTS);
+        assert_eq!(attempts.len(), 1, "{attempts:?}");
+        assert_eq!(
+            (attempts[0].attr("error.type"), attempts[0].count),
+            (Some("cancelled"), 1)
+        );
+        assert_no_exception(&signals);
+    }
+
+    #[test]
+    fn pre_run_user_cancel_on_the_fallback_path_is_exported_cancelled() {
+        use crate::run_options::{AbortPolicy, AbortSignal};
+
+        let signals = crate::observability::test_support::memory_session_with_signals();
+        let model = as_chat(test_loaded_model(true));
+        let token = CancellationToken::new();
+        token.cancel();
+        let cloud = FakeCloudAdapter::new("never sent");
+        let options = observed(
+            RunOptions::new()
+                .with_cancellation_token(token)
+                .with_abort_policy(
+                    AbortPolicy::default()
+                        .stop_on(AbortSignal::UserCancelled)
+                        .with_cloud_fallback(true),
+                ),
+            &signals,
+        );
+        let mut on_token = |_token: xybrid_core::runtime_adapter::types::PartialToken| {
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+        };
+
+        model
+            .run_streaming_with_fallback(
+                &text_envelope("write me a haiku"),
+                &options,
+                &cloud,
+                &mut on_token,
+                &mut |_seam: SeamInfo| panic!("a cancelled run never reaches the seam"),
+            )
+            .expect_err("a pre-cancelled run fails");
+
+        assert_eq!(cloud.call_count(), 0);
+        assert_span_outcome(&signals, &run_span_name(&model), "cancelled");
+        assert_no_exception(&signals);
+        // Whether a request cancelled before it ran is counted in the duration
+        // metric is undecided (E3.5), so the metric side is not asserted.
+    }
+
+    /// Blocks the first resource poll (the TTS pre-run abort check) until the
+    /// test releases it, so the test acts at a known point of the request.
+    #[derive(Debug)]
+    struct GatedResourceProvider {
+        entered: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+        release: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    }
+
+    impl xybrid_core::device::ResourceSnapshotProvider for GatedResourceProvider {
+        fn current_snapshot(
+            &self,
+            _max_age: std::time::Duration,
+        ) -> xybrid_core::device::ResourceSnapshot {
+            if let Some(entered) = self.entered.lock().unwrap().take() {
+                let _ = entered.send(());
+                if let Some(release) = self.release.lock().unwrap().take() {
+                    let _ = release.recv();
+                }
+            }
+            xybrid_core::device::ResourceSnapshot::unknown()
+        }
+    }
+
+    #[test]
+    fn tts_cancelled_before_synthesis_is_exported_cancelled() {
+        use crate::run_options::{AbortPolicy, AbortSignal};
+        use std::sync::mpsc;
+
+        let signals = crate::observability::test_support::memory_session_with_signals();
+        let mut metadata = ModelMetadata::onnx("tts-model", "1.0", "model.onnx");
+        metadata
+            .metadata
+            .insert("task".into(), serde_json::json!("text-to-speech"));
+        let model = test_model_with_metadata(metadata);
+        let span_name = run_span_name(&model);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let token = CancellationToken::new();
+        let options = observed(
+            RunOptions::new()
+                .with_cancellation_token(token.clone())
+                // Observing a resource signal makes the request poll the gate.
+                .with_abort_policy(
+                    AbortPolicy::default().stop_on(AbortSignal::MemoryPressureCritical),
+                )
+                .with_resource_provider(Arc::new(GatedResourceProvider {
+                    entered: Mutex::new(Some(entered_tx)),
+                    release: Mutex::new(Some(release_rx)),
+                })),
+            &signals,
+        );
+        let worker = {
+            let model = model.clone();
+            std::thread::spawn(move || {
+                model.run_tts_streaming(&text_envelope("hello"), &options, |_| {
+                    panic!("a cancelled request delivers no audio")
+                })
+            })
+        };
+
+        // Past its first cancellation check: cancel before synthesis starts.
+        entered_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the request polls resources");
+        token.cancel();
+        release_tx.send(()).expect("release the request");
+        let result = worker
+            .join()
+            .expect("no panic")
+            .expect("a cancelled request");
+
+        assert_eq!(result.status, xybrid_core::execution::TtsStatus::Cancelled);
+        assert_eq!(result.samples, 0);
+        assert!(result.observation.is_some(), "the request was observed");
+        assert_span_outcome(&signals, &span_name, "cancelled");
+        assert_no_exception(&signals);
+        // The cancel stops the request before synthesis starts. Whether such a
+        // request is counted in the duration metric is undecided (E3.5), so
+        // the metric side is not asserted.
+    }
+
+    #[test]
+    fn a_run_displaced_by_a_preempting_start_is_exported_cancelled() {
+        // Cancel-and-replace cancels the displaced run through its own token,
+        // so the displaced run is a cancellation, not an exception.
+        use std::sync::mpsc;
+
+        let signals = crate::observability::test_support::memory_session_with_signals();
+        let (entered_tx, entered_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let model = as_chat(test_model_with_runtime(Box::new(BlockingFakeRuntime {
+            entered_tx: Mutex::new(Some(entered_tx)),
+            release_rx: Mutex::new(release_rx),
+        })));
+        let span_name = run_span_name(&model);
+        let token = CancellationToken::new();
+        let options = observed(preempt_options(&token), &signals);
+        let worker = {
+            let model = model.clone();
+            std::thread::spawn(move || {
+                model.run_streaming_with_options_preempt(
+                    &text_envelope("frame A"),
+                    &options,
+                    /* preempt */ true,
+                    |_token| Ok(()),
+                )
+            })
+        };
+
+        // The run is inside the runtime. A preempting start displaces it
+        // (the first step of `run_streaming_with_options_preempt`).
+        entered_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the run enters the runtime");
+        let displaced = model.preempt_register(CancellationToken::new());
+        assert!(displaced.is_some_and(|old| old.same_token(&token)));
+        release_tx.send(()).expect("release the runtime");
+        worker
+            .join()
+            .expect("no panic")
+            .expect_err("a displaced run fails");
+
+        assert_span_outcome(&signals, &span_name, "cancelled");
+        assert_one_duration_point(&signals, "cancelled");
+        assert_no_exception(&signals);
+    }
+
+    // ------------------------------------------------------------------------
+    // Caller parents of async entry points (A1, A2). `run_async`,
+    // `run_stream`, `warmup_async` and `ModelLoader::load_async` take no
+    // observation options: they report to the default session and take the
+    // caller's parent only from the ambient context where their future first
+    // runs (`run_stream`: where it is called). The async LLM runs have no
+    // explicit-parent form yet; that is an API decision (A2-needs_decision).
+    // ------------------------------------------------------------------------
+
+    /// [`weightless_onnx_dir`] for a model named `id`, so its spans are this
+    /// test's alone even under a shared default session.
+    fn weightless_onnx_dir_for(id: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let metadata = ModelMetadata::onnx(id, "1.0", "model.onnx");
+        std::fs::write(
+            dir.path().join("model_metadata.json"),
+            serde_json::to_vec(&metadata).unwrap(),
+        )
+        .unwrap();
+        dir
+    }
+
+    /// A caller's application span for case `case` of entry point `entry`.
+    fn caller_context(entry: usize, case: usize) -> crate::observability::ObservationContext {
+        crate::observability::ObservationContext::from_traceparent(
+            &format!(
+                "00-{:032x}-{:016x}-01",
+                0xa200 + entry * 16 + case,
+                0xa200 + entry * 16 + case
+            ),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn async_entry_points_take_the_callers_parent_only_from_where_they_run() {
+        // A2: plain `tokio::spawn` after `Context::attach` exports a root
+        // (the worker never sees the caller's context); `with_context` or a
+        // `block_on` on the caller's thread exports the caller's child. An
+        // explicit parent in the loader's observation options wins over both.
+        use crate::observability::test_support::*;
+        use tokio_stream::StreamExt as _;
+        let _residency = crate::model_registry::residency_test_lock();
+        let _default = default_session_lock();
+        let signals = memory_session_with_signals();
+        let _installed = DefaultSession::install(&signals.session);
+        let dir = weightless_onnx_dir_for("ambient-entry");
+        let loader = ModelLoader::from_directory(dir.path()).unwrap();
+        let model = loader.load().unwrap();
+        let run_span = run_span_name(&model);
+        let input = text_envelope("hello");
+
+        for (case, hop) in Hop::ALL.into_iter().enumerate() {
+            let parent = caller_context(1, case);
+            let mark = signals.spans.mark();
+            let (m, i) = (model.clone(), input.clone());
+            let ran = hop.run(&parent, async move { m.run_async(&i, None).await });
+            assert!(ran.is_err(), "{hop:?}: the weights are missing");
+            hop.assert_parent(&signals.spans.named_since(mark, &run_span), &parent);
+
+            let parent = caller_context(2, case);
+            let mark = signals.spans.mark();
+            let (m, i) = (model.clone(), input.clone());
+            let last = hop.run(&parent, async move {
+                let mut stream = m.run_stream(i, None);
+                let mut last = None;
+                while let Some(event) = stream.next().await {
+                    last = Some(event);
+                }
+                last
+            });
+            assert!(
+                matches!(last, Some(StreamEvent::Error(_))),
+                "{hop:?}: {last:?}"
+            );
+            hop.assert_parent(&signals.spans.named_since(mark, &run_span), &parent);
+
+            let parent = caller_context(3, case);
+            let mark = signals.spans.mark();
+            let m = model.clone();
+            let warmed = hop.run(&parent, async move { m.warmup_async().await });
+            assert!(warmed.is_err(), "{hop:?}: the weights are missing");
+            hop.assert_parent(
+                &signals.spans.named_since(mark, "warmup ambient-entry"),
+                &parent,
+            );
+
+            let parent = caller_context(4, case);
+            let mark = signals.spans.mark();
+            let l = loader.clone();
+            let loaded = hop.run(&parent, async move { l.load_async().await });
+            assert!(loaded.is_ok(), "{hop:?}: {:?}", loaded.err());
+            let load = signals.spans.named_since(mark, "load_model ambient-entry");
+            assert_eq!(attr(&load, "xybrid.load.trigger").as_deref(), Some("load"));
+            hop.assert_parent(&load, &parent);
+
+            // The loader's explicit parent wins over the ambient one,
+            // wherever the future runs.
+            let parent = caller_context(7, case);
+            let explicit = caller_context(8, case);
+            let mark = signals.spans.mark();
+            let l = loader.clone().observation(
+                crate::observability::ObservationOptions::default().with_parent(explicit.clone()),
+            );
+            let loaded = hop.run(&parent, async move { l.load_async().await });
+            assert!(loaded.is_ok(), "{hop:?}: {:?}", loaded.err());
+            let load = signals.spans.named_since(mark, "load_model ambient-entry");
+            assert_eq!(parent_id(&load), explicit.span_id(), "{hop:?}");
+            assert_eq!(trace_id(&load), explicit.trace_id(), "{hop:?}");
+        }
+
+        // `run_stream` reads the context when it is called, wherever the
+        // stream is then drained.
+        let parent = caller_context(5, 0);
+        let mark = signals.spans.mark();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .unwrap();
+        let stream = {
+            let _attached = parent.to_otel().attach();
+            let _entered = runtime.enter();
+            model.run_stream(input.clone(), None)
+        };
+        let events = runtime.block_on(stream.collect::<Vec<_>>());
+        assert!(
+            matches!(events.last(), Some(StreamEvent::Error(_))),
+            "{events:?}"
+        );
+        Hop::BlockOn.assert_parent(&signals.spans.named_since(mark, &run_span), &parent);
+    }
+
+    /// Fake `"onnx"` runtime whose `execute()` returns only once every run
+    /// sharing `arrived` is inside its own runtime, so those runs overlap.
+    struct RendezvousRuntime {
+        arrived: Arc<(Mutex<usize>, std::sync::Condvar)>,
+        expected: usize,
+    }
+
+    impl xybrid_core::runtime_adapter::ModelRuntime for RendezvousRuntime {
+        fn name(&self) -> &str {
+            "onnx"
+        }
+
+        fn supported_formats(&self) -> Vec<&str> {
+            vec!["onnx"]
+        }
+
+        fn load(
+            &mut self,
+            _model_path: &std::path::Path,
+        ) -> xybrid_core::runtime_adapter::AdapterResult<()> {
+            Ok(())
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+
+        fn execute(
+            &mut self,
+            _input: &xybrid_core::ir::Envelope,
+        ) -> xybrid_core::runtime_adapter::AdapterResult<xybrid_core::ir::Envelope> {
+            let (count, all_in) = &*self.arrived;
+            let mut arrived = count.lock().unwrap();
+            *arrived += 1;
+            all_in.notify_all();
+            // The bound only detects a run that never arrives; its expiry
+            // fails the waiting runs, and so the test.
+            let (arrived, wait) = all_in
+                .wait_timeout_while(arrived, Duration::from_secs(30), |n| *n < self.expected)
+                .unwrap();
+            if wait.timed_out() {
+                return Err(xybrid_core::runtime_adapter::AdapterError::RuntimeError(
+                    format!("only {} of {} runs overlapped", *arrived, self.expected),
+                ));
+            }
+            Ok(xybrid_core::ir::Envelope::new(
+                xybrid_core::ir::EnvelopeKind::Text("overlapped".to_string()),
+            ))
+        }
+    }
+
+    #[test]
+    fn overlapping_async_runs_keep_their_own_ambient_parents() {
+        // A1: eight `run_async` calls on eight models are inside their
+        // runtimes at once, each under its own application context. Each run
+        // is its caller's child and is counted once.
+        use crate::observability::semconv::{attr::REQUEST_MODEL, metric::INFERENCE_DURATION};
+        use crate::observability::test_support::*;
+        use opentelemetry::context::FutureExt as _;
+        const RUNS: usize = 8;
+        let _default = default_session_lock();
+        let signals = memory_session_with_signals();
+        let _installed = DefaultSession::install(&signals.session);
+        let arrived = Arc::new((Mutex::new(0), std::sync::Condvar::new()));
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .build()
+            .unwrap();
+        let parents: Vec<_> = (0..RUNS).map(|i| caller_context(6, i)).collect();
+        let tasks: Vec<_> = parents
+            .iter()
+            .enumerate()
+            .map(|(i, parent)| {
+                let mut model = as_chat(test_model_with_runtime(Box::new(RendezvousRuntime {
+                    arrived: arrived.clone(),
+                    expected: RUNS,
+                })));
+                model.model_id = format!("overlap-{i}");
+                let run = async move { model.run_async(&text_envelope("hi"), None).await };
+                runtime.spawn(run.with_context(parent.to_otel()))
+            })
+            .collect();
+        for (i, task) in tasks.into_iter().enumerate() {
+            let result = runtime.block_on(task).expect("no task panicked");
+            assert!(result.is_ok(), "run {i}: {:?}", result.err());
+        }
+
+        for (i, parent) in parents.iter().enumerate() {
+            let run = signals.spans.named(&format!("chat overlap-{i}"));
+            assert_eq!(parent_id(&run), parent.span_id(), "run {i}");
+            assert_eq!(trace_id(&run), parent.trace_id(), "run {i}");
+        }
+        let points: Vec<_> = signals
+            .points(INFERENCE_DURATION)
+            .into_iter()
+            .filter(|p| {
+                p.attr(REQUEST_MODEL)
+                    .is_some_and(|m| m.starts_with("overlap-"))
+            })
+            .collect();
+        assert_eq!(points.len(), RUNS, "{points:?}");
+        for point in &points {
+            assert_eq!(
+                (point.count, point.attr("error.type")),
+                (1, None),
+                "{point:?}"
+            );
+        }
     }
 
     /// Fake `"onnx"` runtime for the preemptive cancel-and-replace tests. Each

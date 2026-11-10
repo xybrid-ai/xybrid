@@ -14,6 +14,7 @@ use opentelemetry_sdk::trace::{InMemorySpanExporter, Sampler, SdkTracerProvider}
 use serde_json::json;
 
 use super::*;
+use crate::semconv::metric;
 use crate::{ContentCapture, ContentPolicy, Evaluation, Feedback, Observer, RedactionRule};
 
 struct Signals {
@@ -85,6 +86,118 @@ fn dropped_generic_spans_are_cancelled_but_explicit_completion_is_preserved() {
     assert!(finished[2]
         .attributes
         .contains(&KeyValue::new(attr::ERROR_TYPE, "network")));
+}
+
+/// Every data point of the metric `name` in the latest export, as its
+/// `error.type` and its count (histograms) or value (counters).
+fn points(metrics: &InMemoryMetricExporter, name: &str) -> Vec<(Option<String>, u64)> {
+    let finished = metrics.get_finished_metrics().unwrap();
+    fn error_type<'a>(mut attributes: impl Iterator<Item = &'a KeyValue>) -> Option<String> {
+        attributes
+            .find(|kv| kv.key.as_str() == attr::ERROR_TYPE)
+            .map(|kv| kv.value.to_string())
+    }
+    let mut out = Vec::new();
+    for sm in finished.last().expect("one metric export").scope_metrics() {
+        for m in sm.metrics().filter(|m| m.name() == name) {
+            match m.data() {
+                AggregatedMetrics::F64(MetricData::Histogram(h)) => {
+                    for p in h.data_points() {
+                        out.push((error_type(p.attributes()), p.count()));
+                    }
+                }
+                AggregatedMetrics::U64(MetricData::Sum(s)) => {
+                    for p in s.data_points() {
+                        out.push((error_type(p.attributes()), p.value()));
+                    }
+                }
+                _ => panic!("unexpected data for {name}"),
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn dropped_typed_operations_are_cancelled_in_spans_and_metrics() {
+    // A3: Drop of an un-ended handle ends it as cancelled, metric included.
+    let s = signals(Sampler::AlwaysOn);
+    let metrics = InMemoryMetricExporter::default();
+    let meter = SdkMeterProvider::builder()
+        .with_reader(PeriodicReader::builder(metrics.clone()).build())
+        .build();
+    let obs = Observer::builder()
+        .tracer_provider(&s.tracer)
+        .logger_provider(&s.logger)
+        .meter_provider(&meter)
+        .build();
+
+    let inference = obs.start_inference(chat(), StartOptions::default());
+    drop(inference.start_attempt(AttemptInfo {
+        index: 0,
+        reason: crate::AttemptReason::Initial,
+        provider: "llama.cpp".into(),
+        model: Some("m".into()),
+        location: Location::Local,
+        runtime: None,
+        server_address: None,
+        server_port: None,
+    }));
+    drop(inference);
+    drop(obs.start_tool(ToolCallInfo::new("lookup"), StartOptions::default()));
+    drop(obs.start_workflow("flow", StartOptions::default()));
+    drop(obs.start_model_load(
+        ModelLoadInfo {
+            model: "m".into(),
+            ..ModelLoadInfo::default()
+        },
+        StartOptions::default(),
+    ));
+
+    let spans = s.spans.get_finished_spans().unwrap();
+    let mut names: Vec<_> = spans.iter().map(|s| s.name.to_string()).collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "attempt 0",
+            "chat m",
+            "execute_tool lookup",
+            "invoke_workflow flow",
+            "load_model m"
+        ],
+        "one span per dropped handle"
+    );
+    for span in &spans {
+        assert_eq!(span.status, Status::error("cancelled"), "{}", span.name);
+        assert_eq!(
+            attr(&span.attributes, attr::ERROR_TYPE),
+            [&OtelValue::from("cancelled")],
+            "{}",
+            span.name
+        );
+    }
+
+    meter.force_flush().unwrap();
+    let cancelled = vec![(Some("cancelled".to_owned()), 1)];
+    for name in [
+        metric::INFERENCE_DURATION,
+        metric::ATTEMPTS,
+        metric::TOOL_DURATION,
+        metric::WORKFLOW_DURATION,
+        metric::OPERATION_DURATION,
+    ] {
+        assert_eq!(points(&metrics, name), cancelled, "{name}");
+    }
+
+    let exceptions = s
+        .logs
+        .get_emitted_logs()
+        .unwrap()
+        .into_iter()
+        .filter(|l| l.record.event_name() == Some(event::OPERATION_EXCEPTION))
+        .count();
+    assert_eq!(exceptions, 0, "a cancellation is not an exception");
 }
 
 #[test]

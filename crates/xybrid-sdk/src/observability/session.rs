@@ -8,7 +8,29 @@ struct SessionInner {
     pipeline: Option<Arc<xybrid_observability::otlp::ObservabilityPipeline>>,
     live_trace_interval: Duration,
     live_traced: Mutex<HashMap<String, Instant>>,
+    live_clock: LiveClock,
     retired: std::sync::atomic::AtomicBool,
+}
+
+/// Monotonic time source of the live-frame sampler: the system clock, or in
+/// tests a clock the test moves, so which frame opens an interval never
+/// depends on how fast the test runs.
+enum LiveClock {
+    System,
+    #[cfg(test)]
+    Manual(Arc<Mutex<Instant>>),
+}
+
+impl LiveClock {
+    fn now(&self) -> Instant {
+        match self {
+            Self::System => Instant::now(),
+            #[cfg(test)]
+            Self::Manual(now) => *now
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        }
+    }
 }
 
 impl Drop for SessionInner {
@@ -100,6 +122,7 @@ impl ObservabilitySession {
                 pipeline,
                 live_trace_interval: config.live_trace_interval,
                 live_traced: Mutex::new(HashMap::new()),
+                live_clock: LiveClock::System,
                 retired: std::sync::atomic::AtomicBool::new(false),
             }),
             resource_telemetry: Some(crate::telemetry::prepare_resource_telemetry(
@@ -118,6 +141,7 @@ impl ObservabilitySession {
                 pipeline: None,
                 live_trace_interval: Duration::from_secs(1),
                 live_traced: Mutex::new(HashMap::new()),
+                live_clock: LiveClock::System,
                 retired: std::sync::atomic::AtomicBool::new(false),
             }),
             resource_telemetry: None,
@@ -223,6 +247,20 @@ impl ObservabilitySession {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Drives this session's live-frame sampler from `clock` instead of the
+    /// system clock (a test seam; see [`LiveClock`]).
+    ///
+    /// # Panics
+    ///
+    /// When the session is already shared: the clock is set right after the
+    /// session is built, before any clone or operation holds it.
+    #[cfg(test)]
+    pub(crate) fn drive_live_clock(&mut self, clock: Arc<Mutex<Instant>>) {
+        Arc::get_mut(&mut self.inner)
+            .expect("the live clock is set before the session is shared")
+            .live_clock = LiveClock::Manual(clock);
+    }
+
     pub(super) fn retire(&self) {
         self.inner
             .retired
@@ -230,7 +268,7 @@ impl ObservabilitySession {
     }
 
     pub(super) fn live_trace_mode(&self, session: &str) -> TraceMode {
-        let now = Instant::now();
+        let now = self.inner.live_clock.now();
         let mut map = self
             .inner
             .live_traced

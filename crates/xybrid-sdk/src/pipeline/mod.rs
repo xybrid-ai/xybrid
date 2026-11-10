@@ -2177,6 +2177,108 @@ mod tests {
                 assert!(attr(span, semconv::attr::INPUT_MESSAGES).is_none());
             }
         }
+
+        #[test]
+        fn async_pipeline_entry_points_take_the_callers_parent_only_from_where_they_run() {
+            // A2: `Pipeline::run_async`, `Pipeline::warmup_async` and the
+            // legacy `run_pipeline_async(path)` select no observation options
+            // and report to the default session. Plain `tokio::spawn` after
+            // `Context::attach` exports a root (the legacy function starts its
+            // workflow only after an await); `with_context` or a `block_on` on
+            // the caller's thread exports the caller's child. An explicit
+            // parent given to `run_async_with_options` wins over all three.
+            let _default = default_session_lock();
+            let (server, url) = gateway();
+            let (session, memory, _provider) = allowing(&server);
+            let _installed = DefaultSession::install(&session);
+            // Its own name: the default session collects every test's
+            // unpinned operations while it is installed.
+            let yaml = cloud_yaml(&url).replace("name: rust-observed", "name: a2-ambient");
+            let pipeline = PipelineRef::from_yaml(&yaml).unwrap().load().unwrap();
+            let config = tempfile::tempdir().unwrap();
+            let legacy = config.path().join("legacy.yaml");
+            // Stages name no provider: the cloud adapter refuses them before
+            // any request, and the workflow still records the run.
+            std::fs::write(
+                &legacy,
+                "name: a2-legacy\nstages:\n  - hop-model\ninput:\n  kind: Text\navailability: {}\n",
+            )
+            .unwrap();
+            let legacy = legacy.to_str().unwrap().to_owned();
+            let caller = |entry: usize, case: usize| {
+                ObservationContext::from_traceparent(
+                    &format!(
+                        "00-{:032x}-{:016x}-01",
+                        0xa280 + entry * 16 + case,
+                        0xa280 + entry * 16 + case
+                    ),
+                    None,
+                )
+                .unwrap()
+            };
+
+            for (case, hop) in Hop::ALL.into_iter().enumerate() {
+                let parent = caller(1, case);
+                let mark = memory.mark();
+                let p = pipeline.clone();
+                let ran = hop.run(&parent, async move {
+                    p.run_async(&Envelope::new(EnvelopeKind::Text("ambient".into())))
+                        .await
+                });
+                assert_eq!(
+                    ran.expect("the gateway answers").text(),
+                    Some("stage output")
+                );
+                hop.assert_parent(
+                    &memory.named_since(mark, "invoke_workflow a2-ambient"),
+                    &parent,
+                );
+
+                let parent = caller(2, case);
+                let mark = memory.mark();
+                let p = pipeline.clone();
+                hop.run(&parent, async move { p.warmup_async().await })
+                    .expect("the warmup completes");
+                hop.assert_parent(&memory.named_since(mark, "warmup a2-ambient"), &parent);
+
+                let parent = caller(3, case);
+                let mark = memory.mark();
+                let path = legacy.clone();
+                let ran = hop.run(
+                    &parent,
+                    async move { crate::run_pipeline_async(&path).await },
+                );
+                let error = ran.map(|_| ()).unwrap_err().to_string();
+                assert!(error.contains("Missing 'provider'"), "{hop:?}: {error}");
+                hop.assert_parent(
+                    &memory.named_since(mark, "invoke_workflow a2-legacy"),
+                    &parent,
+                );
+
+                // The run's explicit parent wins over the ambient one,
+                // wherever the future runs.
+                let parent = caller(4, case);
+                let explicit = caller(5, case);
+                let mark = memory.mark();
+                let p = pipeline.clone();
+                let options = RunOptions::default()
+                    .with_observation(ObservationOptions::default().with_parent(explicit.clone()));
+                let ran = hop.run(&parent, async move {
+                    p.run_async_with_options(
+                        &Envelope::new(EnvelopeKind::Text("explicit".into())),
+                        &options,
+                    )
+                    .await
+                });
+                assert_eq!(
+                    ran.expect("the gateway answers").text(),
+                    Some("stage output")
+                );
+                let workflow = memory.named_since(mark, "invoke_workflow a2-ambient");
+                assert_eq!(parent_id(&workflow), explicit.span_id(), "{hop:?}");
+                assert_eq!(trace_id(&workflow), explicit.trace_id(), "{hop:?}");
+            }
+        }
     }
 
     #[test]

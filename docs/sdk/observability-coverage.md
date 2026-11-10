@@ -11,8 +11,8 @@ select metadata-only mode or native redaction rules deliberately.
 | Execution | Parent/control input | Reference output | Lifecycle |
 |---|---|---|---|
 | Model load: registry, path, reload, lazy materialization | Loader `.observation(...)` / existing options | Model `load_observation_ref()`; triggering run owns reload/lazy child | Load success/error; cancellation on abandoned work |
-| Model inference, sync/async, token stream | `RunOptions` observation | Inference/terminal result | Logical totals once, attempts retain own usage |
-| Pipeline | Pipeline observation options | Workflow on result; inference on stage results | Child stages and attempts share captured context |
+| Model inference, sync/async, token stream | `RunOptions` observation | Inference/terminal result | Logical totals once, attempts retain own usage; a run that fails with an inference error after its `cancellation_token` was cancelled (by the caller, or by a preempting run) ends `cancelled`, attempt included; other error classes keep their type |
+| Pipeline | Pipeline observation options | Workflow on result; inference on stage results | Child stages and attempts share captured context; pipelines do not act on `cancellation_token`, so a failed stage keeps its error type, as its workflow does |
 | Streamed TTS | Existing run options | SDK summary plus inference reference; foreign terminal result | Completion/error/cancellation ends operation |
 | Live ASR | Session observation options | Decoder reference on partial; workflow on terminal transcription | Reset starts a new session; cached partials add no inference; foreign flush ends worker |
 | Manual workflow/tool/inference/load | Explicit normalized W3C options | Handle context/reference | First terminal transition wins; last owner cancels; no implicit flush |

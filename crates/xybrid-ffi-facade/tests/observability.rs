@@ -115,8 +115,16 @@ fn attr<'a>(span: &'a Value, key: &str) -> Option<&'a Value> {
         .map(|a| &a["value"])
 }
 
+/// Serializes the tests here: each installs the process-wide observability.
+fn exclusive() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[test]
 fn execution_refs_content_rules_and_last_owner_cancellation_reach_otlp() {
+    let _exclusive = exclusive();
     let receiver = Receiver::start();
     let config = ObservabilityConfigHandle::xybrid("local-test-key".into());
     config.set_traces_endpoint(format!("{}/v1/traces", receiver.url()));
@@ -332,4 +340,76 @@ fn execution_refs_content_rules_and_last_owner_cancellation_reach_otlp() {
     assert!(exported.contains("facade-test-device"));
     drop(requests);
     observability_shutdown(5000).unwrap();
+}
+
+/// `set_max_content_bytes` bounds every content attribute an automatic run
+/// exports: a pipeline cloud stage's long input reaches OTLP cut to the
+/// budget with the truncation marker, still valid JSON, and listed as
+/// truncated, while its short output exports whole and the caller's result
+/// is untouched.
+#[test]
+fn max_content_bytes_truncates_automatic_run_content_on_the_export() {
+    const BUDGET: usize = 256;
+    // Bounds only a hang: loopback answers at once, and expiry is the failure.
+    const HANG_MS: u32 = 20_000;
+    let _exclusive = exclusive();
+    let receiver = Receiver::start();
+    let config = ObservabilityConfigHandle::xybrid("local-test-key".into());
+    config.set_traces_endpoint(format!("{}/v1/traces", receiver.url()));
+    config.set_json_protocol(true);
+    config.set_max_content_bytes(BUDGET as u32);
+    config.init().unwrap();
+
+    let long_input = format!("budget input {}", "x".repeat(4096));
+    let yaml = format!("name: budget-pipeline\nstages:\n  - id: draft\n    model: loopback-model\n    target: cloud\n    provider: openai\n    gateway_url: \"{}/gateway/v1\"\n    api_key: local-test-key\n    timeout_ms: 20000\n", receiver.url());
+    let result = Pipeline::from_yaml(yaml)
+        .unwrap()
+        .run(Envelope::text(long_input), RunOptions::default())
+        .unwrap();
+    assert_eq!(result.stages[0].text(), Some("secret answer"));
+    let stage_ref = result.stages[0].observation.clone().unwrap();
+    observability_flush(HANG_MS).unwrap();
+
+    let spans = receiver.spans();
+    let stage = spans
+        .iter()
+        .find(|s| s["spanId"] == stage_ref.span_id)
+        .unwrap();
+    let string_attr = |key: &str| -> String {
+        attr(stage, key).unwrap_or_else(|| panic!("{key} is exported"))["stringValue"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let input = string_attr("gen_ai.input.messages");
+    assert!(input.len() <= BUDGET, "{} bytes", input.len());
+    let messages: Value = serde_json::from_str(&input).expect("still valid JSON");
+    let text = messages[0]["parts"][0]["content"].as_str().unwrap();
+    assert!(
+        text.starts_with("budget input ") && text.ends_with("…[truncated]"),
+        "{text}"
+    );
+    let output = string_attr("gen_ai.output.messages");
+    assert!(output.contains("secret answer"), "{output}");
+    let truncated: Vec<&str> = attr(stage, "xybrid.genai.content.truncated_attributes")
+        .expect("the truncated input is listed")["arrayValue"]["values"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["stringValue"].as_str().unwrap())
+        .collect();
+    assert_eq!(truncated, ["gen_ai.input.messages"]);
+    {
+        let requests = receiver.requests.lock().unwrap();
+        let exported = requests
+            .iter()
+            .filter(|(p, _, _)| p == "/v1/traces")
+            .map(|(_, _, b)| String::from_utf8_lossy(b).into_owned())
+            .collect::<String>();
+        assert!(
+            !exported.contains(&"x".repeat(BUDGET)),
+            "no export carries the input beyond the budget"
+        );
+    }
+    observability_shutdown(HANG_MS).unwrap();
 }

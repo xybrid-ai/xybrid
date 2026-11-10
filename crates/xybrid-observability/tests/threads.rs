@@ -1,6 +1,8 @@
 //! R-CFG-5 and R-CANCEL-8: no transport thread exists before a valid build,
-//! none remains after shutdown (beyond the runtime's short teardown), and the
-//! lifecycle works from Tokio worker threads and through the async variants.
+//! none remains after shutdown (beyond the runtime's short teardown), even one
+//! that cut exports off (A4), nor after dropping a pipeline whose exports are
+//! parked (B4), and the lifecycle works from Tokio worker threads and through
+//! the async variants.
 //!
 //! This binary holds a single test so that no other test's threads are
 //! counted. Thread names are read from `/proc` (Linux); elsewhere the
@@ -15,7 +17,7 @@ use std::time::{Duration, Instant};
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use support::Server;
+use support::{Action, Server};
 use xybrid_observability::otlp::{
     exporters, BatchLimits, EnvironmentSource, ObservabilityPipeline, OtlpConfig, Protocol,
     RetryLimits, SignalEndpoint,
@@ -285,4 +287,132 @@ fn transport_threads_exist_only_between_a_valid_build_and_shutdown() {
     drop(pipeline);
     assert!(started.elapsed() < Duration::from_secs(1));
     assert_none_left("dropped pipeline");
+
+    // A4: a shutdown that cut every signal's export off leaves nothing
+    // running either, while the application still holds the pipeline. With
+    // no thread left to send, the request count after a later emit and
+    // flush needs no wait.
+    let hung = Server::always(Action::Hang);
+    // Only the shutdown ends a parked request.
+    let endpoint = |signal: &str| {
+        Some(
+            hung.endpoint(signal, Protocol::HttpProtobuf)
+                .with_timeout(Duration::from_secs(120)),
+        )
+    };
+    let pipeline = Arc::new(
+        ObservabilityPipeline::build(
+            OtlpConfig::default()
+                .with_environment(EnvironmentSource::Disabled)
+                .with_traces(endpoint("traces"))
+                .with_logs(endpoint("logs"))
+                .with_metrics(endpoint("metrics"))
+                .with_batch(BatchLimits {
+                    scheduled_delay: Duration::from_secs(60),
+                    export_timeout: Duration::from_secs(120),
+                    ..BatchLimits::default()
+                })
+                .with_retry(RetryLimits {
+                    max_retries: 0,
+                    ..RetryLimits::default()
+                })
+                .with_metric_export_interval(Duration::from_secs(600)),
+        )
+        .unwrap(),
+    );
+    let observer = pipeline.observer_with(events());
+    inference(&observer);
+    let copy = pipeline.clone();
+    let flush = std::thread::spawn(move || copy.force_flush(Duration::from_secs(60)));
+    // One export per signal parks; the bound only detects one that never
+    // arrives.
+    hung.wait_for(3, Duration::from_secs(10));
+    let result = pipeline.shutdown(Duration::from_millis(100));
+    assert!(result.as_ref().is_err_and(Error::is_timeout), "{result:?}");
+    assert!(flush.join().unwrap().is_err());
+    // These bounds only detect a thread that never stops.
+    assert_eq!(
+        remaining(TRANSPORT, Duration::from_secs(10)),
+        0,
+        "cut-off shutdown: transport threads remain"
+    );
+    assert_eq!(
+        remaining(READER, Duration::from_secs(10)),
+        0,
+        "cut-off shutdown: periodic reader threads remain"
+    );
+    inference(&observer);
+    let _ = pipeline.force_flush(Duration::from_secs(1));
+    assert_eq!(hung.count(), 3, "a request after the shutdown");
+    let stats = pipeline.stats();
+    for signal in [stats.traces, stats.logs, stats.metrics] {
+        assert_eq!(signal.pending, 0, "{signal:?}");
+        assert!(signal.is_consistent(), "{signal:?}");
+    }
+
+    // B4: dropped while every signal's export is parked, from a plain thread
+    // and inside a Tokio runtime: the drop returns although nothing was
+    // answered, and leaves no transport or reader thread behind. The bounds
+    // only detect a drop that never returns or a thread that never stops.
+    for in_runtime in [false, true] {
+        let parked = Server::always(Action::Hang);
+        // Only the drop ends a parked request.
+        let endpoint = |signal: &str| {
+            Some(
+                parked
+                    .endpoint(signal, Protocol::HttpProtobuf)
+                    .with_timeout(Duration::from_secs(120)),
+            )
+        };
+        let pipeline = ObservabilityPipeline::build(
+            OtlpConfig::default()
+                .with_environment(EnvironmentSource::Disabled)
+                .with_traces(endpoint("traces"))
+                .with_logs(endpoint("logs"))
+                .with_metrics(endpoint("metrics"))
+                .with_batch(BatchLimits {
+                    // One item is a full batch: it is exported at once.
+                    max_export_batch_size: 1,
+                    scheduled_delay: Duration::from_secs(60),
+                    export_timeout: Duration::from_secs(120),
+                    ..BatchLimits::default()
+                })
+                .with_retry(RetryLimits {
+                    max_retries: 0,
+                    ..RetryLimits::default()
+                })
+                .with_metric_export_interval(Duration::from_millis(20)),
+        )
+        .unwrap();
+        inference(&pipeline.observer_with(events()));
+        for path in ["/v1/traces", "/v1/logs", "/v1/metrics"] {
+            parked.wait_for_path(path, 1, Duration::from_secs(10));
+        }
+
+        let (dropped, returned) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            if in_runtime {
+                tokio::runtime::Builder::new_current_thread()
+                    .build()
+                    .unwrap()
+                    .block_on(async move { drop(pipeline) });
+            } else {
+                drop(pipeline);
+            }
+            let _ = dropped.send(());
+        });
+        returned
+            .recv_timeout(Duration::from_secs(20))
+            .unwrap_or_else(|_| panic!("in_runtime={in_runtime}: the drop waited on an export"));
+        assert_eq!(
+            remaining(TRANSPORT, Duration::from_secs(10)),
+            0,
+            "in_runtime={in_runtime}: transport threads remain after the drop"
+        );
+        assert_eq!(
+            remaining(READER, Duration::from_secs(10)),
+            0,
+            "in_runtime={in_runtime}: periodic reader threads remain after the drop"
+        );
+    }
 }
