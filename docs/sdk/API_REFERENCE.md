@@ -1868,7 +1868,9 @@ cancellation primitive to it.
 > that is already cancelled when it starts (`check_before_run`), but once the
 > backend is generating, `run_with_options` has no token-aware path to stop it
 > and the call finishes normally. Reach for the streaming surface when a
-> mid-flight stop button matters.
+> mid-flight stop button matters. Decision models are the exception: their
+> batch run polls the token between passes and inside each pass, and ends with
+> `Cancelled` (see [decisions](decisions.md)).
 
 ```swift
 // Swift — structured concurrency drives the native stop button

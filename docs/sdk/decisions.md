@@ -69,7 +69,10 @@ For cancellation, use the existing `run_with_options` and a shared
 `CancellationToken`. Cancellation is checked before preparation, between passes
 and by native CPU evaluation. The native context serializes concurrent calls.
 An aborted or failed request returns an error, with no partial answers; the
-context is recovered before reuse. The Rust async batch signature still accepts
+context is recovered before reuse. A cancelled token ends a decision run with
+`SdkError::Cancelled` whatever the abort policy observes; only decision models
+poll the token during a batch run, and every other model keeps its existing
+batch contract. The Rust async batch signature still accepts
 `GenerationConfig`, not `RunOptions`; an async application needing cancellation
 can move `run_with_options` onto `tokio::task::spawn_blocking`.
 Resource abort policies are checked before batch execution; during-call
