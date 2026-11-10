@@ -77,6 +77,7 @@ DESTINATIONS: Dict[str, Dict[str, Any]] = {
         # metadata.attributes; completionStartTime is not set by the profile.
         "timing": "metadata",
         "evaluations": "dropped",
+        "evaluation_source": False,
         "remote_parent": "kept",
         "maps": [
             "observation id = OTel span id, traceId = OTel trace id, parentObservationId = parent span id",
@@ -118,6 +119,7 @@ DESTINATIONS: Dict[str, Dict[str, Any]] = {
         "content_roles": ("inference", "tool"),
         "timing": "attributes",
         "evaluations": "dropped",
+        "evaluation_source": False,
         "remote_parent": "kept",
         "maps": [
             "context.trace_id / span_id = OTel ids, parent_id = parent span id, status_code = OTel status",
@@ -155,6 +157,8 @@ DESTINATIONS: Dict[str, Dict[str, Any]] = {
         "content_roles": ("inference", "tool"),
         "timing": "typed",
         "evaluations": "linked",
+        # Each linked result says whether it is feedback or an evaluation.
+        "evaluation_source": True,
         "remote_parent": "kept",
         "maps": [
             "trace_id / span_id / parent_span_id = OTel ids; status.code/message = OTel status",
@@ -491,7 +495,9 @@ def destination_checks(destination: str, truth: GroundTruth, spans: Sequence[Des
                 check.failures.append(f"{_label(gt)} ({role(gt)}): carries tokens {dest.input_tokens}/"
                                       f"{dest.output_tokens}; they would be counted twice")
         counted_rule = (table.get("counted") or {}).get(role(gt))
-        if counted_rule is not None and dest.counted is not None and dest.counted != counted_rule:
+        # A destination whose table promises the counted flag must expose it:
+        # a missing flag is a mismatch, not a pass.
+        if counted_rule is not None and dest.counted != counted_rule:
             check.failures.append(f"{_label(gt)} ({role(gt)}): counted_request={dest.counted}, "
                                   f"expected {counted_rule}")
     if asserted == 0 and not check.failures:
@@ -616,7 +622,9 @@ def destination_checks(destination: str, truth: GroundTruth, spans: Sequence[Des
                 check.failures.append(f"{label}: label {found.label!r}, expected "
                                       f"{attrs.get('gen_ai.evaluation.score.label')!r}")
             want_source = "feedback" if attrs.get("gen_ai.evaluation.name") == "user_feedback" else "evaluation"
-            if found.source is not None and found.source != want_source:
+            # A destination that tells feedback from evaluations must say which
+            # each result is; a missing source is a mismatch.
+            if table.get("evaluation_source") and found.source != want_source:
                 check.failures.append(f"{label}: source {found.source!r}, expected {want_source!r}")
             comment = attrs.get("xybrid.genai.feedback.comment")
             if comment is not None and found.comment != comment:

@@ -210,12 +210,13 @@ rather than "dropped, as expected"), `ids.spans`, `ids.parents`,
 `ids.remote_parent` (the Python workflow's caller span P, never exported),
 `ids.producer_refs`, `mapping.kind`, `mapping.model_provider`,
 `mapping.usage` (equal, absent where the table says so, Xybrid's counted
-flag), `mapping.errors`, `content` (present and equal to the producer's, or
+flag, which must be present), `mapping.errors`, `content` (present and equal to the producer's, or
 absent for `js-metadata`), `content.redaction` (no redacted or metadata-only
 string in any API answer), `timing.first_chunk_vs_first_token` (each value
 under its own field, equal to the producer's; a completion start equal to the
-first chunk fails), `evaluations` (linked with name, score, label, source and
-comment, or dropped as the table says). `SKIP` means the workload has nothing
+first chunk fails), `evaluations` (linked with name, score, label, source (required
+where the table sets `evaluation_source`) and comment, or dropped as the
+table says). `SKIP` means the workload has nothing
 to check there (no remote parent, no usage, no streaming timing).
 
 ### To confirm on the first run against each backend

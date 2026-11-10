@@ -149,6 +149,15 @@ def load_json_dir(directory: Path) -> Dict[str, Any]:
     return {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in sorted(directory.glob("*.json"))}
 
 
+def load_fresh_json(path: Path, since: float) -> Optional[Any]:
+    """``path`` when it was written by this run (at or after ``since``), else
+    None: a reused ``--out-dir`` must not let an earlier run's results stand
+    in for a benchmark this run left out or failed to produce."""
+    if not path.exists() or path.stat().st_mtime < since - 1:
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 # ---------------------------------------------------------------------------
 # Deriving
 # ---------------------------------------------------------------------------
@@ -415,7 +424,10 @@ def write_report(out_dir: Path, e2e_report: Optional[Path] = None,
 
 
 def main_from_args(args: argparse.Namespace) -> int:
-    out_dir = Path(args.out_dir) if args.out_dir else pc.timestamp_dir(pc.default_target_dir() / "observability-perf", "micro")
+    # Absolute: the children run elsewhere (cargo bench binaries in the crate,
+    # Node in bindings/observability-js) and write under this directory.
+    out_dir = (Path(args.out_dir) if args.out_dir
+               else pc.timestamp_dir(pc.default_target_dir() / "observability-perf", "micro")).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     pc.stage(f"output: {out_dir}")
     started = time.time()
@@ -427,6 +439,15 @@ def main_from_args(args: argparse.Namespace) -> int:
         if not args.skip_js:
             runs.append(run_js(out_dir, args))
     js_path = out_dir / "js" / "observability-js-bench.json"
+    if args.collect_only:
+        side_reports = load_json_dir(out_dir / "rust")
+        js = json.loads(js_path.read_text(encoding="utf-8")) if js_path.exists() else None
+    else:
+        # Only what the benchmarks selected for this run wrote during it.
+        fresh = {} if args.skip_rust else {
+            name: load_fresh_json(out_dir / "rust" / f"{name}.json", started) for name in benches}
+        side_reports = {name: report for name, report in fresh.items() if report is not None}
+        js = None if args.skip_js else load_fresh_json(js_path, started)
     raw = {
         "schema": "xybrid-observability-perf/micro-raw/v1",
         "environment": pc.environment(),
@@ -435,8 +456,8 @@ def main_from_args(args: argparse.Namespace) -> int:
         "runs": runs,
         "criterion": collect_criterion(pc.default_target_dir() / "criterion",
                                        None if args.collect_only else started),
-        "side_reports": load_json_dir(out_dir / "rust"),
-        "js": json.loads(js_path.read_text(encoding="utf-8")) if js_path.exists() else None,
+        "side_reports": side_reports,
+        "js": js,
         "js_requested": not args.skip_js,
     }
     pc.write_json(out_dir / "raw.json", raw)

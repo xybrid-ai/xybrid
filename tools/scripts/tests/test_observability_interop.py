@@ -568,6 +568,16 @@ class DestinationChecksTest(unittest.TestCase):
         run.item(run.span_of_role("attempt").span_id)["counted_request"] = True
         self.assertEqual(failed(run.checks()), ["mapping.usage"])
 
+    def test_a_missing_counted_flag_fails_where_the_table_promises_it(self):
+        run = DestinationRun("xybrid", "rust")
+        del run.item(run.span_of_role("inference").span_id)["counted_request"]
+        self.assertEqual(failed(run.checks()), ["mapping.usage"])
+
+    def test_a_missing_evaluation_source_fails_where_the_table_promises_it(self):
+        run = DestinationRun("xybrid", "rust")
+        del run.evaluations_payload["items"][0]["source"]
+        self.assertEqual(failed(run.checks()), ["evaluations"])
+
     def test_model_and_provider(self):
         run = DestinationRun("phoenix", "rust")
         llm = run.item(run.span_of_role("inference").span_id)["attributes"]["llm"]
@@ -982,12 +992,14 @@ class ReportTest(unittest.TestCase):
 
     def test_every_destination_table_is_complete(self):
         keys = {"label", "profile", "kind", "model", "model_roles", "provider_roles", "usage", "counted", "error",
-                "status_message", "error_type", "content_roles", "timing", "evaluations", "remote_parent",
-                "maps", "drops"}
+                "status_message", "error_type", "content_roles", "timing", "evaluations", "evaluation_source",
+                "remote_parent", "maps", "drops"}
         for name, table in expectations.DESTINATIONS.items():
             self.assertEqual(set(table), keys, name)
             self.assertTrue((PROFILES / table["profile"]).is_file())
             self.assertIn(table["evaluations"], ("linked", "dropped"))
+            # A destination that drops results cannot promise their source.
+            self.assertFalse(table["evaluation_source"] and table["evaluations"] == "dropped", name)
 
     def test_cli_requires_a_destination_and_known_workloads(self):
         with self.assertRaises(SystemExit), mock.patch("sys.stderr", io.StringIO()):

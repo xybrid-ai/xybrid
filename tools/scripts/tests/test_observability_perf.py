@@ -9,6 +9,7 @@ driver (sinks, blocked endpoint, report), the Criterion collector, and that
 the driver, the harness and the Rust/JS workloads stay in step.
 """
 
+import argparse
 import contextlib
 import hashlib
 import io
@@ -448,6 +449,70 @@ class MicroCollectorTests(unittest.TestCase):
         self.assertEqual([(r["id"], r["within"], bool(r.get("not_run"))) for r in rows], [("J1", None, True)])
         skipped = micro.evaluate(thresholds, rust, None, micro.e2e_reference(None), js_requested=False)
         self.assertEqual(skipped["results"], [])
+
+    def micro_args(self, *argv):
+        parser = argparse.ArgumentParser()
+        micro.add_arguments(parser)
+        return parser.parse_args(list(argv))
+
+    def test_a_relative_out_dir_reaches_the_children_as_an_absolute_path(self):
+        seen = {}
+
+        def fake_js(out_dir, args):
+            seen["js"] = out_dir
+            target = out_dir / "js" / "observability-js-bench.json"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps({"results": {}}))
+            return {"command": ["node"], "exit_code": 0, "seconds": 0.0, "log": None}
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(micro, "run_js", side_effect=fake_js), \
+                mock.patch.object(micro, "collect_criterion", return_value=[]):
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    micro.main_from_args(self.micro_args("--out-dir", "results", "--skip-rust"))
+            finally:
+                os.chdir(cwd)
+            self.assertTrue(seen["js"].is_absolute())
+            self.assertEqual(seen["js"], (Path(tmp) / "results").resolve())
+            raw = json.loads((Path(tmp) / "results" / "raw.json").read_text())
+            self.assertEqual(raw["js"], {"results": {}})
+
+    def test_a_reused_out_dir_never_lends_earlier_results(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            (out / "rust").mkdir(parents=True)
+            (out / "js").mkdir()
+            old = time.time() - 3600
+            for name in ("stream_overhead", "content_pipeline", "saturation"):
+                path = out / "rust" / f"{name}.json"
+                path.write_text(json.dumps({"bench": name, "old": True}))
+                os.utime(path, (old, old))
+            js = out / "js" / "observability-js-bench.json"
+            js.write_text(json.dumps({"results": {}, "old": True}))
+            os.utime(js, (old, old))
+
+            def fake_rust(benches, out_dir, args):
+                # stream_overhead writes a fresh report; content_pipeline fails to.
+                (out_dir / "rust" / "stream_overhead.json").write_text(json.dumps({"bench": "stream_overhead"}))
+                return [{"command": ["cargo"], "exit_code": 0, "seconds": 0.0, "log": None}]
+
+            with mock.patch.object(micro, "run_rust", side_effect=fake_rust), \
+                    mock.patch.object(micro, "collect_criterion", return_value=[]), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                micro.main_from_args(self.micro_args("--out-dir", str(out), "--skip-js",
+                                                     "--benches", "stream_overhead,content_pipeline"))
+            raw = json.loads((out / "raw.json").read_text())
+            self.assertEqual(raw["side_reports"], {"stream_overhead": {"bench": "stream_overhead"}})
+            self.assertIsNone(raw["js"])
+            # --collect-only still reads whatever the directory holds.
+            with mock.patch.object(micro, "collect_criterion", return_value=[]), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                micro.main_from_args(self.micro_args("--out-dir", str(out), "--collect-only"))
+            raw = json.loads((out / "raw.json").read_text())
+            self.assertEqual(set(raw["side_reports"]), {"stream_overhead", "content_pipeline", "saturation"})
+            self.assertTrue(raw["js"]["old"])
 
     def test_js_overheads(self):
         dist = lambda v: {"p50": v}  # noqa: E731
