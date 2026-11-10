@@ -6440,6 +6440,7 @@ dependencies = [
  "filetime",
  "hf-hub",
  "hound",
+ "httpmock",
  "image 0.25.10",
  "lazy_static",
  "libc",

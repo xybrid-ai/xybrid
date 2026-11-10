@@ -772,7 +772,8 @@ nulls arrive as `bytesValue: ""` and JS whole-number doubles as `intValue`.
     rejections);
   - `dropped`: discarded by local policy without a deciding delivery attempt
     (admission refused, offered after shutdown began, oversized single item,
-    still queued when shutdown cancelled);
+    still queued when shutdown cancelled, pending or offered after a response
+    hook disabled the destination — Rust only, see "Transport");
   - `failed`: export ended without acknowledgement (rejection, retries
     exhausted, deadline or cancellation in flight, transport error, lost
     acknowledgement — delivery unknown —, partial-success rejection, encoding
@@ -852,6 +853,20 @@ nulls arrive as `bytesValue: ""` and JS whole-number doubles as `intValue`.
   outcome. A decodable OTLP partial success counts its rejected items as failed.
 - Rust uses a pipeline-owned Tokio runtime with reqwest (rustls), behind the
   `otlp` feature; caller threads never do network I/O.
+- Rust response hooks (optional, per destination): a `SignalEndpoint` may
+  carry a `ResponseHook`, called exactly once for every HTTP response of that
+  destination (scheduled batches, flushes, retries, the shutdown drain; no call
+  for a transport error or timeout). With a hook, failure bodies are read too,
+  under the 64 KiB bound and for at most one second (never past the attempt's
+  timeout), so a stalled failure body cannot use up the retry budget; the hook
+  sees the status, headers, body and the decoded `google.rpc.Status`. It may
+  disable its destination for the rest of that pipeline's or exporter set's
+  life: the response itself is handled as usual (2xx acknowledges, anything
+  else fails at once, with no further retry or retry wait), no further request
+  is made, and items pending or offered later are dropped. Other destinations, other pipelines and local processors
+  are unaffected; a pipeline built again from the same configuration starts
+  enabled. The package interprets no vendor response itself; adapters attach
+  hooks to the destinations they trust (`SignalEndpoint::is_xybrid_preset`).
 
 ## Configuration sources
 
@@ -912,7 +927,9 @@ cumulative. Tests inject or disable the environment (Rust
   `https://ingest.xybrid.dev/v1/traces`, `http/protobuf`, with exactly
   `Authorization: Bearer <key>` (`header_policy = isolated`; no environment
   header ever reaches the endpoint or replaces the key). It never sends metrics
-  or logs; route those through a Collector.
+  or logs; route those through a Collector. Rust marks the endpoint it builds
+  (`SignalEndpoint::is_xybrid_preset`), so an adapter can trust Xybrid's
+  workspace responses from it and from no generic endpoint.
 - Collector profiles for Langfuse and Phoenix live in
   [`collector/`](collector/) and translate at export time; instrumentation
   stays canonical.

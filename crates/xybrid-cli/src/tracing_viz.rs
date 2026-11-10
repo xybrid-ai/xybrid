@@ -8,7 +8,7 @@ use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider, Span, SpanData, SpanProcessor};
 use opentelemetry_sdk::Resource;
 use xybrid_observability::otlp::{trace_json, ObservabilityPipeline, OtlpConfig};
-use xybrid_sdk::observability::{self, ObservabilitySession, Observer};
+use xybrid_sdk::observability::{self, ObservabilitySession, Observer, WorkspaceFeedback};
 
 pub use xybrid_core::tracing::{add_metadata, SpanGuard};
 
@@ -68,6 +68,9 @@ pub struct LocalCapture {
     provider: Option<SdkTracerProvider>,
     pipeline: Option<ObservabilityPipeline>,
     session: ObservabilitySession,
+    /// What Xybrid's ingest reports about the key's workspace, when the
+    /// trace is exported through the Xybrid preset.
+    workspace: Option<WorkspaceFeedback>,
 }
 
 impl LocalCapture {
@@ -89,6 +92,7 @@ impl LocalCapture {
             resource: Resource::builder_empty().build(),
         }));
         let processor = CaptureProcessor(state.clone());
+        let mut workspace = None;
         let (provider, pipeline, observer) = match config {
             Some(mut config) => {
                 // The validated id replaces any copy the flags already added.
@@ -97,6 +101,7 @@ impl LocalCapture {
                     .attributes
                     .retain(|kv| kv.key.as_str() != "device.id");
                 config.resource.attributes.extend(attributes);
+                workspace = WorkspaceFeedback::attach(&mut config);
                 let pipeline = ObservabilityPipeline::build_with_span_processor(config, processor)?;
                 let observer = pipeline.observer();
                 (None, Some(pipeline), observer)
@@ -125,12 +130,20 @@ impl LocalCapture {
             provider,
             pipeline,
             session,
+            workspace,
         })
     }
 
     /// Whether the captured trace is also exported over OTLP.
     pub fn exports(&self) -> bool {
         self.pipeline.is_some()
+    }
+
+    /// The workspace feedback of the export, when it goes through the Xybrid
+    /// preset. Readable after [`Self::shutdown`], whose drain may bring the
+    /// first response.
+    pub fn workspace_feedback(&self) -> Option<WorkspaceFeedback> {
+        self.workspace.clone()
     }
 
     /// Spans captured so far (sorted by start time on [`Self::finish`]).

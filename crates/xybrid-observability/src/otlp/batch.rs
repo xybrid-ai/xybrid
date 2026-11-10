@@ -111,7 +111,8 @@ struct State<T> {
     next_seq: u64,
     /// Every item with a lower sequence number is terminal.
     settled_seq: u64,
-    /// Drops after admission (oversized singletons, cancelled at shutdown).
+    /// Drops after admission (oversized singletons, cancelled at shutdown,
+    /// queued when the destination was disabled).
     lost_dropped: u64,
     flush_target: u64,
     waiters: Vec<Waiter>,
@@ -240,12 +241,14 @@ impl<C: BatchCodec> Batcher<C> {
         *lock(&self.resource) = Arc::new(ResourceInfo::from_sdk(resource));
     }
 
-    /// Admits one item if the item and byte budgets allow it; `make` runs
-    /// only for admitted items. Never blocks on export.
+    /// Admits one item if the item and byte budgets allow it and the
+    /// destination is enabled; `make` runs only for admitted items. Never
+    /// blocks on export.
     pub(crate) fn offer(&self, bytes: u64, make: impl FnOnce() -> C::Item) {
         let mut st = lock(&self.state);
         st.stats.accepted += 1;
         if st.closed
+            || self.core.is_disabled()
             || st.stats.pending >= self.limits.max_queue_size as u64
             || st.bytes.saturating_add(bytes) > self.limits.max_buffered_bytes
         {
@@ -376,6 +379,7 @@ impl<C: BatchCodec> Batcher<C> {
             enum Step<T> {
                 Export(Vec<T>, u64, u64),
                 Wait(Option<Instant>),
+                Again,
                 Exit,
             }
             let step = {
@@ -388,6 +392,18 @@ impl<C: BatchCodec> Batcher<C> {
                     } else {
                         Step::Wait(None)
                     }
+                } else if self.core.is_disabled() {
+                    // The response hook disabled the destination: nothing
+                    // queued will ever be sent. Drop it all now, so pending
+                    // counters and flush waiters settle without a request.
+                    let n = st.queue.len() as u64;
+                    let bytes: u64 = st.queue.drain(..).map(|(_, b)| b).sum();
+                    st.stats.settle(Outcome::dropped(n));
+                    st.bytes = st.bytes.saturating_sub(bytes);
+                    st.lost_dropped += n;
+                    st.settled_seq += n;
+                    st.resolve_waiters(false);
+                    Step::Again
                 } else if st.draining
                     || st.flush_target > st.settled_seq
                     || st.queue.len() >= self.limits.batch_size
@@ -408,6 +424,7 @@ impl<C: BatchCodec> Batcher<C> {
             };
             match step {
                 Step::Exit => break,
+                Step::Again => {}
                 Step::Wait(until) => {
                     let notified = self.wake.notified();
                     match until {

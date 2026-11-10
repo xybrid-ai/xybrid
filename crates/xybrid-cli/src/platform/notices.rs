@@ -1,20 +1,36 @@
-//! Daily stderr notices: the claim reminder and the no-export tip.
+//! Stderr notices: the claim reminder, the no-export tip, and the workspace
+//! notice of a run's trace export.
 //!
-//! Both go to stderr at most once per local day (state in
-//! `~/.xybrid/notices.json`, which holds no secrets; see [`super::state_dir`])
-//! and are suppressed by `--quiet`, JSON output, CI and `XYBRID_QUIET`. The
-//! reminder runs on every command except `connect` and `auth`, from the
-//! stored deadlines of the current project's credential (also when the same
-//! key arrives through `--api-key` or `XYBRID_API_KEY`); it never calls the
-//! platform, so it says the state is as of the last check. The tip explains
-//! that a key alone exports nothing.
+//! The reminder and the tip go to stderr at most once per local day (state in
+//! `~/.xybrid/notices.json`, which holds no secrets; see [`super::state_dir`]).
+//! Every notice is suppressed by `--quiet`, JSON output, CI and
+//! `XYBRID_QUIET`. The reminder runs on every command except `connect` and
+//! `auth`, from the stored deadlines of the current project's credential
+//! (also when the same key arrives through `--api-key` or `XYBRID_API_KEY`);
+//! it never calls the platform, so it says the state is as of the last check.
+//! The tip explains that a key alone exports nothing.
+//!
+//! The workspace notice comes from Xybrid's trace ingest, through the SDK's
+//! [`WorkspaceFeedback`](xybrid_sdk::observability::WorkspaceFeedback), and is
+//! read after the export's final drain. A run that exports through the Xybrid
+//! preset holds its claim reminder until then, so it prints one claim line:
+//! the platform's own word when ingest gave one, the stored reminder
+//! otherwise ([`report_workspace_notice`]). An expired key is reported on
+//! every run it happens; a provisional one shares the reminder's daily slot,
+//! so a day brings one claim nudge. Before it is shown, a provisional
+//! deadline refreshes the saved credential's, when the run used that
+//! credential's key on its own platform's ingest ([`refresh_key_deadline`]).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use chrono::{DateTime, Local, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
+use xybrid_sdk::observability::WorkspaceNotice;
 
-use super::credentials::{create_private_dir_all, owned_by_current_account, Credential};
+use super::credentials::{create_private_dir_all, owned_by_current_account, Credential, Store};
+use super::host::{self, PlatformHost};
+use super::resolve::ResolvedKey;
 use super::{ci_marker, xybrid_quiet};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -75,9 +91,120 @@ pub(crate) fn claim_reminder_text(credential: &Credential, now: DateTime<Utc>) -
 /// The no-export tip for a run that has a key but exports nothing. Never
 /// implies that a key alone exports traces.
 pub(crate) fn export_tip_text() -> &'static str {
-    "Tip: a Xybrid key (for example from `xybrid connect`) only authenticates; traces reach \
-     the console only with --observability. Add \
-     OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT=no_content to send metadata only."
+    "Tip: this project has a Xybrid key (from `xybrid connect` or the console), but a key only \
+     authenticates: nothing was exported. Rerun with `xybrid --observability ...` to send this \
+     run's traces to the console (metadata only: set \
+     OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT=no_content), then check them with `xybrid auth \
+     status`."
+}
+
+/// What a run reports about the workspace of the key its trace export used.
+pub(crate) fn workspace_notice_text(notice: WorkspaceNotice) -> Option<String> {
+    match notice {
+        WorkspaceNotice::Expired => Some(
+            "Xybrid stopped accepting traces from this key: its workspace was not claimed in \
+             time and the key expired, so traces this run sent after that were not stored \
+             (local inference is unaffected). Claim the workspace to restore the key: xybrid \
+             auth claim"
+                .to_string(),
+        ),
+        WorkspaceNotice::Provisional { key_expires_at } => Some(format!(
+            "Xybrid accepted this run's traces into an unclaimed workspace: its key stops \
+             working on {} unless you claim it. Claim it: xybrid auth claim",
+            human_date(key_expires_at.into())
+        )),
+        _ => None,
+    }
+}
+
+/// Print, after the export's final drain, what this run's trace export
+/// learned about the key's workspace, to stderr. A run exporting through the
+/// Xybrid preset defers its claim reminder to here, so without a notice (no
+/// response, or an accepted export without the header) the stored reminder
+/// stands in (`credential` as for [`maybe_claim_reminder`]). An expiry is
+/// reported every time; a provisional deadline at most once a day, sharing
+/// the claim reminder's slot.
+pub(crate) fn report_workspace_notice(
+    notice: Option<WorkspaceNotice>,
+    credential: impl FnOnce() -> Option<Credential>,
+    quiet: bool,
+    json: bool,
+) {
+    if notice.is_none() {
+        maybe_claim_reminder(credential, quiet, json);
+        return;
+    }
+    let line = workspace_notice_line(notice, suppressed(quiet, json), || {
+        take_daily_slot(Notice::ClaimReminder)
+    });
+    if let Some(text) = line {
+        eprintln!("  {} {}", crate::ui::warn("!"), text);
+    }
+}
+
+/// The workspace notice to print, if any. `take_slot` claims the day's
+/// reminder slot; it runs for any notice that may be shown. A provisional
+/// notice needs the slot; an expiry is shown regardless, and only uses the
+/// slot up so the stored reminder does not repeat the nudge later that day.
+fn workspace_notice_line(
+    notice: Option<WorkspaceNotice>,
+    suppressed: bool,
+    take_slot: impl FnOnce() -> bool,
+) -> Option<String> {
+    let notice = notice.filter(|_| !suppressed)?;
+    let text = workspace_notice_text(notice)?;
+    let slot = take_slot();
+    match notice {
+        WorkspaceNotice::Expired => Some(text),
+        _ => slot.then_some(text),
+    }
+}
+
+/// Fold a provisional deadline reported by trace ingest into the saved
+/// credential behind `key`, so the daily reminder follows the platform. Only
+/// when the run exported with that credential's own key (whatever its
+/// source), to `endpoint` that its platform's ingest may receive it on, and
+/// the credential is not known to be claimed. Best effort: a store that
+/// cannot be read, locked or written is left alone.
+pub(crate) fn refresh_key_deadline(
+    key: &ResolvedKey,
+    host: &PlatformHost,
+    root: &Path,
+    endpoint: &str,
+    key_expires_at: DateTime<Utc>,
+) {
+    if !host::trace_endpoint_allowed(host, endpoint) {
+        return;
+    }
+    let Ok(store) = Store::locate() else {
+        return;
+    };
+    let needs_update = |file: &super::credentials::CredentialsFile| {
+        file.holds_key(host.origin(), root, &key.key)
+            && file.find(host.origin(), root).is_some_and(|credential| {
+                !credential.claimed && credential.key_expires_at != Some(key_expires_at)
+            })
+    };
+    // Read first: most runs change nothing and never take the lock.
+    if !store.read().is_ok_and(|file| needs_update(&file)) {
+        return;
+    }
+    let Ok(lock) = store.lock(Duration::from_secs(2)) else {
+        return;
+    };
+    let Ok(loaded) = lock.load() else {
+        return;
+    };
+    let mut file = loaded.file;
+    if loaded.moved_corrupt_file.is_some() || !needs_update(&file) {
+        return;
+    }
+    let Some(mut credential) = file.find(host.origin(), root).cloned() else {
+        return;
+    };
+    credential.key_expires_at = Some(key_expires_at);
+    file.put(credential, Utc::now());
+    let _ = lock.save(&file);
 }
 
 /// Print the claim reminder to stderr once a day. `credential` (the saved
@@ -221,6 +348,58 @@ mod tests {
         let tip = export_tip_text();
         assert!(tip.contains("--observability"), "{tip}");
         assert!(tip.contains("only authenticates"), "{tip}");
+        assert!(tip.contains("nothing was exported"), "{tip}");
+        assert!(tip.contains("xybrid connect"), "{tip}");
         assert!(tip.contains("no_content"), "{tip}");
+    }
+
+    #[test]
+    fn workspace_notices_point_at_the_claim_command() {
+        let expired = workspace_notice_text(WorkspaceNotice::Expired).unwrap();
+        assert!(expired.contains("xybrid auth claim"), "{expired}");
+        assert!(expired.contains("expired"), "{expired}");
+        // Batches accepted before the deadline were stored.
+        assert!(
+            expired.contains("sent after that were not stored"),
+            "{expired}"
+        );
+        assert!(!expired.contains("this run's traces were not"), "{expired}");
+        let deadline = Utc::now() + Duration::days(3);
+        let provisional = workspace_notice_text(WorkspaceNotice::Provisional {
+            key_expires_at: deadline.into(),
+        })
+        .unwrap();
+        assert!(provisional.contains("xybrid auth claim"), "{provisional}");
+        assert!(provisional.contains(&human_date(deadline)), "{provisional}");
+    }
+
+    #[test]
+    fn workspace_notices_are_silent_when_suppressed_and_provisional_is_daily() {
+        let provisional = Some(WorkspaceNotice::Provisional {
+            key_expires_at: (Utc::now() + Duration::days(3)).into(),
+        });
+        let expired = Some(WorkspaceNotice::Expired);
+        // `--quiet`, JSON, CI and XYBRID_QUIET all arrive as `suppressed`
+        // (`suppressed(quiet, json)` covers the flags and the environment).
+        assert!(suppressed(true, false) && suppressed(false, true));
+        for notice in [provisional, expired] {
+            let line = workspace_notice_line(notice, true, || panic!("no slot when suppressed"));
+            assert_eq!(line, None);
+        }
+        assert_eq!(
+            workspace_notice_line(None, false, || panic!("nothing to show")),
+            None
+        );
+        // An expiry never waits for the daily slot, but uses it up.
+        let mut taken = false;
+        let take = || {
+            taken = true;
+            false
+        };
+        assert!(workspace_notice_line(expired, false, take).is_some());
+        assert!(taken);
+        // A provisional deadline shares the reminder's slot.
+        assert!(workspace_notice_line(provisional, false, || true).is_some());
+        assert_eq!(workspace_notice_line(provisional, false, || false), None);
     }
 }

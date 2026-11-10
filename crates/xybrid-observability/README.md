@@ -87,6 +87,14 @@ closes admission, drains, cancels remaining requests and remembers its result.
 An application-owned OpenTelemetry metrics provider retains the SDK reader's
 own shutdown timeout; see `otlp::OtlpMetricExporter` for that limitation.
 
+A destination may carry an `otlp::ResponseHook`
+(`SignalEndpoint::with_response_hook`). It sees every HTTP response of that
+destination once, including retries and the shutdown drain, and may disable
+that destination alone: later items are dropped and counted, never reported as
+exported, and a rebuilt pipeline starts enabled. The package reads no vendor
+header itself; `SignalEndpoint::is_xybrid_preset` tells an adapter which
+destination the Xybrid preset built.
+
 See the [API documentation](https://docs.rs/xybrid-observability) for provider
 configuration and the [shared contract](CONTRACT.md) for behavioral details.
 The JavaScript package `@xybrid/observability` implements the same contract.

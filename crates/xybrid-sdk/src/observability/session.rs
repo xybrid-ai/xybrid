@@ -6,6 +6,8 @@ struct SessionInner {
     observer: Observer,
     provider_origins: Vec<String>,
     pipeline: Option<Arc<xybrid_observability::otlp::ObservabilityPipeline>>,
+    /// Workspace feedback of the pipeline's Xybrid trace destination.
+    workspace: Option<WorkspaceFeedback>,
     live_trace_interval: Duration,
     live_traced: Mutex<LiveSessions>,
     live_clock: LiveClock,
@@ -184,7 +186,7 @@ impl ObservabilitySession {
     /// # Errors
     /// [`SdkError::ConfigError`] for invalid exporter or device configuration.
     pub fn new(config: ObservabilityConfig) -> SdkResult<Self> {
-        let (observer, pipeline) =
+        let (observer, pipeline, workspace) =
             match config.exporter {
                 Exporter::Observer(observer) => {
                     if config.device_id.is_some() {
@@ -192,7 +194,7 @@ impl ObservabilitySession {
                             "set device.id on the application-owned provider's Resource".into(),
                         ));
                     }
-                    (observer, None)
+                    (observer, None, None)
                 }
                 Exporter::Otlp(mut otlp) => {
                     otlp.resource
@@ -217,10 +219,17 @@ impl ObservabilitySession {
                     if otlp.resource.service_name.is_none() {
                         otlp.resource.service_name = Some("xybrid-app".into());
                     }
+                    // Fresh per session: a new session after a claim starts
+                    // with an enabled destination and no stale notice.
+                    let workspace = WorkspaceFeedback::attach(&mut otlp);
                     let pipeline = xybrid_observability::otlp::ObservabilityPipeline::build(*otlp)
                         .map_err(|e| SdkError::ConfigError(format!("observability: {e}")))?;
                     let content = config.content.unwrap_or_default();
-                    (pipeline.observer_with(content), Some(Arc::new(pipeline)))
+                    (
+                        pipeline.observer_with(content),
+                        Some(Arc::new(pipeline)),
+                        workspace,
+                    )
                 }
             };
         Ok(Self {
@@ -228,6 +237,7 @@ impl ObservabilitySession {
                 observer,
                 provider_origins: config.provider_origins,
                 pipeline,
+                workspace,
                 live_trace_interval: config.live_trace_interval,
                 live_traced: Mutex::new(LiveSessions::default()),
                 live_clock: LiveClock::System,
@@ -249,6 +259,7 @@ impl ObservabilitySession {
                 observer,
                 provider_origins: Vec::new(),
                 pipeline: None,
+                workspace: None,
                 live_trace_interval: Duration::from_secs(1),
                 live_traced: Mutex::new(LiveSessions::default()),
                 live_clock: LiveClock::System,
@@ -279,6 +290,15 @@ impl ObservabilitySession {
     #[must_use]
     pub fn stats(&self) -> Option<PipelineStats> {
         self.inner.pipeline.as_ref().map(|p| p.stats())
+    }
+
+    /// The workspace feedback of this session's Xybrid trace destination:
+    /// `Some` only when the session owns a pipeline whose traces go through
+    /// the Xybrid preset. The handle outlives the session's shutdown, so a
+    /// notice that arrives with the final drain can still be read.
+    #[must_use]
+    pub fn workspace_feedback(&self) -> Option<WorkspaceFeedback> {
+        self.inner.workspace.clone()
     }
 
     /// Flushes the owned pipeline up to its acceptance barrier.
