@@ -4605,7 +4605,8 @@ impl XybridModel {
 
     /// [`Self::run`] with per-run options and a parent context captured
     /// before a hop to a blocking worker. `abort` is the caller's
-    /// cancellation flag, which decision execution polls between passes.
+    /// cancellation flag, which decision execution polls between passes. It
+    /// is `None` for every other model, whose batch runs do not poll a token.
     fn run_observed(
         &self,
         envelope: &Envelope,
@@ -4930,16 +4931,23 @@ impl XybridModel {
         envelope: &Envelope,
         options: &RunOptions,
     ) -> SdkResult<InferenceResult> {
-        if options
+        // Only a decision run takes the token as a cancellation flag: it ends
+        // with `Cancelled` whatever the abort policy observes. Every other
+        // model keeps its batch contract, where a cancelled token matters only
+        // through `AbortSignal::UserCancelled` (or, for speech, inside the
+        // synthesis itself).
+        let decision = self.is_decision_model();
+        let abort = options
             .cancellation_token
             .as_ref()
-            .is_some_and(CancellationToken::is_cancelled)
-        {
+            .filter(|_| decision)
+            .map(CancellationToken::flag);
+        if abort.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst)) {
             return Err(SdkError::Cancelled {
-                message: "Execution cancelled".into(),
+                message: "Decision execution cancelled".into(),
             });
         }
-        if self.is_decision_model() && options.abort_policy.fallback_to_cloud {
+        if decision && options.abort_policy.fallback_to_cloud {
             return Err(decision_capability_refusal(
                 &self.model_id,
                 "cloud fallback",
@@ -5008,10 +5016,7 @@ impl XybridModel {
             options.generation_config.as_ref(),
             Some(options),
             None,
-            options
-                .cancellation_token
-                .as_ref()
-                .map(CancellationToken::flag),
+            abort,
         )
     }
 
@@ -11227,6 +11232,31 @@ mod tests {
             .unwrap_err();
         assert!(matches!(error, SdkError::Cancelled { .. }));
         drop(held);
+    }
+
+    #[test]
+    fn a_cancelled_token_keeps_the_batch_contract_of_other_models() {
+        use crate::run_options::{AbortPolicy, AbortSignal};
+        let model = test_loaded_model(true);
+        let token = CancellationToken::new();
+        token.cancel();
+        // Unobserved, a cancelled token does not end a batch run by itself.
+        let unobserved = model.run_with_options(
+            &text_envelope("hello"),
+            &RunOptions::new().with_cancellation_token(token.clone()),
+        );
+        assert!(!matches!(unobserved, Err(SdkError::Cancelled { .. })));
+        // Observed, it is the abort policy's stop, as it was before decisions.
+        let observed = model.run_with_options(
+            &text_envelope("hello"),
+            &RunOptions::new()
+                .with_cancellation_token(token)
+                .with_abort_policy(AbortPolicy::default().stop_on(AbortSignal::UserCancelled)),
+        );
+        assert!(matches!(
+            &observed,
+            Err(SdkError::InferenceError { message, .. }) if message.contains("user_cancelled")
+        ));
     }
 
     #[test]

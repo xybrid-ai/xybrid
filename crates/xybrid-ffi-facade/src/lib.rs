@@ -2475,9 +2475,13 @@ impl XybridModel {
         options: RunOptions,
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<InferenceResult> {
-        if cancel.as_ref().is_some_and(|token| token.is_cancelled()) {
+        // A decision run ends a cancelled token with `Cancelled`. Other models
+        // keep reporting it through the abort policy, as before decisions.
+        if self.inner.is_decision_model()
+            && cancel.as_ref().is_some_and(|token| token.is_cancelled())
+        {
             return Err(Error::Cancelled {
-                message: "inference cancelled".into(),
+                message: "decision cancelled".into(),
             });
         }
         let env = envelope.into_sdk()?;

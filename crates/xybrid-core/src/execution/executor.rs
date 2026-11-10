@@ -584,7 +584,7 @@ impl TemplateExecutor {
     }
 
     /// Executes with cooperative cancellation across decision preparation and passes.
-    /// Other templates retain their existing batch execution behavior.
+    /// Other templates ignore `abort` and keep their batch execution behavior.
     pub fn execute_controlled(
         &mut self,
         metadata: &ModelMetadata,
@@ -607,11 +607,12 @@ impl TemplateExecutor {
         config: Option<&GenerationConfig>,
         abort: Option<&std::sync::atomic::AtomicBool>,
     ) -> ExecutorResult<Envelope> {
-        if abort.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire)) {
+        let decision = matches!(metadata.execution_template, ExecutionTemplate::Decision(_));
+        if decision && abort.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire)) {
             return Err(AdapterError::Cancelled);
         }
         validate_decision_request(metadata, input, EntryPoint::Batch)?;
-        if matches!(metadata.execution_template, ExecutionTemplate::Decision(_)) {
+        if decision {
             if config.is_some() {
                 return Err(super::decision::unsupported(
                     &metadata.model_id,
