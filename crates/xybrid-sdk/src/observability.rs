@@ -817,7 +817,6 @@ fn is_user_cancel(error: &(dyn std::error::Error + 'static)) -> bool {
 #[derive(Clone)]
 pub(crate) struct ChunkSink {
     op: Arc<InferenceOperation>,
-    observer: Observer,
     stopped: CancelMark,
 }
 
@@ -831,14 +830,16 @@ impl ChunkSink {
 
     /// Hands one token to the caller through `deliver` and counts it as a
     /// delivered chunk, timed when it was handed over, once `deliver`
-    /// accepts it. A token the caller refuses is not delivered; a refusal
-    /// that is the caller's cancellation (see [`CancelMark::note`]) marks the
-    /// run cancelled.
+    /// accepts it. The time is the operation's anchored reading, as for
+    /// every other default timing call, so a wall-clock step mid-stream does
+    /// not distort the chunk timings. A token the caller refuses is not
+    /// delivered; a refusal that is the caller's cancellation (see
+    /// [`CancelMark::note`]) marks the run cancelled.
     pub(crate) fn deliver(
         &self,
         deliver: impl FnOnce() -> Result<(), StreamingError>,
     ) -> Result<(), StreamingError> {
-        let at = self.observer.now();
+        let at = self.op.now();
         let delivered = deliver();
         match &delivered {
             Ok(()) => self.op.record_chunk_at(at),
@@ -1302,7 +1303,6 @@ impl RunObservation {
     pub(crate) fn chunk_sink(&self) -> ChunkSink {
         ChunkSink {
             op: self.op.clone(),
-            observer: self.stages.observer.clone(),
             stopped: self.stopped.clone(),
         }
     }
@@ -3531,6 +3531,57 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::mpsc;
 
+    /// A chunk is timed on the operation's anchored clock, not the raw wall
+    /// clock: an NTP step between the start of a stream and its first token
+    /// must not move `time_to_first_chunk` by the size of the step. Needs the
+    /// observability crate's wall-steppable test clock (feature `test-util`).
+    #[cfg(feature = "test-util")]
+    #[test]
+    fn a_delivered_chunk_is_timed_on_the_operation_clock_across_a_wall_clock_step() {
+        use opentelemetry_sdk::trace::SdkTracerProvider;
+        use xybrid_observability::{Clock, ManualClock};
+
+        const STEP: Duration = Duration::from_secs(3_600);
+        let wall = Arc::new(ManualClock::new(
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+        ));
+        let memory = test_support::Memory::default();
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(memory.clone())
+            .build();
+        let observer = Observer::builder()
+            .tracer_provider(&provider)
+            .clock(Clock::manual_wall(wall.clone()))
+            .build();
+        let started = observer.now();
+        let op = observer.start_inference(
+            InferenceRequest::new("chat", "llama.cpp").streaming(true),
+            StartOptions::default().with_start_time(started),
+        );
+        let sink = ChunkSink {
+            op: Arc::new(op),
+            stopped: CancelMark::default(),
+        };
+
+        // The device clock jumps an hour ahead before the first token.
+        wall.advance(STEP);
+        assert_eq!(observer.now(), started + STEP, "the wall clock stepped");
+        sink.deliver(|| Ok(()))
+            .expect("the caller accepts the token");
+        sink.op.end();
+
+        let span = memory.spans().pop().expect("the run's span ended");
+        let ttfc: f64 = test_support::attr(&span, semconv::attr::RESPONSE_TIME_TO_FIRST_CHUNK)
+            .expect("the delivered chunk sets the time to first chunk")
+            .parse()
+            .expect("time to first chunk is a number of seconds");
+        assert!(
+            ttfc < STEP.as_secs_f64() / 2.0,
+            "time to first chunk follows the operation clock, not the {STEP:?} \
+             wall-clock step: {ttfc} s"
+        );
+    }
+
     #[test]
     fn url_address_extracts_only_http_host_and_port() {
         for (url, host, port) in [
@@ -5043,7 +5094,7 @@ mod tests {
 
     #[test]
     fn concurrent_async_workflows_keep_their_own_parents() {
-        // A1: 16 workflows interleave stage by stage (barriers, a yield, a
+        // 16 workflows interleave stage by stage (barriers, a yield, a
         // stage held across it) on one thread and on four workers. Each keeps
         // its own parent, nothing crosses into another task's trace, nothing
         // installed by one task's poll outlives it, and every workflow and
@@ -5124,7 +5175,7 @@ mod tests {
 
     #[test]
     fn concurrent_async_workflows_keep_session_counters_consistent() {
-        // A1: the same interleaving against an SDK-owned pipeline. After a
+        // The same interleaving against an SDK-owned pipeline. After a
         // flush every span is exported exactly once and every signal's
         // counters reconcile with nothing pending.
         use httpmock::prelude::*;

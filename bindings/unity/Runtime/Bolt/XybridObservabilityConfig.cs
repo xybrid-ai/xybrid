@@ -179,7 +179,8 @@ namespace XybridBolt
 
         /// <summary>
         /// Maximum bytes per captured content attribute, clamped to at most
-        /// 208 KiB so that one span fits the 480 KiB export request.
+        /// 208 KiB so that a span's content leaves 64 KiB of the 480 KiB export
+        /// request for its other data.
         /// </summary>
         public void SetMaxContentBytes(uint bytes)
         {

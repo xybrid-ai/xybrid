@@ -76,10 +76,12 @@ Each export shares one absolute deadline across split requests, retries and
 response reads. Redirects are disabled. Content retained per operation defaults
 to 208 KiB and traversal to 480 KiB, queues plus in-flight data to 32 MiB per
 signal, and JSON depth to 128. These budgets describe library-owned data, not
-process RSS. The content budgets are clamped so one span fits the request bound
-(`max_request_body_bytes`, 480 KiB; see `ContentPolicy`), content for a span
-that is not recording is not processed, and a redaction hook that panics fails
-closed like one that returns an error. `stats()` reports `accepted`,
+process RSS. The content budgets are clamped so one span's content fits the
+request bound (`max_request_body_bytes`, 480 KiB; see `ContentPolicy`) with
+64 KiB left for the span's other data, an allowance that is reserved, not
+enforced (CONTRACT.md "Content pipeline", budgets). Content for a span that is
+not recording is not processed, and a redaction hook that panics fails closed
+like one that returns an error. `stats()` reports `accepted`,
 `exported`, `dropped`, `failed`, `pending` and `buffered_bytes` (the bytes
 held against the 32 MiB budget) for each signal. A missing acknowledgement leaves delivery unknown; retries
 do not multiply item outcomes. Flush covers its acceptance barrier; shutdown

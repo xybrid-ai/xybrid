@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
 """A stand-in for the ``observability_perf`` example driver, for dry runs of
 ``run_perf.py e2e`` and its unit tests: same arguments, same JSON schema, no
-model. It synthesizes deterministic token timings (enabled modes a little
-slower), holds a little extra memory in enabled modes so peak RSS differs,
-and talks to the endpoint like the real pipeline would: one OTLP request to
-an accepting sink, a request that waits for no answer to a blocked one.
+model. It synthesizes deterministic token timings (enabled modes slower,
+by more than the jitter, so every enabled run is slower than every ``off``
+run, yet within the agreed bounds in thresholds.json), holds a little extra
+memory in enabled modes so peak RSS differs, and talks to the endpoint like
+the real pipeline would: one OTLP request to an accepting sink, a request
+that waits for no answer to a blocked one.
 
+``e2e`` reads the model directory before it starts a driver: its
+model_metadata.json must name an existing file in
+``execution_template.model_file`` (the fake never opens it). This dry run
+passes the agreed gates:
+
+    mkdir -p /tmp/fake-model && touch /tmp/fake-model/tiny.gguf
+    echo '{"execution_template": {"type": "Gguf", "model_file": "tiny.gguf"}}' \\
+        > /tmp/fake-model/model_metadata.json
     python3 run_perf.py e2e --driver-cmd "python3 fake_driver.py" \\
         --model-dir /tmp/fake-model --allow-unpinned-model --rounds 2
 
@@ -26,7 +36,15 @@ import time
 import urllib.parse
 from typing import Any, Dict
 
-SLOWDOWN = {"off": 1.0, "metadata": 1.002, "content": 1.004, "blocked": 1.004}
+# Each token time is ``5 ms * SLOWDOWN[mode] * (1 + U(-JITTER, JITTER))``. The
+# steps between modes exceed the jitter's whole range (1.003 * 0.999 > 1.001,
+# 1.006 * 0.999 > 1.003 * 1.001), so a run's mode decides its order against
+# another mode's runs: the tests that expect `content` to be slower than `off`
+# cannot pass or fail by chance. The largest slowdown, 0.6%, stays inside the
+# tightest agreed bounds (E1/E2: 1% of tokens/s; E4: 0.05 ms of a 5 ms gap), so
+# a dry run against the shipped thresholds.json passes its gates.
+JITTER = 0.001
+SLOWDOWN = {"off": 1.0, "metadata": 1.003, "content": 1.006, "blocked": 1.006}
 EXTRA_MIB = {"off": 0, "metadata": 2, "content": 3, "blocked": 4}
 
 
@@ -75,7 +93,9 @@ def main() -> int:
     if args.mode != "off" and not args.endpoint:
         print("fake_driver: --endpoint required", file=sys.stderr)
         return 2
-    rng = random.Random(f"{args.mode}-{os.getpid()}")
+    # Seeded from the mode and the output file name (which names the round),
+    # never the process id: the same invocation gives the same timings.
+    rng = random.Random(f"{args.mode}-{os.path.basename(args.out or '')}")
     ballast = bytearray(EXTRA_MIB.get(args.mode, 0) * 1024 * 1024)
     for i in range(0, len(ballast), 4096):
         ballast[i] = 1  # touch every page so it counts as resident
@@ -84,8 +104,8 @@ def main() -> int:
     runs = []
     for index in range(args.runs):
         tokens = args.max_tokens - (1 if index == 0 and os.environ.get("FAKE_DRIVER_SHORT") == args.mode else 0)
-        gaps = [round(5.0 * factor * (1 + rng.uniform(-0.02, 0.02)), 4) for _ in range(tokens - 1)]
-        first = 40.0 * factor * (1 + rng.uniform(-0.02, 0.02))
+        gaps = [round(5.0 * factor * (1 + rng.uniform(-JITTER, JITTER)), 4) for _ in range(tokens - 1)]
+        first = 40.0 * factor * (1 + rng.uniform(-JITTER, JITTER))
         wall = first + sum(gaps) + 1.0
         runs.append({
             "wall_ms": wall,

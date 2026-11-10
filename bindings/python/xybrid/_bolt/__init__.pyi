@@ -1165,7 +1165,8 @@ class XybridObservabilityConfig:
         """Record metadata only: no prompts, outputs, or tool payloads."""
     def set_max_content_bytes(self, bytes: int) -> None:
         """Maximum bytes per captured content attribute, clamped to at most
-        208 KiB so that one span fits the 480 KiB export request.
+        208 KiB so that a span's content leaves 64 KiB of the 480 KiB export
+        request for its other data.
         """
     def allow_provider_context(self, origin: str) -> None:
         """Allows context propagation to one exact third-party HTTP(S) origin."""

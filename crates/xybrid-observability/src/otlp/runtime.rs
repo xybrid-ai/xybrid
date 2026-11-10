@@ -292,7 +292,7 @@ mod tests {
 
     #[test]
     fn transport_work_runs_with_telemetry_suppressed_across_awaits() {
-        // D26.8: a span or log record created by export work (an instrumented
+        // A span or log record created by export work (an instrumented
         // HTTP client, a log bridge) must not feed back into the pipeline.
         let rt = TransportRuntime::start().unwrap();
         let c = Completion::<(bool, bool)>::new();

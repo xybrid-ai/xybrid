@@ -46,9 +46,10 @@ and a closed memory-pressure vocabulary (see "Resource samples"); the fixture
 format gained steps and stricter normalization. Content destined for a span
 that does not record is not processed; a redaction hook that panics (Rust)
 fails closed like one that throws, and a span processor that panics while a
-span ends is contained; the content budgets are clamped so one span fits the
-request bound (default retained-operation budget 208 KiB); per-signal stats
-report the bytes held against the byte budget (`buffered_bytes`).
+span ends is contained; the content budgets are clamped so one span's
+content fits the request bound (default retained-operation budget 208 KiB);
+per-signal stats report the bytes held against the byte budget
+(`buffered_bytes`).
 
 ## Scope and independence
 
@@ -251,7 +252,11 @@ times. JS ignores a non-finite explicit time. Durations are seconds as doubles.
 
 - The default clock is wall-clock anchored per operation and monotonic within
   it: the operation captures wall and monotonic time at start and later readings
-  add the monotonic elapsed time.
+  add the monotonic elapsed time. In Rust, `InferenceOperation::now()` returns
+  that reading, for a time taken before work and recorded through an
+  explicit-time call once the work is done (the SDK times a streamed chunk when
+  it hands it to the application's callback and records it once the callback
+  accepts it), so the recorded time does not follow a wall-clock step either.
 - Workers report epoch milliseconds anchored to `Date.now()` (anchor =
   `Date.now() − performance.now()` captured when the worker starts the
   operation, then `anchor + performance.now()`), never
@@ -432,12 +437,19 @@ never does.
 Ending a span runs the tracer's span processors (`on_end` / `onEnd`) on the
 calling thread. A processor that panics (Rust) or throws (JS) there is
 contained: the operation's end, metrics and events complete, the caller
-continues, and later spans are processed as usual (the Rust SDK leaves only that
-span's own lock poisoned). Processors registered after the failing one never
-see that span; behind `ObservabilityPipeline::build_with_span_processor` the
-application's processor runs before the pipeline's, so the span is neither
-exported nor counted. A failure in `on_start` / `onStart` is not contained: it
-propagates from the start call.
+continues, and later spans still reach every processor (the Rust SDK leaves
+only that span's own lock poisoned, never the provider's). What the failing
+processor does with later spans is its own: a Rust processor that panics while
+it holds a lock of its own may handle no later span. The SDK's
+`SimpleSpanProcessor` (what `with_simple_exporter` installs) is one: it exports
+under its exporter mutex, so an exporter that panics once poisons that mutex
+for good and the processor drops every later span, while the other processors,
+the pipeline's export included, keep working. Processors registered after the
+failing one never see that span; behind
+`ObservabilityPipeline::build_with_span_processor` the application's processor
+runs before the pipeline's, so the span is neither exported nor counted. A
+failure in `on_start` / `onStart` is not contained: it propagates from the
+start call.
 
 ## Content capture
 
@@ -523,10 +535,13 @@ comment is processed in this order:
    or one without a span of its own (no tracer, or an OpenTelemetry API
    without an SDK), span-destined content does no work at all (no
    omit check, preflight, clone, callback, rules or truncation) and is never
-   marked truncated. The event destination does not depend on the span: event
-   capture processes and emits every value whether or not the span records.
-   Output for recording spans is unchanged. Error messages (which also feed
-   the exception event) and feedback comments are processed as before.
+   marked truncated. The event destination does not depend on the span: with
+   an enabled logger, event capture processes and emits every value whether
+   or not the span records; without one (no logger provider, a traces-only
+   pipeline) it counts as no destination. Output for recording spans is
+   unchanged. Error messages (which also feed the exception event) are
+   processed as before; a feedback comment is processed only when an enabled
+   logger receives the evaluation event, and does no work otherwise.
 2. **Omit rules**: an `omit_attribute` rule naming the key drops the value
    (not marked truncated).
 3. **Preflight, before cloning**: a bounded walk of the caller's value computes
@@ -808,10 +823,11 @@ nulls arrive as `bytesValue: ""` and JS whole-number doubles as `intValue`.
 - Rust: `Result<()>` with `Error::Timeout` or `Error::Delivery`, plus
   `force_flush_async`/`shutdown_async`; sync calls are safe inside another Tokio
   runtime. JS: `Promise<boolean>`, `true` only for success, resolved after
-  counters settle. JS timers never keep a process alive; an export in flight
-  does until it completes or its deadline aborts it, so a process that exits
-  without shutdown can linger up to `export_timeout` against an unresponsive
-  endpoint.
+  counters settle. JS scheduling timers (batch delay, metric interval, flush,
+  export and shutdown deadlines) never keep a process alive; an export in
+  flight, retry backoff included, does until it completes or its deadline
+  aborts it, so a process that exits without shutdown can linger up to
+  `export_timeout` against an unresponsive endpoint.
 - Rust: dropping an `ObservabilityPipeline` without `shutdown` abandons its
   work at once: queued spans and log records are dropped, exports in flight
   are cancelled (failed) and nothing is flushed. Its providers are shut down

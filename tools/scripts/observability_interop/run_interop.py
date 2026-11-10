@@ -41,7 +41,7 @@ import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Collection, Dict, List, Mapping, Optional, Sequence, Tuple
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -193,14 +193,14 @@ class CaptureServer:
         self.process: Optional[subprocess.Popen] = None
         self.endpoint = ""
 
-    def start(self) -> "CaptureServer":
+    def start(self, timeout: float = 20.0) -> "CaptureServer":
         if self.ready.exists():
             self.ready.unlink()
-        handle = self.log.open("w", encoding="utf-8")
-        self.process = subprocess.Popen(
-            [sys.executable, "-I", str(CAPTURE_SERVER), "--host", "127.0.0.1", "--port", "0",
-             "--out", str(self.out), "--ready-file", str(self.ready)], stdout=handle, stderr=subprocess.STDOUT)
-        deadline = time.monotonic() + 20
+        with self.log.open("w", encoding="utf-8") as handle:  # the child keeps its own copy
+            self.process = subprocess.Popen(
+                [sys.executable, "-I", str(CAPTURE_SERVER), "--host", "127.0.0.1", "--port", "0",
+                 "--out", str(self.out), "--ready-file", str(self.ready)], stdout=handle, stderr=subprocess.STDOUT)
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if self.ready.exists():
                 self.endpoint = json.loads(self.ready.read_text(encoding="utf-8"))["endpoint"]
@@ -208,6 +208,8 @@ class CaptureServer:
             if self.process.poll() is not None:
                 break
             time.sleep(0.05)
+        # A server that is still starting past the deadline would outlive the run.
+        self.stop()
         raise SetupError(f"capture server {self.out.name} did not start; see {self.log}")
 
     def lines(self) -> int:
@@ -228,6 +230,7 @@ class CaptureServer:
                 self.process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 self.process.kill()
+                self.process.wait()
 
 
 def settle(servers: Sequence[CaptureServer], quiet: float = 1.5, limit: float = 20.0) -> None:
@@ -357,9 +360,9 @@ class RawLog:
     def __call__(self, label: str, url: str, value: Any) -> None:
         self.items.append((label, url, value))
 
-    def text_for(self, keys: Sequence[str]) -> str:
-        return "\n".join(json.dumps(value, sort_keys=True) for label, url, value in self.items
-                         if any(key in label or key in url for key in keys))
+    def answers(self, labels: Collection[str]) -> List[Any]:
+        """Every recorded answer (each poll's) whose label is one of ``labels``."""
+        return [value for label, _, value in self.items if label in labels]
 
     def write(self, directory: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
@@ -370,6 +373,30 @@ class RawLog:
             safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", label)[:120]
             (directory / f"{safe}.json").write_text(json.dumps({"url": url, "response": value}, indent=2) + "\n",
                                                     encoding="utf-8")
+
+
+def own_answers_text(truth: expectations.GroundTruth, spans: Sequence[destinations.DestSpan],
+                     evaluations: Optional[Sequence[destinations.DestEvaluation]],
+                     raw: Optional[RawLog] = None) -> str:
+    """What the destination answered for this run's spans, as the text the
+    ``content`` and ``content.redaction`` checks search.
+
+    Only spans with a ground-truth id count, their quality results, and (from
+    ``raw``) the Xybrid content route's answer for each of them. A trace
+    holds every run's spans when its id is fixed (the Python scenario's), so
+    the whole trace's answers would fail a clean run on a secret an earlier
+    run stored, and pass a broken one on a replacement an earlier run stored.
+    """
+    ids = truth.span_ids()
+    traces = set(truth.trace_ids())
+    own = [span for span in spans if span.span_id in ids and span.trace_id in traces]
+    parts = [json.dumps(span.raw, sort_keys=True) for span in own]
+    if raw is not None:
+        parts += [json.dumps(value, sort_keys=True)
+                  for value in raw.answers({f"content-{span.span_id}" for span in own})]
+    parts += [json.dumps(evaluation.raw, sort_keys=True) for evaluation in evaluations or []
+              if evaluation.span_id in ids]
+    return "\n".join(parts)
 
 
 def make_client(destination: str, settings: Mapping[str, str], raw: RawLog,
@@ -490,6 +517,45 @@ def read_back(client: Any, truth: expectations.GroundTruth, table: Mapping[str, 
     return result
 
 
+def destination_readback(destination: str, truth: expectations.GroundTruth, table: Mapping[str, Any],
+                         client: Any, raw: RawLog, started: datetime, timeout: float,
+                         wire_entries: Optional[Sequence[Dict[str, Any]]] = None,
+                         ) -> Tuple[List[expectations.Check], Optional[Dict[str, Any]]]:
+    """Reads one workload back and checks it against its ground truth.
+
+    With ``wire_entries`` (``--wire``) the spans come from the wire capture,
+    which holds only this run's requests; otherwise ``client`` reads the
+    destination's API, and the text the content checks search is built from
+    this run's own spans only (``own_answers_text``). Returns the checks and
+    the report's ``destination`` entry, ``None`` when there was nothing to read.
+    """
+    name = truth.workload.name
+    check = expectations.Check("destination", name, "readback")
+    if not truth.spans:
+        check.failures.append("nothing to read back: the workload exported no spans")
+        return [check], None
+    if wire_entries is not None:
+        spans = [span for span in destinations.wire_spans(destination, wire_entries)
+                 if span.trace_id in truth.trace_ids()]
+        evaluations = destinations.wire_evaluations(wire_entries) if destination == "xybrid" else []
+        raw_text = "\n".join([json.dumps(span.raw, sort_keys=True) for span in spans] + [
+            json.dumps(evaluation.raw, sort_keys=True) for evaluation in evaluations
+            if evaluation.trace_id in truth.trace_ids()])
+        notes: List[str] = []
+        errors: List[str] = []
+    else:
+        print(f"==> reading {name} back from {destination}", flush=True)
+        readback = read_back(client, truth, table, started, timeout)
+        spans, evaluations = readback.spans, readback.evaluations
+        notes, errors = readback.notes, readback.errors
+        raw_text = own_answers_text(truth, spans, evaluations, raw)
+    check.failures.extend(f"read failed: {error}" for error in errors)
+    check.notes.extend(notes)
+    checks = [check] + expectations.destination_checks(destination, truth, spans, evaluations, raw_text, table)
+    return checks, {"spans_read": len(spans), "evaluations_read": None if evaluations is None else len(evaluations),
+                    "read_errors": errors}
+
+
 # ---------------------------------------------------------------------------
 # One destination
 # ---------------------------------------------------------------------------
@@ -534,9 +600,9 @@ def run_destination(destination: str, args: argparse.Namespace, settings: Mappin
         raise SetupError("workloads not ready:\n" + "\n".join(
             f"  {name}: {problem}" for name, found in problems.items() for problem in found))
 
-    tee = CaptureServer(out, "ground-truth").start()
-    sink = CaptureServer(out, "sinks").start() if args.sinks else None
-    wire = CaptureServer(out, "wire").start() if args.wire else None
+    tee = CaptureServer(out, "ground-truth")
+    sink = CaptureServer(out, "sinks") if args.sinks else None
+    wire = CaptureServer(out, "wire") if args.wire else None
     servers = [server for server in (tee, sink, wire) if server is not None]
     collector = None
     exit_codes: Dict[str, List[int]] = {}
@@ -544,6 +610,10 @@ def run_destination(destination: str, args: argparse.Namespace, settings: Mappin
     windows: Dict[str, Tuple[int, int]] = {}
     metrics: Dict[str, Dict[str, float]] = {}
     try:
+        # Started inside the try, so a server that fails to start still has
+        # the ones before it stopped by the finally below.
+        for server in servers:
+            server.start()
         port = int(args.collector_port or settings["INTEROP_COLLECTOR_PORT"])
         metrics_port = int(settings["INTEROP_COLLECTOR_METRICS_PORT"])
         env = otelcol.scrubbed_environment()
@@ -636,36 +706,11 @@ def run_destination(destination: str, args: argparse.Namespace, settings: Mappin
 
     # Destination readback.
     for name in selected:
-        truth = truths[name]
-        if not truth.spans:
-            check = expectations.Check("destination", name, "readback")
-            check.failures.append("nothing to read back: the workload exported no spans")
-            checks.append(check)
-            continue
-        if wire is not None:
-            wire_entries = wire.entries()
-            spans = [span for span in destinations.wire_spans(destination, wire_entries)
-                     if span.trace_id in truth.trace_ids()]
-            evaluations = destinations.wire_evaluations(wire_entries) if destination == "xybrid" else []
-            raw_text = "\n".join([json.dumps(span.raw, sort_keys=True) for span in spans] + [
-                json.dumps(evaluation.raw, sort_keys=True) for evaluation in evaluations
-                if evaluation.trace_id in truth.trace_ids()])
-            notes: List[str] = []
-            errors: List[str] = []
-        else:
-            print(f"==> reading {name} back from {destination}", flush=True)
-            readback = read_back(client, truth, table, started, args.readback_timeout)
-            spans, evaluations = readback.spans, readback.evaluations
-            notes, errors = readback.notes, readback.errors
-            raw_text = raw.text_for(truth.trace_ids())
-        check = expectations.Check("destination", name, "readback")
-        check.failures.extend(f"read failed: {error}" for error in errors)
-        check.notes.extend(notes)
-        checks.append(check)
-        checks += expectations.destination_checks(destination, truth, spans, evaluations, raw_text, table)
-        report["workloads"][name]["destination"] = {
-            "spans_read": len(spans), "evaluations_read": None if evaluations is None else len(evaluations),
-            "read_errors": errors}
+        found, read = destination_readback(destination, truths[name], table, client, raw, started,
+                                           args.readback_timeout, wire.entries() if wire is not None else None)
+        checks += found
+        if read is not None:
+            report["workloads"][name]["destination"] = read
 
     if not args.wire:
         raw.write(out / "raw")

@@ -1,7 +1,7 @@
 //! R-CFG-5 and R-CANCEL-8: no transport thread exists before a valid build,
 //! none remains after shutdown (beyond the runtime's short teardown), even one
-//! that cut exports off (A4), nor after dropping a pipeline whose exports are
-//! parked (B4), and the lifecycle works from Tokio worker threads and through
+//! that cut exports off, nor after dropping a pipeline whose exports are
+//! parked, and the lifecycle works from Tokio worker threads and through
 //! the async variants.
 //!
 //! This binary holds a single test so that no other test's threads are
@@ -288,7 +288,7 @@ fn transport_threads_exist_only_between_a_valid_build_and_shutdown() {
     assert!(started.elapsed() < Duration::from_secs(1));
     assert_none_left("dropped pipeline");
 
-    // A4: a shutdown that cut every signal's export off leaves nothing
+    // A shutdown that cut every signal's export off leaves nothing
     // running either, while the application still holds the pipeline. With
     // no thread left to send, the request count after a later emit and
     // flush needs no wait.
@@ -350,7 +350,7 @@ fn transport_threads_exist_only_between_a_valid_build_and_shutdown() {
         assert!(signal.is_consistent(), "{signal:?}");
     }
 
-    // B4: dropped while every signal's export is parked, from a plain thread
+    // Dropped while every signal's export is parked, from a plain thread
     // and inside a Tokio runtime: the drop returns although nothing was
     // answered, and leaves no transport or reader thread behind. The bounds
     // only detect a drop that never returns or a thread that never stops.

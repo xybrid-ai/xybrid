@@ -720,6 +720,23 @@ describe("content for spans that do not record", () => {
         expect(sorted(onEvents)).toEqual(sorted(CONTENT_KEYS));
       }
     });
+
+    test(`${name}: with no logger, event capture does not run the pipeline either`, () => {
+      for (const capture of ["span_and_event", "event_only"] as const) {
+        const hook = counting();
+        const { sampler, options, tracer } = setup();
+        const harness = createHarness({
+          sampler,
+          logs: false,
+          ...(tracer === undefined ? {} : { tracer }),
+          content: { capture, redact: hook.redact },
+        });
+        recordEveryContentKind(harness.observer, options);
+        expect(hook.calls).toEqual([]);
+        expect(harness.spans.getFinishedSpans()).toHaveLength(0);
+        expect(harness.logs.getFinishedLogRecords()).toHaveLength(0);
+      }
+    });
   }
 
   test("a recording span still processes and records every value", () => {

@@ -16,8 +16,11 @@
 //! same session, which must export: what is missing was dropped, not lost.
 //!
 //! Every run is pinned to its session. Only the unsampled-parent test
-//! installs its session as the process default, under the default-session
-//! lock, to record evaluations through the public free functions.
+//! installs a process default, under the default-session lock, to record
+//! evaluations through the public free functions. It installs a second
+//! session of its own, not the run's: a run pinned to no session in a test
+//! beside it records into that default too (the test makes one), so it reads
+//! back only the records linked to its run's span there.
 
 use super::*;
 use crate::observability::semconv::{self, attr, metric};
@@ -335,10 +338,14 @@ fn an_unsampled_parent_run_keeps_its_reference_counts_and_evaluations() {
         .expect("an unsampled reference");
     assert_eq!(reference.trace_id, TRACE, "in the parent's trace");
     assert_ne!(reference.span_id, PARENT_SPAN, "a span of its own");
+    let linked = Some((TRACE.to_owned(), reference.span_id.clone(), false));
     {
-        // The public free functions record on the process default.
+        // The public free functions record on the process default, which
+        // also takes the records of any run pinned to no session meanwhile.
+        let evaluations = memory_session_with_signals();
         let _default = default_session_lock();
-        let _installed = DefaultSession::install(&signals.session);
+        let _installed = DefaultSession::install(&evaluations.session);
+        run_an_unpinned_neighbour_that_fails();
         assert!(crate::observability::record_evaluation(
             &reference,
             &Evaluation {
@@ -354,6 +361,21 @@ fn an_unsampled_parent_run_keeps_its_reference_counts_and_evaluations() {
                 ..Feedback::default()
             }
         ));
+        let of_the_run: Vec<_> = log_records(&evaluations)
+            .into_iter()
+            .filter(|(_, link)| {
+                link.as_ref()
+                    .is_some_and(|(_, span, _)| *span == reference.span_id)
+            })
+            .collect();
+        assert_eq!(
+            of_the_run,
+            [
+                (semconv::event::EVALUATION_RESULT.to_owned(), linked.clone()),
+                (semconv::event::EVALUATION_RESULT.to_owned(), linked),
+            ],
+            "evaluation and feedback on the run's reference, trace flags 0"
+        );
     }
 
     assert_eq!(
@@ -362,15 +384,8 @@ fn an_unsampled_parent_run_keeps_its_reference_counts_and_evaluations() {
     );
     assert_eq!(text_tokens(&signals, metric::USAGE_INPUT_TOKENS), 3);
     assert_eq!(text_tokens(&signals, metric::USAGE_OUTPUT_TOKENS), 5);
-    let linked = Some((TRACE.to_owned(), reference.span_id.clone(), false));
-    assert_eq!(
-        log_records(&signals),
-        [
-            (semconv::event::EVALUATION_RESULT.to_owned(), linked.clone()),
-            (semconv::event::EVALUATION_RESULT.to_owned(), linked),
-        ],
-        "evaluation and feedback on the run's reference, trace flags 0"
-    );
+    let own = log_records(&signals);
+    assert!(own.is_empty(), "the run itself emits no record: {own:?}");
 
     // Anchor: the same model as a traced root run exports its run and its
     // runtime stage; nothing of the unsampled run was exported.

@@ -2,10 +2,13 @@
 
 What telemetry costs an application that streams tokens from a local model,
 measured against a disabled baseline, plus the bounded-resource claims of the
-export pipeline under bursts, a blocked exporter and saturation. This is the
-performance half of acceptance step 5 ("Finish reliability and performance
-acceptance") of the observability plan. It records distributions and proposes
-thresholds; it does not decide pass or fail from a single sample.
+export pipeline under bursts, a blocked exporter and saturation: the
+performance acceptance of the observability stack. It records distributions
+and gates them on the agreed bounds in `thresholds.json`: for e2e, mostly the
+median delta of each mode against `off` over many rounds, plus a limit on the
+worst shutdown time; for the micro benches, the measured value. A failed bound
+makes `e2e` and `micro` exit 1; `"status": "proposed"` in `thresholds.json`
+turns the gate off (see [Thresholds](#thresholds)).
 
 | File | Role |
 |---|---|
@@ -78,7 +81,10 @@ Qwen3.5-0.8B recipe (`integration-tests/fixtures/models/models.json`
 converts the same model). `integration-tests/download.sh qwen3.5-0.8b`
 fetches the same file from the unpinned `main` revision; `fetch-model`
 pins revision `6ab461498e2023f6e3c1baea90a8f0fe38ab64d0` and SHA-256
-`bd258782…dc517`, and `e2e` refuses any other bytes under that name.
+`bd258782…dc517`. `e2e` hashes and records the file that `model_metadata.json`
+names (`execution_template.model_file`), exits when it names none or a missing
+one, and without `--allow-unpinned-model` refuses anything but the pinned
+bytes.
 
 ## End to end (`e2e`)
 
@@ -112,9 +118,12 @@ Per measured run, from the application's token callback:
 `first_callback_ms` (run start to first callback), the gaps between
 consecutive callbacks, the callback-derived decode rate, and wall time; from
 the runtime: `ttft_ms`, `tokens_per_second`, `tokens_generated`. The SDK
-records a chunk (`InferenceOperation::record_chunk`) immediately before
-invoking the application's callback, so the per-chunk cost shows up directly
-in every callback gap. Per process: peak RSS and footprint, model load time,
+reads the chunk's time just before invoking the application's callback and,
+once the callback accepts the token, records the chunk at that time
+(`InferenceOperation::record_chunk_at`; a token the callback refuses is not
+counted). The per-chunk cost therefore lands between consecutive callbacks,
+in every callback gap; the last chunk's falls after the final callback, in
+wall time only. Per process: peak RSS and footprint, model load time,
 shutdown time (timed separately; never counted as inference) and the
 pipeline counters before and after shutdown.
 
@@ -192,8 +201,9 @@ benches, in which every bound held. Each e2e row compares the **regression**
 of a mode against `off` (slower, later or larger is positive) with the bound.
 With both an absolute and a relative allowance, the larger applies.
 
-The gate is `within`: the median delta for e2e rows, the measured value for
-micro rows. A failed gate makes `e2e` and `micro` exit 1 and lists the rows
+The gate is `within`: the median delta against `off` for relative e2e rows,
+the row's statistic against its limit for absolute ones (E8, E9: the maximum
+shutdown time over processes), the measured value for micro rows. A failed gate makes `e2e` and `micro` exit 1 and lists the rows
 under `thresholds_failed`. `within at CI worst case` (the end of the bootstrap
 95% interval in the regressing direction) is reported for information only:
 on a desktop the e2e noise floor is a few percent (the `blocked` mode, which

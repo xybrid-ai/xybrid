@@ -194,9 +194,9 @@ describe("transport and lifecycle (R-LIFE, R-CANCEL, R-CNT)", () => {
   });
 });
 
-// Mirrors of the Rust reliability tests in crates/xybrid-observability/tests/delivery.rs
-// (step 5): an outage then recovery, receiver-reconciled metric points (D5a), and a
-// shutdown cut-off settling every signal exactly. Phases are driven by flushes and by the
+// Mirrors of the Rust reliability tests in crates/xybrid-observability/tests/delivery.rs:
+// an outage then recovery, receiver-reconciled metric points, and a shutdown cut-off
+// settling every signal exactly. Phases are driven by flushes and by the
 // requests the server holds, never by time; every wait is a hang detector of at least 10 s.
 
 const HANG = 10_000;

@@ -142,23 +142,36 @@ def fetch_model(dest: Path, spec: Dict[str, Any] = MODEL, url: Optional[str] = N
 
 
 def verify_model(model_dir: Path, allow_unpinned: bool) -> Dict[str, Any]:
-    """Identity of the model the run measures. Fails when the pinned file is
-    present with other bytes, or absent, unless ``allow_unpinned``."""
+    """Identity of the model the run measures: the file ``model_metadata.json``
+    names (``execution_template.model_file``), which is the one the driver
+    loads, whatever else the directory holds. Fails when the metadata names no
+    file or a missing one, and, unless ``allow_unpinned``, when that file is
+    not the pinned one with the pinned bytes."""
     info: Dict[str, Any] = {"dir": str(model_dir), "pinned": False}
-    if not (model_dir / "model_metadata.json").exists():
-        raise SystemExit(f"error: {model_dir}/model_metadata.json not found; run `run_perf.py fetch-model`")
-    pinned = model_dir / MODEL["file"]
-    ggufs = sorted(model_dir.glob("*.gguf"))
-    candidate = pinned if pinned.exists() else (ggufs[0] if ggufs else None)
-    if candidate is not None:
-        pc.stage(f"hashing {candidate.name}")
-        info.update(file=candidate.name, size=candidate.stat().st_size, sha256=sha256_file(candidate))
-    if candidate == pinned and info.get("sha256") == MODEL["sha256"]:
+    metadata_path = model_dir / "model_metadata.json"
+    if not metadata_path.exists():
+        raise SystemExit(f"error: {metadata_path} not found; run `run_perf.py fetch-model`")
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except ValueError as error:
+        raise SystemExit(f"error: {metadata_path} is not JSON ({error})") from None
+    template = metadata.get("execution_template") if isinstance(metadata, dict) else None
+    model_file = template.get("model_file") if isinstance(template, dict) else None
+    if not isinstance(model_file, str) or not model_file:
+        raise SystemExit(f"error: {metadata_path} names no execution_template.model_file, so the measured "
+                         "model is unknown")
+    measured = model_dir / model_file
+    if not measured.is_file():
+        raise SystemExit(f"error: {metadata_path} names {model_file}, which is not in {model_dir}")
+    pc.stage(f"hashing {model_file}")
+    info.update(file=model_file, size=measured.stat().st_size, sha256=sha256_file(measured))
+    if model_file == MODEL["file"] and info["sha256"] == MODEL["sha256"]:
         info.update(pinned=True, repo=MODEL["repo"], revision=MODEL["revision"])
     elif not allow_unpinned:
         raise SystemExit(
-            f"error: {model_dir} does not hold the pinned {MODEL['file']} (sha256 {MODEL['sha256']}); "
-            "run `run_perf.py fetch-model` or pass --allow-unpinned-model to measure another model"
+            f"error: {metadata_path} names {model_file} (sha256 {info['sha256']}), not the pinned "
+            f"{MODEL['file']} (sha256 {MODEL['sha256']}); run `run_perf.py fetch-model` or pass "
+            "--allow-unpinned-model to measure another model"
         )
     return info
 
@@ -229,7 +242,7 @@ class BlockedEndpoint:
 class Sink:
     """One ``capture_server.py`` (answers 200 and records every request)."""
 
-    def __init__(self, out_dir: Path, name: str) -> None:
+    def __init__(self, out_dir: Path, name: str, timeout: float = 15.0) -> None:
         self.capture = out_dir / f"sink-{name}.jsonl"
         ready = out_dir / f"sink-{name}.ready.json"
         ready.unlink(missing_ok=True)
@@ -239,9 +252,12 @@ class Sink:
              "--out", str(self.capture), "--ready-file", str(ready)],
             stdout=self.log, stderr=subprocess.STDOUT,
         )
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + timeout
         while not ready.exists():
             if self.process.poll() is not None or time.monotonic() > deadline:
+                # Nobody holds this half-built sink, so nothing else would stop
+                # a server that is still starting.
+                self.close()
                 raise SystemExit(f"error: capture_server.py ({name}) did not start; see {self.log.name}")
             time.sleep(0.05)
         self.endpoint = json.loads(ready.read_text(encoding="utf-8"))["endpoint"]
@@ -253,6 +269,7 @@ class Sink:
                 self.process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 self.process.kill()
+                self.process.wait()
         self.log.close()
 
     def summary(self) -> Dict[str, Any]:
@@ -670,9 +687,16 @@ def evaluate_thresholds(thresholds: Dict[str, Any], comparisons: Dict[str, Any],
 def render_markdown(report: Dict[str, Any]) -> str:
     env = report["environment"]
     work = report["workload"]
+    status = report["thresholds"]["status"]
+    agreed = status == "agreed"
     lines = ["# Observability end-to-end overhead", ""]
-    lines.append(f"Generated {env.get('captured_at')} — thresholds are **{report['thresholds']['status']}**; "
-                 "results below are measurements, not pass/fail verdicts.")
+    if agreed:
+        lines.append(f"Generated {env.get('captured_at')} — thresholds are **agreed**: each row's `within` "
+                     "is a gate (the median delta against `off`, or for an absolute row its statistic against "
+                     "the limit), and a failed one makes `e2e` exit 1.")
+    else:
+        lines.append(f"Generated {env.get('captured_at')} — thresholds are **{status}**; "
+                     "results below are measurements, not pass/fail verdicts.")
     lines += ["", "## Environment", ""]
     lines.append(pc.table(["field", "value"], [
         ("chip", env.get("chip")), ("model", env.get("model")),
@@ -726,15 +750,27 @@ def render_markdown(report: Dict[str, Any]) -> str:
     rows = []
     for r in report["thresholds"]["results"]:
         observed = r.get("observed_regression", r.get("observed"))
-        rows.append((r["id"], r["mode"], r["metric"], json.dumps(r.get("bound", {"max_abs": r.get("limit")})),
+        bound = r["bound"] if "bound" in r else {"statistic": r.get("statistic"), "max_abs": r.get("limit")}
+        rows.append((r["id"], r["mode"], r["metric"], json.dumps(bound),
                      observed, r.get("observed_regression_pct"), r.get("worst_case_regression"), r["within"],
                      r.get("within_at_ci_worst_case")))
     lines.append(pc.table(["id", "mode", "metric", "bound", "observed regression", "observed %",
                            "CI worst case", "within", "within at CI worst case"], rows))
     lines.append("")
-    lines.append("Regressions are positive (slower, later, larger). `within` uses the median delta, "
-                 "`within at CI worst case` the end of its bootstrap 95% interval in the regressing direction. "
-                 "Agree the bounds (thresholds.json `status`) before treating any row as a gate.")
+    lines.append("Regressions are positive (slower, later, larger). `within` uses the median delta (an "
+                 "absolute row, which has a `statistic` in its bound, compares that statistic over processes "
+                 "with `max_abs`), `within at CI worst case` the end of the delta's bootstrap 95% interval in "
+                 "the regressing direction"
+                 + (" (for information; it does not gate)." if agreed else ". Agree the bounds (thresholds.json "
+                    "`status`) before treating any row as a gate."))
+    if agreed:
+        failed = pc.failed_gates(report["thresholds"])
+        unevaluated = sum(1 for r in report["thresholds"]["results"] if r.get("within") is None)
+        verdict = (f"**Failed gates:** {', '.join(f'`{row}`' for row in failed)}." if failed
+                   else "Every gate held.")
+        if unevaluated:
+            verdict += f" {unevaluated} row(s) had nothing to evaluate (`within` –) and do not gate."
+        lines += ["", verdict]
     return "\n".join(lines) + "\n"
 
 

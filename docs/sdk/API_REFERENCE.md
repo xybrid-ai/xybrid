@@ -1827,7 +1827,8 @@ final stream = model.runStreaming(
   cancellationToken: cancel,
 );
 final sub = stream.listen((token) { /* ... */ });
-// Later, to stop Rust generation (not just unsubscribe):
+// Later, stop Rust generation at its next token. Either call does it on its
+// own; the token suits code that does not hold the subscription.
 cancel.cancel();
 await sub.cancel();
 ```

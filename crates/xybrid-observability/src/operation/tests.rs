@@ -120,7 +120,7 @@ fn points(metrics: &InMemoryMetricExporter, name: &str) -> Vec<(Option<String>, 
 
 #[test]
 fn dropped_typed_operations_are_cancelled_in_spans_and_metrics() {
-    // A3: Drop of an un-ended handle ends it as cancelled, metric included.
+    // Drop of an un-ended handle ends it as cancelled, metric included.
     let s = signals(Sampler::AlwaysOn);
     let metrics = InMemoryMetricExporter::default();
     let meter = SdkMeterProvider::builder()
@@ -543,6 +543,49 @@ fn measured_first_token_after_chunks_is_recorded() {
         attr(&spans[0].attributes, attr::RESPONSE_TIME_TO_FIRST_TOKEN),
         [&OtelValue::F64(0.08)]
     );
+}
+
+/// `InferenceOperation::now` is the operation's anchored reading: a wall-clock
+/// step mid-operation moves the observer's reading but not the operation's,
+/// so a chunk timed with it keeps its real time to first chunk.
+#[cfg(feature = "test-util")]
+#[test]
+fn the_operation_reading_does_not_follow_a_wall_clock_step() {
+    use crate::clock::{Clock, ManualClock};
+
+    const STEP: Duration = Duration::from_secs(3_600);
+    let s = signals(Sampler::AlwaysOn);
+    let wall = Arc::new(ManualClock::new(
+        SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+    ));
+    let obs = Observer::builder()
+        .tracer_provider(&s.tracer)
+        .clock(Clock::manual_wall(wall.clone()))
+        .build();
+    let started = obs.now();
+    let op = obs.start_inference(chat().streaming(true), StartOptions::default());
+    for step in [STEP, Duration::ZERO] {
+        // Forward an hour, then back to where it was (each an NTP step).
+        if step.is_zero() {
+            wall.set(started);
+        } else {
+            wall.advance(step);
+        }
+        assert_eq!(obs.now(), started + step, "the observer follows the wall");
+        let reading = op.now();
+        assert!(
+            reading >= started && reading < started + STEP / 2,
+            "the operation keeps its anchor: {reading:?} after a {step:?} step"
+        );
+    }
+    op.record_chunk_at(op.now());
+    op.end();
+    let spans = s.spans.get_finished_spans().unwrap();
+    let ttfc = attr(&spans[0].attributes, attr::RESPONSE_TIME_TO_FIRST_CHUNK);
+    let [&OtelValue::F64(ttfc)] = ttfc[..] else {
+        panic!("one time to first chunk: {ttfc:?}");
+    };
+    assert!(ttfc < (STEP / 2).as_secs_f64(), "{ttfc} s");
 }
 
 #[test]

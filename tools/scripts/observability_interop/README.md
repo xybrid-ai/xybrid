@@ -4,9 +4,9 @@ Runs real producers through the pinned OpenTelemetry Collector into Langfuse,
 Phoenix or Xybrid, reads each destination back through its own API, and checks
 it against what the Collector received. This is the acceptance for the
 Collector profiles in
-[`crates/xybrid-observability/collector/`](../../../crates/xybrid-observability/collector/)
-(plan step 4: IDs and parents, model and provider, usage, errors,
-content and redaction, first chunk versus first token, linked quality results).
+[`crates/xybrid-observability/collector/`](../../../crates/xybrid-observability/collector/).
+It covers IDs and parents, model and provider, usage, errors, content and
+redaction, first chunk versus first token, and linked quality results.
 
 ```text
  rust example ──┐                         ┌─ destination profile ──► Langfuse / Phoenix / Xybrid staging
@@ -210,9 +210,10 @@ rather than "dropped, as expected"), `ids.spans`, `ids.parents`,
 `ids.remote_parent` (the Python workflow's caller span P, never exported),
 `ids.producer_refs`, `mapping.kind`, `mapping.model_provider`,
 `mapping.usage` (equal, absent where the table says so, Xybrid's counted
-flag, which must be present), `mapping.errors`, `content` (present and equal to the producer's, or
-absent for `js-metadata`), `content.redaction` (no redacted or metadata-only
-string in any API answer), `timing.first_chunk_vs_first_token` (each value
+flag, which must be present), `mapping.errors`, `content` (present and equal
+to the producer's, or absent for `js-metadata`), `content.redaction` (no
+redacted or metadata-only string in what the destination answered for this
+run's own spans; earlier runs under the same trace id are ignored), `timing.first_chunk_vs_first_token` (each value
 under its own field, equal to the producer's; a completion start equal to the
 first chunk fails), `evaluations` (linked with name, score, label, source (required
 where the table sets `evaluation_source`) and comment, or dropped as the

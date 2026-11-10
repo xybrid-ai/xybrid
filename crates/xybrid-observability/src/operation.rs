@@ -438,8 +438,12 @@ impl Core {
     /// Unwind safety: the SDK takes the span's data before it calls the
     /// processors and holds no provider lock while they run, so the panic
     /// leaves only that span's own lock poisoned (the span has ended, so it is
-    /// never used again) and later spans are processed as usual. Processors
-    /// registered after the panicking one never see this span: behind
+    /// never used again) and later spans still reach every processor. A lock
+    /// the panicking processor held itself stays poisoned: the SDK's
+    /// `SimpleSpanProcessor` exports under its exporter mutex, so after its
+    /// exporter panics once it drops every later span, while the other
+    /// processors keep working. Processors registered after the panicking one
+    /// never see this span: behind
     /// `ObservabilityPipeline::build_with_span_processor` that includes the
     /// export, so the span is neither exported nor counted. The panic stops
     /// here, before it can unwind through the operation's state lock, which
@@ -591,6 +595,18 @@ impl InferenceOperation {
     #[must_use]
     pub fn request(&self) -> &InferenceRequest {
         &self.request
+    }
+
+    /// Current time on this operation's clock: the reading every default
+    /// timing call uses (CONTRACT.md "Timing"), anchored when the operation
+    /// started and monotonic since then, so a wall-clock step mid-operation
+    /// does not move it. Take it before work whose result is recorded later
+    /// with an explicit-time call, such as a chunk timed when it is handed to
+    /// a callback and passed to [`Self::record_chunk_at`] once the callback
+    /// accepts it.
+    #[must_use]
+    pub fn now(&self) -> SystemTime {
+        self.core.now()
     }
 
     /// Whether the operation has reached its first terminal transition.

@@ -19,7 +19,12 @@ import {
   TraceIdRatioBasedSampler,
   TracerProvider,
 } from "@opentelemetry/sdk-trace";
-import { type LoggerProviderLike, type ObservationRef, Observer } from "../src/index.ts";
+import {
+  type JsonValue,
+  type LoggerProviderLike,
+  type ObservationRef,
+  Observer,
+} from "../src/index.ts";
 import {
   createOtlpPipeline,
   type OtlpPipeline,
@@ -133,6 +138,59 @@ describe("createOtlpPipeline", () => {
       logs: stats({}),
       metrics: stats({}),
     });
+  });
+
+  test("a traces-only pipeline has no event destination: content is processed for the span only", async () => {
+    const server = await startServer();
+    const pipeline = track(
+      createOtlpPipeline({
+        traces: { endpoint: `${server.url}/v1/traces`, protocol: "http/json" },
+        batch: { scheduledDelayMs: 60_000 },
+      }),
+      server,
+    );
+    expect(pipeline.loggerProvider).toBeUndefined();
+    const calls: string[] = [];
+    const redact = (kind: string, value: JsonValue): JsonValue => {
+      calls.push(kind);
+      return value;
+    };
+    const messages = [{ role: "user", parts: [{ type: "text", content: "hi" }] }];
+    // The span copy costs 95 bytes; an event copy (243 more) would not fit 300.
+    const both = pipeline
+      .observer({ capture: "span_and_event", maxRetainedOperationBytes: 300, redact })
+      .startInference(request);
+    both.recordInputMessages(messages);
+    both.end();
+    expect(calls).toEqual(["gen_ai.input.messages"]);
+    // event_only: governed content skips the span, and nothing receives the event. The message is
+    // over the 16 KiB attribute bound, so processing it for an event would mark the span truncated.
+    const large = [{ role: "user", parts: [{ type: "text", content: "x".repeat(20_000) }] }];
+    const eventOnly = pipeline.observer({ capture: "event_only", redact }).startInference(request);
+    eventOnly.recordInputMessages(large);
+    eventOnly.end();
+    expect(calls).toEqual(["gen_ai.input.messages"]);
+
+    expect(await pipeline.forceFlush(3000)).toBe(true);
+    const spans = server
+      .received("/v1/traces")
+      .flatMap((received) =>
+        JSON.parse(received.body.toString()).resourceSpans.flatMap(
+          (resource: { scopeSpans: { spans: unknown[] }[] }) =>
+            resource.scopeSpans.flatMap((scope) => scope.spans),
+        ),
+      ) as { spanId: string; attributes: { key: string; value: { stringValue?: string } }[] }[];
+    const attributes = (ref: ObservationRef | undefined) => {
+      const span = spans.find((candidate) => candidate.spanId === ref?.span_id);
+      if (span === undefined) throw new Error("expected the operation's span");
+      return Object.fromEntries(span.attributes.map(({ key, value }) => [key, value]));
+    };
+    const recorded = attributes(both.observationRef());
+    expect(JSON.parse(String(recorded["gen_ai.input.messages"]?.stringValue))).toEqual(messages);
+    expect(recorded["xybrid.genai.content.truncated_attributes"]).toBeUndefined();
+    const quiet = attributes(eventOnly.observationRef());
+    expect(quiet["gen_ai.input.messages"]).toBeUndefined();
+    expect(quiet["xybrid.genai.content.truncated_attributes"]).toBeUndefined();
   });
 
   test("the Xybrid preset defaults to the ingest endpoint and rejects empty keys", () => {

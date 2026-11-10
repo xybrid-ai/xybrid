@@ -1,5 +1,4 @@
-//! How SDK runs are observed when the network or telemetry around them fails
-//! (reliability B1–B4).
+//! How SDK runs are observed when the network or telemetry around them fails.
 //!
 //! - A reactive local→cloud fallback is one logical request: a failed local
 //!   attempt, then a remote `fallback` attempt whose context the gateway
@@ -457,13 +456,13 @@ enum Step {
 }
 
 // ---------------------------------------------------------------------------
-// B1: the reactive local→cloud fallback, observed.
+// The reactive local→cloud fallback, observed.
 // ---------------------------------------------------------------------------
 
-/// `(host, traceparent, tracestate)` of one request the B1 gateway received.
+/// `(host, traceparent, tracestate)` of one request the fallback gateway received.
 type SeenRequest = (String, Option<String>, Option<String>);
 
-/// Every request the B1 gateway received.
+/// Every request the fallback gateway received.
 static GATEWAY_SEEN: Mutex<Vec<SeenRequest>> = Mutex::new(Vec::new());
 
 fn header(request: &httpmock::prelude::HttpMockRequest, name: &str) -> Option<String> {
@@ -683,8 +682,8 @@ fn a_reactive_fallback_is_one_request_with_a_failed_local_and_a_remote_attempt()
 }
 
 // ---------------------------------------------------------------------------
-// B2/B3: runs, streams and token callbacks never wait on export or on the
-// end-of-run content hook.
+// Runs, streams and token callbacks never wait on export or on the end-of-run
+// content hook.
 // ---------------------------------------------------------------------------
 
 /// A cloud stage's OpenAI-compatible JSON answer.
@@ -998,7 +997,7 @@ fn a_failing_redactor_fails_closed_and_leaves_the_stream_whole() {
 }
 
 // ---------------------------------------------------------------------------
-// B4: disposal never waits on the parked export.
+// Disposal never waits on the parked export.
 // ---------------------------------------------------------------------------
 
 /// Wakes the thread that polls in [`poll_here`].

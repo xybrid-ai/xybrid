@@ -2331,7 +2331,7 @@ mod tests {
 
         #[test]
         fn async_pipeline_entry_points_take_the_callers_parent_only_from_where_they_run() {
-            // A2: `Pipeline::run_async`, `Pipeline::warmup_async` and the
+            // `Pipeline::run_async`, `Pipeline::warmup_async` and the
             // legacy `run_pipeline_async(path)` select no observation options
             // and report to the default session. Plain `tokio::spawn` after
             // `Context::attach` exports a root (the legacy function starts its

@@ -514,6 +514,12 @@ jobs:
       # `cargo test` builds no bench; this also compiles them with test-util.
       - name: Compile the overhead and memory benchmarks
         run: cargo check --locked -p xybrid-observability --benches --features test-util
+      # The SDK lib test that steps the wall clock under a stream needs the
+      # observability test clocks, which only xybrid-sdk's `test-util` enables.
+      # No other lane builds the SDK with it, and Bazel builds
+      # xybrid-observability without `test-util`.
+      - name: Test SDK chunk timing across a wall-clock step
+        run: cargo test --locked -p xybrid-sdk --features test-util --lib observability::tests::a_delivered_chunk_is_timed_on_the_operation_clock_across_a_wall_clock_step
       - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: '22'

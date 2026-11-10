@@ -406,8 +406,8 @@ def _status(span: Mapping[str, Any]) -> Tuple[int, str]:
     return int(code or 0), status.get("message") or ""
 
 
-# The platform's span classification (ingest/core/src/otlp/normalize.rs,
-# PLAN-OTLP-TRACES.md section 4.4): first match wins.
+# How Xybrid's trace ingest classifies a span (a mirror of the platform's
+# normalizer, which is not in this repository): first match wins.
 XYBRID_REQUEST_OPERATIONS = ("chat", "text_completion", "generate_content", "embeddings", "predict")
 
 
@@ -585,8 +585,25 @@ class HttpError(RuntimeError):
 Recorder = Callable[[str, str, Any], None]
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Hands every 3xx back as an ``HTTPError``. urllib's default handler
+    re-sends the request's headers, ``Authorization`` included, to wherever
+    a redirect points, and the staging-only guard (``run_interop.
+    check_xybrid_target``) only ever checked the configured URLs."""
+
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any,
+                         newurl: str) -> None:
+        return None
+
+
+# Every readback request goes through this opener: a redirect is a failed read
+# (its status and Location are in the error), never a request to another host.
+OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 class Client:
-    """A tiny JSON client; every response is handed to ``record`` (raw/)."""
+    """A tiny JSON client; every response is handed to ``record`` (raw/).
+    Redirects are not followed (``OPENER``)."""
 
     def __init__(self, base_url: str, headers: Mapping[str, str], record: Optional[Recorder] = None,
                  timeout: float = 30.0) -> None:
@@ -601,10 +618,14 @@ class Client:
         url = f"{self.base_url}{path}" + (f"?{query}" if query else "")
         request = urllib.request.Request(url, headers={"Accept": "application/json", **self.headers})
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310
+            with OPENER.open(request, timeout=self.timeout) as response:  # noqa: S310
                 body = response.read().decode("utf-8", "replace")
         except urllib.error.HTTPError as error:
-            raise HttpError(error.code, url, error.read().decode("utf-8", "replace")) from None
+            body = error.read().decode("utf-8", "replace")
+            if 300 <= error.code < 400:
+                location = error.headers.get("Location") if error.headers is not None else None
+                body = f"redirect to {location} not followed; {body}"
+            raise HttpError(error.code, url, body) from None
         except (urllib.error.URLError, OSError, http.client.HTTPException) as error:
             # Refused, reset, timed out (socket.timeout is an OSError) or a
             # broken response: a failed read, not a crash of the whole run.
@@ -663,6 +684,10 @@ class Langfuse:
         return langfuse_spans(pages)
 
     def evaluations(self, trace_id: str, span_ids: Sequence[str]) -> List[DestEvaluation]:
+        """Scores from v3 (Langfuse v4), else v2 (Langfuse v3). A 400 or 404
+        only moves on to the next endpoint: when the last one fails too the
+        error is raised, so the read counts as failed, not as "no scores"."""
+        last: Optional[HttpError] = None
         for path in ("/api/public/v3/scores", "/api/public/v2/scores"):
             try:
                 params: List[Tuple[str, Any]] = [("traceId", trace_id), ("limit", 100)]
@@ -673,7 +698,9 @@ class Langfuse:
             except HttpError as error:
                 if error.status not in (400, 404):
                     raise
-        return []
+                last = error
+        assert last is not None  # every endpoint answered 400 or 404
+        raise last
 
 
 class Phoenix:

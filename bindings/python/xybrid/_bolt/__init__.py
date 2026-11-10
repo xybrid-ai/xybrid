@@ -3903,7 +3903,8 @@ class XybridObservabilityConfig:
 
     def set_max_content_bytes(self, bytes: int) -> None:
         """Maximum bytes per captured content attribute, clamped to at most
-        208 KiB so that one span fits the 480 KiB export request.
+        208 KiB so that a span's content leaves 64 KiB of the 480 KiB export
+        request for its other data.
         """
         _native._boltffi_xybrid_observability_config_set_max_content_bytes(self._handle, bytes)
 

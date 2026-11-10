@@ -54,8 +54,9 @@ default = []
 # Development/test convenience: lets SdkCacheProvider fall back to the
 # workspace's integration-test model fixtures. Off by default so shipped SDKs
 # never reference `xybrid_core::testing`. Forwards to `xybrid-core/test-util`
-# so the gate stays consistent if core later moves `testing` behind it.
-test-util = ["xybrid-core/test-util"]
+# so the gate stays consistent if core later moves `testing` behind it, and to
+# `xybrid-observability/test-util` for the test clocks some lib tests step.
+test-util = ["xybrid-core/test-util", "xybrid-observability/test-util"]
 
 # HuggingFace Hub integration (download models directly from HF repos)
 huggingface = ["dep:hf-hub", "dep:ureq3"]

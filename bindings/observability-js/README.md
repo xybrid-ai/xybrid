@@ -174,7 +174,9 @@ Every content value goes through one pipeline, in order:
 
 Content headed for a span that is not recording (a sampler drop, an unsampled
 parent, `trace: "suppress"`, no tracer) is not processed at all; event capture
-(`event_only`, `span_and_event`) still processes and emits it. The budgets are
+(`event_only`, `span_and_event`) still processes and emits it when the observer
+has a logger. Without one (`loggerProvider: null`, a traces-only pipeline, the
+Xybrid preset) nothing receives the content, so it is not processed either. The budgets are
 clamped so one span's content cannot push its export request past
 `maxRequestBodyBytes` (default 480 KiB; `pipeline.observer()` uses the
 pipeline's traces bound when it is smaller): `maxRetainedOperationBytes` is at most
@@ -259,11 +261,13 @@ environment reads; a supplied environment map supports browsers and tests.
 settings. Tune `batch.maxBufferedBytes` and `batch.exportTimeoutMs` before
 construction; invalid limits throw before workers or timers start.
 
-The pipeline's timers never keep a Node process alive, but an export in flight
-does, until it completes or its deadline aborts it. Against an unresponsive
-endpoint a process that exits without `shutdown()` therefore lingers for up to
-`batch.exportTimeoutMs` (10 s by default). Call `shutdown(timeoutMs)` before
-exiting to bound that wait, and to deliver or count what is still queued.
+The pipeline's scheduling timers (batch delay, metric interval, flush, export
+and shutdown deadlines) never keep a Node process alive, but an export in
+flight does, retry backoff included, until it completes or its deadline aborts
+it. Against an unresponsive endpoint a process that exits without `shutdown()`
+therefore lingers for up to `batch.exportTimeoutMs` (10 s by default). Call
+`shutdown(timeoutMs)` before exiting to bound that wait, and to deliver or
+count what is still queued.
 
 ### Application-owned providers
 

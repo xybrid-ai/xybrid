@@ -58,11 +58,15 @@ observer ([contract](../../crates/xybrid-observability/CONTRACT.md#content-pipel
   error: the run and its token stream are unaffected, and the value is omitted
   and listed in `xybrid.genai.content.truncated_attributes`. An application
   span processor that panics while a span ends is contained the same way.
-- The content budgets are clamped so that one span fits the 480 KiB request
-  bound: the retained-operation budget is at most 208 KiB and the attribute
-  budget at most that, so a raised budget (including the facade's
+- The content budgets are clamped so that a span's content fits the 480 KiB
+  request bound with 64 KiB left for the span's other data: the
+  retained-operation budget is at most 208 KiB and the attribute budget at
+  most that, so a raised budget (including the facade's
   `set_max_content_bytes`) truncates or omits (and lists) content instead of
-  dropping the span.
+  dropping the span. That 64 KiB is reserved, not enforced: a span whose other
+  data outgrows it (attributes the application adds, a large resource, many
+  or very long omitted prompt-variable names) can still be dropped as an
+  oversized item.
 - The Rust `PipelineStats` reports, per signal, `buffered_bytes`: the bytes
   held against the 32 MiB delivery budget, zero after shutdown. The facade and
   the foreign bindings do not carry it yet.

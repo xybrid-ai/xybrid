@@ -4833,14 +4833,38 @@ impl XybridModel {
         }
         #[cfg(feature = "tts-zzz")]
         {
-            let is_zzz = matches!(
-                self.handle
+            let zzz = |template: &ExecutionTemplate| {
+                matches!(
+                    template,
+                    ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. }
+                )
+            };
+            let cancelled = options
+                .cancellation_token
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled);
+            let is_zzz = if cancelled {
+                // A synthesis whose token is already cancelled is recorded
+                // without waiting for a run in flight that holds the handle
+                // lock: while it is held, the subject the last observed run
+                // (or the load) read says whether the model is zzz.
+                match self.try_handle() {
+                    Some(handle) => zzz(&handle.metadata.execution_template),
+                    None => self
+                        .subject
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .as_ref()
+                        .is_some_and(|subject| subject.runtime == Some("zzz")),
+                }
+            } else {
+                zzz(&self
+                    .handle
                     .read()
                     .unwrap_or_else(|e| e.into_inner())
                     .metadata
-                    .execution_template,
-                ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. }
-            );
+                    .execution_template)
+            };
             if is_zzz {
                 let start = Instant::now();
                 let mut pcm = Vec::new();
@@ -5785,6 +5809,28 @@ impl XybridModel {
     {
         use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
+
+        // A request its caller cancelled before it runs is one cancelled
+        // request, recorded without waiting for a run in flight that holds
+        // the handle lock (`guard_input` and `observe` wait for it), as in
+        // `run_streaming_with_options`. A pre-run resource abort still goes
+        // through the local leg below: it is that leg's failed attempt, ahead
+        // of the cloud fallback.
+        let cancelled = options
+            .cancellation_token
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled);
+        if cancelled
+            && options
+                .abort_policy
+                .observes(crate::run_options::AbortSignal::UserCancelled)
+        {
+            let error = streaming_pre_run_abort_error(
+                crate::run_options::AbortReason::UserCancelled,
+                options.abort_policy.fallback_to_cloud,
+            );
+            return self.refuse(envelope, &[], Some(options), None, true, error);
+        }
 
         // Before the resource scope: a refused input starts nothing but its
         // record. The local leg below checks again, as every streaming entry
@@ -9554,6 +9600,20 @@ mod tests {
         );
     }
 
+    /// What a test running beside one that installed a default session may
+    /// record into it: a run pinned to no session, of another model, that
+    /// fails, so it records a span, a duration point and an exception log
+    /// record. A test that installs a default makes such a run itself, so its
+    /// assertions are shown to read only what its own run recorded.
+    fn run_an_unpinned_neighbour_that_fails() {
+        let mut neighbour = as_chat(test_loaded_model(false));
+        neighbour.model_id = "unpinned-neighbour".to_string();
+        assert!(
+            neighbour.run(&text_envelope("hi"), None).is_err(),
+            "the neighbour's model has no weights"
+        );
+    }
+
     /// No log record is an operation exception: a cancellation is not one.
     fn assert_no_exception(signals: &crate::observability::test_support::Signals) {
         let events = signals.log_events();
@@ -9963,7 +10023,7 @@ mod tests {
 
     #[test]
     fn async_entry_points_take_the_callers_parent_only_from_where_they_run() {
-        // A2: plain `tokio::spawn` after `Context::attach` exports a root
+        // Plain `tokio::spawn` after `Context::attach` exports a root
         // (the worker never sees the caller's context); `with_context` or a
         // `block_on` on the caller's thread exports the caller's child. An
         // explicit parent in the loader's observation options wins over both.
@@ -10162,7 +10222,7 @@ mod tests {
 
     #[test]
     fn overlapping_async_runs_keep_their_own_ambient_parents() {
-        // A1: eight `run_async` calls on eight models are inside their
+        // Eight `run_async` calls on eight models are inside their
         // runtimes at once, each under its own application context. Each run
         // is its caller's child and is counted once.
         use crate::observability::semconv::{attr::REQUEST_MODEL, metric::INFERENCE_DURATION};

@@ -48,10 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Portable observability contract v2 preserves numeric/null wire types and
   unsampled references, bounds retained content and delivery queues, and cancels
   HTTP work on lifecycle deadlines. Per-signal counters report delivery outcomes.
-- Observability content budgets are clamped so one span always fits the
-  480 KiB export request (the default retained-operation budget is now
-  208 KiB): a raised budget truncates or omits (and lists) content instead of
-  dropping the span.
+- Observability content budgets are clamped so that a span's content fits the
+  export request bound (480 KiB by default) with 64 KiB left for the span's
+  other data (the default retained-operation budget is now 208 KiB): a raised
+  budget truncates or omits (and lists) content instead of dropping the span.
+  That 64 KiB is reserved, not enforced, so a span whose other data outgrows
+  it (large application attributes or resource, many or very long omitted
+  prompt-variable names) can still be dropped as an oversized item.
   Content for spans that are not recording is no longer processed, a Rust
   redaction hook that panics fails closed, a span processor that panics (Rust)
   or throws (JS) while a span ends is contained (that span is lost; a failure
@@ -74,6 +77,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `XybridModel::run_async` and `run_stream` (and the facade's async run) take
   their caller's parent only from the ambient OpenTelemetry context; this is
   now documented, with `FutureExt::with_context` for spawned futures.
+- Dropping a Rust `XybridModel::run_stream` stream before its terminal event
+  now stops the run at its next token and releases the model write lock; the
+  run used to generate to the end. Unsubscribing a Flutter token stream
+  started without a `CancellationToken` now does the same, as it already did
+  with one, and closing a facade streaming session or a Bolt stream
+  (`stream_close`) early already stopped its run. Observability records these
+  runs as `cancelled`.
 - JavaScript exporter support covers aligned OpenTelemetry 3.0/0.300 and
   3.1/0.301 families. The core entry point stays independent of SDK packages.
 - CLI traces are scoped to each operation; `--trace-export PATH` explicitly

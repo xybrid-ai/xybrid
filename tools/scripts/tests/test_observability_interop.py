@@ -694,6 +694,71 @@ class DestinationChecksTest(unittest.TestCase):
         self.assertEqual(failed(checks), [])
         self.assertTrue(any("other spans" in note for note in checks[0].notes))
 
+    def read_xybrid_with_an_earlier_run(self, run, carried):
+        """Reads ``run`` back through the real Xybrid client, its trace also
+        holding an earlier run's tool span (object-stored content) and quality
+        result, each carrying ``carried``; returns the checks run_destination
+        makes from that readback (destination_readback, its API branch)."""
+        earlier_id = "0123456789abcdef"
+        spans = copy.deepcopy(run.spans_payload)
+        tool = next(span for span in spans["spans"] if (span.get("content") or {}).get("storage") == "object")
+        earlier = copy.deepcopy(tool)
+        earlier.update(span_id=earlier_id, name="from an earlier run",
+                       status={"code": "ERROR", "message": f"rejected {carried}"})
+        spans["spans"].append(earlier)
+        contents = dict(run.contents)
+        contents[earlier_id] = {**copy.deepcopy(contents[tool["span_id"]]), "span_id": earlier_id,
+                                "values": {"gen_ai.tool.call.arguments": {"stringValue": carried}}}
+        evaluations = copy.deepcopy(run.evaluations_payload)
+        evaluations["items"].append({**evaluations["items"][-1], "span_id": earlier_id,
+                                     "comment": f"earlier feedback {carried}"})
+        raw = run_interop.RawLog()
+        client = destinations.Xybrid("https://staging.api.xybrid.dev", "key", raw)
+
+        def get(path, params=None, label="", raw_text=False):
+            if path.endswith("/content"):
+                value = contents[path.split("/")[-2]]
+            elif path.endswith("/evaluations"):
+                value = evaluations
+            else:
+                value = spans
+            raw(label or path, path, value)  # what Client.get records for raw/
+            return value
+
+        client.client.get = get
+        table = expectations.DESTINATIONS["xybrid"]
+        from datetime import datetime, timezone
+        with mock.patch.object(run_interop.time, "sleep"), mock.patch("sys.stdout", io.StringIO()):
+            checks, read = run_interop.destination_readback("xybrid", run.truth, table, client, raw,
+                                                            datetime.now(timezone.utc), 5)
+        self.assertEqual(read["read_errors"], [])
+        # The earlier run's span was read (and then ignored by the span checks).
+        ids_spans = next(check for check in checks if check.name == "ids.spans")
+        self.assertIn("1 other spans in the same trace(s) (earlier runs share a fixed trace id)", ids_spans.notes)
+        self.assertEqual(read["spans_read"], len(run.truth.spans) + 1)
+        return checks
+
+    def test_an_earlier_runs_secret_in_the_same_trace_does_not_fail_this_run(self):
+        # The Python scenario's trace id is fixed, so a persistent backend
+        # (Xybrid staging) returns every earlier run's spans with this one's.
+        run = DestinationRun("xybrid", "python")
+        checks = self.read_xybrid_with_an_earlier_run(run, run.truth.workload.secrets[0])
+        self.assertEqual(failed(checks), [], [check.failures for check in checks if check.failures])
+
+    def test_an_earlier_runs_replacement_does_not_stand_in_for_this_runs(self):
+        run = DestinationRun("xybrid", "python")
+        replacement = run.truth.workload.replacements[0]
+
+        def without_replacement(payload):
+            return json.loads(json.dumps(payload).replace(replacement, "[lost]"))
+
+        run.spans_payload = without_replacement(run.spans_payload)
+        run.evaluations_payload = without_replacement(run.evaluations_payload)
+        run.contents = {span_id: without_replacement(content) for span_id, content in run.contents.items()}
+        checks = self.read_xybrid_with_an_earlier_run(run, replacement)
+        content = next(check for check in checks if check.name == "content")
+        self.assertIn(f"redaction replacements not found at the destination: {[replacement]}", content.failures)
+
 
 class WireTest(unittest.TestCase):
     """The recorded profile output (what each backend receives) passes the same table."""
@@ -853,6 +918,74 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(client.spans("a" * 32, ("a", "b")), [])
         self.assertEqual(client.evaluations("a" * 32, []), [])
 
+    def test_langfuse_scores_fall_back_to_v2_and_fail_when_both_reads_do(self):
+        client = destinations.Langfuse("http://127.0.0.1:1", "pk", "sk")
+        calls = []
+
+        def answering(statuses):
+            def get(path, params=None, label="", raw_text=False):
+                calls.append(path)
+                status = statuses.get(path)
+                if status:
+                    raise destinations.HttpError(status, path, "")
+                return {"data": [{"name": "relevance", "value": 1, "observationId": "ab", "traceId": "cd"}]}
+            return get
+
+        client.client.get = answering({"/api/public/v3/scores": 404})
+        self.assertEqual([e.name for e in client.evaluations("cd", ["ab"])], ["relevance"])
+        self.assertEqual(calls, ["/api/public/v3/scores", "/api/public/v2/scores"])
+        # v3 refuses the `fields` query, v2 is gone: nothing was read.
+        client.client.get = answering({"/api/public/v3/scores": 400, "/api/public/v2/scores": 404})
+        with self.assertRaises(destinations.HttpError) as caught:
+            client.evaluations("cd", ["ab"])
+        self.assertEqual(caught.exception.status, 404)
+
+    def test_a_redirect_is_a_failed_read_that_never_carries_the_key_elsewhere(self):
+        import http.server
+        import threading
+
+        seen = []
+
+        class Elsewhere(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append(self.headers.get("Authorization"))
+                body = b"{}"
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        def serve(handler):
+            server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            self.addCleanup(thread.join, 10)
+            self.addCleanup(server.server_close)
+            self.addCleanup(server.shutdown)
+            return server
+
+        elsewhere = serve(Elsewhere)
+        target = f"http://127.0.0.1:{elsewhere.server_address[1]}/v1/telemetry/traces/x/spans"
+
+        class Redirecting(Elsewhere):
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header("Location", target)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        staging = serve(Redirecting)
+        client = destinations.Xybrid(f"http://127.0.0.1:{staging.server_address[1]}", "staging-key")
+        client.client.timeout = 10
+        with self.assertRaises(destinations.HttpError) as caught:
+            client.spans("x", ("a", "b"))
+        self.assertEqual(caught.exception.status, 302)
+        self.assertIn(f"redirect to {target} not followed", str(caught.exception))
+        self.assertEqual(seen, [])
+
 
 class ReadbackTest(unittest.TestCase):
     """A failed read never turns into a pass, and never crashes the run."""
@@ -900,16 +1033,35 @@ class ReadbackTest(unittest.TestCase):
         self.assertTrue(any("ConnectionResetError" in note for note in result.notes))
         self.assertEqual(len(result.spans), len(self.spans))
 
+    def test_a_langfuse_score_read_that_fails_on_both_endpoints_is_not_read_as_dropped(self):
+        client = destinations.Langfuse("http://127.0.0.1:1", "pk", "sk")
+        spans = self.spans
+
+        def get(path, params=None, label="", raw_text=False):
+            if path == "/api/public/v2/observations":
+                trace = dict(params)["traceId"]
+                return {"data": [span.raw for span in spans if span.trace_id == trace], "meta": {}}
+            raise destinations.HttpError(400 if path == "/api/public/v3/scores" else 404, path, "")
+
+        client.client.get = get
+        result = self.read(client)
+        self.assertIsNone(result.evaluations)
+        self.assertEqual(len(result.errors), len(self.run.truth.trace_ids()))
+        self.assertEqual(len(result.spans), len(self.spans))
+        checks = expectations.destination_checks("langfuse", self.run.truth, result.spans, result.evaluations,
+                                                 self.run.raw_text())
+        self.assertEqual(statuses(checks)["evaluations"], "skip")
+
     def test_transport_errors_become_read_failures(self):
         client = destinations.Client("http://127.0.0.1:9", {}, timeout=2)
-        with mock.patch.object(destinations.urllib.request, "urlopen",
+        with mock.patch.object(destinations.OPENER, "open",
                                side_effect=destinations.urllib.error.URLError(ConnectionRefusedError(61, "refused"))):
             with self.assertRaises(destinations.HttpError) as caught:
                 client.get("/x")
         self.assertEqual(caught.exception.status, 0)
         for error in (TimeoutError("timed out"), ConnectionResetError(54, "reset"),
                       destinations.http.client.RemoteDisconnected("closed")):
-            with mock.patch.object(destinations.urllib.request, "urlopen", side_effect=error):
+            with mock.patch.object(destinations.OPENER, "open", side_effect=error):
                 with self.assertRaises(destinations.HttpError):
                     client.get("/x")
 
@@ -920,7 +1072,7 @@ class ReadbackTest(unittest.TestCase):
             def __exit__(self, *exc):
                 return False
 
-        with mock.patch.object(destinations.urllib.request, "urlopen", return_value=Page(b"<html>proxy</html>")):
+        with mock.patch.object(destinations.OPENER, "open", return_value=Page(b"<html>proxy</html>")):
             with self.assertRaisesRegex(destinations.HttpError, "not JSON"):
                 client.get("/x")
 
@@ -955,6 +1107,56 @@ class ProducerProcessTest(unittest.TestCase):
             self.assertEqual(code, 124)
             child = int(pid_file.read_text())
             self.assertTrue(wait_until_gone(child), f"pid {child} outlived the timeout")
+
+
+class CaptureServerStartupTest(unittest.TestCase):
+    """A capture server that does not start never outlives the run, and
+    neither do the ones started before it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        self.started = []
+
+    def tracked_start(self, fail_name):
+        original = run_interop.CaptureServer.start
+        started = self.started
+
+        def start(server, timeout=20.0):
+            if server.out.stem == fail_name:
+                raise run_interop.SetupError(f"capture server {server.out.name} did not start")
+            started.append(server)
+            self.addCleanup(server.stop)  # only matters when the harness leaked it
+            return original(server, timeout)
+
+        return start
+
+    def test_a_server_past_its_deadline_is_stopped(self):
+        # Alive, but never writes its ready file.
+        stalled = self.dir / "stalled.py"
+        stalled.write_text("import time\ntime.sleep(60)\n")
+        server = run_interop.CaptureServer(self.dir, "stalled")
+        self.addCleanup(server.stop)
+        with mock.patch.object(run_interop, "CAPTURE_SERVER", stalled):
+            with self.assertRaisesRegex(run_interop.SetupError, "did not start"):
+                server.start(timeout=0.5)
+        self.assertIsNotNone(server.process.poll(), "the stalled server is still running")
+
+    def test_a_failed_start_stops_the_servers_already_running(self):
+        args = run_interop.parse_args(["--destination", "phoenix", "--wire", "--workloads", "rust",
+                                       "--out-dir", str(self.dir)])
+        tools = workloads.Toolchain(python=sys.executable, node=None, js_runtime="node", cargo_release=False)
+        with mock.patch.object(run_interop.CaptureServer, "start", self.tracked_start("sinks")), \
+                mock.patch.object(run_interop.otelcol, "ensure_collector", return_value=mock.Mock()), \
+                mock.patch.object(run_interop, "producer_provenance", return_value={}), \
+                mock.patch.object(run_interop.workloads, "preflight", return_value=[]), \
+                mock.patch.object(run_interop, "settle"), \
+                mock.patch("sys.stdout", io.StringIO()):
+            with self.assertRaisesRegex(run_interop.SetupError, "sinks.jsonl did not start"):
+                run_interop.run_destination("phoenix", args, run_interop.load_settings(), tools)
+        self.assertEqual([server.out.stem for server in self.started], ["ground-truth"])
+        self.assertIsNotNone(self.started[0].process.poll(), "the ground-truth tee is still running")
 
 
 def wait_until_gone(pid, limit=5.0):

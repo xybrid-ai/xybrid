@@ -2,7 +2,13 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { context, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace";
-import { ObservationContext, Observer, resolveContentCapture } from "../src/index.ts";
+import {
+  type JsonValue,
+  type LoggerProviderLike,
+  ObservationContext,
+  Observer,
+  resolveContentCapture,
+} from "../src/index.ts";
 import { createHarness, normalizeMetrics } from "./support/harness.ts";
 
 const request = {
@@ -241,6 +247,42 @@ describe("events", () => {
     if (target === undefined) return;
     expect(observer.recordEvaluation(target, { name: "relevance", scoreValue: 1 })).toBe(false);
     expect(observer.recordFeedback(target, { score: 1 })).toBe(false);
+  });
+
+  test("without an enabled logger the feedback comment is not processed", () => {
+    const calls: string[] = [];
+    const content = {
+      capture: "span_and_event",
+      redact: (kind: string, value: JsonValue): JsonValue => {
+        calls.push(kind);
+        return value;
+      },
+    } as const;
+    const { observer } = createHarness({ logs: false, content });
+    const op = observer.startInference(request);
+    op.end();
+    const target = op.observationRef();
+    if (target === undefined) throw new Error("expected a recorded span");
+    expect(observer.recordFeedback(target, { score: 1, comment: "secret" })).toBe(false);
+    const emitted: unknown[] = [];
+    const disabled: LoggerProviderLike = {
+      getLogger: () => ({ emit: (record) => emitted.push(record), enabled: () => false }),
+    };
+    const quiet = new Observer({
+      tracerProvider: null,
+      meterProvider: null,
+      loggerProvider: disabled,
+      content,
+    });
+    expect(quiet.recordFeedback(target, { score: 1, comment: "secret" })).toBe(false);
+    expect(calls).toEqual([]);
+    expect(emitted).toEqual([]);
+    // With an enabled logger the comment goes through the pipeline once.
+    const { observer: enabled, logs } = createHarness({ content });
+    expect(enabled.recordFeedback(target, { score: 1, comment: "secret" })).toBe(true);
+    expect(calls).toEqual(["xybrid.genai.feedback.comment"]);
+    const [record] = logs.getFinishedLogRecords();
+    expect(record?.attributes["xybrid.genai.feedback.comment"]).toBe("secret");
   });
 
   test("no_content drops the feedback comment", () => {

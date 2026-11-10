@@ -22,6 +22,13 @@
 //! sends its permit, so a drop or stop happens at a known token and the
 //! runtime's callback count shows where the run stopped. Every wait is a hang
 //! detector.
+//!
+//! An entry point that takes no options reports to the process default, so
+//! its test installs one, under the default-session lock. A run pinned to no
+//! session in a test beside it records there too, so such a test names its
+//! model for itself and reads back only its own run: the span named after
+//! that model, that model's duration points and that span's log records. It
+//! makes a neighbour's failed run itself, beside its own.
 
 use super::*;
 use crate::observability::semconv;
@@ -264,6 +271,50 @@ fn chunk_count(span: &SpanData) -> Option<String> {
     attr(span, semconv::attr::RESPONSE_CHUNK_COUNT)
 }
 
+/// `model` under `id`, a model id no other test uses: a test whose run
+/// reports to the process default reads back only this model's records.
+fn named(mut model: XybridModel, id: &str) -> XybridModel {
+    model.model_id = id.to_string();
+    model
+}
+
+/// The only `gen_ai.client.inference.duration` point of `model` has
+/// `error.type` `expected` and counts one run, whatever other models' runs
+/// recorded into the same session.
+fn assert_one_duration_point_of(signals: &Signals, model: &XybridModel, expected: &str) {
+    let points: Vec<_> = signals
+        .points(semconv::metric::INFERENCE_DURATION)
+        .into_iter()
+        .filter(|p| p.attr(semconv::attr::REQUEST_MODEL) == Some(model.model_id.as_str()))
+        .collect();
+    assert_eq!(points.len(), 1, "{points:?}");
+    assert_eq!(
+        (points[0].attr(semconv::attr::ERROR_TYPE), points[0].count),
+        (Some(expected), 1)
+    );
+}
+
+/// No log record of `span` is an operation exception: a cancellation is not
+/// one. Records of other runs in the same session are not read.
+fn assert_no_exception_on(signals: &Signals, span: &SpanData) {
+    let own = span.span_context.span_id();
+    let events: Vec<_> = signals
+        .logs
+        .get_emitted_logs()
+        .expect("logs")
+        .iter()
+        .filter(|l| l.record.trace_context().is_some_and(|t| t.span_id == own))
+        .filter_map(|l| l.record.event_name().map(str::to_owned))
+        .collect();
+    assert!(
+        !events
+            .iter()
+            .any(|e| e == semconv::event::OPERATION_EXCEPTION),
+        "{}: {events:?}",
+        span.name
+    );
+}
+
 /// `span` ended with `error.type` `expected` and status `ERROR`.
 fn assert_ended(span: &SpanData, expected: &str) {
     assert!(
@@ -313,8 +364,12 @@ fn dropping_a_run_stream_mid_stream_cancels_the_run_at_its_next_token() {
     let _default = default_session_lock();
     let signals = memory_session_with_signals();
     let _installed = DefaultSession::install(&signals.session);
-    let model = as_chat(test_loaded_model(true));
+    let model = named(
+        as_chat(test_loaded_model(true)),
+        "run-stream-dropped-mid-stream",
+    );
     let span_name = run_span_name(&model);
+    run_an_unpinned_neighbour_that_fails();
     let (paced, permit, callbacks) = Paced::new(5);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -355,8 +410,8 @@ fn dropping_a_run_stream_mid_stream_cancels_the_run_at_its_next_token() {
     let span = signals.spans.named(&span_name);
     assert_ended(&span, "cancelled");
     assert_eq!(chunk_count(&span).as_deref(), Some("2"));
-    assert_one_duration_point(&signals, "cancelled");
-    assert_no_exception(&signals);
+    assert_one_duration_point_of(&signals, &model, "cancelled");
+    assert_no_exception_on(&signals, &span);
 }
 
 #[test]
@@ -368,8 +423,12 @@ fn dropping_a_run_stream_before_its_token_cancels_the_run() {
     let signals = memory_session_with_signals();
     let _installed = DefaultSession::install(&signals.session);
     let (fake, entered, release) = Gated::new(Ok("the whole answer"));
-    let model = as_chat(test_model_with_runtime(Box::new(fake)));
+    let model = named(
+        as_chat(test_model_with_runtime(Box::new(fake))),
+        "run-stream-dropped-before-its-token",
+    );
     let span_name = run_span_name(&model);
+    run_an_unpinned_neighbour_that_fails();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -391,8 +450,8 @@ fn dropping_a_run_stream_before_its_token_cancels_the_run() {
     let span = signals.spans.named(&span_name);
     assert_ended(&span, "cancelled");
     assert_eq!(chunk_count(&span), None);
-    assert_one_duration_point(&signals, "cancelled");
-    assert_no_exception(&signals);
+    assert_one_duration_point_of(&signals, &model, "cancelled");
+    assert_no_exception_on(&signals, &span);
 }
 
 #[test]
@@ -884,8 +943,12 @@ fn a_refused_run_stream_input_is_one_request() {
     let _default = default_session_lock();
     let signals = memory_session_with_signals();
     let _installed = DefaultSession::install(&signals.session);
-    let model = as_chat(test_model_with_runtime(Box::new(NeverRuns)));
+    let model = named(
+        as_chat(test_model_with_runtime(Box::new(NeverRuns))),
+        "run-stream-refused-input",
+    );
     let span_name = run_span_name(&model);
+    run_an_unpinned_neighbour_that_fails();
 
     let events: Vec<_> = tokio::runtime::Runtime::new()
         .unwrap()
@@ -896,17 +959,20 @@ fn a_refused_run_stream_input_is_one_request() {
         "{events:?}"
     );
     assert_ended(&signals.spans.named(&span_name), "unsupported");
-    assert_one_duration_point(&signals, "unsupported");
+    assert_one_duration_point_of(&signals, &model, "unsupported");
 }
+
+/// An entry point, run by a request cancelled before it runs.
+type CancelledRequest = fn(&XybridModel, &RunOptions) -> SdkResult<()>;
 
 #[test]
 fn requests_that_end_before_they_run_never_wait_for_a_busy_model() {
     // A run in flight holds the model's write lock. A request cancelled
     // before it runs returns without waiting for it, as it always did, and is
     // recorded under the model's subject as the load read it: a chat model's
-    // request is a `chat` inference, counted with its other runs.
+    // request is a `chat` inference, counted with its other runs. The
+    // reactive cloud fallback is no exception.
     let _residency = crate::model_registry::residency_test_lock();
-    let signals = memory_session_with_signals();
     let dir = tempfile::tempdir().unwrap();
     let mut metadata = ModelMetadata::onnx("busy-model", "1.0", "model.onnx");
     metadata
@@ -923,16 +989,95 @@ fn requests_that_end_before_they_run_never_wait_for_a_busy_model() {
         .unwrap();
     let span_name = run_span_name(&model);
     assert_eq!(span_name, "chat busy-model");
-    let held = model.handle.write().unwrap();
 
+    let entry_points: [(&str, CancelledRequest); 2] = [
+        ("run_streaming_with_options", |model, options| {
+            model
+                .run_streaming_with_options(&text_envelope("hi"), options, ignore_tokens)
+                .map(drop)
+        }),
+        ("run_streaming_with_fallback", |model, options| {
+            let cloud = FakeCloudAdapter::new("never sent");
+            let result = model
+                .run_streaming_with_fallback(
+                    &text_envelope("hi"),
+                    options,
+                    &cloud,
+                    &mut ignore_tokens,
+                    &mut |_seam: SeamInfo| {},
+                )
+                .map(drop);
+            assert_eq!(cloud.call_count(), 0, "a cancelled request sends nothing");
+            result
+        }),
+    ];
+    for (entry, run) in entry_points {
+        let signals = memory_session_with_signals();
+        let held = model.handle.write().unwrap();
+        let (send, recv) = mpsc::channel();
+        let worker = {
+            let model = model.clone();
+            let options = observed(pre_cancelled(), &signals);
+            std::thread::spawn(move || send.send(run(&model, &options)).unwrap())
+        };
+        let result = recv.recv_timeout(HANG).unwrap_or_else(|_| {
+            panic!("{entry}: a request cancelled before it runs never waits for the model lock")
+        });
+        assert!(result.is_err(), "{entry}");
+        drop(held);
+        worker.join().unwrap();
+
+        let span = signals.spans.named(&span_name);
+        assert_ended(&span, "cancelled");
+        assert_eq!(
+            attr(&span, semconv::attr::OPERATION_NAME).as_deref(),
+            Some("chat"),
+            "{entry}"
+        );
+        // The chat inference duration metric, beside the model's other runs.
+        assert_one_duration_point(&signals, "cancelled");
+    }
+}
+
+/// A zzz synthesis through the batch entry point, whose token is cancelled
+/// before it runs under a policy that does not stop on it, is recorded
+/// without waiting for a run in flight either: the remembered subject says
+/// the model is zzz while the lock is held.
+#[cfg(feature = "tts-zzz")]
+#[test]
+fn a_cancelled_zzz_synthesis_never_waits_for_a_busy_model() {
+    let signals = memory_session_with_signals();
+    let mut metadata = ModelMetadata::onnx("busy-zzz", "1.0", "phonon.gguf");
+    metadata
+        .metadata
+        .insert("task".into(), serde_json::json!("text-to-speech"));
+    metadata.execution_template = serde_json::from_value(serde_json::json!({
+        "type": "ZzzPhonon", "model_file": "phonon.gguf"
+    }))
+    .unwrap();
+    let model = test_model_with_metadata(metadata);
+    {
+        // As the load does.
+        let handle = model.handle.read().unwrap();
+        model.remember_subject(&RunSubject::from_metadata(
+            &model.model_id,
+            &handle.metadata,
+        ));
+    }
+    let span_name = run_span_name(&model);
+    let token = CancellationToken::new();
+    token.cancel();
+    // The policy does not stop on the token: only the TTS path reads it.
+    let options = observed(RunOptions::new().with_cancellation_token(token), &signals);
+
+    let held = model.handle.write().unwrap();
     let (send, recv) = mpsc::channel();
     let worker = {
         let model = model.clone();
-        let options = observed(pre_cancelled(), &signals);
         std::thread::spawn(move || {
             send.send(
                 model
-                    .run_streaming_with_options(&text_envelope("hi"), &options, ignore_tokens)
+                    .run_with_options(&text_envelope("hello"), &options)
                     .map(drop),
             )
             .unwrap();
@@ -940,18 +1085,15 @@ fn requests_that_end_before_they_run_never_wait_for_a_busy_model() {
     };
     let result = recv
         .recv_timeout(HANG)
-        .expect("a request cancelled before it runs never waits for the model lock");
-    assert!(result.is_err());
+        .expect("a cancelled synthesis never waits for the model lock");
+    assert!(
+        result.is_ok(),
+        "a cancelled synthesis is a result: {result:?}"
+    );
     drop(held);
     worker.join().unwrap();
 
-    let span = signals.spans.named(&span_name);
-    assert_ended(&span, "cancelled");
-    assert_eq!(
-        attr(&span, semconv::attr::OPERATION_NAME).as_deref(),
-        Some("chat")
-    );
-    // The chat inference duration metric, beside the model's other runs.
+    assert_ended(&signals.spans.named(&span_name), "cancelled");
     assert_one_duration_point(&signals, "cancelled");
 }
 

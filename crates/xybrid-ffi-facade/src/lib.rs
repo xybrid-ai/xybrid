@@ -3586,8 +3586,9 @@ impl ObservabilityConfigHandle {
 
     /// Maximum bytes per captured content attribute (longer content is
     /// truncated with a marker). The value is clamped, never rejected, to the
-    /// retained-operation budget that keeps one span within the 480 KiB
-    /// export request: at most 208 KiB.
+    /// retained-operation budget: at most 208 KiB, which keeps a span's
+    /// content within the 480 KiB export request with 64 KiB left for its
+    /// other data.
     pub fn set_max_content_bytes(&self, bytes: u32) {
         self.with_draft(|d| d.max_content_bytes = Some(bytes));
     }

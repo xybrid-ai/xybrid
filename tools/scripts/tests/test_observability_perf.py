@@ -16,6 +16,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -26,6 +27,7 @@ from unittest import mock
 HARNESS = Path(__file__).resolve().parents[1] / "observability_perf"
 sys.path.insert(0, str(HARNESS))
 
+import fake_driver  # noqa: E402
 import micro  # noqa: E402
 import perf_common as pc  # noqa: E402
 import run_perf  # noqa: E402
@@ -172,11 +174,17 @@ class StatisticsTests(unittest.TestCase):
             self.assertTrue(item.get("rationale"), item["id"])
 
 
+def write_metadata(model_dir, model_file):
+    """A model_metadata.json whose GGUF template loads ``model_file``."""
+    template = {"type": "Gguf", "model_file": model_file, "context_length": 4096}
+    (model_dir / "model_metadata.json").write_text(json.dumps({"model_id": "m", "execution_template": template}))
+
+
 class ModelPinTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
-        (self.dir / "model_metadata.json").write_text("{}")
+        write_metadata(self.dir, run_perf.MODEL["file"])
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -188,6 +196,43 @@ class ModelPinTests(unittest.TestCase):
         info = run_perf.verify_model(self.dir, allow_unpinned=True)
         self.assertFalse(info["pinned"])
         self.assertEqual(info["sha256"], hashlib.sha256(b"not the model").hexdigest())
+
+    def test_the_pinned_bytes_pass(self):
+        (self.dir / run_perf.MODEL["file"]).write_bytes(b"the model")
+        with mock.patch.dict(run_perf.MODEL, sha256=hashlib.sha256(b"the model").hexdigest()):
+            info = run_perf.verify_model(self.dir, allow_unpinned=False)
+        self.assertEqual((info["pinned"], info["file"], info["revision"]),
+                         (True, run_perf.MODEL["file"], run_perf.MODEL["revision"]))
+
+    def test_the_file_the_metadata_names_is_the_one_recorded(self):
+        # The driver loads execution_template.model_file; a.gguf sorts first.
+        (self.dir / "a.gguf").write_bytes(b"a projector, say")
+        (self.dir / "b.gguf").write_bytes(b"the model that runs")
+        write_metadata(self.dir, "b.gguf")
+        info = run_perf.verify_model(self.dir, allow_unpinned=True)
+        self.assertEqual((info["file"], info["sha256"], info["pinned"]),
+                         ("b.gguf", hashlib.sha256(b"the model that runs").hexdigest(), False))
+
+    def test_the_pinned_file_counts_only_when_the_metadata_names_it(self):
+        (self.dir / run_perf.MODEL["file"]).write_bytes(b"the model")
+        (self.dir / "other.gguf").write_bytes(b"another model")
+        write_metadata(self.dir, "other.gguf")
+        with mock.patch.dict(run_perf.MODEL, sha256=hashlib.sha256(b"the model").hexdigest()):
+            with self.assertRaises(SystemExit):
+                run_perf.verify_model(self.dir, allow_unpinned=False)
+            info = run_perf.verify_model(self.dir, allow_unpinned=True)
+        self.assertEqual((info["file"], info["pinned"]), ("other.gguf", False))
+        self.assertNotIn("revision", info)
+
+    def test_metadata_without_a_loadable_file_fails(self):
+        (self.dir / "a.gguf").write_bytes(b"gguf")
+        for metadata in ("{}", json.dumps({"execution_template": {"type": "Gguf"}}), "not json"):
+            (self.dir / "model_metadata.json").write_text(metadata)
+            with self.subTest(metadata=metadata), self.assertRaises(SystemExit):
+                run_perf.verify_model(self.dir, allow_unpinned=True)
+        write_metadata(self.dir, "missing.gguf")
+        with self.assertRaisesRegex(SystemExit, "missing.gguf"):
+            run_perf.verify_model(self.dir, allow_unpinned=True)
 
     def test_missing_metadata_fails(self):
         (self.dir / "model_metadata.json").unlink()
@@ -246,7 +291,7 @@ class EndToEndFakeDriverTests(unittest.TestCase):
         root = Path(self.tmp.name)
         self.model = root / "model"
         self.model.mkdir()
-        (self.model / "model_metadata.json").write_text("{}")
+        write_metadata(self.model, "tiny.gguf")
         (self.model / "tiny.gguf").write_bytes(b"\0" * 64)
         self.out = root / "out"
         self.proposed = root / "thresholds-proposed.json"
@@ -262,11 +307,31 @@ class EndToEndFakeDriverTests(unittest.TestCase):
             path = Path(self.tmp.name) / f"thresholds-{status}-{max_pct}.json"
             path.write_text(json.dumps({"status": status, "e2e": [
                 {"id": "T1", "metric": "runtime_tokens_per_s", "modes": ["content"], "bound": {"max_pct": max_pct},
-                 "rationale": "test"}], "e2e_absolute": [], "micro": []}))
+                 "rationale": "test"}], "e2e_absolute": [
+                # `off` never shuts a pipeline down: a row with nothing to evaluate.
+                {"id": "A1", "metric": "shutdown_ms", "modes": ["off"], "statistic": "max",
+                 "bound": {"max_abs": 1.0}, "rationale": "test"}], "micro": []}))
             return path
 
-        for status, max_pct, code, failed in (("agreed", 0.0, 1, ["T1/content"]), ("agreed", 1000.0, 0, []),
-                                              ("proposed", 0.0, 0, [])):
+        # report.md says what the exit status did: a gate under agreed bounds,
+        # a measurement under proposed ones. An absolute row (A1) gates on its
+        # statistic, not on a median delta, and its bound cell names it.
+        agreed_header = ("each row's `within` is a gate (the median delta against `off`, or for an absolute row "
+                         "its statistic against the limit)")
+        proposed_header = "results below are measurements, not pass/fail verdicts"
+        unevaluated = "1 row(s) had nothing to evaluate (`within` –) and do not gate."
+        absolute = ("`within` uses the median delta (an absolute row, which has a `statistic` in its bound, "
+                    "compares that statistic over processes with `max_abs`)")
+        absolute_bound = '| A1 | off | shutdown_ms | {"statistic": "max", "max_abs": 1.0} |'
+        for status, max_pct, code, failed, says, never in (
+                ("agreed", 0.0, 1, ["T1/content"], [agreed_header, "**Failed gates:** `T1/content`.", unevaluated,
+                                                    absolute, absolute_bound],
+                 [proposed_header, "Every gate held.", "before treating any row as a gate", "(the median delta)"]),
+                ("agreed", 1000.0, 0, [], [agreed_header, "Every gate held.", unevaluated, absolute, absolute_bound],
+                 [proposed_header, "Failed gates", "before treating any row as a gate", "(the median delta)"]),
+                ("proposed", 0.0, 0, [], [proposed_header, "before treating any row as a gate", absolute,
+                                          absolute_bound],
+                 [agreed_header, "Every gate held.", "Failed gates", unevaluated])):
             with self.subTest(status=status, max_pct=max_pct):
                 out = Path(self.tmp.name) / f"out-{status}-{max_pct}"
                 stdout = io.StringIO()
@@ -275,6 +340,32 @@ class EndToEndFakeDriverTests(unittest.TestCase):
                                                   thresholds=thresholds(status, max_pct)), code)
                 summary = json.loads(stdout.getvalue().strip().splitlines()[-1])
                 self.assertEqual((summary["thresholds_status"], summary["thresholds_failed"]), (status, failed))
+                markdown = (out / "report.md").read_text()
+                for text in says:
+                    self.assertIn(text, markdown)
+                for text in never:
+                    self.assertNotIn(text, markdown)
+
+    def test_the_shipped_agreed_bounds_hold_for_the_fake_driver(self):
+        # fake_driver.py's docstring dry run gates on the shipped thresholds.json;
+        # a fake slower than those bounds made it exit 1 on every run. The rows
+        # on synthesized timings (and on the fake's resident memory) are kept;
+        # the shutdown rows (e2e_absolute) time real requests and are left out.
+        shipped = pc.load_thresholds()
+        self.assertEqual(shipped["status"], "agreed")
+        path = Path(self.tmp.name) / "thresholds-shipped-relative.json"
+        path.write_text(json.dumps({**shipped, "e2e_absolute": []}))
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            code = self.run_e2e(self.out, self.model, thresholds=path)
+        summary = json.loads(stdout.getvalue().strip().splitlines()[-1])
+        self.assertEqual((code, summary["thresholds_status"], summary["thresholds_failed"]), (0, "agreed", []))
+        # Held, not skipped: every timing row was evaluated for every mode.
+        report = json.loads((self.out / "report.json").read_text())
+        held = {(r["id"], r["mode"]) for r in report["thresholds"]["results"] if r["within"] is True}
+        self.assertEqual({row for row in held if row[0] in ("E1", "E2", "E3", "E4", "E5")},
+                         {(row, mode) for row in ("E1", "E2", "E3", "E4", "E5")
+                          for mode in ("metadata", "content", "blocked")})
 
     def test_report_covers_every_mode_and_passes_sanity(self):
         self.assertEqual(self.run_e2e(self.out, self.model), 0)
@@ -319,6 +410,60 @@ class EndToEndFakeDriverTests(unittest.TestCase):
         self.assertEqual(report["analysis"]["modes"]["content"]["failed_processes"], 2)
         check = next(c for c in report["analysis"]["sanity"] if c["check"].startswith("content: every process"))
         self.assertFalse(check["ok"])
+
+
+class SinkTests(unittest.TestCase):
+    def test_a_sink_that_does_not_start_is_stopped(self):
+        # Nothing holds a Sink whose constructor raised, so it must stop its
+        # own server: cmd_e2e's finally only closes the sinks it was given.
+        with tempfile.TemporaryDirectory() as tmp:
+            stalled = Path(tmp) / "stalled.py"
+            stalled.write_text("import time\ntime.sleep(60)\n")  # alive, never ready
+            created = []
+            real_popen = subprocess.Popen
+
+            def popen(*args, **kwargs):
+                created.append(real_popen(*args, **kwargs))
+                return created[-1]
+
+            try:
+                with mock.patch.object(run_perf, "CAPTURE_SERVER", stalled), \
+                        mock.patch.object(run_perf.subprocess, "Popen", side_effect=popen):
+                    with self.assertRaisesRegex(SystemExit, "did not start"):
+                        run_perf.Sink(Path(tmp), "content", timeout=0.5)
+                self.assertEqual(len(created), 1)
+                self.assertIsNotNone(created[0].poll(), "the stalled sink is still running")
+            finally:
+                for process in created:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
+
+
+class FakeDriverTests(unittest.TestCase):
+    """The e2e tests above expect `content` to be slower than `off`; the fake
+    driver's timings must make that certain, not likely."""
+
+    def test_every_enabled_run_is_slower_than_every_off_run(self):
+        # A 0.4% slowdown under +-2% jitter left the order to chance: the
+        # 0%-bound gate passed and the delta came out positive about 1 run in 10.
+        slowest_off = fake_driver.SLOWDOWN["off"] * (1 + fake_driver.JITTER)
+        for mode in ("metadata", "content", "blocked"):
+            self.assertGreater(fake_driver.SLOWDOWN[mode] * (1 - fake_driver.JITTER), slowest_off, mode)
+        self.assertGreater(fake_driver.SLOWDOWN["content"] * (1 - fake_driver.JITTER),
+                           fake_driver.SLOWDOWN["metadata"] * (1 + fake_driver.JITTER))
+
+    def test_the_same_invocation_gives_the_same_timings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            outputs = []
+            for attempt in ("a", "b"):
+                out = Path(tmp) / attempt / "r00-off.json"
+                out.parent.mkdir()
+                subprocess.run([sys.executable, str(FAKE_DRIVER), "--model-dir", tmp, "--mode", "off",
+                                "--out", str(out), "--runs", "2", "--max-tokens", "16"], check=True, timeout=60)
+                outputs.append(json.loads(out.read_text())["runs"])
+            self.assertEqual(outputs[0], outputs[1])
+            self.assertNotEqual(outputs[0][0]["callback_gaps_ms"], outputs[0][1]["callback_gaps_ms"])
 
 
 def criterion_entry(root, group, function, value, mean_ns, iters=(10.0, 20.0)):

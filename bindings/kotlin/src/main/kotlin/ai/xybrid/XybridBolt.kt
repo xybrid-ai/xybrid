@@ -4682,7 +4682,8 @@ class XybridObservabilityConfig internal constructor(internal val handle: Long) 
 
     /**
      * Maximum bytes per captured content attribute, clamped to at most
-     * 208 KiB so that one span fits the 480 KiB export request.
+     * 208 KiB so that a span's content leaves 64 KiB of the 480 KiB export
+     * request for its other data.
      */
     fun setMaxContentBytes(bytes: UInt) {
         Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_max_content_bytes(this.boltffiHandle(), bytes.toInt())

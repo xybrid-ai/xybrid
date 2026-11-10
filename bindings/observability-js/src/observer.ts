@@ -465,8 +465,9 @@ const positiveInteger = (value: unknown, fallback: number, name: string): number
 };
 
 /**
- * The largest retained-operation (and so attribute) budget that keeps one span within
- * `maxRequestBodyBytes`: `(request - allowance) / growth`, at least 1.
+ * The largest retained-operation (and so attribute) budget that keeps one span's content within
+ * `maxRequestBodyBytes` less `span_envelope_allowance_bytes`: `(request - allowance) / growth`,
+ * at least 1.
  */
 export const spanContentCeiling = (maxRequestBodyBytes: number): number =>
   Math.max(
@@ -564,6 +565,14 @@ class ObserverCore {
     return this.capture === "event_only" || this.capture === "span_and_event";
   }
 
+  /**
+   * Whether events have a destination: `false` only for an explicit `loggerProvider: null`. The
+   * global loggers (no provider given) stay open, since a provider may be registered later.
+   */
+  get eventDestination(): boolean {
+    return this.#logger !== null;
+  }
+
   /** Wall-clock epoch milliseconds for calls without an operation. */
   wallNow(): number {
     return this.#clock === undefined ? Date.now() : this.#clock();
@@ -659,11 +668,15 @@ class ObserverCore {
     else instrument.add(value, attributes);
   }
 
-  /** Emits one event; `true` only when an enabled logger received it. Never throws. */
+  /**
+   * Emits one event; `true` only when an enabled logger received it. Never throws. `attributes`
+   * may be a builder, called only once an enabled logger is found, so content that no logger
+   * receives is never processed.
+   */
   emit(
     eventName: keyof typeof EVENTS,
     atMs: number,
-    attributes: Record<string, AnyValue>,
+    attributes: Record<string, AnyValue> | (() => Record<string, AnyValue>),
     ctx: Context,
   ): boolean {
     const event = EVENTS[eventName];
@@ -676,7 +689,7 @@ class ObserverCore {
         observedTimestamp: msToHrTime(atMs),
         severityNumber: event.severity_number,
         severityText: event.severity_text,
-        attributes,
+        attributes: typeof attributes === "function" ? attributes() : attributes,
         context: ctx,
       });
       return true;
@@ -858,9 +871,9 @@ abstract class Operation {
   protected recordContent(key: string, raw: unknown, shape: ContentShape, governed: boolean): void {
     if (this.#ended) return;
     // Content for a span that does not record (unsampled, suppressed, no tracer) is never
-    // processed; the event destination does not depend on the span.
+    // processed; the event destination does not depend on the span, only on a logger.
     const toSpan = (!governed || this.core.spanContent) && this.span?.isRecording() === true;
-    const toEvent = this.hasDetailsEvent && this.core.eventContent;
+    const toEvent = this.hasDetailsEvent && this.core.eventContent && this.core.eventDestination;
     if (!toSpan && !toEvent) return;
     const outcome = this.core.content.process(key, raw, shape);
     if (outcome.kind === "dropped") {
@@ -1682,22 +1695,26 @@ export class Observer {
   /**
    * User feedback as `gen_ai.evaluation.result` named `user_feedback`. The comment is governed
    * content (capture mode, redaction, rules, `K = B` truncation). Returns as `recordEvaluation`.
+   * Without an enabled logger the comment is not processed (the redactor is not called).
    */
   recordFeedback(target: ObservationRef, feedback: Feedback): boolean {
     const ref = toObservationRef(target);
     if (ref === undefined || typeof feedback !== "object" || feedback === null) return false;
     const core = this.#core;
-    const attributes: Record<string, AnyValue> = { [ATTR.EVALUATION_NAME]: "user_feedback" };
-    const score = finite(feedback.score, ATTR.EVALUATION_SCORE_VALUE);
-    if (score !== undefined) attributes[ATTR.EVALUATION_SCORE_VALUE] = score;
-    const label = text(feedback.label);
-    if (label !== undefined) attributes[ATTR.EVALUATION_SCORE_LABEL] = label;
-    if (feedback.comment !== undefined && core.capture !== "no_content") {
-      const outcome = core.content.process(ATTR.FEEDBACK_COMMENT, feedback.comment, "string");
-      if (outcome.kind === "value" && typeof outcome.value === "string") {
-        attributes[ATTR.FEEDBACK_COMMENT] = truncateString(outcome.value, core.budget);
+    const attributes = (): Record<string, AnyValue> => {
+      const built: Record<string, AnyValue> = { [ATTR.EVALUATION_NAME]: "user_feedback" };
+      const score = finite(feedback.score, ATTR.EVALUATION_SCORE_VALUE);
+      if (score !== undefined) built[ATTR.EVALUATION_SCORE_VALUE] = score;
+      const label = text(feedback.label);
+      if (label !== undefined) built[ATTR.EVALUATION_SCORE_LABEL] = label;
+      if (feedback.comment !== undefined && core.capture !== "no_content") {
+        const outcome = core.content.process(ATTR.FEEDBACK_COMMENT, feedback.comment, "string");
+        if (outcome.kind === "value" && typeof outcome.value === "string") {
+          built[ATTR.FEEDBACK_COMMENT] = truncateString(outcome.value, core.budget);
+        }
       }
-    }
+      return built;
+    };
     return core.emit("gen_ai.evaluation.result", core.wallNow(), attributes, refContext(ref));
   }
 }

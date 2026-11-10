@@ -206,9 +206,13 @@ The portable defaults include a 208 KiB retained-operation budget, a 480 KiB
 traversal budget, 32 MiB of queued plus in-flight data per signal, and a
 128-level JSON guard. These bound library-owned data, not process RSS. The
 existing per-attribute content limit remains 16 KiB. Content budgets are
-clamped so that one span always fits the 480 KiB request bound: a raised
-budget truncates or omits (and lists) content instead of dropping the whole
-span. Content for a
+clamped so that a span's content fits the request bound (480 KiB by default)
+with 64 KiB left for the span's other data: a raised budget truncates or omits
+(and lists) content instead of dropping the whole span. That 64 KiB is
+reserved, not enforced: a span whose other data outgrows it (attributes the
+application adds, a large resource, many or very long omitted prompt-variable
+names in `xybrid.genai.content.truncated_attributes`) can still exceed the
+bound and is then dropped as an oversized item. Content for a
 span that is not recording (an unsampled parent, suppression) is not
 processed. A Rust redaction hook that panics fails closed like one that
 returns an error: the value is omitted and listed, the run is unaffected.

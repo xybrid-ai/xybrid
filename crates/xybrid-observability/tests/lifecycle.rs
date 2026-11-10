@@ -341,7 +341,7 @@ fn poll_here<F: std::future::Future>(
 
 #[test]
 fn shutdown_aborts_the_export_in_flight_and_sends_nothing_after_it() {
-    // A4 (R-CANCEL-1), per signal against an endpoint that never answers:
+    // R-CANCEL-1, per signal against an endpoint that never answers:
     // the export is in flight before shutdown starts, and the shutdown's
     // deadline cuts it off: the client closes that request while the
     // transport still runs. What the application emits through its handles
@@ -541,7 +541,7 @@ fn hot_paths_return_promptly_with_a_hung_endpoint() {
 
 #[test]
 fn dropping_a_pipeline_with_every_export_parked_returns_and_closes_them() {
-    // B4: the last handle is dropped while each signal's export is parked on
+    // The last handle is dropped while each signal's export is parked on
     // an endpoint that never answers, from a plain thread and from inside a
     // Tokio runtime. The drop returns although no export was answered, and
     // no parked request stays open. The bounds only detect a drop that waits
@@ -663,7 +663,7 @@ impl log::Log for LogBridge {
 
 #[test]
 fn export_retries_never_feed_back_into_the_pipeline() {
-    // D26.8: every 503 makes the transport log a warning. Without
+    // Every 503 makes the transport log a warning. Without
     // suppression, a bridge would turn each one into a span and a log record
     // that the next export carries, and an outage would feed itself.
     static INSTALL: std::sync::Once = std::sync::Once::new();
@@ -942,6 +942,59 @@ fn an_application_span_processor_sees_the_spans_and_traces_can_stay_local() {
     let stats = pipeline.stats();
     assert_eq!(stats.traces, Default::default());
     assert!(stats.logs.exported > 0);
+}
+
+/// An application exporter that panics on the span named `chat boom`, and
+/// keeps the name of every span it is handed.
+#[derive(Debug, Default)]
+struct PanicsOnBoom(Arc<std::sync::Mutex<Vec<String>>>);
+
+impl SpanExporter for PanicsOnBoom {
+    async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
+        for span in batch {
+            let name = span.name.into_owned();
+            let boom = name == "chat boom";
+            self.0.lock().unwrap().push(name);
+            assert!(!boom, "application exporter panicked");
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn a_simple_exporter_that_panics_once_drops_its_later_spans_and_nothing_else() {
+    // CONTRACT.md "Errors and cancellation": a processor that panics while
+    // holding a lock of its own may handle no later span. The SDK's
+    // `SimpleSpanProcessor` exports under its exporter mutex, so one panic
+    // poisons it for good: the application's exporter never sees a later
+    // span. The operation ends, and the pipeline's export after it keeps
+    // working for every span but the one that panicked.
+    let server = Server::ok();
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let pipeline = ObservabilityPipeline::build_with_span_processor(
+        server.traces_config(Protocol::HttpProtobuf),
+        SimpleSpanProcessor::new(PanicsOnBoom(seen.clone())),
+    )
+    .unwrap();
+    let observer = pipeline.observer();
+    for model in ["before", "boom", "after", "later"] {
+        let op = observer.start_inference(
+            InferenceRequest::new("chat", "fake").with_model(model),
+            StartOptions::default(),
+        );
+        op.end();
+        assert!(op.is_finished(), "{model}");
+    }
+    // The poisoned exporter cannot shut down cleanly; the export can.
+    let _ = pipeline.shutdown(Duration::from_secs(5));
+
+    assert_eq!(*seen.lock().unwrap(), ["chat before", "chat boom"]);
+    let remote: Vec<String> = server
+        .requests_to("/v1/traces")
+        .iter()
+        .flat_map(|r| r.span_names())
+        .collect();
+    assert_eq!(remote, ["chat before", "chat after", "chat later"]);
 }
 
 /// An application processor whose shutdown blocks far longer than the

@@ -8,7 +8,7 @@
 mod support;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::{SocketAddr, TcpListener};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread;
@@ -956,7 +956,7 @@ fn logs_and_metrics_counters_and_standalone_exporter_stats() {
 
 #[test]
 fn a_shutdown_cut_off_fails_the_export_in_flight_and_drops_what_is_queued() {
-    // D6(a), D5/D6: every item of every signal ends in exactly one bucket,
+    // Every item of every signal ends in exactly one bucket,
     // and the receiver agrees with the counters. Per path the first request
     // is rejected (503, no retries), the second acknowledged and every later
     // one parked. When shutdown starts, each signal has one export parked:
@@ -1324,13 +1324,76 @@ fn totals(pairs: &[(&str, i64)]) -> BTreeMap<String, i64> {
     pairs.iter().map(|(k, v)| ((*k).to_owned(), *v)).collect()
 }
 
-/// A loopback address nothing listens on (bound, then released).
-fn closed_port() -> SocketAddr {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
+/// A loopback port that refuses connections. [`Refusing::listen`] brings an
+/// endpoint up on it.
+///
+/// On Linux the port stays the test's own ([`Refusing::held`]): a socket bound
+/// to it that never listens. Linux resets a connect to it as if nothing were
+/// there, and no other test (each binds port 0 in parallel) can be given the
+/// port. That does not carry over: macOS drops a SYN sent to a socket that is
+/// bound but not listening, so a connect would wait for the OS to time it out
+/// instead of being refused. Everywhere else the port is bound and released
+/// ([`Refusing::released`]) and `listen` binds it again; in between, the
+/// kernel can (rarely) hand it to another test.
+enum Refusing {
+    Held(tokio::net::TcpSocket),
+    Released(SocketAddr),
 }
+
+impl Refusing {
+    fn bind() -> Self {
+        if cfg!(target_os = "linux") {
+            Self::held()
+        } else {
+            Self::released()
+        }
+    }
+
+    /// Bound and never listening (refuses only on Linux).
+    fn held() -> Self {
+        // Without `SO_REUSEADDR`, which std's listeners set on Unix: no
+        // other socket shares the port while this one holds it.
+        let socket = tokio::net::TcpSocket::new_v4().expect("a TCP socket");
+        socket.bind(LOOPBACK).expect("a loopback port");
+        Self::Held(socket)
+    }
+
+    /// Bound, then released: nothing holds the port.
+    fn released() -> Self {
+        let listener = TcpListener::bind(LOOPBACK).expect("a loopback port");
+        Self::Released(listener.local_addr().expect("a bound listener"))
+    }
+
+    fn addr(&self) -> SocketAddr {
+        match self {
+            Self::Held(socket) => socket.local_addr().expect("a bound socket"),
+            Self::Released(addr) => *addr,
+        }
+    }
+
+    /// Starts listening on the same port: the endpoint comes up.
+    fn listen(self) -> TcpListener {
+        match self {
+            Self::Held(socket) => {
+                // Tokio registers a listener with a reactor; the std listener
+                // it hands back no longer needs one.
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_io()
+                    .build()
+                    .expect("a runtime to listen in");
+                let _entered = runtime.enter();
+                socket
+                    .listen(128)
+                    .expect("listening")
+                    .into_std()
+                    .expect("a std listener")
+            }
+            Self::Released(addr) => rebind(addr),
+        }
+    }
+}
+
+const LOOPBACK: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
 
 /// Binds `addr` again. The bound only detects a port that never frees up.
 fn rebind(addr: SocketAddr) -> TcpListener {
@@ -1344,6 +1407,35 @@ fn rebind(addr: SocketAddr) -> TcpListener {
             Err(e) => panic!("rebinding {addr}: {e}"),
         }
     }
+}
+
+/// Connects to `refusing`, which must refuse; then brings it up and connects.
+fn refuses_then_listens_on_the_same_port(refusing: Refusing) {
+    let addr = refusing.addr();
+    let refused = std::net::TcpStream::connect(addr).expect_err("nothing listens yet");
+    assert_eq!(
+        refused.kind(),
+        std::io::ErrorKind::ConnectionRefused,
+        "{refused}"
+    );
+    let listener = refusing.listen();
+    assert_eq!(listener.local_addr().unwrap(), addr);
+    std::net::TcpStream::connect(addr).expect("listening on the same port");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_held_port_refuses_connections_and_is_never_handed_to_another_test() {
+    let refusing = Refusing::held();
+    let taken = TcpListener::bind(refusing.addr()).expect_err("the port is held");
+    assert_eq!(taken.kind(), std::io::ErrorKind::AddrInUse, "{taken}");
+    refuses_then_listens_on_the_same_port(refusing);
+}
+
+#[test]
+fn a_released_port_refuses_connections_until_it_is_bound_again() {
+    // What `Refusing::bind` falls back to off Linux; exercised everywhere.
+    refuses_then_listens_on_the_same_port(Refusing::released());
 }
 
 /// One reply sequence for one batch, and what it must come to.
@@ -1427,7 +1519,7 @@ fn check_case(signal: Signal, case: Case) {
     }
 }
 
-/// D2: what each reply class makes of one batch.
+/// What each reply class makes of one batch.
 fn failure_replies() -> Vec<Case> {
     let throttled = |after: &str| Action::status(429).header("Retry-After", after);
     vec![
@@ -1517,12 +1609,13 @@ fn failure_replies_settle_a_metrics_collection_exactly() {
 
 #[test]
 fn a_refused_connection_fails_every_signal() {
-    // D2: nothing listens on the port, so every attempt is a transport error;
+    // Nothing listens on the port, so every attempt is a transport error;
     // the batch fails and the flush says so. Whether a refused connect is
     // retried is not pinned: a closed port records no attempts to count. (The
     // lost-acknowledgement tests pin retries of a transport error on a
     // connection that was made.)
-    let base = format!("http://{}", closed_port());
+    let refusing = Refusing::bind();
+    let base = format!("http://{}", refusing.addr());
     for signal in Signal::ALL {
         let pipeline = pipeline_to(&base, &[signal], Duration::from_secs(10), fast_retry(2));
         let n = offer(&pipeline, signal);
@@ -1542,7 +1635,7 @@ fn a_refused_connection_fails_every_signal() {
 
 #[test]
 fn lost_acknowledgements_resend_the_same_bytes_and_count_each_item_once() {
-    // D3 (R-CNT-3 for every signal): the receiver reads each body, then
+    // R-CNT-3 for every signal: the receiver reads each body, then
     // closes the connection unanswered. Every attempt resends the batch byte
     // for byte, and its items count once: exported when a later attempt is
     // acknowledged; failed (delivery unknown) when the retries run out,
@@ -1638,7 +1731,7 @@ impl Drop for OpenOnDrop {
     }
 }
 
-/// D1: healthy, down, healthy again; the phases are driven by flushes, not
+/// Healthy, down, healthy again; the phases are driven by flushes, not
 /// by time. Queue 8, batch 4, one retry, all three signals. Measured loss:
 ///
 /// | phase  | spans, and log records alike    | metrics (`work` counter)        |
@@ -1666,7 +1759,7 @@ impl Drop for OpenOnDrop {
 /// The exact request counts pin today's per-export retry policy: nothing
 /// carries a `Retry-After` hold or a circuit breaker across exports. Whether
 /// sustained failures should suppress later exports is an open product
-/// decision (audit D2(e)); adopting one changes these counts.
+/// decision; adopting one changes these counts.
 fn an_outage_then_recovery(down: Down) {
     let (arrived, arrivals) = mpsc::channel();
     let switch = Arc::new(Switch::new(arrived));
@@ -1869,15 +1962,15 @@ fn an_outage_of_lost_acknowledgements_then_recovery_loses_only_what_was_offered_
 
 #[test]
 fn an_endpoint_that_refuses_then_comes_up_delivers_from_then_on() {
-    // D1, connection refused: down from the start, then listening on the
+    // Connection refused: down from the start, then listening on the
     // same port. Measured loss: what was offered while it refused (2 spans,
     // 2 log records and the collection's point: failed); nothing after. The
     // first collection after it comes up carries the increment recorded
     // while it was down. The time from coming up to the first request is
     // printed (`--nocapture`), not asserted.
-    let addr = closed_port();
+    let refusing = Refusing::bind();
     let pipeline = pipeline_to(
-        &format!("http://{addr}"),
+        &format!("http://{}", refusing.addr()),
         &Signal::ALL,
         Duration::from_secs(10),
         fast_retry(1),
@@ -1896,7 +1989,7 @@ fn an_endpoint_that_refuses_then_comes_up_delivers_from_then_on() {
     let flushed = pipeline.force_flush(Duration::from_secs(60));
     assert_eq!(delivery(&flushed), Some((2 + 2 + 1, 0)), "{flushed:?}");
 
-    let server = Server::start_on(rebind(addr), |_| Action::ok());
+    let server = Server::start_on(refusing.listen(), |_| Action::ok());
     let up = Instant::now();
     let after = names("c", 2);
     named_spans(&pipeline, &after);
@@ -1946,7 +2039,7 @@ fn an_endpoint_that_refuses_then_comes_up_delivers_from_then_on() {
 
 #[test]
 fn a_metrics_byte_budget_below_one_collection_drops_it_without_a_request() {
-    // D4(b): metrics are admitted by bytes only: a collection whose encoded
+    // Metrics are admitted by bytes only: a collection whose encoded
     // body exceeds max_buffered_bytes is dropped whole at admission (local
     // policy, not a failed delivery). No request; every point dropped.
     for protocol in PROTOCOLS {
@@ -1984,7 +2077,7 @@ fn a_metrics_byte_budget_below_one_collection_drops_it_without_a_request() {
 
 #[test]
 fn a_hung_endpoint_saturates_the_log_queue_exactly() {
-    // D4(c), the log twin of the JS "a hung endpoint: queue 8, batch 4, 20
+    // The log twin of the JS "a hung endpoint: queue 8, batch 4, 20
     // spans": the queue bound counts the batch in flight as well as the
     // queue, so 8 records are pending and the other 12 are dropped.
     let server = Server::always(Action::Hang);
@@ -2034,7 +2127,7 @@ fn a_hung_endpoint_saturates_the_log_queue_exactly() {
 
 #[test]
 fn exported_metric_points_are_the_points_the_receiver_acknowledged() {
-    // D5(a): a mixed run over every aggregation the default views produce
+    // A mixed run over every aggregation the default views produce
     // (sum, non-monotonic sum, histogram, gauge). The first collection is
     // rejected (503, no retry), the later ones acknowledged. The points the
     // receiver decodes from acknowledged requests are exactly `exported`;

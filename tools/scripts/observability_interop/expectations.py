@@ -6,7 +6,8 @@ canonical span role must look there and what the backend drops; every check
 below reads its expectation from that table, so a backend that changes its
 mapping fails one named row instead of a generic diff.
 
-Roles (the platform's own classification, ``ingest/core/src/otlp/normalize.rs``):
+Roles (``role`` below; the order of Xybrid's own trace-ingest classification,
+first match wins):
 
 | Role | Canonical span |
 |---|---|
