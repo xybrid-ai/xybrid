@@ -62,7 +62,7 @@ xybrid connect --help >/dev/null 2>&1; echo $?     # PowerShell: xybrid connect 
 ```
 
 - `0`: go on.
-- `2` (`unrecognized subcommand 'connect'`) or `xybrid: command not found`: this CLI predates `connect`. If the user already approved installing the Xybrid CLI in this session, re-run that same installer once (`curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.sh | sh` on macOS/Linux, `irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex` on Windows) and check again. Never install anything the user didn't approve.
+- `2` (`unrecognized subcommand 'connect'`): this CLI predates `connect`. `127` (command not found): there is no CLI. If the user already approved installing the Xybrid CLI in this session, re-run that same installer once (`curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.sh | sh` on macOS/Linux, `irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex` on Windows) and check again. Never install anything the user didn't approve.
 - Still no `connect`, or the environment only has pip/npm/pub: use the [no-CLI path](#no-cli-path-pip-npm-or-pub-only-environments). If that isn't possible either, say: "This environment can't connect to the Xybrid console yet; on-device inference works without it." and stop.
 
 If `~/.xybrid` isn't writable (some sandboxes), the CLI fails with a `credentials_*` error before creating anything. Then, and only then, prefix this and every later `xybrid` command with `XYBRID_CREDENTIALS_FILE=.xybrid/credentials.json`; the CLI gitignores that directory.
@@ -74,6 +74,8 @@ From the repository root:
 ```bash
 xybrid connect --agent <claude-code|codex|cursor|...> --write-env <file> [--env-name <VAR>] --json
 ```
+
+`--agent` is self-reported. The console names `claude-code`, `codex`, `cursor`, `gemini-cli`, `github-copilot`, `windsurf`, `cline`, `roo-code`, `aider`, `amp`, `goose`, `jules`, `kiro`, `opencode`, `zed` and `devin`; any other value shows as "Coding agent". The workspace is named after the repository directory unless you pass `--project-name`.
 
 It prints one JSON object on stdout and exits with the status's code. It contacts the Xybrid API, solves a small proof of work (a few seconds), saves the key and claim token to `~/.xybrid/credentials.json` (0600), then writes the key and a comment with the claim command and dates (never the link) to the file. It never starts an exporter. Don't run two at once.
 
@@ -641,7 +643,7 @@ In chat, never anywhere else, include:
 - `tell_the_user` from the connect result, with the claim link and both deadlines (unclaimed, the key stops on `workspace.key_expires_at` and the workspace is deleted on `workspace.claim_expires_at`; claiming any time before the deletion date keeps the workspace and its history and restores the key), and the terms and privacy links when present.
 - What you wired (metadata-only Xybrid trace export, in which file and init call, and whether cloud authentication was added), and the exact verification result: verified through the app, verified only through the CLI, or not verified (`none`/`unavailable`), and why.
 - For mobile, web, Expo and Unity builds: the key ships inside the app and can be extracted. It is a restricted client key (trace export, a small gateway quota); claiming the workspace lets the user rotate it.
-- That `xybrid auth claim` shows the link again later.
+- That claiming means signing in with GitHub and accepting the terms in the console, and that `xybrid auth claim` shows the link again later.
 
 In commits and PR descriptions, say only that a Xybrid key is configured in a gitignored file: no key, no link, no claim token.
 
