@@ -7,7 +7,7 @@
 //  `xybrid_bolt.swift` alongside this file; both compile into the same
 //  Swift module so consumers `import Xybrid` and see one surface.
 //
-//  For full API documentation, see https://docs.xybrid.dev/sdk/swift
+//  For full API documentation, see https://docs.xybrid.dev/docs/sdks/ios
 //
 
 import Foundation
@@ -39,8 +39,8 @@ private let boltSetProviderApiKey = setProviderApiKey
 ///
 /// Inference runs on-device whether or not you authenticate. The `apiKey`
 /// authenticates the cloud gateway; it does not export anything. Trace export
-/// is off until you start it with ``Xybrid/Observability`` — get a free key at
-/// https://dashboard.xybrid.dev.
+/// is off until you start it with ``Xybrid/Observability`` — get a key at
+/// https://console.xybrid.dev.
 ///
 /// ```swift
 /// // Anonymous — local inference only
@@ -73,8 +73,8 @@ public enum Xybrid {
     /// All parameters are optional. Without an `apiKey`, the SDK runs fully
     /// on-device. `apiKey` authenticates the cloud gateway and `gatewayUrl`
     /// overrides it. Neither starts trace export: build a config with
-    /// ``Xybrid/Observability`` and call `start()` for that. Get a free key at
-    /// https://dashboard.xybrid.dev.
+    /// ``Xybrid/Observability`` and call `start()` for that. Get a key at
+    /// https://console.xybrid.dev.
     ///
     /// Configuration is applied on the first call; because `initialize()` is
     /// idempotent, a later call with different arguments is a no-op.

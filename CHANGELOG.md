@@ -43,7 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existing exporter stats; local inference, local spans and other destinations
   continue. Claim the workspace and start observability again to resume.
 - The first-inference nudge points at `xybrid connect` and the console, and
-  says that a key alone exports nothing.
+  says that a key alone exports nothing. Its docs link now opens the API keys
+  page (`/docs/concepts/api-keys`); the old `/sdk/observability` link was a 404.
 
 - Portable observability contract v2 preserves numeric/null wire types and
   unsampled references, bounds retained content and delivery queues, and cancels

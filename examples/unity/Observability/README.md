@@ -52,8 +52,8 @@ The example picks the first target it finds:
 ```bash
 # An OpenTelemetry Collector on this machine:
 export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"
-# ...or the Xybrid dashboard:
-export XYBRID_API_KEY="xy_live_..."
+# ...or Xybrid (get a key at console.xybrid.dev):
+export XYBRID_API_KEY="sk_live_..."
 open -a "Unity" /path/to/examples/unity/Observability
 ```
 

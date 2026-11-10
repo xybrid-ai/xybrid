@@ -2,7 +2,7 @@
 # Install xybrid AI skills into your project.
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | sh
+#   curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | bash
 #
 # Or run directly:
 #   ./install-skills.sh
