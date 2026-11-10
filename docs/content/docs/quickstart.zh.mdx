@@ -26,8 +26,8 @@ flutter pub get
 ```dart
 import 'package:xybrid_flutter/xybrid_flutter.dart';
 
-// 默认即可本地运行。在 dashboard.xybrid.dev 免费获取密钥即可查看
-// 推理轨迹：Xybrid.init(apiKey: '...')
+// 默认即可本地运行，无需账号。在 console.xybrid.dev 获取的密钥可启用云端功能
+// （Xybrid.init(apiKey: '...')）；轨迹导出需另行显式开启。
 await Xybrid.init();
 
 // 加载模型并运行文本转语音
@@ -65,8 +65,8 @@ dependencies: [
 ```swift
 import Xybrid
 
-// 默认即可本地运行。在 dashboard.xybrid.dev 免费获取密钥即可查看
-// 推理轨迹：Xybrid.initialize(apiKey: "...")
+// 默认即可本地运行，无需账号。在 console.xybrid.dev 获取的密钥可启用云端功能
+// （Xybrid.initialize(apiKey: "...")）；轨迹导出需另行显式开启。
 Xybrid.initialize()
 
 // 先描述模型来源，再显式加载
@@ -100,8 +100,8 @@ dependencies {
 ```kotlin
 import ai.xybrid.*
 
-// 默认即可本地运行。在 dashboard.xybrid.dev 免费获取密钥即可查看
-// 推理轨迹：Xybrid.init(context, apiKey = "...")
+// 默认即可本地运行，无需账号。在 console.xybrid.dev 获取的密钥可启用云端功能
+// （Xybrid.init(context, apiKey = "...")）；轨迹导出需另行显式开启。
 Xybrid.init(context)
 
 // 先描述模型来源，再显式加载
@@ -161,8 +161,8 @@ https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 using Xybrid;
 using UnityEngine;
 
-// 默认即可本地运行。在 dashboard.xybrid.dev 免费获取密钥即可查看
-// 推理轨迹：XybridClient.Initialize(apiKey: "...")
+// 默认即可本地运行，无需账号。在 console.xybrid.dev 获取的密钥可启用云端功能
+// （XybridClient.Initialize(apiKey: "...")）；轨迹导出需另行显式开启。
 XybridClient.Initialize();
 
 // 加载 TTS 模型并生成 NPC 对话
@@ -295,4 +295,5 @@ Transcription: "Hello, how can I help you?"
   <Card title="模型目录" href="/zh/docs/concepts/models" description="浏览设备端模型目录" />
   <Card title="流水线" href="/zh/docs/concepts/pipelines" description="用几行 YAML 串联多个模型" />
   <Card title="命令行" href="/zh/docs/cli" description="在终端中运行和调试模型" />
+  <Card title="API 密钥" href="/zh/docs/concepts/api-keys" description="云端认证、轨迹导出与密钥作用域" />
 </Cards>

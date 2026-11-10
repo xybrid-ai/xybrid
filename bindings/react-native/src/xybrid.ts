@@ -9,7 +9,7 @@ export interface XybridInitOptions {
   /**
    * Xybrid API key. Enables the platform features on top of local inference:
    * cloud fallback and speculative cloud serving. It does not enable trace
-   * export; see `ObservabilityConfig`. Get one at https://dashboard.xybrid.dev.
+   * export; see `ObservabilityConfig`. Get one at https://console.xybrid.dev.
    */
   apiKey?: string;
   /** Override the LLM gateway URL (full URL including `/v1`). */

@@ -141,8 +141,8 @@ namespace Xybrid
         /// not enable observability export &#x2014; build an
         /// <see cref="ObservabilityConfig"/> and call
         /// <see cref="InitializeObservability"/> for that. Omit it to run
-        /// anonymously; inference still runs fully on-device. Get a free key at
-        /// https://dashboard.xybrid.dev.
+        /// anonymously; inference still runs fully on-device. Get a key at
+        /// https://console.xybrid.dev.
         /// </param>
         /// <param name="gatewayUrl">Optional override for the LLM gateway URL.</param>
         /// <remarks>

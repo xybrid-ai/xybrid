@@ -56,6 +56,8 @@ Future<void> main() async {
 
 Inference runs locally without an account. `apiKey` configures cloud authentication;
 export is off until you explicitly configure observability.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
 
 ## Observability
 

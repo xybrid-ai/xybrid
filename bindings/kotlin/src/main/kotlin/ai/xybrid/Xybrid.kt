@@ -5,7 +5,7 @@
  * bindings in `XybridBolt.kt`. Both files live in the same `ai.xybrid`
  * package so consumers `import ai.xybrid.…` and see a single surface.
  *
- * For full API documentation, see https://docs.xybrid.dev/sdk/kotlin
+ * For full API documentation, see https://docs.xybrid.dev/docs/sdks/kotlin
  */
 @file:Suppress("unused")
 
@@ -37,8 +37,8 @@ import kotlinx.coroutines.withContext
  * Call [Xybrid.init] once before using any other Xybrid functionality.
  * Inference runs on-device whether or not you authenticate. The `apiKey`
  * authenticates the cloud gateway; it does not export anything. Trace export
- * is off until you start it with [Xybrid.Observability]. Get a free key at
- * https://dashboard.xybrid.dev.
+ * is off until you start it with [Xybrid.Observability]. Get a key at
+ * https://console.xybrid.dev.
  *
  * ```kotlin
  * class MyApplication : Application() {

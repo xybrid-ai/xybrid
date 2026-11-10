@@ -88,8 +88,8 @@ runs anonymously (on-device inference, no trace export). With a key, the app
 passes it to `Xybrid.initialize` and also starts trace export with
 `Xybrid.Observability.xybrid(apiKey:)` — the SDK never exports on the key
 alone. `XYBRID_TRACES_ENDPOINT` points those traces at a self-hosted or
-tunneled endpoint instead of the Xybrid dashboard. Get a free key at
-[dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+tunneled endpoint instead of Xybrid. Get a key at
+[console.xybrid.dev](https://console.xybrid.dev).
 
 To inject them from the command line on a Simulator instead, prefix the
 launch environment:

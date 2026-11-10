@@ -351,7 +351,7 @@ Xybridは**任意の**ONNX、GGUF、またはSafeTensorsモデルで動作しま
 
 ```sh
 # プロジェクトにxybridスキルをインストール
-curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | sh
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | bash
 
 # HuggingFaceモデルからmodel_metadata.jsonを生成
 claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
