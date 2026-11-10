@@ -17,8 +17,7 @@ use xybrid_observability::otlp::{
     ResponseHook, RetryLimits, RpcStatus, SignalEndpoint,
 };
 use xybrid_observability::{
-    ContentCapture, ContentPolicy, Feedback, InferenceRequest, InputMessage, Location, Observer,
-    StartOptions,
+    Feedback, InferenceRequest, KeyValue, Location, Observer, StartOptions,
 };
 
 use support::{Action, Server};
@@ -391,8 +390,10 @@ fn parts_of_a_split_batch_after_the_disabling_response_are_dropped() {
         then.status(401).header("x-marker", "stop");
     });
     let recorder = Recorder::default();
-    // Each span carries ~9 KB of captured input: one fits the 14 KB body
-    // bound, two do not, so a batch of four is sent one span per request.
+    // Each span carries a ~9 KB attribute: one fits the 14 KB body bound, two
+    // do not, so a batch of four is sent one span per request. (Not captured
+    // content: the pipeline clamps content budgets so content alone can never
+    // push a span past the body bound.)
     let config = base()
         .with_traces(Some(
             SignalEndpoint::new(server.url("/v1/traces"))
@@ -400,15 +401,14 @@ fn parts_of_a_split_batch_after_the_disabling_response_are_dropped() {
         ))
         .with_max_request_body_bytes(14_000);
     let pipeline = ObservabilityPipeline::build(config).unwrap();
-    let observer =
-        pipeline.observer_with(ContentPolicy::default().with_capture(ContentCapture::SpanOnly));
-    let text = "x".repeat(9_000);
+    let observer = pipeline.observer();
+    let padding = "x".repeat(9_000);
     for _ in 0..4 {
         let op = observer.start_inference(
             InferenceRequest::new("chat", "llama.cpp"),
             StartOptions::default(),
         );
-        op.record_input_messages(&[InputMessage::text("user", text.as_str())]);
+        op.set_attribute(KeyValue::new("test.padding", padding.clone()));
         op.end();
     }
     let flushed = pipeline.force_flush(Duration::from_secs(5)).unwrap_err();

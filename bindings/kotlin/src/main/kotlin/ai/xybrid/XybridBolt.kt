@@ -4245,6 +4245,10 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
 
     /**
      * Forget a streaming session.
+     *
+     * Closing a session before its terminal event cancels its run: the run
+     * stops at its next token and is recorded as a user cancellation
+     * (`error.type` `cancelled`), not as an error.
      */
     fun streamClose(streamId: ULong) {
         Native.boltffi_method_class_xybrid_bolt_xybrid_model_stream_close(this.boltffiHandle(), streamId.toLong())
@@ -4677,7 +4681,9 @@ class XybridObservabilityConfig internal constructor(internal val handle: Long) 
     }
 
     /**
-     * Maximum bytes per captured content attribute.
+     * Maximum bytes per captured content attribute, clamped to at most
+     * 208 KiB so that a span's content leaves 64 KiB of the 480 KiB export
+     * request for its other data.
      */
     fun setMaxContentBytes(bytes: UInt) {
         Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_max_content_bytes(this.boltffiHandle(), bytes.toInt())
@@ -5876,7 +5882,7 @@ fun observabilityDefaultTracesEndpoint(): String {
 }
 
 /**
- * Current delivery counters (all zero when observability is off).
+ * Delivery counters: live while export runs, the final ones after shutdown until the next init.
  */
 fun observabilityStats(): XybridObservabilityStats {
     val __boltffi_result = Native.boltffi_function_xybrid_bolt_observability_stats() ?: throw IllegalStateException("null buffer returned")

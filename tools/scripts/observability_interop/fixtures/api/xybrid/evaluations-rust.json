@@ -1,0 +1,30 @@
+{
+ "items": [
+  {
+   "comment": null,
+   "explanation": null,
+   "id": "00000000-0000-4000-8000-000000000000",
+   "name": "relevance",
+   "score_label": null,
+   "score_value": 1.0,
+   "source": "evaluation",
+   "span_id": "80878d0eb62dd7da",
+   "timestamp": "2026-11-09T16:46:20.000000000Z",
+   "trace_id": "e65def71db67b57b768f59d149f76bbd"
+  },
+  {
+   "comment": "Short and correct",
+   "explanation": null,
+   "id": "00000000-0000-4000-8000-000000000001",
+   "name": "user_feedback",
+   "score_label": "thumbs_up",
+   "score_value": 1.0,
+   "source": "feedback",
+   "span_id": "80878d0eb62dd7da",
+   "timestamp": "2026-11-09T16:46:20.000000000Z",
+   "trace_id": "e65def71db67b57b768f59d149f76bbd"
+  }
+ ],
+ "trace_id": "e65def71db67b57b768f59d149f76bbd",
+ "truncated": false
+}

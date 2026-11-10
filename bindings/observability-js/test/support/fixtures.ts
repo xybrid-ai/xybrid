@@ -48,6 +48,7 @@ export type FixtureConfig = {
   content_capture?: ContentCaptureInput;
   max_content_attribute_bytes?: number;
   max_retained_operation_bytes?: number;
+  max_request_body_bytes?: number;
   max_traversal_bytes?: number;
   redact_substrings?: string[];
   test_redactor?: { drop_kinds?: string[]; fail_kinds?: string[]; invalid_output_kinds?: string[] };
@@ -98,6 +99,7 @@ const CONFIG_FIELDS = new Set([
   "content_capture",
   "max_content_attribute_bytes",
   "max_retained_operation_bytes",
+  "max_request_body_bytes",
   "max_traversal_bytes",
   "redact_substrings",
   "test_redactor",
@@ -411,6 +413,9 @@ export const runFixture = async (fixture: Fixture): Promise<NormalizedOutput> =>
       ...(config.max_retained_operation_bytes === undefined
         ? {}
         : { maxRetainedOperationBytes: config.max_retained_operation_bytes }),
+      ...(config.max_request_body_bytes === undefined
+        ? {}
+        : { maxRequestBodyBytes: config.max_request_body_bytes }),
       ...(config.max_traversal_bytes === undefined
         ? {}
         : { maxTraversalBytes: config.max_traversal_bytes }),

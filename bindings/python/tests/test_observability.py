@@ -331,7 +331,11 @@ def test_delivery_loss_raises_telemetry_delivery_and_counts_per_signal():
         # The shutdown export fails too; only that it uninstalls matters here.
         with contextlib.suppress(xybrid.TelemetryDelivery):
             bolt.observability_shutdown(TIMEOUT_MS)
-    assert not bolt.observability_stats().enabled
+    final = bolt.observability_stats()
+    assert not final.enabled
+    # The final counters stay readable until the next init: the loss is
+    # still visible after shutdown.
+    assert (final.traces.accepted, final.traces.failed, final.traces.pending) == (1, 1, 0)
 
 
 def _metadata_only_model(directory: Path) -> Path:

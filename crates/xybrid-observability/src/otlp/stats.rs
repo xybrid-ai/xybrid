@@ -20,6 +20,13 @@ pub struct SignalStats {
     pub failed: u64,
     /// Accepted items not yet terminal (queued, in flight, or in backoff).
     pub pending: u64,
+    /// Library-owned bytes held for delivery now: the conservative per-item
+    /// estimate computed at admission, summed over the pending items (queued
+    /// and in flight; for metrics, the collection in flight). It is the
+    /// running total that `max_buffered_bytes` (32 MiB) admits against, not
+    /// process memory, and it is zero once nothing is pending (always after
+    /// shutdown).
+    pub buffered_bytes: u64,
 }
 
 impl SignalStats {

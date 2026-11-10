@@ -39,7 +39,14 @@ Use `OtlpConfig::with_traces`, `with_metrics` and `with_logs` to select each
 signal's destination, protocol, headers and timeout with `SignalEndpoint`.
 `with_batch` and `with_retry` control bounded in-memory queues and retries.
 Delivery is best effort; the exporter has no durable offline spool. Inspect
-`observability::stats()` for packaged-pipeline export/drop counters.
+`observability::stats()` for packaged-pipeline export/drop counters. After
+`shutdown_observability` it keeps returning the shut-down session's final
+counters, settled by the shutdown (what it failed in flight or dropped from the
+queue included, nothing pending), until the next `init_observability` or
+`install_default_session`; `is_enabled()` is then `false`. An init that
+replaces a running session reports the new session's counters at once, so shut
+down first to read the old one's. The bindings' observability stats behave the
+same way.
 
 `ObservabilityConfig::from_env()` explicitly opts into standard
 `OTEL_EXPORTER_OTLP_*` endpoint, protocol and header configuration. It returns
@@ -105,7 +112,17 @@ The HTTP receiver necessarily sees the network source address.
 The SDK observes model loads, logical inferences, concrete execution attempts,
 pipelines and internal stages. `RunOptions::observation` accepts
 `ObservationOptions` for an explicit W3C parent, conversation/prompt metadata,
-per-run observer and trace suppression. Successful inference results expose
+per-run observer and trace suppression. A per-run session or observer can only
+lower content capture: its policy is capped by the session the run would
+otherwise use (the enclosing operation's, else the default), so content goes
+only where both capture, within the smaller budgets, through both policies'
+redaction. A session whose observer is disabled caps nothing, so the next one
+out caps instead: a per-run session inside an operation that observes nothing
+is still capped by the default. A per-run setting that would capture more is
+ignored; with no enabled session around it, the per-run policy applies as is. To lower capture for one run on the
+default's providers, pass
+`observer().content_capped_by(&ContentPolicy::metadata_only())` as the run's
+observer. Successful inference results expose
 `observation_ref()` for linking feedback or evaluations. See the
 [trace model](trace-model.md) for parentage and current result limitations.
 
@@ -185,12 +202,24 @@ redactors run first. Invalid redaction output fails closed before truncation.
 Metadata-only mode still permits explicit bounded error messages through the
 error redactor; use a classification alone when error text may contain secrets.
 
-The portable defaults include a 480 KiB retained-operation/traversal budget,
-32 MiB of queued plus in-flight data per signal, and a 128-level JSON guard.
-These bound library-owned data, not process RSS. The existing per-attribute
-content limit remains 16 KiB. Oversized singletons are dropped; metrics collections
-that cannot fit fail explicitly. `stats()` exposes accepted/exported/dropped/failed/
-pending per signal. Retry attempts do not multiply item counts. A lost or invalid
+The portable defaults include a 208 KiB retained-operation budget, a 480 KiB
+traversal budget, 32 MiB of queued plus in-flight data per signal, and a
+128-level JSON guard. These bound library-owned data, not process RSS. The
+existing per-attribute content limit remains 16 KiB. Content budgets are
+clamped so that a span's content fits the request bound (480 KiB by default)
+with 64 KiB left for the span's other data: a raised budget truncates or omits
+(and lists) content instead of dropping the whole span. That 64 KiB is
+reserved, not enforced: a span whose other data outgrows it (attributes the
+application adds, a large resource, many or very long omitted prompt-variable
+names in `xybrid.genai.content.truncated_attributes`) can still exceed the
+bound and is then dropped as an oversized item. Content for a
+span that is not recording (an unsampled parent, suppression) is not
+processed. A Rust redaction hook that panics fails closed like one that
+returns an error: the value is omitted and listed, the run is unaffected.
+Oversized singletons are dropped; metrics collections that cannot fit fail
+explicitly. `stats()` exposes accepted/exported/dropped/failed/pending per
+signal; the Rust `PipelineStats` also carries `buffered_bytes`, the bytes held
+against the 32 MiB budget (not yet exposed through the foreign bindings). Retry attempts do not multiply item counts. A lost or invalid
 acknowledgement leaves delivery unknown. Flush waits through its acceptance
 barrier; shutdown closes admission, drains, cancels outstanding work at its
 deadline, and memoizes the result.

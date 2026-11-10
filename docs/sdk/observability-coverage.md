@@ -11,9 +11,9 @@ select metadata-only mode or native redaction rules deliberately.
 | Execution | Parent/control input | Reference output | Lifecycle |
 |---|---|---|---|
 | Model load: registry, path, reload, lazy materialization | Loader `.observation(...)` / existing options | Model `load_observation_ref()`; triggering run owns reload/lazy child | Load success/error; cancellation on abandoned work |
-| Model inference, sync/async, token stream | `RunOptions` observation | Inference/terminal result | Logical totals once, attempts retain own usage |
-| Pipeline | Pipeline observation options | Workflow on result; inference on stage results | Child stages and attempts share captured context |
-| Streamed TTS | Existing run options | SDK summary plus inference reference; foreign terminal result | Completion/error/cancellation ends operation |
+| Model inference, sync/async, token stream | `RunOptions` observation; `run_async`, `run_stream` and the facade's async run take none and read the caller's parent from the ambient context only ([trace model](trace-model.md#async-entry-points-without-options)) | Inference/terminal result | Logical totals once, attempts retain own usage; see [Run outcomes](#run-outcomes) |
+| Pipeline | Pipeline observation options | Workflow on result; inference on stage results | Child stages and attempts share captured context; a streaming consumer that stops the pipeline (its `on_token` fails) cancels the stage, its attempt and the workflow; pipelines do not act on `cancellation_token`, so a stage that fails for its own reason keeps its error type, as its workflow does |
+| Streamed TTS | Existing run options (`run_tts_streaming_async` included: its explicit parent wins wherever the future runs) | SDK summary plus inference reference; foreign terminal result | Completion/error/cancellation ends operation; a request cancelled, aborted or refused before synthesis is one operation with that outcome (a pre-cancelled request returns a cancelled summary with its reference) |
 | Live ASR | Session observation options | Decoder reference on partial; workflow on terminal transcription | Reset starts a new session; cached partials add no inference; foreign flush ends worker |
 | Manual workflow/tool/inference/load | Explicit normalized W3C options | Handle context/reference | First terminal transition wins; last owner cancels; no implicit flush |
 | CLI direct-core calls and REPL | Operation-scoped capture adapter | Trace artifact / renderer | Each operation owns its local capture |
@@ -23,6 +23,72 @@ The ASR and streamed-TTS rows describe supported audio interfaces; they do not
 add those interfaces to the browser GGUF preview. Third-party provider-child
 spans require instrumentation in that provider. Xybrid hops carry context;
 direct third-party origins require explicit allowlisting.
+
+### Run outcomes
+
+Every SDK model request (LLM run or stream, TTS, the reactive cloud fallback)
+is one operation that ends with exactly one outcome and records one duration
+point (`gen_ai.client.inference.duration`, or the operation duration for
+`predict` models) carrying that outcome's `error.type`, so a request ledger
+reconciles against the metric.
+
+| What happens | `error.type` | Notes |
+|---|---|---|
+| The run stops on its caller's cancellation: the abort gate stops on the cancelled `cancellation_token` (by the caller, or by a preempting run) | `cancelled` | Span `ERROR` `cancelled`, attempt included; no exception log |
+| The caller abandons a stream before its terminal event: drops the Rust `run_stream` stream, drops a facade streaming session or closes a Bolt stream (`stream_close`), unsubscribes the Flutter stream, or a token callback returns `AbortReason::UserCancelled` | `cancelled` | The run stops at its next token (the runtime sees one callback past the last delivered token); with or without a token. What the caller receives is unchanged |
+| A request cancelled before it runs (`check_before_run`, or a TTS token already cancelled) | `cancelled` | Recorded without waiting for a model whose lock a run in flight holds |
+| A resource abort before the run | the returned error's type: `aborted_for_cloud_fallback` when a streaming or TTS policy allows fallback, otherwise `inference_error` | On `run_streaming_with_fallback` this is the failed local attempt (`initial`, `local`), ahead of the remote `fallback` attempt; the request's outcome is the fallback's |
+| A refused input (for example a choice request to a model that does not score choices) | the refusal's type, such as `unsupported` | The runtime is never entered |
+| A run whose token was cancelled but that failed for its own reason (a batch run, which has no token boundary, or a stream whose `AbortPolicy` does not observe `UserCancelled`) | its own type, such as `inference_error` | Only a stop on the caller's cancellation is `cancelled` |
+
+`xybrid.genai.response.chunk_count` counts the tokens the caller's callback
+accepted: a token the abort gate stops, or that the caller refuses, is not a
+delivered chunk.
+
+### Content and delivery bounds
+
+These hold on every SDK path because the SDK records through the portable
+observer ([contract](../../crates/xybrid-observability/CONTRACT.md#content-pipeline)):
+
+- A run whose span does not record (an unsampled incoming parent,
+  `TraceMode::Suppress`, a live frame that is not traced) does no content
+  work for the span: no preflight, redaction hook, rules or truncation. Event
+  capture still processes its content.
+- A Rust redaction hook that panics fails closed like one that returns an
+  error: the run and its token stream are unaffected, and the value is omitted
+  and listed in `xybrid.genai.content.truncated_attributes`. An application
+  span processor that panics while a span ends is contained the same way.
+- The content budgets are clamped so that a span's content fits the 480 KiB
+  request bound with 64 KiB left for the span's other data: the
+  retained-operation budget is at most 208 KiB and the attribute budget at
+  most that, so a raised budget (including the facade's
+  `set_max_content_bytes`) truncates or omits (and lists) content instead of
+  dropping the span. That 64 KiB is reserved, not enforced: a span whose other
+  data outgrows it (attributes the application adds, a large resource, many
+  or very long omitted prompt-variable names) can still be dropped as an
+  oversized item.
+- The Rust `PipelineStats` reports, per signal, `buffered_bytes`: the bytes
+  held against the 32 MiB delivery budget, zero after shutdown. The facade and
+  the foreign bindings do not carry it yet.
+- After an observability shutdown, `stats()` (Rust) and every binding's
+  observability stats keep the shut-down session's final per-signal counters
+  until the next init, with export reported disabled: nothing pending, and
+  what the shutdown cancelled in flight (`failed`) or found still queued
+  (`dropped`) included, so `accepted = exported + dropped + failed` reconciles
+  per signal. An init that replaces a running session reports the new
+  session's counters at once; shut down first to read the old one's. Before
+  any init the counters are zero.
+- A per-run session or observer (`ObservationOptions::session` /
+  `::observer`, Rust only; no binding has a per-run content option) can lower
+  content capture but never raise it: its policy is capped by the session the
+  run would otherwise use (the enclosing operation's, else the default; a
+  disabled one caps nothing, so the next one out caps). The run records
+  content only where both capture, within the smaller budgets, redacted by
+  both policies' hooks and rules, each hook once per value.
+- Live frames: the sampler remembers at most 1,024 frame sessions, evicting
+  the least recently used, and forgets a session 300 s after its last frame;
+  a forgotten session's next frame is traced. Lookup is a hash probe, so a
+  per-frame session id neither grows memory nor scans the sessions.
 
 ## Binding surfaces and validation
 
@@ -42,6 +108,11 @@ policy and first-terminal-wins implementation.
 | React Native | TurboModule codec and both native shims | `WorkflowObservation`, `ToolObservation`, `InferenceObservation`, `ModelLoadObservation`; explicit `dispose()` and module invalidation | Native config/rules and lifecycle | Type, facade, wire, parity and Kotlin codec tests. No runtime lane: [`scenario.md`](../../tools/scripts/observability_capture/scenario.md) maps its API, but nothing runs the scenario through the TurboModule on iOS or Android yet, so this row is the one native surface the matrix does not demonstrate at runtime |
 | Browser | Worker propagation and generation result reference | Portable JS observer handles; browser model dispose | Application-owned provider lifecycle | Worker/control tests and typecheck; browser/model acceptance is a separate lane |
 | Portable JS | Explicit W3C controls / references | Workflow/tool/inference/load operations | Callback plus declarative policy, cancellable exporters | Shared fixtures, decoded wire and transport/lifecycle tests; real packed OTel 3.0/0.300 and 3.1/0.301 installations |
+
+The `lifecycle.shutdown` check requires the final counters after shutdown
+rather than zeros, so a lane passes it only with natives that keep the last
+snapshot readable; a native built before that change fails it. The lane
+results cited above predate the check.
 
 What the scenario lanes leave out:
 
@@ -63,7 +134,7 @@ does not establish a parent/reference round trip or a runtime lifecycle result.
 
 | Surface | Regression source | Execution boundary |
 |---|---|---|
-| Rust | [SDK observation tests](../../crates/xybrid-sdk/src/observability.rs), [load attribute tests](../../crates/xybrid-sdk/tests/load_observability.rs), [core decoder tests](../../crates/xybrid-core/src/streaming/session.rs), [facade tests](../../crates/xybrid-ffi-facade/tests/observability.rs) | Synthetic runtime/HTTP fixtures and real host resource measurements exercise orchestration; downloaded-model tests skip when their assets are absent |
+| Rust | [SDK observation tests](../../crates/xybrid-sdk/src/observability.rs), [load attribute tests](../../crates/xybrid-sdk/tests/load_observability.rs), [per-run content floor](../../crates/xybrid-sdk/tests/per_run_content.rs), [core decoder tests](../../crates/xybrid-core/src/streaming/session.rs), [facade tests](../../crates/xybrid-ffi-facade/tests/observability.rs) | Synthetic runtime/HTTP fixtures and real host resource measurements exercise orchestration; downloaded-model tests skip when their assets are absent |
 | Python | [Native observation tests](../../bindings/python/tests/test_observability.py), [runtime scenario](../../bindings/python/tests/test_observability_scenario.py) | Compiled native bridge and local OTLP/HTTP receiver; the runtime scenario runs the [reference implementation](../../bindings/python/tests/observability_scenario.py) through `run_scenario.py`, once as is and once without the omit rule |
 | Flutter | [Observation wrapper tests](../../bindings/flutter/test/observability_test.dart), [pipeline tests](../../bindings/flutter/test/pipeline_observability_test.dart), [runtime scenario](../../bindings/flutter/test/observability_scenario_test.dart) | Dart wrapper and mocked FRB boundary; the runtime scenario loads the native Linux library under `flutter test` against a local OTLP receiver when `run_scenario.py` gives it an endpoint (its CI job does), and skips otherwise; mobile device execution remains separate |
 | React Native | [Facade tests](../../bindings/react-native/tests/facade.test.mjs), [wire tests](../../bindings/react-native/tests/wire.test.mjs) | Mocked TurboModule; native codec tests and device execution add host coverage |

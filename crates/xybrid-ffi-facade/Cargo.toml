@@ -16,6 +16,12 @@ path = "src/lib.rs"
 # (`xybrid-bolt`, `xybrid-ffi`, `bindings/flutter/rust`) own the artifact
 # emission.
 
+[features]
+default = []
+# Test seams for the crates that wrap the facade (M-TEST-UTIL): a streaming
+# session over a caller-supplied run, so binding tests can pace its tokens.
+test-util = []
+
 [dependencies]
 xybrid-sdk = { workspace = true }
 xybrid-core = { path = "../xybrid-core", default-features = false }

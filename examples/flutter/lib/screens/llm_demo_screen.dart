@@ -267,8 +267,8 @@ class _LlmDemoScreenState extends State<LlmDemoScreen> {
 
     try {
       final envelope = XybridEnvelope.text(userMessage);
-      // Fresh cancel handle per run; wired into the stream so "Stop" can halt
-      // Rust generation, not just unsubscribe.
+      // Fresh cancel handle per run. "Stop" cancels it and unsubscribes;
+      // either one alone halts Rust generation at the next token.
       final cancellationToken = CancellationToken();
       _cancellationToken = cancellationToken;
       final stream = (_contextEnabled && _conversationContext != null)

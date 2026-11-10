@@ -10,6 +10,7 @@
 
 use std::env::VarError;
 use std::fmt;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -18,7 +19,8 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 use crate::preflight::{self, PreflightError};
 use crate::semconv::{
-    CAPTURE_CONTENT_ENV, CAPTURE_CONTENT_LEGACY_ENV, DEFAULT_MAX_CONTENT_ATTRIBUTE_BYTES,
+    span_content_ceiling, CAPTURE_CONTENT_ENV, CAPTURE_CONTENT_LEGACY_ENV,
+    DEFAULT_MAX_CONTENT_ATTRIBUTE_BYTES, DEFAULT_MAX_REQUEST_BODY_BYTES,
     DEFAULT_MAX_RETAINED_OPERATION_BYTES, DEFAULT_MAX_TRAVERSAL_BYTES, REDACTION_REPLACEMENT,
     TRUNCATION_MARKER, TRUNCATION_MIN_STRING_BYTES,
 };
@@ -152,6 +154,12 @@ impl std::error::Error for RedactionError {}
 /// error messages, feedback comments) receive a string and must return one.
 /// Returning `None` drops the value; `Some(Value::Null)` records JSON null.
 /// Runs on the caller's thread, before declarative rules and truncation.
+///
+/// A hook that panics fails closed exactly like one that returns
+/// [`RedactionError`]: the value is omitted and listed as truncated, the
+/// operation continues, and later values are redacted normally. The process's
+/// panic hook still runs (and reports the panic as it is configured to); a
+/// binary built with `panic = "abort"` aborts.
 pub trait Redactor: Send + Sync {
     /// Returns the value to record, or `None` to drop it.
     fn redact(&self, kind: &str, value: Value) -> Option<Value>;
@@ -312,29 +320,43 @@ impl RedactionRule {
 /// built with it resolves the mode from the environment once, at build time
 /// (see [`ContentCapture::from_env`]), falling back to `span_only`.
 /// [`ContentPolicy::with_capture`] sets it explicitly.
+///
+/// The content budgets are clamped so that one span's content cannot push
+/// its export request past `max_request_body_bytes` (CONTRACT.md "Content
+/// pipeline", budgets): the retained-operation budget is at most
+/// [`crate::semconv::span_content_ceiling`] of the request bound, and the
+/// attribute budget at most the retained-operation budget. Clamping never
+/// fails; the getters return the effective values.
 #[derive(Clone)]
 pub struct ContentPolicy {
     capture: Option<ContentCapture>,
     snapshot: Option<ContentCapture>,
+    /// Configured values; the getters clamp them.
     max_attribute_bytes: usize,
     max_retained_operation_bytes: usize,
+    max_request_body_bytes: usize,
     max_traversal_bytes: usize,
-    redactor: Option<Arc<dyn Redactor>>,
+    /// Redaction hooks in order, each on the previous one's output: none,
+    /// the one [`ContentPolicy::with_redactor`] installs, or those
+    /// [`ContentPolicy::capped_by`] combines (each hook once).
+    redactors: Arc<[Arc<dyn Redactor>]>,
     rules: Arc<[RedactionRule]>,
 }
 
 impl Default for ContentPolicy {
     /// Product default: capture mode from the environment (else span
-    /// attributes), 16 KiB per attribute, 480 KiB retained per operation and
-    /// traversed per value, no redaction hook, no rules.
+    /// attributes), 16 KiB per attribute, 208 KiB retained per operation
+    /// (the ceiling of the default 480 KiB request bound), 480 KiB traversed
+    /// per value, no redaction hook, no rules.
     fn default() -> Self {
         Self {
             capture: None,
             snapshot: None,
             max_attribute_bytes: DEFAULT_MAX_CONTENT_ATTRIBUTE_BYTES,
             max_retained_operation_bytes: DEFAULT_MAX_RETAINED_OPERATION_BYTES,
+            max_request_body_bytes: DEFAULT_MAX_REQUEST_BODY_BYTES,
             max_traversal_bytes: DEFAULT_MAX_TRAVERSAL_BYTES,
-            redactor: None,
+            redactors: Arc::from(Vec::new()),
             rules: Arc::from(Vec::new()),
         }
     }
@@ -362,17 +384,32 @@ impl ContentPolicy {
         self
     }
 
-    /// Sets the per-attribute byte budget `B` (minimum 1).
+    /// Sets the per-attribute byte budget `B` (minimum 1). The effective
+    /// budget is at most the effective retained-operation budget.
     #[must_use]
     pub fn with_max_attribute_bytes(mut self, bytes: usize) -> Self {
         self.max_attribute_bytes = bytes.max(1);
         self
     }
 
-    /// Sets the budget of content retained by one operation (minimum 1).
+    /// Sets the budget of content retained by one operation (minimum 1). The
+    /// effective budget is at most the span content ceiling of the request
+    /// bound.
     #[must_use]
     pub fn with_max_retained_operation_bytes(mut self, bytes: usize) -> Self {
         self.max_retained_operation_bytes = bytes.max(1);
+        self
+    }
+
+    /// Sets the `max_request_body_bytes` of the exporter that sends this
+    /// policy's spans (minimum 1; default 480 KiB), which the content
+    /// budgets are clamped to fit. An [`crate::otlp::ObservabilityPipeline`]
+    /// with a traces signal applies its own bound when it builds an observer
+    /// (the smaller one wins); set it here for providers the application
+    /// owns.
+    #[must_use]
+    pub fn with_max_request_body_bytes(mut self, bytes: usize) -> Self {
+        self.max_request_body_bytes = bytes.max(1);
         self
     }
 
@@ -386,7 +423,7 @@ impl ContentPolicy {
     /// Installs a redaction hook. Declarative rules run after it.
     #[must_use]
     pub fn with_redactor(mut self, redactor: impl Redactor + 'static) -> Self {
-        self.redactor = Some(Arc::new(redactor));
+        self.redactors = Arc::from(vec![Arc::new(redactor) as Arc<dyn Redactor>]);
         self
     }
 
@@ -428,6 +465,63 @@ impl ContentPolicy {
         self
     }
 
+    /// This policy, never capturing more content than `ceiling`:
+    ///
+    /// - content goes only to the destinations both capture modes include
+    ///   (`span_only` under `event_only` captures nothing);
+    /// - each byte budget and the request bound is the smaller of the two;
+    /// - `ceiling`'s redaction hooks run first and this policy's hooks that
+    ///   `ceiling` does not already hold run on their output, so no hook
+    ///   redacts a value twice; `ceiling`'s rules apply first, followed by
+    ///   this policy's rules that `ceiling` does not already have. A value
+    ///   that any hook drops or fails on is dropped or fails.
+    ///
+    /// Capping by a policy at least as permissive changes nothing, and
+    /// capping twice by the same ceiling, or again by a policy already
+    /// capped by this one, is the same as capping once.
+    #[must_use]
+    pub fn capped_by(&self, ceiling: &ContentPolicy) -> Self {
+        let (own, cap) = (self.capture(), ceiling.capture());
+        let spans = own.on_spans() && cap.on_spans();
+        let events = own.on_events() && cap.on_events();
+        let capture = match (spans, events) {
+            (true, true) => ContentCapture::SpanAndEvent,
+            (true, false) => ContentCapture::SpanOnly,
+            (false, true) => ContentCapture::EventOnly,
+            (false, false) => ContentCapture::NoContent,
+        };
+        let mut redactors = ceiling.redactors.to_vec();
+        redactors.extend(
+            self.redactors
+                .iter()
+                .filter(|own| !ceiling.redactors.iter().any(|hook| Arc::ptr_eq(hook, own)))
+                .cloned(),
+        );
+        let mut rules = ceiling.rules.to_vec();
+        rules.extend(
+            self.rules
+                .iter()
+                .filter(|rule| !ceiling.rules.contains(rule))
+                .cloned(),
+        );
+        Self {
+            capture: Some(capture),
+            snapshot: None,
+            max_attribute_bytes: self
+                .max_attribute_bytes()
+                .min(ceiling.max_attribute_bytes()),
+            max_retained_operation_bytes: self
+                .max_retained_operation_bytes()
+                .min(ceiling.max_retained_operation_bytes()),
+            max_request_body_bytes: self
+                .max_request_body_bytes
+                .min(ceiling.max_request_body_bytes),
+            max_traversal_bytes: self.max_traversal_bytes.min(ceiling.max_traversal_bytes),
+            redactors: Arc::from(redactors),
+            rules: Arc::from(rules),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn resolved_with(
         mut self,
@@ -441,16 +535,27 @@ impl ContentPolicy {
         self
     }
 
-    /// The per-attribute byte budget.
+    /// The effective per-attribute byte budget: the configured value, at
+    /// most [`ContentPolicy::max_retained_operation_bytes`].
     #[must_use]
     pub fn max_attribute_bytes(&self) -> usize {
         self.max_attribute_bytes
+            .min(self.max_retained_operation_bytes())
     }
 
-    /// The retained-operation byte budget.
+    /// The effective retained-operation byte budget: the configured value, at
+    /// most the span content ceiling of
+    /// [`ContentPolicy::max_request_body_bytes`].
     #[must_use]
     pub fn max_retained_operation_bytes(&self) -> usize {
         self.max_retained_operation_bytes
+            .min(span_content_ceiling(self.max_request_body_bytes))
+    }
+
+    /// The request body bound the content budgets fit.
+    #[must_use]
+    pub fn max_request_body_bytes(&self) -> usize {
+        self.max_request_body_bytes
     }
 
     /// The traversal byte budget.
@@ -501,7 +606,7 @@ impl ContentPolicy {
         if let Err(f) = self.apply_replacements(&mut value, cost) {
             return failed(kind, f);
         }
-        match truncate_json(value, self.max_attribute_bytes) {
+        match truncate_json(value, self.max_attribute_bytes()) {
             Some(bounded) => Outcome::Keep(bounded),
             None => failed(kind, Failure::Truncation),
         }
@@ -551,21 +656,36 @@ impl ContentPolicy {
 
     /// The plain-string byte bound `K = B`.
     pub(crate) fn text_bound(&self) -> TextBound {
-        TextBound::Bytes(self.max_attribute_bytes)
+        TextBound::Bytes(self.max_attribute_bytes())
     }
 
-    /// Calls the hook (if any) on the clone and validates its output. Returns
-    /// the value to continue with and its preflight cost, or `None` to drop.
+    /// Calls the hooks (if any) in order on the clone and validates the last
+    /// one's output. Returns the value to continue with and its preflight
+    /// cost, or `None` to drop.
     fn call_redactor(
         &self,
         kind: &str,
         clone: Value,
         cost: u64,
     ) -> std::result::Result<Option<(Value, u64)>, Failure> {
-        let Some(redactor) = &self.redactor else {
+        if self.redactors.is_empty() {
             return Ok(Some((clone, cost)));
-        };
-        match redactor.try_redact(kind, clone) {
+        }
+        // A panicking hook fails closed like one that returns an error (as a
+        // throwing JS hook does). Unwind safety: the hooks own the value they
+        // are handed and borrow nothing of ours mutably, and the panic stops
+        // here, before it can unwind through a lock a caller holds (an
+        // operation's end redacts its error message under the operation's
+        // state lock).
+        let redacted = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            self.redactors
+                .iter()
+                .try_fold(Some(clone), |value, redactor| match value {
+                    Some(value) => redactor.try_redact(kind, value),
+                    None => Ok(None),
+                })
+        }));
+        match redacted.unwrap_or(Err(RedactionError)) {
             Err(RedactionError) => Err(Failure::Redactor),
             Ok(None) => Ok(None),
             Ok(Some(out)) => match preflight::measure(&out, self.traversal()) {
@@ -659,6 +779,21 @@ impl ContentPolicy {
     }
 }
 
+/// UTF-8 length of `s` written inside a JSON string (quotes excluded): `"`,
+/// `\` and the short control escapes take two bytes, other control
+/// characters six (`\u00XX`); everything else is kept as is. Both packages'
+/// JSON writers escape exactly these.
+pub(crate) fn json_escaped_len(s: &str) -> usize {
+    s.len()
+        + s.bytes()
+            .map(|b| match b {
+                b'"' | b'\\' | b'\n' | b'\r' | b'\t' | 0x08 | 0x0c => 1,
+                0x00..=0x1f => 5,
+                _ => 0,
+            })
+            .sum::<usize>()
+}
+
 /// Preflight cost of a string of `len` UTF-8 bytes.
 fn preflight_len_cost(len: usize) -> u64 {
     (crate::semconv::PREFLIGHT_NODE_BYTES as u64).saturating_add(len as u64)
@@ -669,13 +804,14 @@ impl fmt::Debug for ContentPolicy {
         f.debug_struct("ContentPolicy")
             .field("capture", &self.capture())
             .field("explicit", &self.capture.is_some())
-            .field("max_attribute_bytes", &self.max_attribute_bytes)
+            .field("max_attribute_bytes", &self.max_attribute_bytes())
             .field(
                 "max_retained_operation_bytes",
-                &self.max_retained_operation_bytes,
+                &self.max_retained_operation_bytes(),
             )
+            .field("max_request_body_bytes", &self.max_request_body_bytes)
             .field("max_traversal_bytes", &self.max_traversal_bytes)
-            .field("redactor", &self.redactor.as_ref().map(|_| "<hook>"))
+            .field("redactors", &self.redactors.len())
             .field("rules", &self.rules.len())
             .finish()
     }
@@ -1419,6 +1555,96 @@ mod tests {
     }
 
     #[test]
+    fn a_panicking_redactor_fails_closed_without_affecting_later_values() {
+        // A panic is the same failure as `Err(RedactionError)`.
+        let hook = |kind: &str, value: Value| {
+            assert!(kind != "panics", "redactor panicked");
+            Some(value)
+        };
+        let p = ContentPolicy::default().with_redactor(hook);
+        assert!(matches!(
+            p.prepare_json("panics", &json!({"a": 1})),
+            Outcome::Failed
+        ));
+        assert!(matches!(
+            p.prepare_text("panics", "x", p.text_bound()),
+            Outcome::Failed
+        ));
+        assert_eq!(
+            keep(p.prepare_json("ok", &json!({"a": 1}))).value,
+            json!({"a": 1})
+        );
+        assert_eq!(keep(p.prepare_text("ok", "x", p.text_bound())).text, "x");
+    }
+
+    #[test]
+    fn budgets_are_clamped_to_fit_one_span_in_the_request_bound() {
+        // Retained <= (request - allowance) / growth, attribute
+        // <= retained; clamping never fails and the getters are effective.
+        use crate::semconv::{
+            span_content_ceiling, SPAN_CONTENT_ENCODING_GROWTH, SPAN_ENVELOPE_ALLOWANCE_BYTES,
+        };
+        let ceiling = (DEFAULT_MAX_REQUEST_BODY_BYTES - SPAN_ENVELOPE_ALLOWANCE_BYTES)
+            / SPAN_CONTENT_ENCODING_GROWTH;
+        assert_eq!(ceiling, 212_992);
+        assert_eq!(
+            span_content_ceiling(DEFAULT_MAX_REQUEST_BODY_BYTES),
+            ceiling
+        );
+        // A bound at or below the allowance leaves one byte.
+        assert_eq!(span_content_ceiling(SPAN_ENVELOPE_ALLOWANCE_BYTES), 1);
+        assert_eq!(span_content_ceiling(1), 1);
+
+        let raised = ContentPolicy::default()
+            .with_max_attribute_bytes(400_000)
+            .with_max_retained_operation_bytes(1_000_000);
+        assert_eq!(raised.max_retained_operation_bytes(), ceiling);
+        assert_eq!(raised.max_attribute_bytes(), ceiling);
+        // The attribute budget follows a lower retained budget, in either
+        // order of the builder calls.
+        let lower = ContentPolicy::default()
+            .with_max_retained_operation_bytes(1000)
+            .with_max_attribute_bytes(5000);
+        assert_eq!(lower.max_attribute_bytes(), 1000);
+        let lower = ContentPolicy::default()
+            .with_max_attribute_bytes(5000)
+            .with_max_retained_operation_bytes(1000);
+        assert_eq!(lower.max_attribute_bytes(), 1000);
+        // A smaller request bound lowers both; values under it are kept.
+        let bound = SPAN_ENVELOPE_ALLOWANCE_BYTES + 2 * 10_000;
+        let small = raised.clone().with_max_request_body_bytes(bound);
+        assert_eq!(small.max_request_body_bytes(), bound);
+        assert_eq!(small.max_retained_operation_bytes(), 10_000);
+        assert_eq!(small.max_attribute_bytes(), 10_000);
+        let kept = ContentPolicy::default()
+            .with_max_attribute_bytes(64)
+            .with_max_request_body_bytes(bound);
+        assert_eq!(kept.max_attribute_bytes(), 64);
+        // Truncation uses the effective budget.
+        let t = keep(small.prepare_text("k", &"a".repeat(20_000), small.text_bound()));
+        assert!(t.truncated);
+        assert_eq!(t.text.len(), 10_000 + TRUNCATION_MARKER.len());
+        let j = keep(small.prepare_json("k", &json!(["b".repeat(20_000)])));
+        assert!(j.truncated && j.json.len() <= 10_000, "{}", j.json.len());
+    }
+
+    #[test]
+    fn json_escaped_len_counts_what_json_writers_escape() {
+        for s in [
+            "plain",
+            "",
+            "é漢🎉",
+            "\u{7f}",
+            "a\"b\\c",
+            "\n\r\t\u{8}\u{c}",
+            "\u{0}\u{1f}",
+        ] {
+            let written = serde_json::to_string(s).unwrap();
+            assert_eq!(json_escaped_len(s), written.len() - 2, "{s:?}");
+        }
+    }
+
+    #[test]
     fn redactor_output_is_validated() {
         let deep = |_: &str, _: Value| {
             let mut v = json!("x");
@@ -1680,5 +1906,150 @@ mod tests {
         let rewritten = items.iter().filter(|s| **s != value[0]).count();
         let room = (policy.traversal() - cost) / 1440;
         assert_eq!(rewritten as u64, room, "only strings that fit were built");
+    }
+
+    #[test]
+    fn a_capped_policy_captures_only_what_both_policies_allow() {
+        // A per-operation policy can only lower capture
+        // below the policy the operation would otherwise run under.
+        use ContentCapture::{EventOnly, NoContent, SpanAndEvent, SpanOnly};
+        let modes = [NoContent, SpanOnly, EventOnly, SpanAndEvent];
+        for own in modes {
+            for ceiling in modes {
+                let capped = ContentPolicy::default()
+                    .with_capture(own)
+                    .capped_by(&ContentPolicy::default().with_capture(ceiling))
+                    .capture();
+                assert_eq!(
+                    (capped.on_spans(), capped.on_events()),
+                    (
+                        own.on_spans() && ceiling.on_spans(),
+                        own.on_events() && ceiling.on_events()
+                    ),
+                    "{own:?} capped by {ceiling:?}"
+                );
+            }
+        }
+        // The environment cannot raise a capped mode: it is explicit.
+        let capped = ContentPolicy::default().capped_by(&ContentPolicy::metadata_only());
+        assert_eq!(capped.explicit_capture(), Some(NoContent));
+
+        // Each budget is the smaller one, whichever side sets it.
+        let small = ContentPolicy::default()
+            .with_max_attribute_bytes(64)
+            .with_max_retained_operation_bytes(1024)
+            .with_max_traversal_bytes(2048)
+            .with_max_request_body_bytes(100_000);
+        let large = ContentPolicy::default()
+            .with_max_attribute_bytes(100_000)
+            .with_max_traversal_bytes(1_000_000);
+        for capped in [large.capped_by(&small), small.capped_by(&large)] {
+            assert_eq!(capped.max_attribute_bytes(), 64);
+            assert_eq!(capped.max_retained_operation_bytes(), 1024);
+            assert_eq!(capped.max_traversal_bytes(), 2048);
+            assert_eq!(capped.max_request_body_bytes(), 100_000);
+        }
+    }
+
+    #[test]
+    fn a_capped_policy_redacts_with_the_ceiling_first_then_its_own() {
+        let ceiling = ContentPolicy::default()
+            .with_redactor(SubstringRedactor::new(["floor-secret"]))
+            .with_rules([
+                RedactionRule::replace_literal("floor-word", "<floor>").unwrap(),
+                RedactionRule::omit_attribute("floor-key").unwrap(),
+            ]);
+        let own = ContentPolicy::default()
+            .with_redactor(|_kind: &str, value: Value| {
+                // Sees the ceiling hook's output.
+                let text = value.as_str()?.replace("[REDACTED]", "<own-saw-floor>");
+                Some(Value::String(text.replace("own-secret", "<own>")))
+            })
+            .with_rules([
+                RedactionRule::replace_literal("<floor>", "<floor-then-own>").unwrap(),
+                RedactionRule::omit_attribute("own-key").unwrap(),
+            ]);
+        let capped = own.capped_by(&ceiling);
+        let text = keep(capped.prepare_text(
+            "k",
+            "floor-secret own-secret floor-word",
+            capped.text_bound(),
+        ))
+        .text;
+        assert_eq!(text, "<own-saw-floor> <own> <floor-then-own>");
+        for key in ["floor-key", "own-key"] {
+            assert!(matches!(
+                capped.prepare_text(key, "x", capped.text_bound()),
+                Outcome::Dropped
+            ));
+        }
+
+        // Either hook failing fails the value closed.
+        let failing = ContentPolicy::default().with_redactor(Flaky);
+        for capped in [own.capped_by(&failing), failing.capped_by(&own)] {
+            assert!(matches!(
+                capped.prepare_text("fail", "x", capped.text_bound()),
+                Outcome::Failed
+            ));
+            assert!(matches!(
+                capped.prepare_text("drop", "x", capped.text_bound()),
+                Outcome::Dropped
+            ));
+        }
+
+        // Capping again by the same ceiling changes nothing: its hook and
+        // rules are not applied twice.
+        let counting = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let calls = counting.clone();
+        let ceiling = ContentPolicy::default()
+            .with_redactor(move |_kind: &str, value: Value| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Some(value)
+            })
+            .with_rule(RedactionRule::replace_literal("a", "aa").unwrap());
+        let twice = ContentPolicy::default()
+            .capped_by(&ceiling)
+            .capped_by(&ceiling);
+        assert_eq!(twice.rules(), ceiling.rules());
+        assert_eq!(
+            keep(twice.prepare_text("k", "a", twice.text_bound())).text,
+            "aa"
+        );
+        assert_eq!(counting.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn capping_again_never_runs_a_hook_twice() {
+        // A nested operation re-caps a per-run policy by its parent's policy,
+        // which that same per-run policy already shaped. Each hook still runs
+        // once per value, in the ceiling-first order, however often the
+        // policies are combined.
+        let marker = |mark: &'static str| {
+            move |_kind: &str, value: Value| {
+                Some(Value::String(format!("{}{mark}", value.as_str()?)))
+            }
+        };
+        let ceiling = ContentPolicy::default().with_redactor(marker("+c"));
+        let own = ContentPolicy::default().with_redactor(marker("+o"));
+        let once = own.capped_by(&ceiling);
+        let combinations = [
+            ("once", once.clone()),
+            ("twice by the ceiling", once.capped_by(&ceiling)),
+            ("by its own capped policy", own.capped_by(&once)),
+            ("the capped policy by itself", once.capped_by(&once)),
+        ];
+        for (name, policy) in combinations {
+            assert_eq!(
+                keep(policy.prepare_text("k", "x", policy.text_bound())).text,
+                "x+c+o",
+                "{name}"
+            );
+        }
+        // The other way round, the other order.
+        let reversed = ceiling.capped_by(&own);
+        assert_eq!(
+            keep(reversed.prepare_text("k", "x", reversed.text_bound())).text,
+            "x+o+c"
+        );
     }
 }

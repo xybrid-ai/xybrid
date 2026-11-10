@@ -26,7 +26,9 @@
 //! Applications that already own OpenTelemetry providers pass an
 //! [`Observer`] built from them with [`ObservabilityConfig::with_observer`].
 //! Prompts and outputs are captured once observability is enabled; use
-//! [`ContentPolicy::metadata_only`] to record metadata only.
+//! [`ContentPolicy::metadata_only`] to record metadata only. A per-run
+//! session or observer can lower that capture for one run, never raise it
+//! (see [`ObservationOptions::session`]).
 //!
 //! Per run, [`ObservationOptions`] on `RunOptions` sets an explicit parent
 //! (for example a `traceparent` from another process or language), a
@@ -48,6 +50,7 @@ use xybrid_core::device::{
 };
 use xybrid_core::execution::{ExecutionTemplate, ModelMetadata};
 use xybrid_core::ir::{Envelope, EnvelopeKind, ImageSource};
+use xybrid_core::runtime_adapter::types::StreamingError;
 use xybrid_core::tracing::{RecorderScope, TraceHeaders, TraceRecorder};
 
 pub use xybrid_observability::otlp::{
@@ -167,6 +170,11 @@ impl ObservabilityConfig {
 
     /// Minimum interval between traced frames of one live session. Every frame
     /// is still counted in metrics. Defaults to one second.
+    ///
+    /// The sampler remembers at most 1,024 frame sessions, evicting the least
+    /// recently used, and forgets a session 300 s after its last frame; a
+    /// forgotten session's next frame is traced. A fresh frame session id per
+    /// frame therefore traces every frame without growing memory.
     pub fn live_trace_interval(mut self, interval: Duration) -> Self {
         self.live_trace_interval = interval;
         self
@@ -252,9 +260,21 @@ pub fn is_enabled() -> bool {
     observer().is_enabled()
 }
 
-/// Per-signal delivery counters, unavailable for borrowed providers.
+/// Per-signal delivery counters of the default session; unavailable for
+/// borrowed providers.
+///
+/// After [`shutdown_observability`] uninstalls a helper-owned default (one
+/// [`init_observability`] created), this keeps returning that session's
+/// counters, settled by the shutdown: the final per-signal totals, with what
+/// it failed (in flight at its deadline) or dropped (still queued), and
+/// nothing pending. They stay readable until the next [`init_observability`]
+/// or [`install_default_session`], whose session starts its own counters. An
+/// [`init_observability`] that replaces a default without a shutdown starts
+/// the new session's counters at once: shut the old one down first to read
+/// its final counters. After uninstalling an application-installed session
+/// this is `None`; read that session's own [`ObservabilitySession::stats`].
 pub fn stats() -> Option<PipelineStats> {
-    default_session().and_then(|s| s.stats())
+    session::default_stats()
 }
 
 /// The workspace feedback of the default session's Xybrid trace destination
@@ -289,10 +309,13 @@ pub async fn flush_observability_async(timeout: Duration) -> SdkResult<()> {
 /// Uninstalls the default session, shutting down a helper-owned pipeline.
 /// Application-installed sessions retain application-controlled lifecycle.
 ///
+/// A helper-owned session's final counters stay readable through [`stats`]
+/// until the next initialization.
+///
 /// # Errors
 /// Returns timeout or delivery errors from a helper-owned pipeline.
 pub fn shutdown_observability(timeout: Duration) -> SdkResult<()> {
-    match session::take_default() {
+    match session::uninstall_default() {
         Some(slot) if slot.helper_owned => slot.session.shutdown(timeout),
         _ => Ok(()),
     }
@@ -303,7 +326,7 @@ pub fn shutdown_observability(timeout: Duration) -> SdkResult<()> {
 /// # Errors
 /// As for [`shutdown_observability`].
 pub async fn shutdown_observability_async(timeout: Duration) -> SdkResult<()> {
-    match session::take_default() {
+    match session::uninstall_default() {
         Some(slot) if slot.helper_owned => slot.session.shutdown_async(timeout).await,
         _ => Ok(()),
     }
@@ -402,8 +425,18 @@ pub struct ObservationOptions {
     /// Trace hint. Metrics are recorded either way.
     pub trace: TraceMode,
     /// Session override, retained for the operation and all its children.
+    ///
+    /// It can lower content capture, never raise it: its content policy is
+    /// capped by the policy of the session the operation would otherwise use
+    /// (the enclosing operation's, else the default), so content goes only
+    /// where both capture, within the smaller budgets, redacted by both. A
+    /// session whose observer is disabled records nothing and caps nothing,
+    /// so the next one out caps instead: inside an operation that observes
+    /// nothing, the default still caps. With neither, its own policy applies.
     pub session: Option<ObservabilitySession>,
-    /// Observer override for this run (borrowed provider lifecycle).
+    /// Observer override for this run (borrowed provider lifecycle). Capped
+    /// like [`Self::session`]. To lower capture on the default's providers,
+    /// pass `observability::observer().content_capped_by(&ContentPolicy::metadata_only())`.
     pub observer: Option<Observer>,
     /// Extra span attributes.
     pub attributes: Vec<KeyValue>,
@@ -670,6 +703,23 @@ impl RunSubject {
         }
     }
 
+    /// A subject that knows only its model's id, for a request recorded
+    /// before the model's metadata could be read.
+    pub(crate) fn unknown(model: &str) -> Self {
+        Self {
+            operation: "predict",
+            task: None,
+            runtime: None,
+            model: model.to_owned(),
+            format: None,
+            size_bytes: None,
+            input_modalities: Vec::new(),
+            output_modalities: Vec::new(),
+            output_type: None,
+            is_llm: false,
+        }
+    }
+
     /// A subject for a remote (gateway) leg serving `model`.
     pub(crate) fn remote_chat(model: &str) -> Self {
         Self {
@@ -716,12 +766,58 @@ pub(crate) struct RunObservation {
     server: Option<(Option<String>, Option<i64>)>,
     /// Shared with attempt recorders, whose transport retries start attempts too.
     attempts: Arc<std::sync::atomic::AtomicU32>,
+    /// Set where the run stopped on its caller's cancellation (see
+    /// [`ends_cancelled`]).
+    stopped: CancelMark,
+}
+
+/// Where a run stopped on its caller's cancellation.
+///
+/// Set by whatever stops the run for that reason, at the point it stops: an
+/// abort gate that stopped on [`AbortReason::UserCancelled`], a token callback
+/// that returned it (the consumer of a stream went away), or a pipeline
+/// consumer whose `on_token` failed. The run's error then says only that the
+/// stream failed, so the mark, not the error or the token, decides that it
+/// ends `cancelled`. Shared with the run's attempts.
+///
+/// [`AbortReason::UserCancelled`]: crate::run_options::AbortReason::UserCancelled
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CancelMark(Arc<std::sync::atomic::AtomicBool>);
+
+impl CancelMark {
+    /// Records that the run stopped on its caller's cancellation.
+    pub(crate) fn set(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Records the cancellation `error` carries, if it is one: the typed
+    /// [`AbortReason::UserCancelled`] an abort gate or a token callback
+    /// returns to stop a stream.
+    ///
+    /// [`AbortReason::UserCancelled`]: crate::run_options::AbortReason::UserCancelled
+    pub(crate) fn note(&self, error: &(dyn std::error::Error + 'static)) {
+        if is_user_cancel(error) {
+            self.set();
+        }
+    }
+
+    fn is_set(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// Whether a token callback's `error` is the caller's cancellation.
+fn is_user_cancel(error: &(dyn std::error::Error + 'static)) -> bool {
+    error
+        .downcast_ref::<crate::run_options::AbortReason>()
+        .is_some_and(|reason| *reason == crate::run_options::AbortReason::UserCancelled)
 }
 
 /// Records streamed chunks from token callbacks (which must be `Send`).
 #[derive(Clone)]
 pub(crate) struct ChunkSink {
     op: Arc<InferenceOperation>,
+    stopped: CancelMark,
 }
 
 impl ChunkSink {
@@ -730,6 +826,31 @@ impl ChunkSink {
     /// runtime's measured `ttft_ms` (see `RunObservation::apply_harvest`).
     pub(crate) fn chunk(&self) {
         self.op.record_chunk();
+    }
+
+    /// Hands one token to the caller through `deliver` and counts it as a
+    /// delivered chunk, timed when it was handed over, once `deliver`
+    /// accepts it. The time is the operation's anchored reading, as for
+    /// every other default timing call, so a wall-clock step mid-stream does
+    /// not distort the chunk timings. A token the caller refuses is not
+    /// delivered; a refusal that is the caller's cancellation (see
+    /// [`CancelMark::note`]) marks the run cancelled.
+    pub(crate) fn deliver(
+        &self,
+        deliver: impl FnOnce() -> Result<(), StreamingError>,
+    ) -> Result<(), StreamingError> {
+        let at = self.op.now();
+        let delivered = deliver();
+        match &delivered {
+            Ok(()) => self.op.record_chunk_at(at),
+            Err(error) => self.stopped.note(error.as_ref()),
+        }
+        delivered
+    }
+
+    /// The run's cancellation mark, for callbacks that stop it.
+    pub(crate) fn cancel_mark(&self) -> &CancelMark {
+        &self.stopped
     }
 }
 
@@ -752,6 +873,8 @@ pub(crate) struct AttemptScope {
     parent_stages: Arc<StageRecorder>,
     started: SystemTime,
     logical_started: SystemTime,
+    /// The run's cancellation mark (see [`ends_cancelled`]).
+    stopped: CancelMark,
     _scope: Option<RecorderScope>,
 }
 
@@ -799,7 +922,7 @@ impl AttemptScope {
         };
         match result {
             Ok(_) => op.end(),
-            Err(SdkError::Cancelled { .. }) => op.cancel(),
+            Err(e) if ends_cancelled(e, &self.stopped) => op.cancel(),
             Err(e) => op.end_with_error(&error_info(e)),
         }
     }
@@ -913,6 +1036,9 @@ impl AttemptScope {
 /// model runs started beneath it) become its children.
 pub(crate) struct WorkflowScope {
     op: WorkflowOperation,
+    /// Set when the consumer of the workflow's stream stopped it (see
+    /// [`CancelMark`]).
+    stopped: CancelMark,
     _scope: Option<RecorderScope>,
 }
 
@@ -948,6 +1074,7 @@ impl WorkflowScope {
         let scope = RecorderScope::install(stages);
         Self {
             op,
+            stopped: CancelMark::default(),
             _scope: Some(scope),
         }
     }
@@ -970,6 +1097,12 @@ impl WorkflowScope {
         self.op.context()
     }
 
+    /// The workflow's cancellation mark: a streaming consumer that stops the
+    /// workflow sets it, so the workflow ends `cancelled` with its stage.
+    pub(crate) fn cancel_mark(&self) -> &CancelMark {
+        &self.stopped
+    }
+
     /// Ends the workflow with `result`, returning its reference on success.
     pub(crate) fn end<T>(mut self, result: &SdkResult<T>) -> Option<ObservationRef> {
         self._scope.take();
@@ -979,7 +1112,7 @@ impl WorkflowScope {
                 self.op.end();
                 reference
             }
-            Err(e) if is_cancellation(e) => {
+            Err(e) if is_cancellation(e) || self.stopped.is_set() => {
                 self.op.cancel();
                 None
             }
@@ -1162,6 +1295,7 @@ impl RunObservation {
             subject,
             server,
             attempts: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            stopped: CancelMark::default(),
         }
     }
 
@@ -1169,7 +1303,14 @@ impl RunObservation {
     pub(crate) fn chunk_sink(&self) -> ChunkSink {
         ChunkSink {
             op: self.op.clone(),
+            stopped: self.stopped.clone(),
         }
+    }
+
+    /// Records that the run stopped on its caller's cancellation (see
+    /// [`CancelMark`]).
+    pub(crate) fn mark_cancelled(&self) {
+        self.stopped.set();
     }
 
     /// Starts the next execution attempt of this run.
@@ -1225,6 +1366,7 @@ impl RunObservation {
             parent_stages: self.stages.clone(),
             started,
             logical_started: self.started,
+            stopped: self.stopped.clone(),
             _scope: Some(scope),
         }
     }
@@ -1297,7 +1439,7 @@ impl RunObservation {
     /// Ends the run with an error (user cancellation ends it as cancelled).
     pub(crate) fn fail(self, error: &SdkError) {
         self.apply_harvest(None);
-        if is_cancellation(error) {
+        if ends_cancelled(error, &self.stopped) {
             self.op.cancel();
         } else {
             self.op.end_with_error(&error_info(error));
@@ -1401,6 +1543,18 @@ fn is_cancellation(error: &SdkError) -> bool {
         }
         _ => false,
     }
+}
+
+/// Whether a run (or one of its attempts) that failed with `error` ends as
+/// cancelled: a cancellation error, or a run that stopped on its caller's
+/// cancellation (see [`CancelMark`]). What reaches the run after a stream
+/// stops is the callback's failure wrapped as an inference error (`Streaming
+/// callback failed`, or `Streaming execution failed` when the runtime adapter
+/// keeps only the cause's text), so the mark set where it stopped is the
+/// signal that survives every shape. The token is not read: a run whose token
+/// was cancelled but that failed for its own reason keeps its error type.
+fn ends_cancelled(error: &SdkError, stopped: &CancelMark) -> bool {
+    is_cancellation(error) || stopped.is_set()
 }
 
 /// Host and port of the configured LLM gateway.
@@ -2922,12 +3076,15 @@ impl AsyncWorkflow {
     }
 }
 
-/// In-memory span capture through an application-owned tracer provider, for
-/// tests that assert exported spans without a network collector.
+/// In-memory span, metric and log capture through application-owned
+/// providers, for tests that assert exported signals without a collector.
 #[cfg(test)]
 pub(crate) mod test_support {
     use super::*;
     use opentelemetry_sdk::error::OTelSdkResult;
+    use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider};
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
     use opentelemetry_sdk::trace::{SdkTracerProvider, SpanData, SpanProcessor};
 
     /// Every ended span, in end order.
@@ -3037,6 +3194,145 @@ pub(crate) mod test_support {
         (ObservabilitySession::new(config).unwrap(), memory, provider)
     }
 
+    /// One metric data point read back from the in-memory exporter.
+    #[derive(Clone, Debug, PartialEq)]
+    pub(crate) struct Point {
+        /// Attribute values, by key, as strings.
+        pub(crate) attributes: std::collections::BTreeMap<String, String>,
+        /// A histogram's count, or a counter's value.
+        pub(crate) count: u64,
+    }
+
+    impl Point {
+        pub(crate) fn attr(&self, key: &str) -> Option<&str> {
+            self.attributes.get(key).map(String::as_str)
+        }
+    }
+
+    /// A configured session over application-owned tracer, meter and logger
+    /// providers that keep every span, metric point and log record in memory
+    /// (see [`memory_session_with_signals`]). Keep it alive for the test.
+    pub(crate) struct Signals {
+        pub(crate) session: ObservabilitySession,
+        pub(crate) spans: Memory,
+        pub(crate) metrics: InMemoryMetricExporter,
+        pub(crate) logs: InMemoryLogExporter,
+        meter: SdkMeterProvider,
+        // Kept alive for the test, like the meter.
+        _tracer: SdkTracerProvider,
+        _logger: SdkLoggerProvider,
+    }
+
+    impl Signals {
+        /// Every data point of the metric `name`, read after a meter flush.
+        /// Temporality is cumulative, so each point counts everything recorded
+        /// for its attributes so far.
+        pub(crate) fn points(&self, name: &str) -> Vec<Point> {
+            self.meter.force_flush().expect("meter flush");
+            let finished = self.metrics.get_finished_metrics().expect("metrics");
+            let Some(last) = finished.last() else {
+                return Vec::new();
+            };
+            fn point<'a>(attributes: impl Iterator<Item = &'a KeyValue>, count: u64) -> Point {
+                Point {
+                    attributes: attributes
+                        .map(|kv| (kv.key.to_string(), kv.value.to_string()))
+                        .collect(),
+                    count,
+                }
+            }
+            let mut out = Vec::new();
+            for metric in last
+                .scope_metrics()
+                .flat_map(|scope| scope.metrics())
+                .filter(|m| m.name() == name)
+            {
+                match metric.data() {
+                    AggregatedMetrics::F64(MetricData::Histogram(h)) => {
+                        out.extend(h.data_points().map(|p| point(p.attributes(), p.count())));
+                    }
+                    AggregatedMetrics::U64(MetricData::Histogram(h)) => {
+                        out.extend(h.data_points().map(|p| point(p.attributes(), p.count())));
+                    }
+                    AggregatedMetrics::U64(MetricData::Sum(s)) => {
+                        out.extend(s.data_points().map(|p| point(p.attributes(), p.value())));
+                    }
+                    _ => panic!("{name} is neither a histogram nor a u64 counter"),
+                }
+            }
+            out
+        }
+
+        /// Event names of every emitted log record, in emit order.
+        pub(crate) fn log_events(&self) -> Vec<String> {
+            self.logs
+                .get_emitted_logs()
+                .expect("logs")
+                .iter()
+                .filter_map(|l| l.record.event_name().map(str::to_owned))
+                .collect()
+        }
+    }
+
+    /// [`memory_session_with_signals_configured`] with the default config.
+    pub(crate) fn memory_session_with_signals() -> Signals {
+        memory_session_with_signals_configured(|config| config)
+    }
+
+    /// A session built by `configure` from [`ObservabilityConfig::with_observer`]
+    /// over in-memory span, metric and log providers, so session options such
+    /// as `live_trace_interval` apply.
+    pub(crate) fn memory_session_with_signals_configured(
+        configure: impl FnOnce(ObservabilityConfig) -> ObservabilityConfig,
+    ) -> Signals {
+        signals_over(None, configure)
+    }
+
+    /// [`memory_session_with_signals`] whose observer records content under
+    /// `policy`. An application-owned observer carries its own content policy
+    /// (`ObservabilityConfig::content` applies to packaged pipelines only).
+    pub(crate) fn memory_session_with_content(policy: ContentPolicy) -> Signals {
+        signals_over(Some(policy), |config| config)
+    }
+
+    fn signals_over(
+        policy: Option<ContentPolicy>,
+        configure: impl FnOnce(ObservabilityConfig) -> ObservabilityConfig,
+    ) -> Signals {
+        let spans = Memory::default();
+        let tracer = SdkTracerProvider::builder()
+            .with_span_processor(spans.clone())
+            .build();
+        let metrics = InMemoryMetricExporter::default();
+        let meter = SdkMeterProvider::builder()
+            .with_reader(PeriodicReader::builder(metrics.clone()).build())
+            .build();
+        let logs = InMemoryLogExporter::default();
+        let logger = SdkLoggerProvider::builder()
+            .with_simple_exporter(logs.clone())
+            .build();
+        let mut observer = Observer::builder()
+            .tracer_provider(&tracer)
+            .meter_provider(&meter)
+            .logger_provider(&logger);
+        if let Some(policy) = policy {
+            observer = observer.content_policy(policy);
+        }
+        let session = ObservabilitySession::new(configure(ObservabilityConfig::with_observer(
+            observer.build(),
+        )))
+        .expect("observer sessions are valid");
+        Signals {
+            session,
+            spans,
+            metrics,
+            logs,
+            meter,
+            _tracer: tracer,
+            _logger: logger,
+        }
+    }
+
     /// Serializes tests that replace the process-wide default session, so
     /// parallel test threads never observe each other's defaults.
     pub(crate) fn default_session_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -3063,6 +3359,169 @@ pub(crate) mod test_support {
     pub(crate) fn trace_id(span: &SpanData) -> String {
         span.span_context.trace_id().to_string()
     }
+
+    /// Holds [`default_session_lock`] with no default session installed, and
+    /// restores the previous default when dropped.
+    ///
+    /// A test whose per-run session or observer captures more content than
+    /// the product default policy holds one: a default installed by another
+    /// test would cap that content.
+    pub(crate) struct NoDefaultSession {
+        previous: Option<super::session::DefaultSlot>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl NoDefaultSession {
+        pub(crate) fn hold() -> Self {
+            let lock = default_session_lock();
+            Self {
+                previous: super::session::uninstall_default(),
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for NoDefaultSession {
+        fn drop(&mut self) {
+            // Whatever the test installed meanwhile goes first.
+            let _ = super::session::uninstall_default();
+            if let Some(previous) = self.previous.take() {
+                super::session::replace_default(previous.session, previous.helper_owned);
+            }
+        }
+    }
+
+    /// Installs a session as the process default until dropped, then
+    /// restores the previous default. Hold [`default_session_lock`] while it
+    /// lives.
+    pub(crate) struct DefaultSession(Option<ObservabilitySession>);
+
+    impl DefaultSession {
+        pub(crate) fn install(session: &ObservabilitySession) -> Self {
+            Self(install_default_session(session.clone()))
+        }
+    }
+
+    impl Drop for DefaultSession {
+        fn drop(&mut self) {
+            // Uninstalls an application-installed default without shutting it down.
+            let _ = shutdown_observability(Duration::ZERO);
+            if let Some(previous) = self.0.take() {
+                install_default_session(previous);
+            }
+        }
+    }
+
+    impl Memory {
+        /// How many spans have ended so far (a mark for [`Memory::named_since`]).
+        pub(crate) fn mark(&self) -> usize {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .len()
+        }
+
+        /// The only span named `name` among those ended after the first `mark`.
+        pub(crate) fn named_since(&self, mark: usize, name: &str) -> SpanData {
+            let spans = self.spans();
+            let matching: Vec<_> = spans
+                .iter()
+                .skip(mark)
+                .filter(|s| s.name == name)
+                .cloned()
+                .collect();
+            assert_eq!(
+                matching.len(),
+                1,
+                "expected one new span {name:?}, have {:?}",
+                spans
+                    .iter()
+                    .skip(mark)
+                    .map(|s| s.name.to_string())
+                    .collect::<Vec<_>>()
+            );
+            matching.into_iter().next().unwrap()
+        }
+    }
+
+    /// How a caller drives an async SDK entry point that takes no observation
+    /// options, relative to the application context it attached. The
+    /// entry point reads the ambient context where its future first runs.
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) enum Hop {
+        /// `tokio::spawn` on a multi-thread runtime after `Context::attach`
+        /// on the caller: the worker that polls the task never sees it.
+        Spawned,
+        /// `tokio::spawn(future.with_context(cx))`: every poll sees it.
+        WithContext,
+        /// `block_on` on a current-thread runtime after `Context::attach`:
+        /// the future runs on the caller's thread.
+        BlockOn,
+    }
+
+    impl Hop {
+        /// Every hop; the spawned one last, so a context left behind by an
+        /// earlier call would show up in it.
+        pub(crate) const ALL: [Self; 3] = [Self::WithContext, Self::BlockOn, Self::Spawned];
+
+        /// Runs `future` this way, under the application context `parent`.
+        pub(crate) fn run<F>(self, parent: &ObservationContext, future: F) -> F::Output
+        where
+            F: std::future::Future + Send + 'static,
+            F::Output: Send + 'static,
+        {
+            use opentelemetry::context::FutureExt as _;
+            let multi_thread = || {
+                tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(2)
+                    .build()
+                    .expect("runtime")
+            };
+            match self {
+                Self::Spawned => {
+                    let runtime = multi_thread();
+                    let _attached = parent.to_otel().attach();
+                    runtime
+                        .block_on(runtime.spawn(future))
+                        .expect("the task completes")
+                }
+                Self::WithContext => {
+                    let runtime = multi_thread();
+                    runtime
+                        .block_on(runtime.spawn(future.with_context(parent.to_otel())))
+                        .expect("the task completes")
+                }
+                Self::BlockOn => {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .build()
+                        .expect("runtime");
+                    let _attached = parent.to_otel().attach();
+                    runtime.block_on(future)
+                }
+            }
+        }
+
+        /// Asserts `span` is a child of `parent` when this hop carries the
+        /// context, and the root of a trace of its own when it does not.
+        pub(crate) fn assert_parent(self, span: &SpanData, parent: &ObservationContext) {
+            match self {
+                Self::Spawned => {
+                    assert_eq!(
+                        span.parent_span_id,
+                        opentelemetry::trace::SpanId::INVALID,
+                        "{}: {self:?} must export a root, parent {}",
+                        span.name,
+                        parent_id(span)
+                    );
+                    assert_ne!(trace_id(span), parent.trace_id(), "{}", span.name);
+                }
+                Self::WithContext | Self::BlockOn => {
+                    assert_eq!(parent_id(span), parent.span_id(), "{}: {self:?}", span.name);
+                    assert_eq!(trace_id(span), parent.trace_id(), "{}: {self:?}", span.name);
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3071,6 +3530,57 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;
+
+    /// A chunk is timed on the operation's anchored clock, not the raw wall
+    /// clock: an NTP step between the start of a stream and its first token
+    /// must not move `time_to_first_chunk` by the size of the step. Needs the
+    /// observability crate's wall-steppable test clock (feature `test-util`).
+    #[cfg(feature = "test-util")]
+    #[test]
+    fn a_delivered_chunk_is_timed_on_the_operation_clock_across_a_wall_clock_step() {
+        use opentelemetry_sdk::trace::SdkTracerProvider;
+        use xybrid_observability::{Clock, ManualClock};
+
+        const STEP: Duration = Duration::from_secs(3_600);
+        let wall = Arc::new(ManualClock::new(
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+        ));
+        let memory = test_support::Memory::default();
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(memory.clone())
+            .build();
+        let observer = Observer::builder()
+            .tracer_provider(&provider)
+            .clock(Clock::manual_wall(wall.clone()))
+            .build();
+        let started = observer.now();
+        let op = observer.start_inference(
+            InferenceRequest::new("chat", "llama.cpp").streaming(true),
+            StartOptions::default().with_start_time(started),
+        );
+        let sink = ChunkSink {
+            op: Arc::new(op),
+            stopped: CancelMark::default(),
+        };
+
+        // The device clock jumps an hour ahead before the first token.
+        wall.advance(STEP);
+        assert_eq!(observer.now(), started + STEP, "the wall clock stepped");
+        sink.deliver(|| Ok(()))
+            .expect("the caller accepts the token");
+        sink.op.end();
+
+        let span = memory.spans().pop().expect("the run's span ended");
+        let ttfc: f64 = test_support::attr(&span, semconv::attr::RESPONSE_TIME_TO_FIRST_CHUNK)
+            .expect("the delivered chunk sets the time to first chunk")
+            .parse()
+            .expect("time to first chunk is a number of seconds");
+        assert!(
+            ttfc < STEP.as_secs_f64() / 2.0,
+            "time to first chunk follows the operation clock, not the {STEP:?} \
+             wall-clock step: {ttfc} s"
+        );
+    }
 
     #[test]
     fn url_address_extracts_only_http_host_and_port() {
@@ -3129,6 +3639,9 @@ mod tests {
                     Err(error) => panic!("collector accept: {error}"),
                 }
             };
+            // Accepted sockets inherit O_NONBLOCK on macOS/BSD (not on Linux), which
+            // would make the read timeout below a busy WouldBlock instead of a wait.
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();
@@ -3601,6 +4114,69 @@ mod tests {
             provider: None,
             server: None,
         })
+    }
+
+    #[test]
+    fn run_outcomes_reach_the_inference_duration_metric() {
+        // The in-memory metric and log helper reads run outcomes.
+        let signals = test_support::memory_session_with_signals();
+        let options = crate::RunOptions::default()
+            .with_observation(ObservationOptions::default().with_session(&signals.session));
+        let duration = semconv::metric::INFERENCE_DURATION;
+
+        test_run(&options).succeed(&Envelope::new(EnvelopeKind::Text("ok".into())));
+        let points = signals.points(duration);
+        assert_eq!(points.len(), 1, "{points:?}");
+        assert_eq!(points[0].count, 1);
+        assert_eq!(points[0].attr("error.type"), None);
+
+        test_run(&options).fail(&SdkError::inference("runtime failed"));
+        let mut points = signals.points(duration);
+        points.sort_by(|a, b| a.attr("error.type").cmp(&b.attr("error.type")));
+        assert_eq!(points.len(), 2, "{points:?}");
+        assert_eq!((points[0].attr("error.type"), points[0].count), (None, 1));
+        assert_eq!(
+            (points[1].attr("error.type"), points[1].count),
+            (Some("inference_error"), 1)
+        );
+        assert_eq!(
+            signals.log_events(),
+            [semconv::event::OPERATION_EXCEPTION],
+            "only the failure is an exception"
+        );
+    }
+
+    #[test]
+    fn a_workflow_stage_failing_after_an_unheeded_cancel_stays_an_error() {
+        // A pipeline never acts on the cancellation token, so its streaming
+        // fast-path stage fails after a cancel for its own reason: the stage,
+        // its attempt and the workflow record the same error.
+        let signals = test_support::memory_session_with_signals();
+        let token = crate::run_options::CancellationToken::new();
+        token.cancel();
+        let options = crate::RunOptions::default()
+            .with_cancellation_token(token)
+            .with_observation(ObservationOptions::default().with_session(&signals.session));
+        let workflow = WorkflowScope::start("flow", &options);
+        let stage = test_run(&workflow.child_options(&options));
+        let attempt = stage.attempt(AttemptSpec {
+            reason: AttemptReason::Initial,
+            location: Location::Local,
+            provider: None,
+            model: None,
+        });
+        let error = SdkError::inference("LLM streaming execution failed");
+        attempt.end_adapter(&Err::<Envelope, _>("decoder failed"));
+        stage.fail(&error);
+        workflow.end(&Err::<(), _>(error));
+
+        for name in ["invoke_workflow flow", "chat test", "attempt 0"] {
+            assert_eq!(
+                test_support::attr(&signals.spans.named(name), "error.type").as_deref(),
+                Some("inference_error"),
+                "{name}"
+            );
+        }
     }
 
     #[test]
@@ -4394,6 +4970,277 @@ mod tests {
         assert!(held.end_time <= workflow_span.end_time);
     }
 
+    /// Polls `inner`, asserting that no SDK recorder and no application
+    /// context is installed on the polling thread before or after the poll:
+    /// whatever one task installs must not outlive its own poll.
+    struct NoLeak<F>(std::pin::Pin<Box<F>>);
+
+    impl<F: std::future::Future> std::future::Future for NoLeak<F> {
+        type Output = F::Output;
+
+        fn poll(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<F::Output> {
+            fn assert_clean(when: &str) {
+                assert!(
+                    xybrid_core::tracing::current_recorder().is_none(),
+                    "a recorder is installed {when} a poll"
+                );
+                assert!(
+                    ObservationContext::current().is_none(),
+                    "an application context is attached {when} a poll"
+                );
+            }
+            assert_clean("before");
+            let polled = self.0.as_mut().poll(cx);
+            assert_clean("after");
+            polled
+        }
+    }
+
+    /// Task `i` of [`concurrent_async_workflows_keep_their_own_parents`]: a
+    /// workflow whose stages and run interleave with every other task's at
+    /// two barriers, with a stage held across a yield.
+    async fn interleaved_workflow(
+        i: usize,
+        workflow_options: crate::RunOptions,
+        run_options: crate::RunOptions,
+        barrier: Arc<tokio::sync::Barrier>,
+    ) -> Option<ObservationRef> {
+        let workflow = AsyncWorkflow::start(&format!("wf-{i}"), &workflow_options);
+        let result = workflow
+            .instrument(async move {
+                {
+                    let _first = xybrid_core::tracing::SpanGuard::new(format!("first-{i}"));
+                }
+                barrier.wait().await;
+                let held = xybrid_core::tracing::SpanGuard::new(format!("held-{i}"));
+                tokio::task::yield_now().await;
+                barrier.wait().await;
+                {
+                    let _last = xybrid_core::tracing::SpanGuard::new(format!("last-{i}"));
+                    // A run starts and ends within one poll, as on the SDK's
+                    // blocking workers.
+                    let mut subject = test_run_subject();
+                    subject.model = format!("m-{i}");
+                    RunObservation::start(RunStart {
+                        subject,
+                        input: None,
+                        history: &[],
+                        options: Some(&run_options),
+                        generation: None,
+                        streaming: false,
+                        location: Location::Local,
+                        parent: None,
+                        provider: None,
+                        server: None,
+                    })
+                    .succeed(&Envelope::new(EnvelopeKind::Text("ok".into())));
+                }
+                drop(held);
+                Ok::<(), String>(())
+            })
+            .await;
+        workflow.end(&result)
+    }
+
+    /// Spawns [`interleaved_workflow`] once per parent on `runtime` and waits
+    /// for every reference. Even tasks get their parent explicitly; odd tasks
+    /// only through the application context the caller attached, carried
+    /// into the task with `with_context`.
+    fn interleave(
+        runtime: &tokio::runtime::Runtime,
+        session: &ObservabilitySession,
+        parents: &[ObservationContext],
+    ) -> Vec<ObservationRef> {
+        use opentelemetry::context::FutureExt as _;
+        let barrier = Arc::new(tokio::sync::Barrier::new(parents.len()));
+        let run_options = crate::RunOptions::default()
+            .with_observation(ObservationOptions::default().with_session(session));
+        let tasks: Vec<_> = parents
+            .iter()
+            .enumerate()
+            .map(|(i, parent)| {
+                let observation = ObservationOptions::default().with_session(session);
+                if i % 2 == 0 {
+                    let options = crate::RunOptions::default()
+                        .with_observation(observation.with_parent(parent.clone()));
+                    let task =
+                        interleaved_workflow(i, options, run_options.clone(), barrier.clone());
+                    runtime.spawn(NoLeak(Box::pin(task)))
+                } else {
+                    let _attached = parent.to_otel().attach();
+                    let options = crate::RunOptions::default().with_observation(observation);
+                    let task =
+                        interleaved_workflow(i, options, run_options.clone(), barrier.clone())
+                            .with_context(opentelemetry::Context::current());
+                    runtime.spawn(NoLeak(Box::pin(task)))
+                }
+            })
+            .collect();
+        runtime.block_on(async {
+            let mut references = Vec::new();
+            for task in tasks {
+                references.push(
+                    task.await
+                        .expect("no task panicked")
+                        .expect("a sampled workflow"),
+                );
+            }
+            references
+        })
+    }
+
+    #[test]
+    fn concurrent_async_workflows_keep_their_own_parents() {
+        // 16 workflows interleave stage by stage (barriers, a yield, a
+        // stage held across it) on one thread and on four workers. Each keeps
+        // its own parent, nothing crosses into another task's trace, nothing
+        // installed by one task's poll outlives it, and every workflow and
+        // run is counted once.
+        use std::collections::HashSet;
+        use test_support::*;
+        const TASKS: usize = 16;
+        let parents: Vec<ObservationContext> = (1..=TASKS)
+            .map(|i| {
+                ObservationContext::from_traceparent(
+                    &format!("00-{:032x}-{:016x}-01", 0xa100 + i, 0xb100 + i),
+                    None,
+                )
+                .unwrap()
+            })
+            .collect();
+        for workers in [0, 4] {
+            let runtime = if workers == 0 {
+                tokio::runtime::Builder::new_current_thread().build()
+            } else {
+                tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(workers)
+                    .build()
+            }
+            .unwrap();
+            let signals = memory_session_with_signals();
+            let references = interleave(&runtime, &signals.session, &parents);
+            assert!(xybrid_core::tracing::current_recorder().is_none());
+
+            for (i, (parent, reference)) in parents.iter().zip(&references).enumerate() {
+                let label = format!("{workers} workers, task {i}");
+                let workflow = signals.spans.by_ref(reference);
+                assert_eq!(workflow.name, format!("invoke_workflow wf-{i}"), "{label}");
+                assert_eq!(parent_id(&workflow), parent.span_id(), "{label}");
+                assert_eq!(trace_id(&workflow), parent.trace_id(), "{label}");
+                for stage in ["first", "held", "last"] {
+                    let span = signals.spans.named(&format!("{stage}-{i}"));
+                    assert_eq!(parent_id(&span), reference.span_id, "{label}: {stage}");
+                    assert_eq!(trace_id(&span), parent.trace_id(), "{label}: {stage}");
+                    assert_eq!(attr(&span, semconv::attr::ERROR_TYPE), None, "{label}");
+                }
+                let run = signals.spans.named(&format!("chat m-{i}"));
+                assert_eq!(
+                    parent_id(&run),
+                    span_id(&signals.spans.named(&format!("last-{i}"))),
+                    "{label}: the run is a child of the stage open around it"
+                );
+                assert_eq!(trace_id(&run), parent.trace_id(), "{label}");
+            }
+            // Workflow, three stages and a run per task, each in its own
+            // task's trace: no extra root and no span in a foreign trace.
+            let spans = signals.spans.spans();
+            assert_eq!(spans.len(), TASKS * 5, "{workers} workers");
+            let traces: HashSet<String> =
+                parents.iter().map(ObservationContext::trace_id).collect();
+            assert_eq!(
+                spans.iter().map(trace_id).collect::<HashSet<_>>(),
+                traces,
+                "{workers} workers"
+            );
+            for metric in [
+                semconv::metric::WORKFLOW_DURATION,
+                semconv::metric::INFERENCE_DURATION,
+            ] {
+                let points = signals.points(metric);
+                assert_eq!(
+                    points.iter().map(|p| p.count).sum::<u64>(),
+                    TASKS as u64,
+                    "{workers} workers, {metric}: {points:?}"
+                );
+                assert!(
+                    points.iter().all(|p| p.attr("error.type").is_none()),
+                    "{workers} workers, {metric}: {points:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn concurrent_async_workflows_keep_session_counters_consistent() {
+        // The same interleaving against an SDK-owned pipeline. After a
+        // flush every span is exported exactly once and every signal's
+        // counters reconcile with nothing pending.
+        use httpmock::prelude::*;
+        const TASKS: usize = 16;
+        let server = MockServer::start();
+        let accepted = server.mock(|when, then| {
+            when.method(POST);
+            then.status(200);
+        });
+        let endpoint = |signal: &str| {
+            SignalEndpoint::new(server.url(format!("/v1/{signal}")))
+                .with_protocol(Protocol::HttpJson)
+        };
+        let config = OtlpConfig::default()
+            .with_traces(Some(endpoint("traces")))
+            .with_logs(Some(endpoint("logs")))
+            .with_metrics(Some(endpoint("metrics")))
+            .with_batch(BatchLimits {
+                scheduled_delay: Duration::from_secs(60),
+                ..BatchLimits::default()
+            });
+        let session =
+            ObservabilitySession::new(ObservabilityConfig::otlp(config).device_attributes(false))
+                .unwrap();
+        let parents: Vec<ObservationContext> = (1..=TASKS)
+            .map(|i| {
+                ObservationContext::from_traceparent(
+                    &format!("00-{:032x}-{:016x}-01", 0xc100 + i, 0xd100 + i),
+                    None,
+                )
+                .unwrap()
+            })
+            .collect();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .build()
+            .unwrap();
+        let references = interleave(&runtime, &session, &parents);
+        assert_eq!(references.len(), TASKS);
+        session.flush(Duration::from_secs(10)).unwrap();
+        let stats = session.stats().expect("an SDK-owned pipeline");
+        assert_eq!(
+            (
+                stats.traces.accepted,
+                stats.traces.exported,
+                stats.traces.dropped,
+                stats.traces.failed,
+                stats.traces.pending
+            ),
+            ((TASKS * 5) as u64, (TASKS * 5) as u64, 0, 0, 0),
+            "{stats:?}"
+        );
+        for (signal, s) in [("logs", stats.logs), ("metrics", stats.metrics)] {
+            assert!(s.is_consistent(), "{signal}: {s:?}");
+            assert_eq!(
+                (s.failed, s.dropped, s.pending),
+                (0, 0, 0),
+                "{signal}: {s:?}"
+            );
+        }
+        assert!(stats.metrics.exported > 0, "{stats:?}");
+        assert!(accepted.hits() > 0);
+        session.shutdown(Duration::from_secs(10)).unwrap();
+    }
+
     #[test]
     fn replaced_helper_sessions_shut_down_now_unless_pinned() {
         let _default = test_support::default_session_lock();
@@ -4443,7 +5290,7 @@ mod tests {
         let returned =
             install_default_session(ObservabilitySession::borrowed(Observer::disabled())).unwrap();
         assert!(returned.is_retired());
-        let installed = session::take_default();
+        let installed = session::uninstall_default();
         assert!(installed.is_some_and(|slot| !slot.helper_owned));
         if let Some(previous) = previous {
             session::replace_default(previous.session, previous.helper_owned);
@@ -4866,7 +5713,7 @@ mod tests {
         let body: serde_json::Value = serde_json::from_str(&exports.recv().unwrap()).unwrap();
         assert_eq!(spans(&body).len(), 2);
         collector.join().unwrap();
-        let installed = session::take_default().unwrap();
+        let installed = session::uninstall_default().unwrap();
         assert!(!installed.session.observer().is_enabled());
         if let Some(previous) = previous {
             install_default_session(previous);
@@ -4905,7 +5752,7 @@ mod tests {
             .end(&Ok::<(), SdkError>(()))
             .unwrap();
 
-        let restore = session::take_default();
+        let restore = session::uninstall_default();
         if let Some(previous) = previous {
             install_default_session(previous);
         }
@@ -4945,7 +5792,7 @@ mod tests {
         drop(scope);
         workflow.end();
 
-        let restore = session::take_default();
+        let restore = session::uninstall_default();
         if let Some(previous) = previous {
             install_default_session(previous);
         }
@@ -4990,5 +5837,168 @@ mod tests {
         assert_eq!(session.live_trace_mode("stream"), TraceMode::Suppress);
         let other = ObservabilitySession::borrowed(Observer::disabled());
         assert_eq!(other.live_trace_mode("stream"), TraceMode::Default);
+    }
+
+    /// A session whose live-frame sampler runs on a clock the test moves,
+    /// with a `interval` long enough that a remembered session's next frame
+    /// is always suppressed: a traced frame then shows it was forgotten.
+    fn live_sampler(interval: Duration) -> (ObservabilitySession, Arc<Mutex<Instant>>) {
+        let mut session = ObservabilitySession::new(
+            ObservabilityConfig::with_observer(Observer::disabled()).live_trace_interval(interval),
+        )
+        .unwrap();
+        let clock = Arc::new(Mutex::new(Instant::now()));
+        session.drive_live_clock(clock.clone());
+        (session, clock)
+    }
+
+    #[test]
+    fn the_live_sampler_remembers_at_most_1024_sessions_and_forgets_the_least_recently_used() {
+        // Per-frame ids cannot grow the
+        // sampler; a new session beyond the cap evicts the least recently
+        // used one, which is traced again when it returns.
+        const CAP: usize = 1024;
+        let (session, _clock) = live_sampler(Duration::from_secs(3600));
+        let id = |i: usize| format!("frame-{i}");
+        for i in 0..CAP {
+            assert_eq!(session.live_trace_mode(&id(i)), TraceMode::Default, "{i}");
+        }
+        assert_eq!(session.live_sessions(), CAP);
+        // A frame of the oldest session makes it the most recently used one.
+        assert_eq!(session.live_trace_mode(&id(0)), TraceMode::Suppress);
+
+        // One session past the cap evicts the least recently used: `frame-1`,
+        // not `frame-0`, which was used later.
+        assert_eq!(session.live_trace_mode(&id(CAP)), TraceMode::Default);
+        assert_eq!(session.live_sessions(), CAP);
+        assert_eq!(session.live_trace_mode(&id(0)), TraceMode::Suppress);
+        // `frame-1` was forgotten: traced again, evicting `frame-2` in turn.
+        assert_eq!(session.live_trace_mode(&id(1)), TraceMode::Default);
+        assert_eq!(session.live_trace_mode(&id(2)), TraceMode::Default);
+        assert_eq!(session.live_sessions(), CAP);
+        // The sessions used since are all remembered.
+        for i in [0, 1, 2, CAP] {
+            assert_eq!(session.live_trace_mode(&id(i)), TraceMode::Suppress, "{i}");
+        }
+
+        // A fresh id per frame never grows it.
+        for i in CAP + 1..3 * CAP {
+            assert_eq!(session.live_trace_mode(&id(i)), TraceMode::Default, "{i}");
+            assert!(session.live_sessions() <= CAP, "{i}");
+        }
+    }
+
+    #[test]
+    fn the_live_sampler_forgets_sessions_with_no_frame_for_300_seconds() {
+        // The TTL is kept beside the cap.
+        let (session, clock) = live_sampler(Duration::from_secs(3600));
+        let t0 = *clock.lock().unwrap();
+        let at = |seconds: u64| *clock.lock().unwrap() = t0 + Duration::from_secs(seconds);
+        assert_eq!(session.live_trace_mode("a"), TraceMode::Default);
+        assert_eq!(session.live_trace_mode("b"), TraceMode::Default);
+        // At the TTL itself nothing has expired yet.
+        at(300);
+        assert_eq!(session.live_trace_mode("c"), TraceMode::Default);
+        assert_eq!(session.live_sessions(), 3);
+        assert_eq!(session.live_trace_mode("b"), TraceMode::Suppress);
+
+        // One second past it, `a` (no frame since t0) is gone; `b` and `c`
+        // had frames at t0 + 300.
+        at(301);
+        assert_eq!(session.live_trace_mode("d"), TraceMode::Default);
+        assert_eq!(session.live_sessions(), 3);
+        assert_eq!(
+            session.live_trace_mode("a"),
+            TraceMode::Default,
+            "a is traced again"
+        );
+        assert_eq!(session.live_trace_mode("b"), TraceMode::Suppress);
+
+        // Every session idle past the TTL is forgotten by the next frame.
+        at(1000);
+        assert_eq!(session.live_trace_mode("e"), TraceMode::Default);
+        assert_eq!(session.live_sessions(), 1);
+    }
+
+    #[test]
+    fn a_session_the_sdk_resolved_for_an_operation_keeps_its_content_cap() {
+        // A per-run session is capped once, when its
+        // operation starts. A live ASR stream hands its resolved session to
+        // each later decode; the decode must keep that cap rather than take
+        // the one of wherever it runs.
+        use test_support::{memory_session_with_content, NoDefaultSession};
+        let _no_default = NoDefaultSession::hold();
+        let everything = memory_session_with_content(
+            ContentPolicy::default().with_capture(ContentCapture::SpanAndEvent),
+        );
+        let per_run = ObservationOptions::default().with_session(&everything.session);
+        let capture =
+            |session: &ObservabilitySession| session.observer().content_policy().capture();
+        // Resolved with nothing around it: its own policy.
+        let resolved = resolve_session(Some(&per_run));
+        assert_eq!(capture(&resolved), ContentCapture::SpanAndEvent);
+
+        let floor = memory_session_with_content(ContentPolicy::metadata_only());
+        let _enclosing =
+            CapturedScope::for_operation(floor.session.clone().for_operation(), None, false, None);
+        // An application's handle is capped by the enclosing operation's session...
+        assert_eq!(
+            capture(&resolve_session(Some(&per_run))),
+            ContentCapture::NoContent
+        );
+        // ...a handle already resolved for an operation keeps its cap.
+        let pinned = ObservationOptions {
+            session: Some(resolved),
+            ..ObservationOptions::default()
+        };
+        assert_eq!(
+            capture(&resolve_session(Some(&pinned))),
+            ContentCapture::SpanAndEvent
+        );
+    }
+
+    #[test]
+    fn stats_keep_the_last_shut_down_helper_session_until_a_session_is_installed() {
+        // The final counters of the helper-owned default
+        // that `shutdown_observability` uninstalled stay readable, a repeated
+        // shutdown keeps them, and the next installation starts fresh.
+        let _default = test_support::default_session_lock();
+        let previous = session::uninstall_default();
+        let (config, exports, collector) = collector();
+        init_observability(ObservabilityConfig::otlp(config).device_attributes(false)).unwrap();
+        start_workflow("final-counters", &ObservationOptions::default()).end();
+        // Bounds a hang only: the collector answers at once.
+        shutdown_observability(Duration::from_secs(10)).unwrap();
+        exports.recv().unwrap();
+        collector.join().unwrap();
+
+        let last = stats().expect("the final counters stay readable");
+        // At least this test's span: while installed, the default also
+        // collects any unpinned operation of a test running beside this one.
+        let traces = last.traces;
+        assert!(traces.accepted >= 1 && traces.exported >= 1, "{traces:?}");
+        assert_eq!(traces.pending, 0, "settled by the shutdown");
+        assert_eq!(
+            traces.accepted,
+            traces.exported + traces.dropped + traces.failed,
+            "{traces:?}"
+        );
+        assert!(!is_enabled());
+        shutdown_observability(Duration::ZERO).unwrap();
+        assert_eq!(stats(), Some(last), "a repeated shutdown keeps them");
+
+        // An installation starts its own counters; a borrowed observer has none.
+        let borrowed =
+            install_default_session(ObservabilitySession::borrowed(Observer::disabled()));
+        assert!(borrowed.is_none());
+        assert_eq!(stats(), None);
+        // Uninstalling an application-installed session leaves nothing: the
+        // application reads that session's own stats.
+        shutdown_observability(Duration::ZERO).unwrap();
+        assert_eq!(stats(), None);
+
+        if let Some(previous) = previous {
+            session::replace_default(previous.session, previous.helper_owned);
+        }
     }
 }

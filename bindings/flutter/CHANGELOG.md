@@ -35,6 +35,11 @@
   and manual handles) instead of being ignored.
 * `XybridPipeline.run` accepts `observation:`; pipeline results now carry the
   workflow reference and each stage's reference in `metrics.stageLatenciesMs`.
+* Fixed: unsubscribing a token stream (`runStreaming`,
+  `runStreamingWithContext`, `runStreamingWithFallback`) that was started
+  without a `CancellationToken` now halts generation at the next token and
+  releases the model write lock, as the docs already said; the run used to
+  continue to the end. Observability records the run as cancelled.
 
 
 ## 0.17.0

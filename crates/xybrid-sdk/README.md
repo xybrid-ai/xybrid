@@ -121,14 +121,18 @@ trace endpoint. Metrics and logs require their own configured destinations.
 Initialization replaces the previous configuration and shuts down its packaged
 pipeline. Flush and shutdown have bounded timeouts; shutdown is idempotent and
 disables the observer. `observability::stats()` exposes delivery counters while
-a packaged pipeline is installed. With `ObservabilityConfig::with_observer`,
-the application owns provider flush/shutdown.
+a packaged pipeline is installed; after shutdown it keeps that pipeline's final
+counters (what the shutdown failed or dropped included) until the next
+initialization. With `ObservabilityConfig::with_observer`, the application owns
+provider flush/shutdown.
 
 Once observability is enabled, prompts and outputs are captured by default.
 Select `ContentPolicy::metadata_only()` to retain metadata without content, or
 configure a content policy with redaction. Per-run `ObservationOptions` on
-`RunOptions` sets a parent trace, conversation id or trace suppression; successful
-inference results expose an `observation_ref()` for feedback and evaluations.
+`RunOptions` sets a parent trace, conversation id or trace suppression; a
+per-run session or observer can lower content capture below the default's
+policy but never raise it. Successful inference results expose an
+`observation_ref()` for feedback and evaluations.
 
 ### Resource attributes and delivery
 

@@ -35,10 +35,12 @@ pub struct Observer {
     pub(crate) inner: Arc<ObserverInner>,
 }
 
+/// Provider handles are shared, so observers derived with
+/// [`Observer::content_capped_by`] record through the same providers.
 pub(crate) struct ObserverInner {
-    pub tracer: Option<BoxedTracer>,
-    pub instruments: Option<Instruments>,
-    pub events: Option<Box<dyn EventSink>>,
+    pub tracer: Option<Arc<BoxedTracer>>,
+    pub instruments: Option<Arc<Instruments>>,
+    pub events: Option<Arc<dyn EventSink>>,
     pub content: ContentPolicy,
     pub clock: Clock,
 }
@@ -82,6 +84,27 @@ impl Observer {
     #[must_use]
     pub fn content_policy(&self) -> &ContentPolicy {
         &self.inner.content
+    }
+
+    /// This observer, recording through the same providers and clock, with
+    /// its content policy capped by `ceiling` (see
+    /// [`ContentPolicy::capped_by`]): it never captures more content than
+    /// either policy allows.
+    ///
+    /// Hosts that let one operation choose its own observer use this so the
+    /// choice can lower content capture but never raise it above the policy
+    /// that operation would otherwise run under.
+    #[must_use]
+    pub fn content_capped_by(&self, ceiling: &ContentPolicy) -> Self {
+        Self {
+            inner: Arc::new(ObserverInner {
+                tracer: self.inner.tracer.clone(),
+                instruments: self.inner.instruments.clone(),
+                events: self.inner.events.clone(),
+                content: self.inner.content.capped_by(ceiling).resolved(),
+                clock: self.inner.clock.clone(),
+            }),
+        }
     }
 
     /// Current wall-clock time from the observer clock (operations anchor
@@ -279,9 +302,9 @@ impl Default for Observer {
 #[derive(Default)]
 #[must_use]
 pub struct ObserverBuilder {
-    tracer: Option<BoxedTracer>,
+    tracer: Option<Arc<BoxedTracer>>,
     meter: Option<Meter>,
-    events: Option<Box<dyn EventSink>>,
+    events: Option<Arc<dyn EventSink>>,
     content: Option<ContentPolicy>,
     clock: Option<Clock>,
 }
@@ -294,13 +317,15 @@ impl ObserverBuilder {
         P::Tracer: Send + Sync + 'static,
         <P::Tracer as Tracer>::Span: Send + Sync + 'static,
     {
-        self.tracer = Some(BoxedTracer::new(provider.boxed_tracer(scope())));
+        self.tracer = Some(Arc::new(BoxedTracer::new(provider.boxed_tracer(scope()))));
         self
     }
 
     /// Records spans with the global tracer provider (read, never installed).
     pub fn global_tracer_provider(mut self) -> Self {
-        self.tracer = Some(opentelemetry::global::tracer_provider().tracer_with_scope(scope()));
+        self.tracer = Some(Arc::new(
+            opentelemetry::global::tracer_provider().tracer_with_scope(scope()),
+        ));
         self
     }
 
@@ -323,7 +348,7 @@ impl ObserverBuilder {
         P: LoggerProvider,
         P::Logger: Send + Sync + 'static,
     {
-        self.events = Some(Box::new(LoggerSink(provider.logger_with_scope(scope()))));
+        self.events = Some(Arc::new(LoggerSink(provider.logger_with_scope(scope()))));
         self
     }
 
@@ -347,7 +372,7 @@ impl ObserverBuilder {
         Observer {
             inner: Arc::new(ObserverInner {
                 tracer: self.tracer,
-                instruments: self.meter.as_ref().map(Instruments::new),
+                instruments: self.meter.as_ref().map(|m| Arc::new(Instruments::new(m))),
                 events: self.events,
                 content: self.content.unwrap_or_default().resolved(),
                 clock: self.clock.unwrap_or_default(),
@@ -524,6 +549,10 @@ pub(crate) struct SpanState {
     /// differs from the parent's. API-only (no SDK) tracers return the
     /// parent's context instead, which is kept only for propagation.
     pub own: bool,
+    /// Whether the span records (sampled, or a record-only sampler
+    /// decision). Content destined for a span that does not record is never
+    /// processed (CONTRACT.md "Content pipeline", step 1).
+    pub recording: bool,
 }
 
 impl ObserverInner {
@@ -539,7 +568,7 @@ impl ObserverInner {
         if options.trace == TraceMode::Suppress {
             return None;
         }
-        let tracer = self.tracer.as_ref()?;
+        let tracer = self.tracer.as_deref()?;
         let parent = match &options.parent {
             Some(parent) => parent.to_otel(),
             None => Context::current(),
@@ -560,9 +589,11 @@ impl ObserverInner {
             let sc = span.span_context();
             sc.is_valid() && Some(sc.span_id()) != parent_span_id
         };
+        let recording = own && span.is_recording();
         Some(SpanState {
             cx: parent.with_span(span),
             own,
+            recording,
         })
     }
 }

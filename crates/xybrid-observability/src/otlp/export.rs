@@ -243,8 +243,14 @@ impl ExporterShared {
         })
     }
 
+    /// Counters, with the in-flight estimated bytes (the admission byte
+    /// budget's running total).
     pub(crate) fn stats(&self) -> SignalStats {
-        lock(&self.state).stats
+        let st = lock(&self.state);
+        SignalStats {
+            buffered_bytes: st.buffered,
+            ..st.stats
+        }
     }
 
     pub(crate) fn is_closed(&self) -> bool {

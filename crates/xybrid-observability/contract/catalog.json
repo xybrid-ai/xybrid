@@ -186,8 +186,10 @@
     "truncation_marker": "…[truncated]",
     "truncation_min_string_bytes": 32,
     "redaction_replacement": "[REDACTED]",
-    "max_retained_operation_bytes": 491520,
+    "max_retained_operation_bytes": 212992,
     "max_traversal_bytes": 491520,
+    "span_envelope_allowance_bytes": 65536,
+    "span_content_encoding_growth": 2,
     "max_json_depth": 128,
     "preflight_node_bytes": 16,
     "batch": {

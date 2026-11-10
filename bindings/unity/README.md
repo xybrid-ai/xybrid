@@ -504,7 +504,9 @@ using (var workflow = WorkflowObservation.Start("answer-question"))
 ```
 
 `XybridClient.ObservabilityStats()` reports delivery counters per signal
-(`Traces`, `Logs`, `Metrics`). See
+(`Traces`, `Logs`, `Metrics`); after `ShutdownObservability` they are the
+session's final counters (what the shutdown failed or dropped included) until
+the next `InitializeObservability`. See
 [examples/unity/Observability](../../examples/unity/Observability/README.md)
 for the mobile lifecycle wiring.
 

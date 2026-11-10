@@ -12,6 +12,7 @@ import {
   SimpleSpanProcessor,
   TracerProvider,
 } from "@opentelemetry/sdk-trace";
+import { DEFAULTS, spanContentCeiling } from "../src/index.ts";
 import {
   estimateLogBytes,
   estimateSpanBytes,
@@ -110,6 +111,7 @@ describe("trace splitting (R-BATCH-1, R-BATCH-2, R-BATCH-5)", () => {
         dropped: 0,
         failed: 0,
         pending: 0,
+        bufferedBytes: 0,
       });
     });
 
@@ -140,6 +142,7 @@ describe("trace splitting (R-BATCH-1, R-BATCH-2, R-BATCH-5)", () => {
         dropped: 1,
         failed: 0,
         pending: 0,
+        bufferedBytes: 0,
       });
     });
   }
@@ -188,6 +191,7 @@ describe("log splitting (R-BATCH-3)", () => {
         dropped: 1,
         failed: 0,
         pending: 0,
+        bufferedBytes: 0,
       });
     });
   }
@@ -223,6 +227,7 @@ describe("metrics collections are never split (R-BATCH-4)", () => {
       dropped: 0,
       failed: metrics.accepted,
       pending: 0,
+      bufferedBytes: 0,
     });
     expect(await pipeline.shutdown(1000)).toBe(false);
   });
@@ -243,13 +248,9 @@ describe("bounded buffers (R-BUF-1, R-BUF-2, R-CNT-5)", () => {
     for (let index = 0; index < 4; index += 1) tracer.startSpan(`s${index}`).end();
     await server.waitFor(() => server.requests.length === 1);
     for (let index = 4; index < 20; index += 1) tracer.startSpan(`s${index}`).end();
-    expect(pipeline.stats().traces).toEqual({
-      accepted: 20,
-      exported: 0,
-      dropped: 12,
-      failed: 0,
-      pending: 8,
-    });
+    const held = pipeline.stats().traces;
+    expect(held).toMatchObject({ accepted: 20, exported: 0, dropped: 12, failed: 0, pending: 8 });
+    expect(held.bufferedBytes).toBeGreaterThan(0);
   });
 
   test("the byte budget drops spans beyond it; estimates cover the encoded size", async () => {
@@ -277,12 +278,14 @@ describe("bounded buffers (R-BUF-1, R-BUF-2, R-CNT-5)", () => {
     for (let index = 0; index < 5; index += 1) {
       tracer.startSpan("large", { attributes: { padding: "x".repeat(10_000) } }).end();
     }
+    // The bytes held are exactly the three admitted estimates.
     expect(pipeline.stats().traces).toEqual({
       accepted: 5,
       exported: 0,
       dropped: 2,
       failed: 0,
       pending: 3,
+      bufferedBytes: estimate * 3,
     });
     await local.shutdown();
   });
@@ -397,6 +400,44 @@ describe("bounded buffers (R-BUF-1, R-BUF-2, R-CNT-5)", () => {
     await loggerProvider.shutdown();
   });
 
+  test("metrics: a byte budget below one collection drops it whole, without a request", async () => {
+    const server = await startServer();
+    const pipeline = track(
+      createOtlpPipeline({
+        metrics: { endpoint: `${server.url}/v1/metrics` },
+        // Smaller than any encoded collection (the resource alone is larger), well under the
+        // request body bound, so the collection is refused by the budget, not as oversized.
+        batch: { maxBufferedBytes: 64 },
+        metricExportIntervalMs: 60_000,
+      }),
+      server,
+    );
+    const meter = pipeline.meterProvider?.getMeter("app");
+    if (meter === undefined) throw new Error("expected a meter provider");
+    meter.createCounter("one").add(1);
+    meter.createCounter("two").add(1);
+    expect(await pipeline.forceFlush(10_000)).toBe(false);
+    expect(pipeline.stats().metrics).toEqual({
+      accepted: 2,
+      exported: 0,
+      dropped: 2,
+      failed: 0,
+      pending: 0,
+      bufferedBytes: 0,
+    });
+    // The final collection (cumulative: the same two points) is refused the same way.
+    expect(await pipeline.shutdown(10_000)).toBe(false);
+    expect(pipeline.stats().metrics).toEqual({
+      accepted: 4,
+      exported: 0,
+      dropped: 4,
+      failed: 0,
+      pending: 0,
+      bufferedBytes: 0,
+    });
+    expect(server.requests).toHaveLength(0);
+  }, 30_000);
+
   test("large distinct scopes saturate the byte budget for spans and logs", async () => {
     const server = await startServer(() => ({ hang: true }));
     const pipeline = track(
@@ -419,8 +460,12 @@ describe("bounded buffers (R-BUF-1, R-BUF-2, R-CNT-5)", () => {
       loggerProvider.getLogger(scope).emit({ body: "b" });
     }
     const expected = { accepted: 5, exported: 0, dropped: 4, failed: 0, pending: 1 };
-    expect(pipeline.stats().traces).toEqual(expected);
-    expect(pipeline.stats().logs).toEqual(expected);
+    for (const stats of [pipeline.stats().traces, pipeline.stats().logs]) {
+      expect(stats).toMatchObject(expected);
+      // The one admitted item holds its estimate (its 6,000-character scope name and more).
+      expect(stats.bufferedBytes).toBeGreaterThan(6_000);
+      expect(stats.bufferedBytes).toBeLessThanOrEqual(10_000);
+    }
   });
 
   test("queue full, byte budget full and after shutdown all count dropped and accepted (logs too)", async () => {
@@ -438,20 +483,11 @@ describe("bounded buffers (R-BUF-1, R-BUF-2, R-CNT-5)", () => {
     for (let index = 0; index < 3; index += 1) tracer.startSpan(`s${index}`).end(); // queue
     logger.emit({ body: "y".repeat(30_000) });
     for (let index = 0; index < 3; index += 1) logger.emit({ body: `l${index}` });
-    expect(pipeline.stats().traces).toEqual({
-      accepted: 4,
-      exported: 0,
-      dropped: 2,
-      failed: 0,
-      pending: 2,
-    });
-    expect(pipeline.stats().logs).toEqual({
-      accepted: 4,
-      exported: 0,
-      dropped: 2,
-      failed: 0,
-      pending: 2,
-    });
+    for (const stats of [pipeline.stats().traces, pipeline.stats().logs]) {
+      expect(stats).toMatchObject({ accepted: 4, exported: 0, dropped: 2, failed: 0, pending: 2 });
+      expect(stats.bufferedBytes).toBeGreaterThan(0);
+      expect(stats.bufferedBytes).toBeLessThanOrEqual(20_000);
+    }
     const shutdown = pipeline.shutdown(200);
     tracer.startSpan("late").end();
     logger.emit({ body: "late" });
@@ -465,5 +501,105 @@ describe("bounded buffers (R-BUF-1, R-BUF-2, R-CNT-5)", () => {
     expect(logs.pending).toBe(0);
     expect(logs.dropped).toBe(3);
     expect(logs.failed).toBe(2);
+  });
+});
+
+describe("content budgets fit one span in the request bound", () => {
+  // A quote-heavy 300 KB output doubles in OTLP/JSON. With the attribute budget raised past what
+  // one request can carry, the clamp truncates it and the span is exported; unclamped, the span
+  // would be dropped whole as an oversized item. Each pipeline also fits the budgets to its own,
+  // smaller, request bound.
+  const quoted = '"'.repeat(300_000);
+  for (const [bound, protocol] of [
+    [491_520, "http/json"],
+    [491_520, "http/protobuf"],
+    [200_000, "http/json"],
+  ] as const) {
+    test(`${protocol}, bound ${bound}: a raised budget is clamped and the span exported`, async () => {
+      const server = await startServer();
+      const pipeline = track(
+        createOtlpPipeline({
+          traces: { endpoint: `${server.url}/v1/traces`, protocol },
+          maxRequestBodyBytes: bound,
+          batch: { scheduledDelayMs: 60_000 },
+        }),
+        server,
+      );
+      const observer = pipeline.observer({
+        capture: "span_only",
+        maxAttributeBytes: 400_000,
+        maxRetainedOperationBytes: 1_000_000,
+      });
+      const ceiling = spanContentCeiling(bound);
+      expect(observer.contentBudgets).toEqual({
+        maxAttributeBytes: ceiling,
+        maxRetainedOperationBytes: ceiling,
+        maxRequestBodyBytes: bound,
+      });
+      const op = observer.startInference({ operation: "chat", provider: "llama.cpp", model: "m" });
+      op.recordOutputMessages([
+        { role: "assistant", parts: [{ type: "text", content: quoted }], finish_reason: "stop" },
+      ]);
+      op.end();
+      expect(await pipeline.forceFlush(10_000)).toBe(true);
+      expect(pipeline.stats().traces).toMatchObject({ accepted: 1, exported: 1, dropped: 0 });
+      const sent = server.received("/v1/traces");
+      expect(sent).toHaveLength(1);
+      expect(sent[0]?.body.length ?? Infinity).toBeLessThanOrEqual(bound);
+      const [request] = decodedBodies(server, "traces");
+      const span = request.resourceSpans[0].scopeSpans[0].spans[0];
+      const value = (key: string): Json =>
+        span.attributes.find((entry: Json) => entry.key === key)?.value;
+      const output = String(value("gen_ai.output.messages")?.stringValue);
+      expect(Buffer.byteLength(output)).toBeLessThanOrEqual(ceiling);
+      expect(output.includes(DEFAULTS.truncation_marker)).toBe(true);
+      expect(
+        value("xybrid.genai.content.truncated_attributes")?.arrayValue.values.map(
+          (entry: Json) => entry.stringValue,
+        ),
+      ).toEqual(["gen_ai.output.messages"]);
+    });
+  }
+
+  test("an explicit smaller bound wins; an invalid one still throws", async () => {
+    const server = await startServer();
+    const pipeline = track(
+      createOtlpPipeline({ traces: { endpoint: `${server.url}/v1/traces` } }),
+      server,
+    );
+    expect(
+      pipeline.observer({ maxRequestBodyBytes: 100_000 }).contentBudgets.maxRequestBodyBytes,
+    ).toBe(100_000);
+    expect(
+      pipeline.observer({ maxRequestBodyBytes: 900_000 }).contentBudgets.maxRequestBodyBytes,
+    ).toBe(491_520);
+    expect(() => pipeline.observer({ maxRequestBodyBytes: 0 })).toThrow(RangeError);
+    // Only a smaller traces bound replaces the observer's own (default 480 KiB), as in Rust
+    // (delivery.rs an_observer_takes_the_pipeline_traces_bound_only_when_it_is_smaller).
+    const bounded = (bound: number): OtlpPipeline =>
+      track(
+        createOtlpPipeline({
+          traces: { endpoint: `${server.url}/v1/traces` },
+          maxRequestBodyBytes: bound,
+        }),
+      );
+    expect(bounded(200_000).observer().contentBudgets.maxRequestBodyBytes).toBe(200_000);
+    const raised = bounded(1_000_000);
+    expect(raised.observer().contentBudgets.maxRequestBodyBytes).toBe(491_520);
+    expect(
+      raised.observer({ maxRequestBodyBytes: 900_000 }).contentBudgets.maxRequestBodyBytes,
+    ).toBe(900_000);
+    expect(
+      raised.observer({ maxRetainedOperationBytes: 1_000_000 }).contentBudgets
+        .maxRetainedOperationBytes,
+    ).toBe(spanContentCeiling(491_520));
+    // Without a traces signal there is no span request to fit.
+    const metricsOnly = track(
+      createOtlpPipeline({
+        metrics: { endpoint: `${server.url}/v1/metrics` },
+        maxRequestBodyBytes: 70_000,
+      }),
+    );
+    expect(metricsOnly.observer().contentBudgets.maxRequestBodyBytes).toBe(491_520);
   });
 });

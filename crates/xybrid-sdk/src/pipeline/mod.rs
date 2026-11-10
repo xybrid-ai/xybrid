@@ -527,6 +527,90 @@ fn publish_streaming_fast_path_events(
     }
 }
 
+/// The single local stage the streaming fast path runs.
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", test))]
+struct StreamingStage<'a> {
+    name: &'a str,
+    model_id: &'a str,
+    metadata: &'a xybrid_core::execution::ModelMetadata,
+    /// The stage's prepared input.
+    input: &'a Envelope,
+}
+
+/// Runs the streaming fast path's stage as `workflow`'s stage inference, with
+/// one local attempt: `execute` streams it through a callback that hands each
+/// token to `on_token`.
+///
+/// A consumer stops a streaming pipeline by failing `on_token`; it has no
+/// other way. That is the caller's cancellation: the stream stops at that
+/// token, and the stage, its attempt and `workflow` end `cancelled`, with no
+/// exception, while the caller still receives the stage's error.
+/// `chunk_count` counts the tokens `on_token` accepted.
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", test))]
+fn observe_streaming_stage(
+    workflow: &crate::observability::WorkflowScope,
+    options: &RunOptions,
+    stage: StreamingStage<'_>,
+    mut on_token: xybrid_core::runtime_adapter::types::StreamingCallback<'_>,
+    execute: impl FnOnce(
+        xybrid_core::runtime_adapter::types::StreamingCallback<'_>,
+    ) -> xybrid_core::runtime_adapter::AdapterResult<Envelope>,
+) -> crate::model::SdkResult<(Envelope, Option<crate::observability::ObservationRef>)> {
+    let inference_options = workflow.child_options(options);
+    let obs = crate::observability::RunObservation::start(crate::observability::RunStart {
+        subject: crate::observability::RunSubject::from_metadata(stage.model_id, stage.metadata),
+        input: Some(stage.input),
+        history: &[],
+        options: Some(&inference_options),
+        generation: options.generation_config.as_ref(),
+        streaming: true,
+        location: crate::observability::Location::Local,
+        parent: None,
+        provider: None,
+        server: None,
+    });
+    obs.operation()
+        .set_attribute(crate::observability::KeyValue::new(
+            "xybrid.stage.name",
+            stage.name.to_owned(),
+        ));
+    obs.operation()
+        .set_attribute(crate::observability::KeyValue::new(
+            "xybrid.routing.target",
+            "local",
+        ));
+    let attempt = obs.attempt(crate::observability::AttemptSpec {
+        reason: crate::observability::AttemptReason::Initial,
+        location: crate::observability::Location::Local,
+        provider: None,
+        model: Some(stage.model_id),
+    });
+    let resource_guard = obs.begin_resources();
+    let chunks = obs.chunk_sink();
+    let stopped = workflow.cancel_mark().clone();
+    let callback: xybrid_core::runtime_adapter::types::StreamingCallback<'_> =
+        Box::new(move |token| {
+            chunks.deliver(|| on_token(token)).inspect_err(|_| {
+                chunks.cancel_mark().set();
+                stopped.set();
+            })
+        });
+    let output =
+        execute(callback).map_err(|e| SdkError::inference_src("LLM streaming execution failed", e));
+    obs.resource(resource_guard.finish().as_ref());
+    attempt.end_adapter(&output);
+    match output {
+        Ok(output) => {
+            let reference = obs.succeed(&output);
+            Ok((output, reference))
+        }
+        Err(e) => {
+            obs.fail(&e);
+            Err(e)
+        }
+    }
+}
+
 fn pipeline_complete_data(
     stages: &[StageTiming],
     output_type: &OutputType,
@@ -1712,71 +1796,25 @@ impl Xybrid {
 
                             publish_streaming_fast_path_events(&stage_name, &model_id, &route);
 
-                            let inference_options = workflow.child_options(options);
-                            let obs = crate::observability::RunObservation::start(
-                                crate::observability::RunStart {
-                                    subject: crate::observability::RunSubject::from_metadata(
-                                        &model_id, &metadata,
-                                    ),
-                                    input: Some(&prepared),
-                                    history: &[],
-                                    options: Some(&inference_options),
-                                    generation: options.generation_config.as_ref(),
-                                    streaming: true,
-                                    location: crate::observability::Location::Local,
-                                    parent: None,
-                                    provider: None,
-                                    server: None,
-                                },
-                            );
-                            obs.operation()
-                                .set_attribute(crate::observability::KeyValue::new(
-                                    "xybrid.stage.name",
-                                    stage_name.clone(),
-                                ));
-                            obs.operation()
-                                .set_attribute(crate::observability::KeyValue::new(
-                                    "xybrid.routing.target",
-                                    "local",
-                                ));
-                            let attempt = obs.attempt(crate::observability::AttemptSpec {
-                                reason: crate::observability::AttemptReason::Initial,
-                                location: crate::observability::Location::Local,
-                                provider: None,
-                                model: Some(&model_id),
-                            });
-                            let resource_guard = obs.begin_resources();
-                            let chunks = obs.chunk_sink();
-                            let mut on_token = on_token;
-                            let on_token: xybrid_core::runtime_adapter::types::StreamingCallback<
-                                '_,
-                            > = Box::new(move |token| {
-                                chunks.chunk();
-                                on_token(token)
-                            });
-
                             let mut executor = TemplateExecutor::with_base_path(
                                 bundle_path.to_str().unwrap_or(""),
                             );
 
                             let start_time = std::time::Instant::now();
-                            let output = executor
-                                .execute_streaming(&metadata, &prepared, on_token, None)
-                                .map_err(|e| {
-                                    SdkError::inference_src("LLM streaming execution failed", e)
-                                });
-                            obs.resource(resource_guard.finish().as_ref());
-                            attempt.end_adapter(&output);
-                            let (output, inference_reference) = match output {
-                                Ok(output) => {
-                                    let inference_reference = obs.succeed(&output);
-                                    (output, inference_reference)
-                                }
-                                Err(e) => {
-                                    obs.fail(&e);
-                                    return Err(e);
-                                }
-                            };
+                            let (output, inference_reference) = observe_streaming_stage(
+                                workflow,
+                                options,
+                                StreamingStage {
+                                    name: &stage_name,
+                                    model_id: &model_id,
+                                    metadata: &metadata,
+                                    input: &prepared,
+                                },
+                                on_token,
+                                |on_token| {
+                                    executor.execute_streaming(&metadata, &prepared, on_token, None)
+                                },
+                            )?;
                             let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
                             let output_type = output_type_for_envelope(&output);
@@ -1913,6 +1951,119 @@ mod tests {
             format!(
                 "name: rust-observed\nstages:\n  - id: draft\n    model: loopback-model\n    target: cloud\n    provider: openai\n    gateway_url: \"{gateway}\"\n    api_key: local-test-only\n    timeout_ms: 5000\n"
             )
+        }
+
+        #[test]
+        fn a_consumer_that_stops_a_streaming_pipeline_cancels_its_stage_and_workflow() {
+            // A consumer stops a streaming pipeline by failing `on_token`, here
+            // at its third token. That is the caller's cancellation: the stage
+            // stops at that token, and the stage, its attempt and the workflow
+            // end `cancelled`, with no exception, while the caller still
+            // receives the stage's error. (The fast path itself needs an LLM
+            // build and a GGUF stage; it runs its stage through this helper.)
+            use xybrid_core::runtime_adapter::types::{PartialToken, StreamingCallback};
+            use xybrid_core::runtime_adapter::AdapterError;
+            const DELIVERED: usize = 2;
+            let signals = memory_session_with_signals();
+            let options = RunOptions::default()
+                .with_observation(ObservationOptions::default().with_session(&signals.session));
+            let mut metadata =
+                xybrid_core::execution::ModelMetadata::onnx("stage-model", "1.0", "model.onnx");
+            metadata
+                .metadata
+                .insert("task".into(), serde_json::json!("text-generation"));
+            let input = Envelope::new(EnvelopeKind::Text("hi".into()));
+            let workflow = crate::observability::WorkflowScope::start("streaming-stop", &options);
+            let mut received = 0;
+            let on_token: StreamingCallback<'_> = Box::new(move |_token| {
+                if received == DELIVERED {
+                    return Err("the consumer stopped reading".into());
+                }
+                received += 1;
+                Ok(())
+            });
+            let mut callbacks = 0;
+
+            let error = observe_streaming_stage(
+                &workflow,
+                &options,
+                StreamingStage {
+                    name: "draft",
+                    model_id: "stage-model",
+                    metadata: &metadata,
+                    input: &input,
+                },
+                on_token,
+                |mut on_token| {
+                    for index in 0..5 {
+                        callbacks += 1;
+                        on_token(PartialToken {
+                            token: format!("t{index} "),
+                            token_id: None,
+                            index,
+                            cumulative_text: String::new(),
+                            finish_reason: None,
+                            tool_calls: Vec::new(),
+                            raw_text: None,
+                        })
+                        .map_err(AdapterError::from_streaming_callback_error)?;
+                    }
+                    Ok(Envelope::new(EnvelopeKind::Text("five tokens".into())))
+                },
+            )
+            .expect_err("the consumer stopped the stream");
+            assert!(
+                matches!(&error, SdkError::InferenceError { message, .. } if message == "LLM streaming execution failed"),
+                "{error:?}"
+            );
+            assert_eq!(workflow.end(&Err::<(), _>(error)), None);
+
+            assert_eq!(callbacks, DELIVERED + 1);
+            for name in [
+                "chat stage-model",
+                "attempt 0",
+                "invoke_workflow streaming-stop",
+            ] {
+                let span = signals.spans.named(name);
+                assert!(
+                    matches!(span.status, opentelemetry::trace::Status::Error { .. }),
+                    "{name}: {:?}",
+                    span.status
+                );
+                assert_eq!(
+                    attr(&span, semconv::attr::ERROR_TYPE).as_deref(),
+                    Some("cancelled"),
+                    "{name}"
+                );
+            }
+            assert_eq!(
+                attr(
+                    &signals.spans.named("chat stage-model"),
+                    semconv::attr::RESPONSE_CHUNK_COUNT
+                )
+                .as_deref(),
+                Some("2")
+            );
+            for metric in [
+                semconv::metric::INFERENCE_DURATION,
+                semconv::metric::WORKFLOW_DURATION,
+            ] {
+                let points = signals.points(metric);
+                assert_eq!(points.len(), 1, "{metric}: {points:?}");
+                assert_eq!(
+                    (points[0].attr(semconv::attr::ERROR_TYPE), points[0].count),
+                    (Some("cancelled"), 1),
+                    "{metric}"
+                );
+            }
+            assert!(
+                !signals
+                    .log_events()
+                    .iter()
+                    .any(|e| e == semconv::event::OPERATION_EXCEPTION),
+                "{:?}",
+                signals.log_events()
+            );
         }
 
         fn options_with(
@@ -2175,6 +2326,108 @@ mod tests {
                     span.name
                 );
                 assert!(attr(span, semconv::attr::INPUT_MESSAGES).is_none());
+            }
+        }
+
+        #[test]
+        fn async_pipeline_entry_points_take_the_callers_parent_only_from_where_they_run() {
+            // `Pipeline::run_async`, `Pipeline::warmup_async` and the
+            // legacy `run_pipeline_async(path)` select no observation options
+            // and report to the default session. Plain `tokio::spawn` after
+            // `Context::attach` exports a root (the legacy function starts its
+            // workflow only after an await); `with_context` or a `block_on` on
+            // the caller's thread exports the caller's child. An explicit
+            // parent given to `run_async_with_options` wins over all three.
+            let _default = default_session_lock();
+            let (server, url) = gateway();
+            let (session, memory, _provider) = allowing(&server);
+            let _installed = DefaultSession::install(&session);
+            // Its own name: the default session collects every test's
+            // unpinned operations while it is installed.
+            let yaml = cloud_yaml(&url).replace("name: rust-observed", "name: a2-ambient");
+            let pipeline = PipelineRef::from_yaml(&yaml).unwrap().load().unwrap();
+            let config = tempfile::tempdir().unwrap();
+            let legacy = config.path().join("legacy.yaml");
+            // Stages name no provider: the cloud adapter refuses them before
+            // any request, and the workflow still records the run.
+            std::fs::write(
+                &legacy,
+                "name: a2-legacy\nstages:\n  - hop-model\ninput:\n  kind: Text\navailability: {}\n",
+            )
+            .unwrap();
+            let legacy = legacy.to_str().unwrap().to_owned();
+            let caller = |entry: usize, case: usize| {
+                ObservationContext::from_traceparent(
+                    &format!(
+                        "00-{:032x}-{:016x}-01",
+                        0xa280 + entry * 16 + case,
+                        0xa280 + entry * 16 + case
+                    ),
+                    None,
+                )
+                .unwrap()
+            };
+
+            for (case, hop) in Hop::ALL.into_iter().enumerate() {
+                let parent = caller(1, case);
+                let mark = memory.mark();
+                let p = pipeline.clone();
+                let ran = hop.run(&parent, async move {
+                    p.run_async(&Envelope::new(EnvelopeKind::Text("ambient".into())))
+                        .await
+                });
+                assert_eq!(
+                    ran.expect("the gateway answers").text(),
+                    Some("stage output")
+                );
+                hop.assert_parent(
+                    &memory.named_since(mark, "invoke_workflow a2-ambient"),
+                    &parent,
+                );
+
+                let parent = caller(2, case);
+                let mark = memory.mark();
+                let p = pipeline.clone();
+                hop.run(&parent, async move { p.warmup_async().await })
+                    .expect("the warmup completes");
+                hop.assert_parent(&memory.named_since(mark, "warmup a2-ambient"), &parent);
+
+                let parent = caller(3, case);
+                let mark = memory.mark();
+                let path = legacy.clone();
+                let ran = hop.run(
+                    &parent,
+                    async move { crate::run_pipeline_async(&path).await },
+                );
+                let error = ran.map(|_| ()).unwrap_err().to_string();
+                assert!(error.contains("Missing 'provider'"), "{hop:?}: {error}");
+                hop.assert_parent(
+                    &memory.named_since(mark, "invoke_workflow a2-legacy"),
+                    &parent,
+                );
+
+                // The run's explicit parent wins over the ambient one,
+                // wherever the future runs.
+                let parent = caller(4, case);
+                let explicit = caller(5, case);
+                let mark = memory.mark();
+                let p = pipeline.clone();
+                let options = RunOptions::default()
+                    .with_observation(ObservationOptions::default().with_parent(explicit.clone()));
+                let ran = hop.run(&parent, async move {
+                    p.run_async_with_options(
+                        &Envelope::new(EnvelopeKind::Text("explicit".into())),
+                        &options,
+                    )
+                    .await
+                });
+                assert_eq!(
+                    ran.expect("the gateway answers").text(),
+                    Some("stage output")
+                );
+                let workflow = memory.named_since(mark, "invoke_workflow a2-ambient");
+                assert_eq!(parent_id(&workflow), explicit.span_id(), "{hop:?}");
+                assert_eq!(trace_id(&workflow), explicit.trace_id(), "{hop:?}");
             }
         }
     }
