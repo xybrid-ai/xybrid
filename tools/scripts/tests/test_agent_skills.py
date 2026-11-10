@@ -26,6 +26,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -254,6 +255,7 @@ class Platform(BaseHTTPRequestHandler):
     requests: list = []
     workspace: dict = {}  # fields that override the GET /v1/agent/workspace answer
     workspace_failure = None  # (status, body, headers) instead of that answer
+    provision: dict = {}  # fields that override the POST /v1/agent/connect answer
 
     def log_message(self, *args):
         pass
@@ -298,12 +300,13 @@ class Platform(BaseHTTPRequestHandler):
             return self.reply(403, {"error": "agent_signup_closed", "message": "closed", "reason": "disabled"})
         if not body["nonce"].isdigit() or independent_bits(body["challenge"], int(body["nonce"])) < 8:
             return self.reply(400, {"error": "proof_of_work_invalid", "message": "no"})
-        self.reply(201, {"api_key": KEY, "key_prefix": KEY[8:16], "scope": "client",
-                         "organization": {"slug": "app", "name": "app"}, "project": {"slug": "default", "name": "Default"},
-                         # chrono writes nanoseconds, which Python < 3.11 can't parse as-is.
-                         "key_expires_at": "2999-01-01T00:00:00.123456789Z", "claim_expires_at": "2999-01-08T00:00:00Z",
-                         "claim_token": TOKEN, "limits": {"gateway_daily_requests": 25, "max_projects": 5},
-                         "replayed": False})
+        answer = {"api_key": KEY, "key_prefix": KEY[8:16], "scope": "client",
+                  "organization": {"slug": "app", "name": "app"}, "project": {"slug": "default", "name": "Default"},
+                  # chrono writes nanoseconds, which Python < 3.11 can't parse as-is.
+                  "key_expires_at": "2999-01-01T00:00:00.123456789Z", "claim_expires_at": "2999-01-08T00:00:00Z",
+                  "claim_token": TOKEN, "limits": {"gateway_daily_requests": 25, "max_projects": 5}, "replayed": False}
+        answer.update(type(self).provision)
+        self.reply(201, answer)
 
 
 @unittest.skipUnless(shutil.which("git"), "git is required")
@@ -316,6 +319,7 @@ class ScriptContractTests(unittest.TestCase):
         (self.home / "gitconfig").write_text("")
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Platform)
         Platform.closed, Platform.requests, Platform.workspace, Platform.workspace_failure = False, [], {}, None
+        Platform.provision = {}
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
 
@@ -536,6 +540,82 @@ class ScriptContractTests(unittest.TestCase):
         self.assertEqual((code, report["key"]["source"], report["workspace"]["organization"]["name"]),
                          (0, "credentials", "app"))
 
+    def test_the_suggested_check_runs_from_where_connect_ran(self):
+        # Run from a subdirectory, the verify command names the file as it was given, not repository-relative.
+        app = self.repo("monorepo")
+        sub = app / "mobile"
+        sub.mkdir()
+        (sub / ".env.local").write_text(f"EXPO_PUBLIC_XYBRID_API_KEY={OTHER_KEY}\n")
+        flags = ("--write-env", ".env.local", "--env-name", "EXPO_PUBLIC_XYBRID_API_KEY")
+        code, report = self.run_script(sub, "connect", *flags)
+        self.assertEqual((code, report["status"], report["key"]["source"]), (0, "existing", "env_file"), report)
+        self.assertEqual(report["env_file"]["path"], "mobile/.env.local")
+        words = shlex.split(report["next_steps"][1]["command"])
+        self.assertEqual(words[3:8], ["status", *flags], words)
+        code, report = self.run_script(sub, *words[3:8])
+        self.assertEqual((code, report["status"], report["key"]["source"]), (0, "connected", "env_file"), report)
+
+    def test_a_file_with_conflicting_values_gets_no_check_that_must_fail(self):
+        # status refuses a file that gives the variable two values, so connect suggests no command reading it.
+        app = self.repo("conflict")
+        third = "sk_live_" + "FAKE_THIRD_KEY"
+        (app / ".env").write_text(f"XYBRID_API_KEY={OTHER_KEY}\nXYBRID_API_KEY={third}\n")
+        code, report = self.run_script(app, "connect", "--write-env", ".env")
+        self.assertEqual((code, report["status"], report["key"]["source"]), (0, "existing", "env_file"), report)
+        verify = report["next_steps"][1]
+        self.assertIsNone(verify["command"], verify)
+        self.assertIn("keep a single XYBRID_API_KEY line", verify["summary"])
+        self.assertIn("different values on several lines", report["tell_the_user"])
+        self.assertNotIn(third, json.dumps(report))
+        code, report = self.run_script(app, "status", "--write-env", ".env")
+        self.assertEqual((code, report["error"]["code"]), (1, "env_file_ambiguous"), report)
+        self.assertEqual(Platform.requests, [], "neither run sends a key")
+
+    def test_a_workspace_answer_off_the_contract_is_never_saved(self):
+        # A deadline without a UTC offset can't be compared, and the CLI refuses a store holding one: the
+        # answer is a platform_error (as `xybrid auth status` reports it) and the saved deadlines stay.
+        app = self.repo("naive")
+        self.seed(app)
+
+        def lifecycle():
+            (entry,) = self.saved()["credentials"]
+            return {k: entry.get(k) for k in ("key_expires_at", "claim_expires_at", "claimed", "scope")}
+
+        before = lifecycle()
+        for answer in ({"key_expires_at": "2999-01-01T00:00:00"}, {"claim_expires_at": "2999-01-08"},
+                       {"key_expires_at": "2999-01-01T00:00:00+00:60"}):
+            with self.subTest(answer=answer):
+                Platform.workspace = answer
+                code, report = self.run_script(app, "status")
+                self.assertEqual((code, report["status"], report["error"]["code"]), (1, "error", "platform_error"),
+                                 report)
+                self.assertEqual(lifecycle(), before)
+                code, report = self.run_script(app, "claim", XYBRID_CONSOLE_URL="http://localhost:5173")
+                self.assertEqual((code, report["status"]), (0, "claimable"), report)
+                code, report = self.run_script(app, "connect", "--write-env", ".env")
+                self.assertEqual((code, report["status"], report["workspace"]["lifecycle_source"]),
+                                 (0, "existing", "stored"), report)
+                self.assertEqual(lifecycle(), before)
+        Platform.workspace_failure = (200, {"hello": 1})
+        code, report = self.run_script(app, "status")
+        self.assertEqual((code, report["error"]["code"]), (1, "platform_error"), report)
+
+    def test_a_provisioning_answer_off_the_contract_is_retried_not_saved(self):
+        app = self.repo("naive-provision")
+        Platform.provision = {"key_expires_at": "2999-01-01T00:00:00"}
+        code, report = self.run_script(app, "connect", "--write-env", ".env")
+        self.assertEqual((code, report["error"]["code"]), (1, "invalid_platform_response"), report)
+        self.assertFalse((app / ".env").exists())
+        saved = self.saved()
+        self.assertEqual(saved["credentials"], [])
+        (pending,) = saved["pending"]
+        Platform.provision = {}
+        code, report = self.run_script(app, "connect", "--write-env", ".env")
+        self.assertEqual((code, report["status"]), (0, "created"), report)
+        keys = [r[3]["Idempotency-Key"] for r in Platform.requests if r[0] == "POST"]
+        self.assertEqual(keys, [pending["idempotency_key"]] * 2, "the retry repeats the same request")
+        self.assertEqual(self.saved()["credentials"][0]["key_expires_at"], "2999-01-01T00:00:00.123456789Z")
+
     # --- the project file, read and written as the CLI does ----------------------
 
     def test_quoted_values_spanning_lines_are_refused(self):
@@ -598,11 +678,14 @@ class ProjectFileTests(unittest.TestCase):
         cases = {
             "dotenv": {
                 "present": ["XYBRID_API_KEY=abc", "export XYBRID_API_KEY=abc", '  XYBRID_API_KEY = "abc"',
+                            "XYBRID_API_KEY=\x1c", "XYBRID_API_KEY= \x1f # c",
                             "XYBRID_API_KEY='abc' # comment", "XYBRID_API_KEY=\nXYBRID_API_KEY=abc\nXYBRID_API_KEY=\n"],
-                "empty": ["XYBRID_API_KEY=", 'XYBRID_API_KEY=""', "XYBRID_API_KEY= # later",
+                "empty": ["XYBRID_API_KEY=", 'XYBRID_API_KEY=""', "XYBRID_API_KEY= # later", "XYBRID_API_KEY=\u2003\xa0",
                           'A="one line" # "quoted"\nXYBRID_API_KEY=\n', "A='it''s'\nXYBRID_API_KEY=\n",
                           '# CERT="open\nXYBRID_API_KEY=\n', 'CERT="-----BEGIN\nMIIE==\n-----END"\nXYBRID_API_KEY=\n'],
-                "absent": ["# XYBRID_API_KEY=abc", "XYBRID_API_KEY_OLD=abc", "MY_XYBRID_API_KEY=abc", ""],
+                "absent": ["# XYBRID_API_KEY=abc", "XYBRID_API_KEY_OLD=abc", "MY_XYBRID_API_KEY=abc", "",
+                           # Rust's trim keeps \x1c-\x1f, which Python's bare strip() takes.
+                           "\x1cXYBRID_API_KEY=abc", "XYBRID_API_KEY\x1f=abc"],
                 "several_empty": ['XYBRID_API_KEY=\nA=1\nexport XYBRID_API_KEY=""\n'],
                 "quoted_lines": ['CERT="-----BEGIN\nXYBRID_API_KEY=\n-----END"\n',
                                  "CERT='-----BEGIN\nexport XYBRID_API_KEY=abc\n-----END'\n", "CERT=`one\nXYBRID_API_KEY=\n`\n",
@@ -614,7 +697,7 @@ class ProjectFileTests(unittest.TestCase):
                 "empty": ["xybrid.apiKey=", "xybrid.apiKey", "  xybrid.apiKey", "xybrid.apiKey\t", "\x0cxybrid.apiKey",
                           "sdk.dir = C:\\\\\nxybrid.apiKey=\n", "# note \\\nxybrid.apiKey=\n",
                           "other = foo \\\n\nxybrid.apiKey=\n"],
-                "absent": ["! xybrid.apiKey=abc", "", "   ", "\n\t\n", "xybrid.apiKeyOld", "xybrid",
+                "absent": ["! xybrid.apiKey=abc", "", "   ", "\n\t\n", "xybrid.apiKeyOld", "xybrid", "\x1cxybrid.apiKey",
                            "sdk.dir=/opt/android/sdk\\\n", "sdk.dir=/opt/android/sdk\\"],
                 "several_empty": ["xybrid.apiKey=\nsdk.dir=/sdk\nxybrid.apiKey :\n", "xybrid.apiKey=\nsdk.dir=/sdk\nxybrid.apiKey\n"],
                 "continuation": ["other = foo \\\nxybrid.apiKey=\n", "other = foo \\\n  xybrid.apiKey=abc\n",
@@ -680,6 +763,19 @@ class ProjectFileTests(unittest.TestCase):
             self.assertFalse(valid("dotenv", bad), bad)
         for bad in ("a=b", "a:b", "a b", ""):
             self.assertFalse(valid("properties", bad), bad)
+
+
+    def test_only_times_with_an_offset_are_taken(self):
+        # What the CLI's chrono parser reads back from the shared store, and nothing that can't be compared.
+        timestamp = self.script.timestamp
+        for raw in ("2999-01-01T00:00:00Z", "2999-01-01t00:00:00z", "2999-01-01T00:00:00.123456789Z",
+                    "2999-01-01T00:00:00-05:00", "2999-01-01T00:00:00+23:59"):
+            self.assertEqual(timestamp(raw), raw, raw)
+            self.script.passed(raw)  # comparable with now
+        for raw in ("2999-01-01T00:00:00", "2999-01-01", "2999-01-01 00:00:00Z", "2999-01-01T00:00:00+0000",
+                    "2999-01-01T00:00:00+24:00", "2999-01-01T00:00:00+00:60", "2999-02-30T00:00:00Z",
+                    "2999-01-01T00:00Z", "\u0662999-01-01T00:00:00Z", "2999-01-01T00:00:00Z\n", None, 2999):
+            self.assertIsNone(timestamp(raw), raw)
 
 
 if __name__ == "__main__":

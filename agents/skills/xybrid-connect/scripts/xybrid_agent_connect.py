@@ -83,16 +83,25 @@ def stamp(at):
 
 def parse_time(raw):
     """RFC 3339 as the platform and the CLI write it (fractions up to nanoseconds, `Z`)."""
-    raw = re.sub(r"\.(\d+)", lambda m: "." + (m.group(1) + "00000")[:6], raw.strip()).replace("Z", "+00:00")
-    return datetime.fromisoformat(raw)
+    raw = re.sub(r"\.([0-9]+)", lambda m: "." + (m.group(1) + "00000")[:6], raw.strip().upper())
+    return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+
+
+# A date, `T`, a time and its UTC offset: a subset of what the CLI's parser (chrono) reads, so a deadline saved
+# here always loads there, and one without an offset (which can't be compared) is never taken.
+RFC3339 = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?"
+                     r"(?:[Zz]|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])")
 
 
 def timestamp(raw):
-    """`raw` if it is an RFC 3339 time, else None."""
-    try:
-        return raw if isinstance(raw, str) and parse_time(raw) else None
-    except ValueError:
+    """`raw` if it is an RFC 3339 time with its UTC offset, else None."""
+    if not isinstance(raw, str) or not RFC3339.fullmatch(raw):
         return None
+    try:
+        parse_time(raw)
+    except ValueError:  # out of range: month 13, February 30, ...
+        return None
+    return raw
 
 
 def passed(raw):
@@ -217,19 +226,27 @@ def call(host, method, path, body=None, headers=None):
     return status, parsed if isinstance(parsed, dict) else {}, got
 
 
+def deadlines_ok(body, required=False):
+    """Whether `body`'s deadlines are RFC 3339 times with an offset (or, unless `required`, absent or null)."""
+    return all(timestamp(body.get(k)) or (not required and body.get(k) is None)
+               for k in ("key_expires_at", "claim_expires_at"))
+
+
 def check_key(host, key):
     """Ask GET /v1/agent/workspace about `key`: ("ok", answer), or ("expired" | "rejected" | "redirect" |
     "offline" | "failed" | "malformed", details). Only the platform's own `401 invalid_api_key` rejects a key:
-    a 401 from a proxy in front of it says nothing about the key."""
+    a 401 from a proxy in front of it says nothing about the key. A 2xx answer off the contract (no organization
+    or project, a deadline that isn't an RFC 3339 time) is a failure without a platform error code, as the CLI
+    takes it: nothing in it is saved."""
     if not KEY_RE.match(key):
         return "malformed", {"error": "invalid_api_key_format", "message": "the key is not in the Xybrid key format"}
     status, body, headers = call(host, "GET", "/v1/agent/workspace", headers={"Authorization": "Bearer " + key})
     if status is None:
         return "offline", body
     if 200 <= status < 300:
-        if named(body.get("organization")) and named(body.get("project")):
+        if named(body.get("organization")) and named(body.get("project")) and deadlines_ok(body):
             return "ok", body
-        return "failed", {"status": status, "error": "invalid_platform_response", "message": "unexpected answer"}
+        return "failed", {"status": status, "message": "unexpected platform response"}
     if 300 <= status < 400:
         return "redirect", {"status": status}
     code = body.get("error")
@@ -296,9 +313,12 @@ def ensure_ignored(root, rel, what="Xybrid project key"):
 # value or block an appended key would land in, the file is refused as ambiguous.
 
 Assignment = collections.namedtuple("Assignment", "name condition value")
-Target = collections.namedtuple("Target", "path rel format variable text lookup")
+Target = collections.namedtuple("Target", "path rel given format variable text lookup")  # given: --write-env as typed
 AMBIGUITIES = ("several_empty", "quoted_lines", "continuation", "block_comment")
 NAME_CHARS = frozenset(string.ascii_letters + string.digits + "_")
+# Unicode White_Space, which Rust's str::trim strips. Python's bare strip() also takes \x1c-\x1f, which Rust
+# keeps, so every strip in this port names this set.
+WS = "\t\n\x0b\x0c\r \x85\xa0\u1680" + "".join(map(chr, range(0x2000, 0x200b))) + "\u2028\u2029\u202f\u205f\u3000"
 
 
 def file_format(path):
@@ -328,13 +348,13 @@ def valid_variable(fmt, name):
 def strip_export(line):
     """The rest of a dotenv line after `export `, or None."""
     if line.startswith("export") and line[6:7] in (" ", "\t"):
-        return line[6:].lstrip()
+        return line[6:].lstrip(WS)
     return None
 
 
 def parse_assignment(fmt, line):
     """The assignment on `line`, its raw value not yet unquoted, or None."""
-    line = line.lstrip()
+    line = line.lstrip(WS)
     if fmt == "dotenv":
         if line.startswith("#"):
             return None
@@ -343,14 +363,14 @@ def parse_assignment(fmt, line):
         if "=" not in line:
             return None
         name, value = line.split("=", 1)
-        return Assignment(name.strip(), "", value)
+        return Assignment(name.strip(WS), "", value)
     if fmt == "properties":  # as java.util.Properties reads it: the key ends at the first `=`, `:` or blank
         if not line or line[0] in "#!":
             return None
         end = next((i for i, c in enumerate(line) if c in "=: \t\x0c"), len(line))
-        rest = line[end:].lstrip()
+        rest = line[end:].lstrip(WS)
         if rest[:1] in ("=", ":"):
-            rest = rest[1:].lstrip()
+            rest = rest[1:].lstrip(WS)
         return Assignment(line[:end], "", rest)
     if line.startswith("//") or line.startswith("#"):
         return None
@@ -368,21 +388,21 @@ def parse_assignment(fmt, line):
         start = close + 1
     left, value = line[:eq], line[eq + 1:]
     bracket = left.find("[")
-    name, condition = (left[:bracket].strip(), left[bracket:].strip()) if bracket >= 0 else (left.strip(), "")
+    name, condition = (left[:bracket].strip(WS), left[bracket:].strip(WS)) if bracket >= 0 else (left.strip(WS), "")
     return Assignment(name, condition, value.split("//")[0])
 
 
 def value_of(fmt, raw):
     """A value as an application reads it: quotes, inline comments and surrounding blanks removed."""
-    value = raw.strip()
+    value = raw.strip(WS)
     if fmt != "dotenv":
         return value
     for quote in "\"'":
         if value.startswith(quote):
-            return value[1:].split(quote)[0].strip()
+            return value[1:].split(quote)[0].strip(WS)
     at = value.find(" #")
     if at >= 0:
-        return value[:at].strip()
+        return value[:at].strip(WS)
     return "" if value.startswith("#") else value
 
 
@@ -400,9 +420,9 @@ def closing_quote(text, quote):
 
 def continues_xcconfig(value):
     """Whether an xcconfig value (its `//` comment removed) runs on: it ends in `\\`, then blanks and one `;`."""
-    value = value.rstrip()
+    value = value.rstrip(WS)
     if value.endswith(";"):
-        value = value[:-1].rstrip()
+        value = value[:-1].rstrip(WS)
     return value.endswith("\\")
 
 
@@ -446,7 +466,7 @@ class Scanner:
             return "quoted_lines", [reading]
         if reading is None:
             return None, None
-        value = reading.value.lstrip()
+        value = reading.value.lstrip(WS)
         if value[:1] in ('"', "'", "`") and closing_quote(value[1:], value[0]) is None:
             self.state, self.quote = "quoted", value[0]
             return "quoted_lines", [reading]
@@ -485,7 +505,7 @@ class Scanner:
             return "block_comment", [reading, meant]
         if self.state == "continued":
             rest = line.split("//")[0]
-            if not rest.strip():
+            if not rest.strip(WS):
                 self.state = "plain"
                 return None, None
             if not continues_xcconfig(rest):
@@ -507,7 +527,7 @@ class Scanner:
     def after_blocks(self, text):
         """For text starting with `/*`: what follows every /* */ block in a row ("" when one stays open,
         which opens the block state). None if `text` doesn't start with a block."""
-        rest = text.lstrip()
+        rest = text.lstrip(WS)
         if not rest.startswith("/*"):
             return None
         rest = rest[2:]
@@ -517,9 +537,9 @@ class Scanner:
                 self.state = "block"
                 return ""
             rest = rest[at + 2:]
-            if not rest.lstrip().startswith("/*"):
+            if not rest.lstrip(WS).startswith("/*"):
                 return rest
-            rest = rest.lstrip()[2:]
+            rest = rest.lstrip(WS)[2:]
 
 
 def lookup(fmt, text, name):
@@ -560,6 +580,12 @@ def assigns(fmt, text, name, value):
     return value in values(fmt, text, name)
 
 
+def conflicting(target):
+    """Whether the file gives its variable different nonempty values: which one an app reads depends on its
+    loader, so `status` refuses to pick one."""
+    return len(set(values(target.format, target.text or "", target.variable))) > 1
+
+
 def ambiguous(file, name, why):
     return fail("env_file_ambiguous", {
         "several_empty": "%s assigns %s an empty value on more than one line, and which one the app reads depends on "
@@ -589,7 +615,7 @@ def upsert(fmt, text, name, key, comment):
         raise fail("invalid_api_key_format", "the platform returned a key with unexpected characters; nothing was written")
     nl = "\r\n" if "\r\n" in text else "\n"
     prefix = "//" if fmt == "xcconfig" else "#"
-    block = "".join("%s %s%s" % (prefix, "".join(" " if unicodedata.category(c) == "Cc" else c for c in line).strip(),
+    block = "".join("%s %s%s" % (prefix, "".join(" " if unicodedata.category(c) == "Cc" else c for c in line).strip(WS),
                                  nl) for line in comment)
     found = lookup(fmt, text, name)
     if found == "present":
@@ -600,7 +626,7 @@ def upsert(fmt, text, name, key, comment):
         out = text
         if out and not out.endswith("\n"):
             out += nl
-        if out.strip():
+        if out.strip(WS):
             out += nl  # the blank line also ends a join by a trailing backslash on the last line
         return out + block + assignment(fmt, name, "", key) + nl
     scanner, out = Scanner(fmt), []
@@ -609,7 +635,7 @@ def upsert(fmt, text, name, key, comment):
         ending = piece[len(content):]
         why, reading = scanner.read(content)
         if why is None and reading is not None and reading.name == name and not value_of(fmt, reading.value):
-            export = "export " if fmt == "dotenv" and strip_export(content.lstrip()) is not None else ""
+            export = "export " if fmt == "dotenv" and strip_export(content.lstrip(WS)) is not None else ""
             out.append(block + export + assignment(fmt, name, reading.condition, key) + (ending or nl))
         else:
             out.append(piece)
@@ -654,7 +680,7 @@ def prepare_target(cwd, repo, raw, env_name):
         raise fail("env_file_outside_repository", "%s is outside this Git repository, so it can't be checked or "
                    "gitignored from here; choose a file inside it" % path)
     text = read_project_file(path)
-    return Target(path, path.relative_to(repo).as_posix() if repo else str(path), fmt, variable, text,
+    return Target(path, path.relative_to(repo).as_posix() if repo else str(path), raw, fmt, variable, text,
                   "absent" if text is None else lookup(fmt, text, variable))
 
 
@@ -964,20 +990,26 @@ def expired_lead(name, key_deadline):
 
 def next_steps(host, target, home):
     """wire_init / verify / relay for a key in the project file ("file"), a key the file already held that this
-    script didn't save ("env_file"), or XYBRID_API_KEY ("env")."""
-    check = ["status"]
+    script didn't save ("env_file"), or XYBRID_API_KEY ("env"). The command runs from the directory this one ran
+    in, so it names the --write-env file as it was given."""
+    check, unshown = ["status"], ""
     if home == "env":
         source, note = "read XYBRID_API_KEY from the environment the app already uses", " with the same XYBRID_API_KEY"
     else:
         source, note = "read %s from %s" % (target.variable, target.rel), ""
     if home == "env_file":
-        check += ["--write-env", target.rel]
+        check += ["--write-env", target.given]
         if target.variable != default_variable(target.format):
             check += ["--env-name", target.variable]
         note = " with %s: this script didn't save that key, so `status` reads it from that file" % " ".join(check[1:])
+        if conflicting(target):  # `status` refuses such a file, so a command would be certain to fail
+            unshown = (" No command is shown because %s gives %s different values on several lines, and `status` "
+                       "won't guess which one the app reads: keep a single %s line first."
+                       % (target.rel, target.variable, target.variable))
     words = check + host_flags(host)
-    command = " ".join([SELF] + words) if all(WORD.match(w) for w in words) else None
-    unshown = "" if command else " No command is shown because a value can't be written as a plain shell word."
+    command = " ".join([SELF] + words) if not unshown and all(WORD.match(w) for w in words) else None
+    if not command and not unshown:
+        unshown = " No command is shown because a value can't be written as a plain shell word."
     return [
         {"kind": "wire_init", "summary": "Enable metadata-only trace export in the app: %s and pass it to the "
          "binding's Xybrid observability preset. The key alone exports nothing." % source, "command": None},
@@ -1047,8 +1079,10 @@ def connect(args, host, report):
         report["env_file"] = dict(file_report, gitignored=repo is not None, gitignore_updated=updated)
         report["key"] = {"source": "env_file", "preview": None, "scope": None}
         report["next_steps"] = next_steps(host, target, "env_file")
-        raise Stop("existing", "%s already sets %s; nothing was changed%s." % (
-            rel, target.variable, " except adding it to .gitignore" if updated else ""))
+        raise Stop("existing", "%s already sets %s; nothing was changed%s.%s" % (
+            rel, target.variable, " except adding it to .gitignore" if updated else "",
+            " It sets it to different values on several lines, so which one the app reads depends on its loader: "
+            "keep a single %s line." % target.variable if conflicting(target) else ""))
     if target.lookup in AMBIGUITIES:
         raise ambiguous(rel, target.variable, target.lookup)
 
@@ -1276,8 +1310,9 @@ def provision(args, host, lock, data, root):
             if pending.get(field):
                 body[field] = pending[field]
         status, answer, headers = call(host, "POST", "/v1/agent/connect", body, {"Idempotency-Key": pending["idempotency_key"]})
-        if status in (200, 201) and isinstance(answer.get("api_key"), str) and KEY_RE.match(answer["api_key"]):
-            break
+        if status in (200, 201) and isinstance(answer.get("api_key"), str) and KEY_RE.match(answer["api_key"]) and \
+                named(answer.get("organization")) and named(answer.get("project")) and deadlines_ok(answer, True):
+            break  # the contract's shape, as the CLI parses it; anything else may have been applied, so it's retried
         if status in (200, 201):
             status, answer = 502, {"error": "invalid_platform_response", "message": "unexpected platform response"}
         code = answer.get("error")
@@ -1301,8 +1336,8 @@ def provision(args, host, lock, data, root):
     credential = {"platform_origin": host["origin"], "repository_root": root, "api_key": answer["api_key"],
                   "scope": answer.get("scope") if isinstance(answer.get("scope"), str) else None,
                   "organization": named(answer.get("organization")), "project": named(answer.get("project")),
-                  "key_expires_at": timestamp(answer.get("key_expires_at")),
-                  "claim_expires_at": timestamp(answer.get("claim_expires_at")), "claim_token": token,
+                  "key_expires_at": answer["key_expires_at"], "claim_expires_at": answer["claim_expires_at"],
+                  "claim_token": token,
                   "source": pending.get("source"), "console_origin": host["console"] if host["custom"] else None,
                   "claimed": False, "terms_url": safe_link(answer.get("terms_url")),
                   "privacy_url": safe_link(answer.get("privacy_url")), "created_at": stamp(now())}
@@ -1348,11 +1383,11 @@ def resolve_key(args, cwd, repo, stored):
         target = prepare_target(cwd, repo, args.write_env, args.env_name)
         if target.lookup in AMBIGUITIES:
             raise ambiguous(target.rel, target.variable, target.lookup)
-        found = values(target.format, target.text or "", target.variable)
-        if len(set(found)) > 1:
+        if conflicting(target):
             raise fail("env_file_ambiguous", "%s assigns %s different values on several lines, and which one the app "
                        "reads depends on its loader; keep a single %s line" % (target.rel, target.variable,
                                                                                target.variable))
+        found = values(target.format, target.text or "", target.variable)
         if found:
             return found[0], "env_file", "%s in %s" % (target.variable, target.rel)
     if stored:
