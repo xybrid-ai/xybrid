@@ -79,12 +79,9 @@ impl LlamaModel {
         };
         // A decision artifact must never silently enter causal generation,
         // including when old explicit GGUF metadata bypasses SDK detection.
-        let decision_marked = model.named_chat_template("systemone")?.is_some()
-            || model
-                .metadata_keys()?
-                .iter()
-                .any(|key| key.starts_with("systemone.") || key.contains(".decision."));
-        if decision_marked {
+        // The scan cannot fail: its limits belong to decision admission, and
+        // must not refuse a chat model that loaded before decisions existed.
+        if model.has_decision_marker() {
             return Err(LlamaError::InvalidInput(
                 "decision artifact requires an explicit decision execution profile".into(),
             ));

@@ -51,7 +51,40 @@ fn read_text(mut read: impl FnMut(*mut c_char, usize) -> i32) -> LlamaResult<Opt
         .map_err(|_| invalid("decision metadata is not UTF-8"))
 }
 
+/// Whether a GGUF metadata key marks a decision artifact.
+///
+/// The markers are the named `systemone` template, `systemone.*` settings and
+/// upstream's `<architecture>.decision.*` keys. xybrid-core's header sniff
+/// (`execution::decision::is_decision_metadata_key`) uses the same rule and a
+/// core test compares the two: change them together.
+pub fn is_decision_metadata_key(key: &str) -> bool {
+    key == "tokenizer.chat_template.systemone"
+        || key.starts_with("systemone.")
+        || key.contains(".decision.")
+}
+
 impl LlamaModel {
+    /// Whether any metadata key marks this model as a decision artifact.
+    ///
+    /// Reads every key llama.cpp kept and skips one it cannot read (not
+    /// UTF-8, or over the byte limit), so the answer never depends on the
+    /// decision admission limits and the scan never fails a load. A marker
+    /// key is short ASCII, so skipping cannot hide one.
+    pub(crate) fn has_decision_marker(&self) -> bool {
+        // SAFETY: self retains the live model.
+        let count = unsafe { sys::llama_model_metadata_count_c(self.as_ptr()) };
+        (0..count.max(0)).any(|index| {
+            read_text(|out, capacity| {
+                // SAFETY: index is below the model's metadata count; out is
+                // writable for capacity bytes.
+                unsafe { sys::llama_model_metadata_key_c(self.as_ptr(), index, out, capacity) }
+            })
+            .ok()
+            .flatten()
+            .is_some_and(|key| is_decision_metadata_key(&key))
+        })
+    }
+
     /// Load weights with an explicit empty offload-device list.
     ///
     /// This is the only loader admitted by [`DecisionContext::new`]. Protocol
@@ -457,6 +490,34 @@ unsafe impl Send for DecisionContext {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decision_markers_are_the_template_its_settings_and_upstream_keys() {
+        for key in [
+            "tokenizer.chat_template.systemone",
+            "systemone.temperature",
+            "lfm3.decision.type",
+            "lfm3.decision.temperature.choice.2",
+        ] {
+            assert!(is_decision_metadata_key(key), "{key}");
+        }
+        for key in [
+            "general.architecture",
+            "tokenizer.chat_template",
+            "tokenizer.chat_template.tool_use",
+            "lfm3.context_length",
+            "general.decision",
+            "systemone",
+        ] {
+            assert!(!is_decision_metadata_key(key), "{key}");
+        }
+    }
+
+    #[test]
+    fn a_model_without_metadata_has_no_decision_marker() {
+        // The stub has no native model: the scan reads nothing and cannot fail.
+        assert!(!LlamaModel::test_stub().has_decision_marker());
+    }
 
     #[test]
     fn metadata_aggregate_budget_is_inclusive_and_overflow_checked() {

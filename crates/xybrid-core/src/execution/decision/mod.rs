@@ -16,6 +16,19 @@ use crate::execution::{ExecutionTemplate, ModelMetadata};
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::AdapterError;
 
+/// Whether a GGUF metadata key marks a decision artifact.
+///
+/// The markers are the named `systemone` template, `systemone.*` settings and
+/// upstream's `<architecture>.decision.*` keys. Sniffing a GGUF header with
+/// this is best effort: the native chat loader applies the same rule
+/// (`xybrid_llama::is_decision_metadata_key`) to the loaded model and refuses,
+/// so a missed marker costs a wasted load, never generation.
+pub fn is_decision_metadata_key(key: &str) -> bool {
+    key == "tokenizer.chat_template.systemone"
+        || key.starts_with("systemone.")
+        || key.contains(".decision.")
+}
+
 /// A content-free refusal for an unsupported decision entry point.
 pub fn unsupported(model_id: &str, capability: &str) -> AdapterError {
     AdapterError::UnsupportedModelCapability {
@@ -206,6 +219,33 @@ mod tests {
                 Err(AdapterError::UnsupportedModelCapability { .. })
             ));
         }
+    }
+
+    #[test]
+    fn decision_markers_match_the_native_chat_loader() {
+        let keys = [
+            "tokenizer.chat_template.systemone",
+            "systemone.temperature",
+            "lfm3.decision.type",
+            "lfm3.decision.temperature.choice.2",
+            "general.architecture",
+            "tokenizer.chat_template",
+            "tokenizer.chat_template.tool_use",
+            "lfm3.context_length",
+            "general.decision",
+            "systemone",
+        ];
+        assert_eq!(
+            keys.map(is_decision_metadata_key),
+            [true, true, true, true, false, false, false, false, false, false]
+        );
+        // The SDK sniffs with this rule and the chat loader refuses with its
+        // own copy: a difference would classify one way and load the other.
+        #[cfg(feature = "llm-llamacpp")]
+        assert_eq!(
+            keys.map(is_decision_metadata_key),
+            keys.map(xybrid_llama::is_decision_metadata_key)
+        );
     }
 
     #[cfg(not(feature = "llm-llamacpp"))]

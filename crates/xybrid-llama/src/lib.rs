@@ -86,8 +86,8 @@ mod vision;
 pub use context::{LlamaContext, LlamaSeqSnapshot};
 #[cfg(feature = "bindings")]
 pub use decision::{
-    DecisionContext, DecisionContextSettings, DecisionRenderer, VocabularyModel,
-    DECISION_CONTEXT_TOKENS, DECISION_RENDER_BYTES,
+    is_decision_metadata_key, DecisionContext, DecisionContextSettings, DecisionRenderer,
+    VocabularyModel, DECISION_CONTEXT_TOKENS, DECISION_RENDER_BYTES,
 };
 #[cfg(all(feature = "bindings", feature = "vision"))]
 pub use generation::generate_from_current_logits_streaming;

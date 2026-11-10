@@ -513,8 +513,8 @@ fn read_gguf_metadata_inner(path: &Path) -> Option<SdkResult<GgufInfo>> {
         read_u32_le(&mut reader)? as u64
     };
 
-    // Match the decision native wrapper's metadata-copy bound. Never turn a
-    // partial header scan into a generative classification.
+    // Match the decision native wrapper's metadata-copy bound: a header this
+    // large is refused rather than classified from a prefix.
     if metadata_kv_count > 65_536 {
         return Some(Err(SdkError::MetadataInvalid(
             "GGUF metadata entry count exceeds the inspection limit".into(),
@@ -523,8 +523,12 @@ fn read_gguf_metadata_inner(path: &Path) -> Option<SdkResult<GgufInfo>> {
 
     let mut vision_projector_type = None;
 
-    // Classifying from a prefix can hide a decision marker later in the
-    // header. Read every declared entry, stopping on malformed data or EOF.
+    // A decision marker usually follows the architecture and context keys, so
+    // read every declared entry instead of stopping at the first useful ones.
+    // An entry this reader cannot parse or skip (a truncated file, a value
+    // type newer than it knows) ends the scan and classifies from what was
+    // read: that keeps such a chat model loading. Should a decision marker
+    // hide behind it, the native chat loader still refuses the artifact.
     for _ in 0..metadata_kv_count {
         let key = match read_gguf_string(&mut reader) {
             Some(k) => k,
@@ -537,7 +541,7 @@ fn read_gguf_metadata_inner(path: &Path) -> Option<SdkResult<GgufInfo>> {
 
         // We only care about specific keys
         match key.as_str() {
-            k if k == "tokenizer.chat_template.systemone" || k.starts_with("systemone.") => {
+            k if xybrid_core::execution::decision::is_decision_metadata_key(k) => {
                 info.decision_marked = true;
                 if !skip_gguf_value(&mut reader, value_type) {
                     return None;
@@ -2610,7 +2614,11 @@ mod tests {
 
     #[test]
     fn decision_marker_after_context_never_becomes_a_generative_template() {
-        for marker in ["tokenizer.chat_template.systemone", "systemone.temperature"] {
+        for marker in [
+            "tokenizer.chat_template.systemone",
+            "systemone.temperature",
+            "lfm3.decision.type",
+        ] {
             let dir = TempDir::new().unwrap();
             let path = dir.path().join("arbitrary-name.gguf");
             let mut file = std::fs::File::create(&path).unwrap();
