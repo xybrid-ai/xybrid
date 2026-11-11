@@ -1,0 +1,125 @@
+{
+  "schema": "xybrid-staging-scenario/1",
+  "lanes": {
+    "python-mac": {
+      "binding": "python",
+      "host": "mac",
+      "delivery": "pull"
+    },
+    "rust-mac": {
+      "binding": "rust",
+      "host": "mac",
+      "delivery": "callback",
+      "sessions": [
+        "direct",
+        "collector",
+        "case-pipeline",
+        "case-tts",
+        "case-asr",
+        "case-frames",
+        "case-fallback"
+      ]
+    },
+    "swift-iphone": {
+      "binding": "swift",
+      "host": "iphone",
+      "delivery": "pull"
+    },
+    "kotlin-pixel": {
+      "binding": "kotlin",
+      "host": "pixel",
+      "delivery": "pull"
+    },
+    "react-native-pixel": {
+      "binding": "react-native",
+      "host": "pixel",
+      "delivery": "pull"
+    },
+    "react-native-iphone": {
+      "binding": "react-native",
+      "host": "iphone",
+      "delivery": "pull"
+    },
+    "web-mac": {
+      "binding": "web",
+      "host": "mac",
+      "delivery": "pull",
+      "sessions": [
+        "direct",
+        "direct-logs"
+      ]
+    },
+    "unity-mac": {
+      "binding": "unity",
+      "host": "mac",
+      "delivery": "pull"
+    },
+    "flutter-mac": {
+      "binding": "flutter",
+      "host": "mac",
+      "delivery": "push"
+    },
+    "flutter-pixel": {
+      "binding": "flutter",
+      "host": "pixel",
+      "delivery": "push"
+    },
+    "flutter-iphone": {
+      "binding": "flutter",
+      "host": "iphone",
+      "delivery": "push"
+    }
+  },
+  "sessions": [
+    "direct",
+    "collector"
+  ],
+  "per_lane": {
+    "service_name": "xybrid-staging-{binding}",
+    "service_version": "1.0.0",
+    "device_id": "staging-device-{lane}",
+    "conversation_id": "staging-conversation-{run}-{session}"
+  },
+  "resource_attributes": [
+    "xybrid.acceptance.run",
+    "xybrid.acceptance.lane",
+    "xybrid.acceptance.commit",
+    "xybrid.acceptance.session"
+  ],
+  "workflow_name": "staging-workflow",
+  "model": {
+    "id": "lfm2.5-230m",
+    "fallback_id": "qwen2.5-0.5b-instruct"
+  },
+  "stopped": {
+    "prompt": "Write a long, detailed story about a lighthouse keeper who talks to the sea. Keep writing for many paragraphs.",
+    "max_tokens": 256,
+    "stop_after_chunks": 3
+  },
+  "completed": {
+    "prompt": "My access code is xybrid-staging-secret-5e8b. Without repeating it, answer in one short sentence: what colour is a clear daytime sky?",
+    "max_tokens": 32
+  },
+  "secret": "xybrid-staging-secret-5e8b",
+  "replacement": "[staging-redacted]",
+  "feedback": {
+    "score": 1.0,
+    "label": "thumbs_up",
+    "comment": "helpful; my access code is xybrid-staging-secret-5e8b"
+  },
+  "evaluation": {
+    "name": "staging_relevance",
+    "score_value": 0.75,
+    "score_label": "pass",
+    "explanation": "answer names the colour"
+  },
+  "timeout_ms": 20000,
+  "cases": {
+    "frames": 5,
+    "pipeline_stop_after_chunks": 2,
+    "tts_stop_after_chunks": 1,
+    "asr_model": "whisper-tiny-ggml",
+    "tts_model": "kitten-tts-nano-0.8",
+    "cloud_model": "gpt-4o-mini"
+  }
+}

@@ -166,6 +166,14 @@ path = "examples/cloud_fallback_demo.rs"
 # Real inference path — needs llama.cpp linked.
 required-features = ["llm-llamacpp", "dev-tools"]
 
+# Step 6 staging acceptance (tools/scripts/observability_staging): real
+# registry models (llama.cpp, whisper.cpp, ONNX TTS) and the staged
+# memory-pressure seam of the cloud-fallback case.
+[[example]]
+name = "observability_acceptance"
+path = "examples/observability_acceptance.rs"
+required-features = ["llm-llamacpp", "dev-tools"]
+
 [[test]]
 name = "cloud_fallback_e2e"
 path = "tests/cloud_fallback_e2e.rs"
