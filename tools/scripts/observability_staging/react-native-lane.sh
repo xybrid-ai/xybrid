@@ -188,7 +188,7 @@ ios_stage_config() {
     ios_copy_config "$1" && return 0
     echo "==> creating Documents/xybrid-staging in the app's container, then copying again"
     xcrun devicectl device process launch --device "$IOS_UDID" --terminate-existing "$IOS_BUNDLE" \
-        -XybridStagingPrepare YES -RCT_jsLocation "$METRO_HOST:8081"
+        -- -XybridStagingPrepare YES -RCT_jsLocation "$METRO_HOST:8081"
     for _ in $(seq 12); do
         sleep 5
         ios_copy_config "$1" > /dev/null 2>&1 && return 0
@@ -219,8 +219,9 @@ iphone_run() {
     ios_stage_config "$config"
     copied=1
     [ -n "$METRO_HOST" ] || { echo "error: no LAN address for Metro (set XYBRID_MAC_LAN_IP)" >&2; exit 1; }
+    # `--`: what follows goes to the app, not devicectl.
     xcrun devicectl device process launch --device "$IOS_UDID" --terminate-existing "$IOS_BUNDLE" \
-        -RCT_jsLocation "$METRO_HOST:8081"
+        -- -RCT_jsLocation "$METRO_HOST:8081"
     deadline=$((SECONDS + POLL_SECONDS))
     until rm -f "$part" && xcrun devicectl device copy from --device "$IOS_UDID" --domain-type appDataContainer \
             --domain-identifier "$IOS_BUNDLE" --source Documents/xybrid-staging/expectations.json \
