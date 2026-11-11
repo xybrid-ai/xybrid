@@ -369,12 +369,14 @@ test('run results carry the observation and runs forward the trace fields', asyn
     traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
     conversationId: 'conv-1',
     suppressTrace: false,
+    frameSessionId: 'camera-7',
   });
   assert.deepEqual(result.observation, observation);
   assert.deepEqual(calls[0][3], {
     traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
     conversationId: 'conv-1',
     suppressTrace: false,
+    frameSessionId: 'camera-7',
   });
 });
 
@@ -393,6 +395,7 @@ test('pipelines load from any source and forward only the trace fields', async (
     correlationId: 'c',
     tracestate: 's',
     generationConfig: { maxTokens: 1 },
+    frameSessionId: 'camera-7',
   });
   await (await Pipeline.fromFile('file:///p.yaml')).run(Envelope.text('go'));
   assert.equal(result.text, 'done');

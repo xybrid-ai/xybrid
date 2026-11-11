@@ -113,6 +113,12 @@ class XybridRunOptions:
     """Caller-owned conversation id recorded on the run."""
     suppress_trace: bool
     """Skip the detailed trace for this run; metrics are still recorded."""
+    frame_session_id: str | None
+    """Your id for one continuous live-capture session (a camera or
+    microphone loop). Every run of the session is counted in metrics, and
+    detailed traces are kept for roughly one run per live trace interval
+    per session (`set_live_trace_interval_ms`). Blank values are ignored.
+    """
 
 
 
@@ -1165,8 +1171,9 @@ class XybridObservabilityConfig:
         """Record metadata only: no prompts, outputs, or tool payloads."""
     def set_max_content_bytes(self, bytes: int) -> None:
         """Maximum bytes per captured content attribute, clamped to at most
-        208 KiB so that a span's content leaves 64 KiB of the 480 KiB export
-        request for its other data.
+        416 KiB (208 KiB when exporting OTLP/JSON, which can double content)
+        so that a span's content leaves 64 KiB of the 480 KiB export request
+        for its other data.
         """
     def allow_provider_context(self, origin: str) -> None:
         """Allows context propagation to one exact third-party HTTP(S) origin."""

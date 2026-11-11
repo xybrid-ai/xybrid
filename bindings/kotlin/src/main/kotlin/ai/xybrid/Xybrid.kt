@@ -532,6 +532,10 @@ fun XybridObservabilityConfig.start() {
  * @param conversationId your conversation id, recorded on the run's trace.
  * @param suppressTrace skip the detailed trace for this run; metrics are still
  *   recorded.
+ * @param frameSessionId your id for one continuous live-capture session (a
+ *   camera or microphone loop). Every run of the session is counted in
+ *   metrics, and detailed traces are kept for roughly one run per live trace
+ *   interval per session (`setLiveTraceIntervalMs`).
  */
 fun runOptions(
     generationConfig: XybridGenerationConfig? = null,
@@ -543,6 +547,7 @@ fun runOptions(
     tracestate: String? = null,
     conversationId: String? = null,
     suppressTrace: Boolean = false,
+    frameSessionId: String? = null,
 ): XybridRunOptions = XybridRunOptions(
     generationConfig = generationConfig,
     abortOn = abortOn,
@@ -553,6 +558,7 @@ fun runOptions(
     tracestate = tracestate,
     conversationId = conversationId,
     suppressTrace = suppressTrace,
+    frameSessionId = frameSessionId,
 )
 
 // -- Model loading --

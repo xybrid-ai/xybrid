@@ -71,6 +71,7 @@ export interface WireRunOptions {
   tracestate?: string;
   conversationId?: string;
   suppressTrace?: boolean;
+  frameSessionId?: string;
   /** Conversation-context handle. */
   context?: string;
   /** Cancellation-token handle. */
@@ -286,6 +287,7 @@ export interface RunOptionsInput {
   tracestate?: string;
   conversationId?: string;
   suppressTrace?: boolean;
+  frameSessionId?: string;
 }
 
 /** The per-call trace fields, which pipelines accept too. */
@@ -318,6 +320,8 @@ export function toWireRunOptions(
   if (options?.fallbackToCloud !== undefined) wire.fallbackToCloud = options.fallbackToCloud;
   if (options?.maxGraceTokens !== undefined) wire.maxGraceTokens = options.maxGraceTokens;
   if (options) Object.assign(wire, toWireTraceOptions(options));
+  // A model-run field: pipelines take the trace fields only.
+  if (options?.frameSessionId !== undefined) wire.frameSessionId = options.frameSessionId;
   if (handles.context) wire.context = handles.context;
   if (handles.cancel) wire.cancel = handles.cancel;
   return Object.keys(wire).length > 0 ? wire : null;

@@ -35,7 +35,7 @@ reconciles against the metric.
 | What happens | `error.type` | Notes |
 |---|---|---|
 | The run stops on its caller's cancellation: the abort gate stops on the cancelled `cancellation_token` (by the caller, or by a preempting run) | `cancelled` | Span `ERROR` `cancelled`, attempt included; no exception log |
-| The caller abandons a stream before its terminal event: drops the Rust `run_stream` stream, drops a facade streaming session or closes a Bolt stream (`stream_close`), unsubscribes the Flutter stream, or a token callback returns `AbortReason::UserCancelled` | `cancelled` | The run stops at its next token (the runtime sees one callback past the last delivered token); with or without a token. What the caller receives is unchanged |
+| The caller abandons a stream before its terminal event: drops the Rust `run_stream` stream, drops a facade streaming session or closes a Bolt stream (`stream_close`), unsubscribes the Flutter stream, or a token callback returns an error (any error: `AbortReason::UserCancelled` is the conventional one, and a model stream treats an untyped error the same way a streaming pipeline does) | `cancelled` | The run stops at its next token (the runtime sees one callback past the last delivered token); with or without a token. What the caller receives is unchanged. The consumer stopped the stream; the model did not fail |
 | A request cancelled before it runs (`check_before_run`, or a TTS token already cancelled) | `cancelled` | Recorded without waiting for a model whose lock a run in flight holds |
 | A resource abort before the run | the returned error's type: `aborted_for_cloud_fallback` when a streaming or TTS policy allows fallback, otherwise `inference_error` | On `run_streaming_with_fallback` this is the failed local attempt (`initial`, `local`), ahead of the remote `fallback` attempt; the request's outcome is the fallback's |
 | A refused input (for example a choice request to a model that does not score choices) | the refusal's type, such as `unsupported` | The runtime is never entered |
@@ -60,7 +60,8 @@ observer ([contract](../../crates/xybrid-observability/CONTRACT.md#content-pipel
   span processor that panics while a span ends is contained the same way.
 - The content budgets are clamped so that a span's content fits the 480 KiB
   request bound with 64 KiB left for the span's other data: the
-  retained-operation budget is at most 208 KiB and the attribute budget at
+  retained-operation budget is at most 416 KiB over OTLP/protobuf (the
+  default protocol) or 208 KiB over OTLP/JSON, and the attribute budget at
   most that, so a raised budget (including the facade's
   `set_max_content_bytes`) truncates or omits (and lists) content instead of
   dropping the span. That 64 KiB is reserved, not enforced: a span whose other
@@ -88,7 +89,15 @@ observer ([contract](../../crates/xybrid-observability/CONTRACT.md#content-pipel
 - Live frames: the sampler remembers at most 1,024 frame sessions, evicting
   the least recently used, and forgets a session 300 s after its last frame;
   a forgotten session's next frame is traced. Lookup is a hash probe, so a
-  per-frame session id neither grows memory nor scans the sessions.
+  per-frame session id neither grows memory nor scans the sessions. Every
+  binding can name a frame session on a model run, so the live trace interval
+  applies everywhere it can be set: Rust `RunOptions::with_frame_session`;
+  the facade and Bolt `RunOptions.frame_session_id` (Swift
+  `XybridRunOptions.make(frameSessionId:)`, Kotlin
+  `runOptions(frameSessionId = …)`, Python `frame_session_id`, Unity
+  `ObservationOptions.FrameSessionId`, React Native `frameSessionId`); and
+  Flutter's `frameSessionId` parameter. A blank id is ignored. Pipelines,
+  loads and manual observations take no frame session.
 
 ## Binding surfaces and validation
 

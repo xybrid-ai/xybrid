@@ -1900,7 +1900,8 @@ final stream = model.runStreaming(
 );
 ```
 
-**Live mode / frame session (implemented in Rust + Dart, issue 14).** For
+**Live mode / frame session (Rust, Dart, and the Bolt bindings: Swift, Kotlin,
+Python, Unity and React Native through `RunOptions.frame_session_id`).** For
 continuous live-capture loops (e.g. the Flutter vision-live loop), `RunOptions`
 carries an optional `frameSessionId` — a caller-supplied UUID identifying one
 continuous live-capture session — plus a `liveMode` flag. The **caller**
@@ -1981,7 +1982,7 @@ stream stays low-cardinality.
 | `ImagePlane` | ✅ | 📋 | 📋 | 📋 |
 | `YuvColorInfo` | ✅ | 📋 | 📋 | 📋 |
 | `RunOptions` | ✅ | planned | planned | planned |
-| `RunOptions.frameSessionId` / `liveMode` | ✅ | 📋 | 📋 | 📋 |
+| `RunOptions.frameSessionId` (sets live mode) | ✅ | ✅ | ✅ | ✅ |
 | `AbortPolicy` | ✅ | planned | planned | planned |
 | `AbortSignal` | ✅ | planned | planned | planned |
 | `AbortSignal.userCancelled` (Dart surface via CancellationToken) | ✅ | 📋 | 📋 | 📋 |

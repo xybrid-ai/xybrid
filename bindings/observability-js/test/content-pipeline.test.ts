@@ -18,6 +18,7 @@ import {
   type RedactionRule,
   type StartOptions,
   spanContentCeiling,
+  spanEnvelopeAllowance,
   toRedactionRules,
   utf8Length,
   utf8Prefix,
@@ -389,18 +390,32 @@ describe("declarative rules (D19, R-CONTENT-4)", () => {
 
 describe("budgets and re-recording (D20, D22, R-BUF-3, content-11)", () => {
   test("defaults equal the catalog and invalid budgets throw RangeError", () => {
-    // The default retained budget is the span content ceiling of the default request bound.
-    expect(DEFAULTS.max_retained_operation_bytes as number).toBe(208 * 1024);
-    expect(spanContentCeiling(DEFAULTS.max_request_body_bytes)).toBe(
+    // The default retained budget is the span content ceiling of the default request bound as
+    // protobuf; as JSON (the default encoding) the same bound carries half.
+    expect(DEFAULTS.max_retained_operation_bytes as number).toBe(416 * 1024);
+    expect(spanContentCeiling(DEFAULTS.max_request_body_bytes, "protobuf")).toBe(
       DEFAULTS.max_retained_operation_bytes,
     );
+    expect(spanContentCeiling(DEFAULTS.max_request_body_bytes)).toBe(208 * 1024);
     expect(DEFAULTS.max_traversal_bytes as number).toBe(480 * 1024);
     expect(DEFAULTS.max_json_depth as number).toBe(128);
     expect(new Observer().contentBudgets).toEqual({
       maxAttributeBytes: DEFAULTS.max_content_attribute_bytes,
+      maxRetainedOperationBytes: 208 * 1024,
+      maxRequestBodyBytes: DEFAULTS.max_request_body_bytes,
+      spanContentEncoding: "json",
+    });
+    expect(new Observer({ content: { spanContentEncoding: "protobuf" } }).contentBudgets).toEqual({
+      maxAttributeBytes: DEFAULTS.max_content_attribute_bytes,
       maxRetainedOperationBytes: DEFAULTS.max_retained_operation_bytes,
       maxRequestBodyBytes: DEFAULTS.max_request_body_bytes,
+      spanContentEncoding: "protobuf",
     });
+    for (const value of ["JSON", "http/protobuf", "", 1, null]) {
+      expect(() => new Observer({ content: { spanContentEncoding: value as never } })).toThrow(
+        RangeError,
+      );
+    }
     for (const value of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, "10"]) {
       for (const key of [
         "maxAttributeBytes",
@@ -760,7 +775,31 @@ describe("content budgets fit one span in the request bound", () => {
   test("budgets are clamped, never rejected, and the effective values are exposed", () => {
     expect(ceiling).toBe(212_992);
     expect(spanContentCeiling(DEFAULTS.max_request_body_bytes)).toBe(ceiling);
-    expect(spanContentCeiling(DEFAULTS.span_envelope_allowance_bytes)).toBe(1);
+    // JSON escaping can double content; protobuf writes it as retained.
+    expect(DEFAULTS.span_content_encoding_growth).toEqual({ json: 2, protobuf: 1 });
+    expect(spanContentCeiling(DEFAULTS.max_request_body_bytes, "json")).toBe(ceiling);
+    expect(spanContentCeiling(DEFAULTS.max_request_body_bytes, "protobuf")).toBe(2 * ceiling);
+    // The allowance is 64 KiB, or half of a bound under 128 KiB, so a small bound still leaves
+    // room for content.
+    const allowance = DEFAULTS.span_envelope_allowance_bytes;
+    expect(spanEnvelopeAllowance(DEFAULTS.max_request_body_bytes)).toBe(allowance);
+    expect(spanEnvelopeAllowance(2 * allowance)).toBe(allowance);
+    expect(spanEnvelopeAllowance(2 * allowance - 2)).toBe(allowance - 1);
+    expect(spanContentCeiling(allowance)).toBe(allowance / 4);
+    expect(spanContentCeiling(allowance, "protobuf")).toBe(allowance / 2);
+    expect(spanContentCeiling(1600)).toBe(400);
+    expect(spanContentCeiling(800, "protobuf")).toBe(400);
+    // The ceiling never decreases as the bound grows, across the point where the allowance
+    // stops growing.
+    for (const encoding of ["json", "protobuf"] as const) {
+      let last = 0;
+      for (let bound = 1; bound < 4 * allowance; bound += 97) {
+        const now = spanContentCeiling(bound, encoding);
+        expect(now).toBeGreaterThanOrEqual(last);
+        last = now;
+      }
+    }
+    // No bound leaves less than one byte.
     expect(spanContentCeiling(1)).toBe(1);
     const raised = new Observer({
       content: { maxAttributeBytes: 400_000, maxRetainedOperationBytes: 1_000_000 },
@@ -769,26 +808,36 @@ describe("content budgets fit one span in the request bound", () => {
       maxAttributeBytes: ceiling,
       maxRetainedOperationBytes: ceiling,
       maxRequestBodyBytes: DEFAULTS.max_request_body_bytes,
+      spanContentEncoding: "json",
     });
     // The attribute budget follows a lower retained budget.
     expect(
       new Observer({ content: { maxAttributeBytes: 5000, maxRetainedOperationBytes: 1000 } })
         .contentBudgets.maxAttributeBytes,
     ).toBe(1000);
-    // A smaller request bound lowers both; values under it are kept.
-    const bound = DEFAULTS.span_envelope_allowance_bytes + 2 * 10_000;
-    expect(
+    // A smaller request bound lowers both; values under it are kept. Half of a 40,000-byte bound
+    // is reserved, and JSON halves the rest; the same bound carries twice the content as protobuf.
+    const bound = 40_000;
+    const raisedFor = (spanContentEncoding: "json" | "protobuf") =>
       new Observer({
         content: {
           maxAttributeBytes: 400_000,
           maxRetainedOperationBytes: 1_000_000,
           maxRequestBodyBytes: bound,
+          spanContentEncoding,
         },
-      }).contentBudgets,
-    ).toEqual({
+      }).contentBudgets;
+    expect(raisedFor("json")).toEqual({
       maxAttributeBytes: 10_000,
       maxRetainedOperationBytes: 10_000,
       maxRequestBodyBytes: bound,
+      spanContentEncoding: "json",
+    });
+    expect(raisedFor("protobuf")).toEqual({
+      maxAttributeBytes: 20_000,
+      maxRetainedOperationBytes: 20_000,
+      maxRequestBodyBytes: bound,
+      spanContentEncoding: "protobuf",
     });
     expect(
       new Observer({ content: { maxAttributeBytes: 64, maxRequestBodyBytes: bound } })
@@ -797,7 +846,7 @@ describe("content budgets fit one span in the request bound", () => {
   });
 
   test("truncation uses the effective budget", () => {
-    const bound = DEFAULTS.span_envelope_allowance_bytes + 2 * 10_000;
+    const bound = 40_000;
     const { observer, spans } = createHarness({
       content: { capture: "span_only", maxAttributeBytes: 400_000, maxRequestBodyBytes: bound },
     });

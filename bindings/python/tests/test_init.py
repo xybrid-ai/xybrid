@@ -261,6 +261,7 @@ class InitTests(unittest.TestCase):
                     self.assertIsNone(options.tracestate)
                     self.assertIsNone(options.conversation_id)
                     self.assertFalse(options.suppress_trace)
+                    self.assertIsNone(options.frame_session_id)
                     options._boltffi_wire()
                 count += 1
         self.assertEqual(count, 2, "must exercise both quickstart and README options")

@@ -1,0 +1,172 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 4096,
+    "max_request_body_bytes": 800,
+    "max_retained_operation_bytes": 100000,
+    "redact_substrings": [],
+    "span_content_encoding": "protobuf"
+  },
+  "description": "The span content ceiling depends on how the exporter writes content. With span_content_encoding protobuf, content is sent as retained (growth 1), so an 800-byte bound, half of it reserved for the envelope, gives (800 - 400) / 1 = 400: the same effective budgets as content_budget_request_bound reaches as JSON with a 1600-byte bound, and so the same result. The configured budgets (attribute 4096, retained 100000) act as 400 each; 150 quotes are still charged at their JSON-escaped length (16 + 24 + 300 = 340), the input messages that follow are omitted and listed, and a 1000-byte output is truncated to the clamped attribute budget and kept.",
+  "expect": {
+    "logs": [],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 2,
+            "sum": 0.02
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "chat",
+          "gen_ai.prompt.name": "p",
+          "gen_ai.prompt.variable.q": "\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"",
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny",
+          "xybrid.genai.content.truncated_attributes": [
+            "gen_ai.input.messages"
+          ],
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 10,
+        "id": "quoted",
+        "kind": "INTERNAL",
+        "name": "chat tiny",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "chat",
+          "gen_ai.output.messages": [
+            {
+              "finish_reason": "stop",
+              "parts": [
+                {
+                  "content": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…[truncated]",
+                  "type": "text"
+                }
+              ],
+              "role": "assistant"
+            }
+          ],
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny",
+          "xybrid.genai.content.truncated_attributes": [
+            "gen_ai.output.messages"
+          ],
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 30,
+        "id": "long",
+        "kind": "INTERNAL",
+        "name": "chat tiny",
+        "parent": null,
+        "start_ms": 20,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 1
+      }
+    ]
+  },
+  "name": "content_budget_protobuf_encoding",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "quoted",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "prompt_name": "p",
+        "prompt_variables": {
+          "q": "\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\""
+        },
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp"
+      }
+    },
+    {
+      "at_ms": 1,
+      "id": "quoted",
+      "op": "input_messages",
+      "value": [
+        {
+          "parts": [
+            {
+              "content": "hi",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        }
+      ]
+    },
+    {
+      "at_ms": 10,
+      "id": "quoted",
+      "op": "end"
+    },
+    {
+      "at_ms": 20,
+      "id": "long",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp"
+      }
+    },
+    {
+      "at_ms": 21,
+      "id": "long",
+      "op": "output_messages",
+      "value": [
+        {
+          "finish_reason": "stop",
+          "parts": [
+            {
+              "content": {
+                "$repeat_string": {
+                  "count": 1000,
+                  "value": "x"
+                }
+              },
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        }
+      ]
+    },
+    {
+      "at_ms": 30,
+      "id": "long",
+      "op": "end"
+    }
+  ]
+}

@@ -101,6 +101,7 @@ do {
     "tracestate": "vendor=1",
     "conversationId": "conv-1",
     "suppressTrace": true,
+    "frameSessionId": "camera-7",
     "context": "context:1",
     "cancel": "cancel:1",
   ]))
@@ -119,7 +120,9 @@ do {
   check(options.suppressTrace, "suppress trace")
   check(request.context == "context:1" && request.cancel == "cancel:1", "handles")
   let untraced = try XybridCodec.decodeRunRequest(js([:]))
+  check(options.frameSessionId == "camera-7", "frame session")
   check(untraced.options?.suppressTrace == false, "suppressTrace defaults off")
+  check(untraced.options?.frameSessionId == nil, "no frame session by default")
 
   let empty = try XybridCodec.decodeRunRequest(nil)
   check(empty.options == nil && empty.context == nil, "null options")

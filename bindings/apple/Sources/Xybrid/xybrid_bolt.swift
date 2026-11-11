@@ -214,6 +214,11 @@ public struct XybridRunOptions: Hashable, Equatable, Sendable {
     public var conversationId: String?
     /// Skip the detailed trace for this run; metrics are still recorded.
     public var suppressTrace: Bool
+    /// Your id for one continuous live-capture session (a camera or
+    /// microphone loop). Every run of the session is counted in metrics, and
+    /// detailed traces are kept for roughly one run per live trace interval
+    /// per session (`set_live_trace_interval_ms`). Blank values are ignored.
+    public var frameSessionId: String?
 
     public init(
         generationConfig: XybridGenerationConfig?,
@@ -224,7 +229,8 @@ public struct XybridRunOptions: Hashable, Equatable, Sendable {
         traceparent: String?,
         tracestate: String?,
         conversationId: String?,
-        suppressTrace: Bool
+        suppressTrace: Bool,
+        frameSessionId: String?
     ) {
         self.generationConfig = generationConfig
         self.abortOn = abortOn
@@ -235,6 +241,7 @@ public struct XybridRunOptions: Hashable, Equatable, Sendable {
         self.tracestate = tracestate
         self.conversationId = conversationId
         self.suppressTrace = suppressTrace
+        self.frameSessionId = frameSessionId
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridRunOptions {
@@ -247,7 +254,8 @@ public struct XybridRunOptions: Hashable, Equatable, Sendable {
             traceparent: reader.readOptional { reader in reader.readString() },
             tracestate: reader.readOptional { reader in reader.readString() },
             conversationId: reader.readOptional { reader in reader.readString() },
-            suppressTrace: reader.readBool()
+            suppressTrace: reader.readBool(),
+            frameSessionId: reader.readOptional { reader in reader.readString() }
         )
     }
 
@@ -261,6 +269,7 @@ public struct XybridRunOptions: Hashable, Equatable, Sendable {
         writer.writeOptional(self.tracestate) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
         writer.writeOptional(self.conversationId) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
         writer.writeBool(self.suppressTrace)
+        writer.writeOptional(self.frameSessionId) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
     }
 }
 
@@ -2702,8 +2711,9 @@ public final class XybridObservabilityConfig {
     }
 
     /// Maximum bytes per captured content attribute, clamped to at most
-    /// 208 KiB so that a span's content leaves 64 KiB of the 480 KiB export
-    /// request for its other data.
+    /// 416 KiB (208 KiB when exporting OTLP/JSON, which can double content)
+    /// so that a span's content leaves 64 KiB of the 480 KiB export request
+    /// for its other data.
     public func setMaxContentBytes(bytes: UInt32) {
         boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_max_content_bytes(self.handle, bytes)
     }

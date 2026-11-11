@@ -12,8 +12,13 @@ import { LoggerProvider, type ReadableLogRecord } from "@opentelemetry/sdk-logs"
 import { MeterProvider } from "@opentelemetry/sdk-metrics";
 import type { ReadableSpan } from "@opentelemetry/sdk-trace";
 import { AlwaysOnSampler, ParentBasedSampler, TracerProvider } from "@opentelemetry/sdk-trace";
-import { DEFAULTS } from "../catalog.ts";
-import { type ContentOptions, type LoggerProviderLike, Observer } from "../observer.ts";
+import { DEFAULTS, type SpanContentEncoding } from "../catalog.ts";
+import {
+  type ContentOptions,
+  type LoggerProviderLike,
+  Observer,
+  spanContentEncodingOf,
+} from "../observer.ts";
 import {
   BoundedBatchQueue,
   PipelineLogProcessor,
@@ -84,8 +89,9 @@ export class OtlpPipeline {
   readonly #spans: BoundedBatchQueue<ReadableSpan> | undefined;
   readonly #logs: BoundedBatchQueue<ReadableLogRecord> | undefined;
   readonly #metrics: PipelineMetricReader | undefined;
-  /** `maxRequestBodyBytes` of the traces export, if spans are exported. */
+  /** `maxRequestBodyBytes` and content encoding of the traces export, if spans are exported. */
   readonly #spanRequestBound: number | undefined;
+  readonly #spanContentEncoding: SpanContentEncoding | undefined;
   #shutdown: Promise<boolean> | undefined;
 
   /**
@@ -97,6 +103,12 @@ export class OtlpPipeline {
     const { limits } = resolved;
     const resource = defaultResource().merge(resourceFromAttributes(resolved.resourceAttributes));
     this.#spanRequestBound = resolved.traces === undefined ? undefined : limits.maxRequestBodyBytes;
+    this.#spanContentEncoding =
+      resolved.traces === undefined
+        ? undefined
+        : resolved.traces.protocol === "http/json"
+          ? "json"
+          : "protobuf";
     if (resolved.traces !== undefined) {
       const sender = new BatchSender<ReadableSpan>(
         "traces",
@@ -139,10 +151,14 @@ export class OtlpPipeline {
    * An {@link Observer} over this pipeline's providers. Signals the pipeline does not export are
    * disabled rather than read from globals, so evaluation events return `false` on a traces-only
    * pipeline. With a traces signal, the content budgets are clamped to fit this pipeline's
-   * `maxRequestBodyBytes` (or `content.maxRequestBodyBytes`, default 480 KiB, if smaller).
+   * `maxRequestBodyBytes` (or `content.maxRequestBodyBytes`, default 480 KiB, if smaller) as its
+   * traces protocol writes content: `http/protobuf` carries twice the content of `http/json` in
+   * the same request (416 KiB against 208 KiB at the default bound). The pipeline's protocol
+   * replaces `content.spanContentEncoding`.
    */
   observer(content?: ContentOptions): Observer {
     const bound = this.#spanRequestBound;
+    const encoding = this.#spanContentEncoding;
     const own =
       content?.maxRequestBodyBytes === undefined
         ? DEFAULTS.max_request_body_bytes
@@ -151,7 +167,18 @@ export class OtlpPipeline {
     // Rust; invalid input still throws.
     const replace =
       bound !== undefined && typeof own === "number" && Number.isSafeInteger(own) && own > bound;
-    const fitted = replace ? { ...content, maxRequestBodyBytes: bound } : content;
+    // The pipeline knows how its spans are written; an invalid `spanContentEncoding` still throws.
+    if (encoding !== undefined) spanContentEncodingOf(content?.spanContentEncoding);
+    const fitted =
+      encoding === undefined
+        ? replace
+          ? { ...content, maxRequestBodyBytes: bound }
+          : content
+        : {
+            ...content,
+            ...(replace ? { maxRequestBodyBytes: bound } : {}),
+            spanContentEncoding: encoding,
+          };
     return new Observer({
       tracerProvider: this.tracerProvider ?? null,
       meterProvider: this.meterProvider ?? null,

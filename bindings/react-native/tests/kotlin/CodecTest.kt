@@ -125,6 +125,7 @@ fun main() {
       "tracestate" to "vendor=1",
       "conversationId" to "conv-1",
       "suppressTrace" to true,
+      "frameSessionId" to "camera-7",
       "context" to "context:1",
       "cancel" to "cancel:1",
     ),
@@ -140,7 +141,9 @@ fun main() {
   check(options.traceparent == "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01", "traceparent")
   check(options.tracestate == "vendor=1" && options.conversationId == "conv-1", "trace context")
   check(options.suppressTrace, "suppress trace")
+  check(options.frameSessionId == "camera-7", "frame session")
   check(XybridCodec.decodeRunRequest(js()).options?.suppressTrace == false, "suppressTrace defaults off")
+  check(XybridCodec.decodeRunRequest(js()).options?.frameSessionId == null, "no frame session by default")
   check(request.context == "context:1" && request.cancel == "cancel:1", "handles")
   check(XybridCodec.decodeRunRequest(null).options == null, "null options")
 

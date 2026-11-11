@@ -22,6 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`xybrid.genai.resource.memory.pressure`: `normal`, `warn` or `critical`).
   The Rust SDK maps them from its resource summary; unmeasured values stay
   absent. Rust and JS `ResourceSample` gained the matching optional fields.
+- Live frame sessions in every binding. `RunOptions.frame_session_id` in the
+  facade and Bolt names one continuous capture loop (a camera or microphone)
+  on a model run: every frame is counted in metrics, and detailed traces are
+  kept for roughly one frame per live trace interval per session. It was
+  reachable only from Rust and Flutter, so the interval setting did nothing
+  elsewhere. Swift `XybridRunOptions.make(frameSessionId:)`, Kotlin
+  `runOptions(frameSessionId = …)`, Unity `ObservationOptions.FrameSessionId`
+  and React Native `frameSessionId` default to none. The generated
+  `XybridRunOptions` record gained the field, so code that builds it directly
+  (Python, or the Swift, Kotlin and C# initializers) passes one more
+  argument: `None`, `nil` or `null` for a one-shot run.
 - **Rust:** per-destination OTLP response hooks in `xybrid-observability`
   (`otlp::ResponseHook`, `SignalEndpoint::with_response_hook`). A hook sees
   every HTTP response of its destination once, including retries and the
@@ -51,11 +62,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HTTP work on lifecycle deadlines. Per-signal counters report delivery outcomes.
 - Observability content budgets are clamped so that a span's content fits the
   export request bound (480 KiB by default) with 64 KiB left for the span's
-  other data (the default retained-operation budget is now 208 KiB): a raised
-  budget truncates or omits (and lists) content instead of dropping the span.
-  That 64 KiB is reserved, not enforced, so a span whose other data outgrows
-  it (large application attributes or resource, many or very long omitted
-  prompt-variable names) can still be dropped as an oversized item.
+  other data: a raised budget truncates or omits (and lists) content instead
+  of dropping the span. The clamp follows how the exporter writes content.
+  OTLP/protobuf, the default protocol, sends it as retained, so the default
+  retained-operation budget is 416 KiB; OTLP/JSON can double it, so the same
+  request carries 208 KiB. Providers the application owns are fitted as JSON
+  until the policy names protobuf (Rust
+  `ContentPolicy::with_span_content_encoding`, JS
+  `content.spanContentEncoding`). A request bound under 128 KiB reserves half
+  of itself instead of 64 KiB, so a small bound still carries content.
+  That allowance is reserved, not enforced, so a span whose other data
+  outgrows it (large application attributes or resource, many or very long
+  omitted prompt-variable names) can still be dropped as an oversized item.
   Content for spans that are not recording is no longer processed, a Rust
   redaction hook that panics fails closed, a span processor that panics (Rust)
   or throws (JS) while a span ends is contained (that span is lost; a failure
@@ -85,6 +103,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with one, and closing a facade streaming session or a Bolt stream
   (`stream_close`) early already stopped its run. Observability records these
   runs as `cancelled`.
+- A token callback that returns an error stops a model stream as the
+  caller's cancellation whatever the error's type: observability records the
+  run as `cancelled`, as a streaming pipeline already did. An untyped
+  callback error used to be recorded as `inference_error`, although the model
+  had not failed. The error returned to the caller is unchanged.
 - JavaScript exporter support covers aligned OpenTelemetry 3.0/0.300 and
   3.1/0.301 families. The core entry point stays independent of SDK packages.
 - CLI traces are scoped to each operation; `--trace-export PATH` explicitly

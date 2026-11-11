@@ -66,7 +66,7 @@ pub use clock::Clock;
 pub use clock::ManualClock;
 pub use content::{
     ContentCapture, ContentPolicy, InputMessage, MediaMetadata, Modality, OutputMessage, Part,
-    RedactionError, RedactionRule, Redactor, SubstringRedactor,
+    RedactionError, RedactionRule, Redactor, SpanContentEncoding, SubstringRedactor,
 };
 pub use context::{normalize_tracestate, ObservationContext, ObservationRef};
 pub use error::{Error, Result};

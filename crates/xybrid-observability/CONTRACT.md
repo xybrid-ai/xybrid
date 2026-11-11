@@ -47,7 +47,8 @@ format gained steps and stricter normalization. Content destined for a span
 that does not record is not processed; a redaction hook that panics (Rust)
 fails closed like one that throws, and a span processor that panics while a
 span ends is contained; the content budgets are clamped so one span's
-content fits the request bound (default retained-operation budget 208 KiB);
+content fits the request bound as its exporter writes it (default
+retained-operation budget 416 KiB over OTLP/protobuf, 208 KiB over OTLP/JSON);
 per-signal stats report the bytes held against the byte budget
 (`buffered_bytes`).
 
@@ -393,7 +394,10 @@ Metrics are recorded for every operation whether or not its trace is sampled.
 
 Operations accept a `trace` hint. `Default` follows the tracer's sampler (the
 packages' own pipeline uses parent-based sampling with every new root
-recorded). `Suppress` creates no span — the handle still measures time and
+recorded, and takes no ratio or sampler option: metrics are recorded for
+every operation whatever is sampled, and an application that wants a ratio
+builds its own tracer provider with any sampler and hands it to the
+observer). `Suppress` creates no span — the handle still measures time and
 records metrics, and its `context()` and `observation_ref()` are empty.
 Live/continuous sessions use `Suppress` for frames they do not want traced so
 aggregate counts stay exact. Unsampled spans keep their references (see
@@ -580,46 +584,60 @@ comment is processed in this order:
 10. **Record** once at end: one attribute per key, last write wins.
 
 Budgets (catalog `defaults`; configurable, each >= 1): `max_content_attribute_bytes`
-16384, `max_retained_operation_bytes` 212992, `max_traversal_bytes` 491520;
+16384, `max_retained_operation_bytes` 425984, `max_traversal_bytes` 491520;
 `max_json_depth` 128 (fixed). They describe library-owned data, not process
 memory.
 
 The content budgets are clamped, at configuration and never with an error, so
 that one span's content cannot push its export request past
-`max_request_body_bytes` (`R`, 491520 by default):
+`max_request_body_bytes` (`R`, 491520 by default) as the exporter writes it
+(`E`, the span content encoding: `json` by default, or `protobuf`):
 
 ```
-ceiling(R)                   = max(1, floor((R - span_envelope_allowance_bytes) / span_content_encoding_growth))
-max_retained_operation_bytes = min(configured, ceiling(R))
+allowance(R)                 = min(span_envelope_allowance_bytes, floor(R / 2))
+ceiling(R, E)                = max(1, floor((R - allowance(R)) / span_content_encoding_growth[E]))
+max_retained_operation_bytes = min(configured, ceiling(R, E))
 max_content_attribute_bytes  = min(configured, max_retained_operation_bytes)
 ```
 
 `span_envelope_allowance_bytes` (65536) reserves room for the span's
 non-content data: ids, name, resource and scope, the package's metadata
 attributes, status and the truncation list (attributes an application adds, a
-large resource and many long prompt-variable names count against it). The
-allowance is reserved, not enforced: names in
+large resource and many long prompt-variable names count against it). A bound
+under twice the allowance reserves half of itself instead, so a small bound
+still carries content. The allowance is reserved, not enforced: names in
 `xybrid.genai.content.truncated_attributes` are not charged to any budget (an
 omitted value's key is listed even when the retained budget is spent), so a
 span whose non-content data outgrows it (for example thousands of omitted
 prompt variables) can still exceed `R` and is then dropped whole as an
 oversized item.
-`span_content_encoding_growth` (2) covers OTLP/JSON, which writes each content
-attribute as a JSON string: escaping at most doubles a value that is already
-serialized JSON (`"` and `\` take two bytes), and plain-text values are charged
-at their escaped length (below). The defaults satisfy the clamp: `ceiling` of
-the default `R` is the default retained-operation budget, 212992 (208 KiB).
-`R` is the policy's own bound (Rust `ContentPolicy::with_max_request_body_bytes`,
-JS `content.maxRequestBodyBytes`; default 491520); an observer built by a
-packaged pipeline with a traces signal uses the pipeline's
-`max_request_body_bytes` when it is smaller. Both packages expose the effective
-values (Rust `ContentPolicy::max_attribute_bytes`,
-`max_retained_operation_bytes`, `max_request_body_bytes`; JS
-`Observer.contentBudgets`). A bound at or below the allowance leaves budgets of
-1: content is omitted and listed. The clamped attribute budget can equal the
-retained-operation budget; a value truncated to near it still charges its key
-(and, for `span_and_event` with a recording span, both copies) against the
-retained budget, so it can be omitted and listed rather than kept.
+
+`span_content_encoding_growth` is how many encoded bytes one retained byte can
+become. OTLP/JSON (`json`, 2) writes each content attribute as a JSON string:
+escaping at most doubles a value that is already serialized JSON (`"` and `\`
+take two bytes), and plain-text values are charged at their escaped length
+(below). OTLP/protobuf (`protobuf`, 1) writes content as it is retained. So
+the same request carries twice the content as protobuf: with the default `R`
+the ceiling is 425984 (416 KiB), which is the default retained-operation
+budget, and 212992 (208 KiB) as JSON, which clamps that default.
+
+`E` is `json` unless it is named: the safe assumption for an exporter the
+package does not know (Rust `ContentPolicy::with_span_content_encoding`, JS
+`content.spanContentEncoding`). `R` is the policy's own bound (Rust
+`ContentPolicy::with_max_request_body_bytes`, JS `content.maxRequestBodyBytes`;
+default 491520). An observer built by a packaged pipeline with a traces signal
+uses that signal's protocol for `E`, whatever the policy names (`http/protobuf`,
+the default protocol, is `protobuf`; `http/json` is `json`), and the
+pipeline's `max_request_body_bytes` for `R` when it is smaller. Both packages
+expose the effective values (Rust `ContentPolicy::max_attribute_bytes`,
+`max_retained_operation_bytes`, `max_request_body_bytes`,
+`span_content_encoding`; JS `Observer.contentBudgets`). When one policy caps
+another (Rust `ContentPolicy::capped_by`), the result keeps the capped
+policy's own `E` and the smaller of each effective budget. The clamped
+attribute budget can equal the retained-operation budget; a value truncated to
+near it still charges its key (and, for `span_and_event` with a recording
+span, both copies) against the retained budget, so it can be omitted and
+listed rather than kept.
 
 The clamp fits spans only. Event-destined content is bounded by the same
 retained-operation budget but is not fitted to a logs signal's
@@ -862,7 +880,13 @@ nulls arrive as `bytesValue: ""` and JS whole-number doubles as `intValue`.
   `max_retries` with backoff `min(initial_delay × 2^n, max_delay)` (no jitter).
   `Retry-After` replaces the backoff, even above `max_delay`, unless it would end
   at or after the deadline, in which case the items fail immediately. Other
-  statuses fail without retry.
+  statuses fail without retry. Each export retries on its own: a destination
+  that keeps answering 429 or 503 does not hold later exports back
+  (there is no circuit breaker and no `Retry-After` shared across exports).
+  What a struggling destination can receive stays bounded by `max_retries`,
+  the export deadline, one export in flight per signal and the
+  `max_buffered_bytes_per_signal` budget, beyond which items are dropped
+  and counted.
 - Redirects are never followed; a 3xx fails without retry.
 - Responses: the status decides. At most `max_response_body_bytes` (64 KiB) are
   read within the deadline; a body problem after a 2xx does not change the
@@ -933,6 +957,11 @@ cumulative. Tests inject or disable the environment (Rust
   `@opentelemetry/api` logs global, then the `@opentelemetry/api-logs` global, at
   call time. Trace-only destinations do not receive evaluation events; route them
   through a Collector logs pipeline.
+- The records carry no id of their own. An export whose acknowledgement is
+  lost may be sent again, so a destination that must not store the record
+  twice deduplicates on what the record is: its target, timestamp, name,
+  score, response id and content. Xybrid's ingest derives its stable id from
+  exactly those, so a resend replaces the first copy.
 
 ## Export presets
 
@@ -977,8 +1006,9 @@ Each fixture in `contract/fixtures/*.json` is:
 
 Config fields (defaults in parentheses): `content_capture` (`span_only`; runners
 never read the environment), `max_content_attribute_bytes` (16384),
-`max_retained_operation_bytes` (212992), `max_request_body_bytes` (491520; the
+`max_retained_operation_bytes` (425984), `max_request_body_bytes` (491520; the
 content policy's own bound, which the content budgets are clamped to fit),
+`span_content_encoding` (`json`; how that bound's exporter writes content),
 `max_traversal_bytes` (491520),
 `redact_substrings` (`[]`), `test_redactor` (absent), `redaction_rules` (`[]`),
 `logs` (`true`), `tracer` (`sdk`).

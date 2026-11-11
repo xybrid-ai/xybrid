@@ -774,9 +774,9 @@ pub(crate) struct RunObservation {
 /// Where a run stopped on its caller's cancellation.
 ///
 /// Set by whatever stops the run for that reason, at the point it stops: an
-/// abort gate that stopped on [`AbortReason::UserCancelled`], a token callback
-/// that returned it (the consumer of a stream went away), or a pipeline
-/// consumer whose `on_token` failed. The run's error then says only that the
+/// abort gate that stopped on [`AbortReason::UserCancelled`], or the caller's
+/// token callback refusing a token (see [`ChunkSink::deliver`]), in a model
+/// stream and in a pipeline alike. The run's error then says only that the
 /// stream failed, so the mark, not the error or the token, decides that it
 /// ends `cancelled`. Shared with the run's attempts.
 ///
@@ -791,8 +791,9 @@ impl CancelMark {
     }
 
     /// Records the cancellation `error` carries, if it is one: the typed
-    /// [`AbortReason::UserCancelled`] an abort gate or a token callback
-    /// returns to stop a stream.
+    /// [`AbortReason::UserCancelled`] an abort gate returns to stop a stream.
+    /// A gate's other reasons (resource pressure) are not the caller's
+    /// cancellation.
     ///
     /// [`AbortReason::UserCancelled`]: crate::run_options::AbortReason::UserCancelled
     pub(crate) fn note(&self, error: &(dyn std::error::Error + 'static)) {
@@ -806,7 +807,7 @@ impl CancelMark {
     }
 }
 
-/// Whether a token callback's `error` is the caller's cancellation.
+/// Whether an abort gate's `error` is the caller's cancellation.
 fn is_user_cancel(error: &(dyn std::error::Error + 'static)) -> bool {
     error
         .downcast_ref::<crate::run_options::AbortReason>()
@@ -833,8 +834,10 @@ impl ChunkSink {
     /// accepts it. The time is the operation's anchored reading, as for
     /// every other default timing call, so a wall-clock step mid-stream does
     /// not distort the chunk timings. A token the caller refuses is not
-    /// delivered; a refusal that is the caller's cancellation (see
-    /// [`CancelMark::note`]) marks the run cancelled.
+    /// delivered, and the refusal marks the run cancelled whatever error it
+    /// carries: the consumer stopped the stream, the model did not fail. The
+    /// one exception is a typed cloud-fallback abort, which hands the request
+    /// to its cloud leg instead of ending it.
     pub(crate) fn deliver(
         &self,
         deliver: impl FnOnce() -> Result<(), StreamingError>,
@@ -843,7 +846,11 @@ impl ChunkSink {
         let delivered = deliver();
         match &delivered {
             Ok(()) => self.op.record_chunk_at(at),
-            Err(error) => self.stopped.note(error.as_ref()),
+            Err(error) => {
+                if xybrid_core::abort::cloud_fallback_reason_from_error(error.as_ref()).is_none() {
+                    self.stopped.set();
+                }
+            }
         }
         delivered
     }
@@ -3580,6 +3587,67 @@ mod tests {
             "time to first chunk follows the operation clock, not the {STEP:?} \
              wall-clock step: {ttfc} s"
         );
+    }
+
+    /// A token the caller refuses marks the run cancelled whatever error the
+    /// callback returns: the consumer stopped the stream, the model did not
+    /// fail. A typed cloud-fallback abort is the exception, because it hands
+    /// the request to its cloud leg instead of ending it. An abort gate is
+    /// stricter: only its typed user cancellation is the caller's.
+    #[test]
+    fn a_refused_token_marks_the_run_cancelled_unless_it_hands_over_to_the_cloud() {
+        use crate::run_options::AbortReason;
+        use xybrid_core::abort::CloudFallbackAbort;
+
+        let sink = || ChunkSink {
+            op: Arc::new(Observer::disabled().start_inference(
+                InferenceRequest::new("chat", "llama.cpp").streaming(true),
+                StartOptions::default(),
+            )),
+            stopped: CancelMark::default(),
+        };
+        type Refusal = fn() -> StreamingError;
+        let refusals: [(&str, Refusal, bool); 4] = [
+            ("an untyped error", || "the consumer failed".into(), true),
+            (
+                "the typed user cancellation",
+                || Box::new(AbortReason::UserCancelled),
+                true,
+            ),
+            (
+                "an I/O error",
+                || Box::new(std::io::Error::other("the pipe closed")),
+                true,
+            ),
+            (
+                "a typed cloud-fallback abort",
+                || {
+                    Box::new(CloudFallbackAbort::new(
+                        xybrid_core::abort::AbortReason::StressMemory,
+                    ))
+                },
+                false,
+            ),
+        ];
+        for (what, refusal, cancelled) in refusals {
+            let sink = sink();
+            sink.deliver(|| Err(refusal()))
+                .expect_err("the caller refuses the token");
+            assert_eq!(sink.cancel_mark().is_set(), cancelled, "{what}");
+
+            // The gate's reading of the same error.
+            let gate = CancelMark::default();
+            gate.note(refusal().as_ref());
+            assert_eq!(
+                gate.is_set(),
+                what == "the typed user cancellation",
+                "{what}"
+            );
+        }
+        let sink = sink();
+        sink.deliver(|| Ok(()))
+            .expect("the caller accepts the token");
+        assert!(!sink.cancel_mark().is_set(), "an accepted token");
     }
 
     #[test]

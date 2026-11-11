@@ -500,9 +500,10 @@ fn ungated() -> Result<(), StreamingError> {
 /// per-token abort checks) runs first, and only a token it lets through is
 /// handed to `on_token`, then counted as a delivered chunk once the caller
 /// accepts it. So `chunk_count` is the number of tokens the caller received,
-/// whatever stopped the stream. A stop that is the caller's cancellation (the
-/// gate stopping on [`AbortReason::UserCancelled`], or `on_token` returning
-/// it because its consumer went away) marks the run cancelled.
+/// whatever stopped the stream. A stop that is the caller's cancellation
+/// marks the run cancelled: the gate stopping on
+/// [`AbortReason::UserCancelled`], or `on_token` refusing a token with any
+/// error (its consumer went away, or stopped the stream for its own reason).
 ///
 /// [`AbortReason::UserCancelled`]: crate::run_options::AbortReason::UserCancelled
 fn deliver_gated<G, F>(
@@ -5303,14 +5304,15 @@ impl XybridModel {
     /// API regardless of model type, while LLMs get the latency benefits of
     /// true streaming.
     ///
-    /// Returning [`AbortReason::UserCancelled`](crate::AbortReason::UserCancelled)
-    /// from `on_token` stops the run at that token as the caller's
-    /// cancellation (for example, the consumer of a forwarded stream went
-    /// away): the call still fails as a callback error, and observability
-    /// records the run as `cancelled` rather than as an error. Any other
-    /// callback error stops it as an error. This holds for every token-stream
-    /// entry point, and `chunk_count` counts only the tokens `on_token`
-    /// accepted.
+    /// Returning an error from `on_token` stops the run at that token as the
+    /// caller's cancellation (for example, the consumer of a forwarded stream
+    /// went away): the call still fails as a callback error, and
+    /// observability records the run as `cancelled` rather than as an error,
+    /// because the consumer stopped the stream and the model did not fail.
+    /// The error's type does not matter, as in a streaming pipeline;
+    /// [`AbortReason::UserCancelled`](crate::AbortReason::UserCancelled) is
+    /// the conventional one. This holds for every token-stream entry point,
+    /// and `chunk_count` counts only the tokens `on_token` accepted.
     ///
     /// # Arguments
     ///
@@ -5506,10 +5508,9 @@ impl XybridModel {
     /// Run streaming inference with per-token abort checks.
     ///
     /// A run stopped on the caller's cancellation (the token, or `on_token`
-    /// returning [`AbortReason::UserCancelled`](crate::AbortReason::UserCancelled)),
-    /// a run cancelled or aborted before it starts and a refused input are
-    /// each recorded as one request with that outcome; see
-    /// [`Self::run_streaming`].
+    /// returning an error), a run cancelled or aborted before it starts and
+    /// a refused input are each recorded as one request with that outcome;
+    /// see [`Self::run_streaming`].
     pub fn run_streaming_with_options<F>(
         &self,
         envelope: &Envelope,

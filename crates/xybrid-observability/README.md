@@ -74,12 +74,18 @@ different exporter encodes that carrier as empty bytes rather than null.
 
 Each export shares one absolute deadline across split requests, retries and
 response reads. Redirects are disabled. Content retained per operation defaults
-to 208 KiB and traversal to 480 KiB, queues plus in-flight data to 32 MiB per
+to 416 KiB and traversal to 480 KiB, queues plus in-flight data to 32 MiB per
 signal, and JSON depth to 128. These budgets describe library-owned data, not
 process RSS. The content budgets are clamped so one span's content fits the
 request bound (`max_request_body_bytes`, 480 KiB; see `ContentPolicy`) with
 64 KiB left for the span's other data, an allowance that is reserved, not
-enforced (CONTRACT.md "Content pipeline", budgets). Content for a span that is
+enforced (CONTRACT.md "Content pipeline", budgets). How much fits depends on
+how the exporter writes content: OTLP/protobuf, the default protocol, sends
+it as retained, so the default request carries the full 416 KiB; OTLP/JSON
+can double it, so the same request carries 208 KiB. The packaged pipeline
+applies its own protocol. A policy used with providers the application owns
+is fitted as JSON until `ContentPolicy::with_span_content_encoding` names
+protobuf. Content for a span that is
 not recording is not processed, and a redaction hook that panics fails closed
 like one that returns an error. `stats()` reports `accepted`,
 `exported`, `dropped`, `failed`, `pending` and `buffered_bytes` (the bytes

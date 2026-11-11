@@ -279,6 +279,9 @@ impl FfiRunOptions {
             fallback_to_cloud: self.fallback_to_cloud,
             max_grace_tokens: self.max_grace_tokens.unwrap_or(0),
             correlation_id: non_empty(self.correlation_id.as_deref()).map(str::to_string),
+            // Vision live-mode: the facade flips live_mode and the SDK samples
+            // live traces per session.
+            frame_session_id: non_empty(self.frame_session_id.as_deref()).map(str::to_string),
         }
     }
 
@@ -289,8 +292,8 @@ impl FfiRunOptions {
     /// canonical SDK options it returns, we layer the bits the facade keeps out
     /// of its FFI-safe surface: the Flutter resource provider, the cancellation
     /// token (plus `UserCancelled`, which the facade's `AbortSignal` omits by
-    /// design because cancellation is expressed through the token), and the
-    /// vision live-mode frame session.
+    /// design because cancellation is expressed through the token). The
+    /// vision live-mode frame session rides the facade options.
     ///
     /// When `cancellation_token` is `None` the abort policy is left untouched,
     /// preserving the default chat / cloud-fallback semantics exactly.
@@ -319,11 +322,6 @@ impl FfiRunOptions {
             options = options
                 .with_abort_policy(policy)
                 .with_cancellation_token(token.0.clone());
-        }
-
-        // Vision live-mode: flips live_mode and rate-limits live telemetry.
-        if let Some(frame_session_id) = non_empty(self.frame_session_id.as_deref()) {
-            options = options.with_frame_session(frame_session_id.to_string());
         }
 
         Ok(options)

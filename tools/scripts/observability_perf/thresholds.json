@@ -87,7 +87,7 @@
       "bound": {
         "max_abs": 16.0
       },
-      "rationale": "Pipeline runtime threads, HTTP client and a few retained spans per process; content retained by an operation is bounded to 208 KiB by default (clamped to fit the 480 KiB request bound). The 32 MiB per-signal buffer cannot fill with a handful of operations, so 16 MiB catches leaks or unbounded retention without flagging the fixed cost."
+      "rationale": "Pipeline runtime threads, HTTP client and a few retained spans per process; content retained by an operation is bounded to 416 KiB by default over OTLP/protobuf, 208 KiB over OTLP/JSON (clamped to fit the 480 KiB request bound). The 32 MiB per-signal buffer cannot fill with a handful of operations, so 16 MiB catches leaks or unbounded retention without flagging the fixed cost."
     },
     {
       "id": "E7",

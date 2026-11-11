@@ -11,9 +11,15 @@ namespace XybridBolt
     /// <param name="Tracestate">W3C `tracestate` accompanying `traceparent`.</param>
     /// <param name="ConversationId">Caller-owned conversation id recorded on the run.</param>
     /// <param name="SuppressTrace">Skip the detailed trace for this run; metrics are still recorded.</param>
+    /// <param name="FrameSessionId">
+    /// Your id for one continuous live-capture session (a camera or
+    /// microphone loop). Every run of the session is counted in metrics, and
+    /// detailed traces are kept for roughly one run per live trace interval
+    /// per session (`set_live_trace_interval_ms`). Blank values are ignored.
+    /// </param>
     public readonly struct XybridRunOptions
     {
-        public XybridRunOptions(XybridGenerationConfig? GenerationConfig, XybridAbortSignal[] AbortOn, bool FallbackToCloud, uint MaxGraceTokens, string? CorrelationId, string? Traceparent, string? Tracestate, string? ConversationId, bool SuppressTrace) { this.GenerationConfig = GenerationConfig; this.AbortOn = AbortOn; this.FallbackToCloud = FallbackToCloud; this.MaxGraceTokens = MaxGraceTokens; this.CorrelationId = CorrelationId; this.Traceparent = Traceparent; this.Tracestate = Tracestate; this.ConversationId = ConversationId; this.SuppressTrace = SuppressTrace; }
+        public XybridRunOptions(XybridGenerationConfig? GenerationConfig, XybridAbortSignal[] AbortOn, bool FallbackToCloud, uint MaxGraceTokens, string? CorrelationId, string? Traceparent, string? Tracestate, string? ConversationId, bool SuppressTrace, string? FrameSessionId) { this.GenerationConfig = GenerationConfig; this.AbortOn = AbortOn; this.FallbackToCloud = FallbackToCloud; this.MaxGraceTokens = MaxGraceTokens; this.CorrelationId = CorrelationId; this.Traceparent = Traceparent; this.Tracestate = Tracestate; this.ConversationId = ConversationId; this.SuppressTrace = SuppressTrace; this.FrameSessionId = FrameSessionId; }
         public XybridGenerationConfig? GenerationConfig { get; }
         public XybridAbortSignal[] AbortOn { get; }
         public bool FallbackToCloud { get; }
@@ -23,6 +29,7 @@ namespace XybridBolt
         public string? Tracestate { get; }
         public string? ConversationId { get; }
         public bool SuppressTrace { get; }
+        public string? FrameSessionId { get; }
 
         internal static XybridRunOptions Decode(WireReader reader) =>
             new XybridRunOptions(
@@ -34,7 +41,8 @@ namespace XybridBolt
                 reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
                 reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
                 reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
-                reader.ReadBool()
+                reader.ReadBool(),
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
             );
 
         internal void Encode(WireWriter writer)
@@ -109,6 +117,17 @@ namespace XybridBolt
             }
             {
                 writer.WriteBool(this.SuppressTrace);
+            }
+            {
+                if (this.FrameSessionId is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
             }
         }
 

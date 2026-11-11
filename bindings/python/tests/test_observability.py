@@ -366,7 +366,7 @@ def test_directory_load_and_run_take_explicit_parents(collector, tmp_path):
     options = xybrid.XybridRunOptions(
         generation_config=None, abort_on=[], fallback_to_cloud=False, max_grace_tokens=0,
         correlation_id=None, traceparent=run_parent, tracestate=None,
-        conversation_id="chat-run", suppress_trace=False,
+        conversation_id="chat-run", suppress_trace=False, frame_session_id=None,
     )
     with pytest.raises(xybrid.XybridError):
         model.run(xybrid.XybridEnvelope.text("hello"), options)
@@ -405,6 +405,7 @@ stages:
         generation_config=None, abort_on=[], fallback_to_cloud=False, max_grace_tokens=0,
         correlation_id=None, traceparent=f"00-{trace_id}-2222222222222222-01",
         tracestate=None, conversation_id="chat-pipeline", suppress_trace=False,
+        frame_session_id=None,
     )
     result = pipeline.run(xybrid.XybridEnvelope.text("original input"), options)
     assert result.text == "stage output"

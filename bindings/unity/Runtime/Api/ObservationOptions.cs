@@ -48,6 +48,15 @@ namespace Xybrid
         public bool SuppressTrace { get; set; }
 
         /// <summary>
+        /// Your id for one continuous live-capture session (a camera or
+        /// microphone loop). Every run of the session is counted in metrics,
+        /// and detailed traces are kept for roughly one run per live trace
+        /// interval per session (<c>SetLiveTraceIntervalMs</c>). Applies to
+        /// model runs; loads, pipelines and manual observations ignore it.
+        /// </summary>
+        public string FrameSessionId { get; set; }
+
+        /// <summary>
         /// The generated record, for APIs that take <see cref="XybridBolt.XybridObservationOptions"/>
         /// directly (for example a hand-built <see cref="XybridBolt.XybridStreamingConfig"/>).
         /// </summary>
@@ -75,7 +84,8 @@ namespace Xybrid
                 observation?.Traceparent,
                 observation?.Tracestate,
                 observation?.ConversationId,
-                observation?.SuppressTrace ?? false);
+                observation?.SuppressTrace ?? false,
+                observation?.FrameSessionId);
         }
     }
 }

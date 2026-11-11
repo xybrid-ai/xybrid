@@ -91,6 +91,7 @@ def main() -> int:
         tracestate=None,
         conversation_id=None,
         suppress_trace=False,
+        frame_session_id=None,
     )
 
     prompt = "What is the capital of France? Answer in one short sentence."

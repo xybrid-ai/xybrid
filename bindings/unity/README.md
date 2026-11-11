@@ -477,6 +477,11 @@ Prompts and outputs are captured once export is enabled. Other setters:
 `AllowProviderContext`, `WithDeviceId`, `WithLiteralRedaction`,
 `WithoutContentAttribute`.
 
+For a camera or microphone loop, set `ObservationOptions.FrameSessionId` to
+the same id on every run of the loop: each frame is counted in metrics, and
+detailed traces are kept for roughly one frame per `WithLiveTraceInterval` per
+session.
+
 The same `ObservationOptions` go to `Pipeline.Run(envelope, observation)`
 (`PipelineResult.Observation` and each `StageResult.Observation` hold the
 references), `ModelLoader.Load(observation)` (`Model.LoadObservation`),
