@@ -670,46 +670,58 @@ fn read_gguf_uint_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> Opti
     }
 }
 
+/// Byte width of a GGUF value type whose values all have the same size.
+fn gguf_fixed_width(value_type: u32) -> Option<u64> {
+    match value_type {
+        GGUF_TYPE_UINT8 | GGUF_TYPE_INT8 | GGUF_TYPE_BOOL => Some(1),
+        GGUF_TYPE_UINT16 | GGUF_TYPE_INT16 => Some(2),
+        GGUF_TYPE_UINT32 | GGUF_TYPE_INT32 | GGUF_TYPE_FLOAT32 => Some(4),
+        GGUF_TYPE_UINT64 | GGUF_TYPE_INT64 | GGUF_TYPE_FLOAT64 => Some(8),
+        _ => None,
+    }
+}
+
+/// Move `bytes` forward. A buffered reader keeps its buffer when the target
+/// is inside it.
+fn skip_gguf_bytes<R: Seek>(reader: &mut R, bytes: u64) -> bool {
+    i64::try_from(bytes).is_ok_and(|bytes| reader.seek_relative(bytes).is_ok())
+}
+
 /// Skip a GGUF value of the given type. Returns false if the reader is at EOF or corrupted.
 fn skip_gguf_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> bool {
-    let skip_bytes: i64 = match value_type {
-        GGUF_TYPE_UINT8 | GGUF_TYPE_INT8 | GGUF_TYPE_BOOL => 1,
-        GGUF_TYPE_UINT16 | GGUF_TYPE_INT16 => 2,
-        GGUF_TYPE_UINT32 | GGUF_TYPE_INT32 | GGUF_TYPE_FLOAT32 => 4,
-        GGUF_TYPE_UINT64 | GGUF_TYPE_INT64 | GGUF_TYPE_FLOAT64 => 8,
-        GGUF_TYPE_STRING => {
-            if let Some(len) = read_u64_le(reader).and_then(|n| i64::try_from(n).ok()) {
-                return reader.seek_relative(len).is_ok();
-            }
-            return false;
-        }
+    if let Some(width) = gguf_fixed_width(value_type) {
+        return skip_gguf_bytes(reader, width);
+    }
+    match value_type {
+        GGUF_TYPE_STRING => read_u64_le(reader).is_some_and(|len| skip_gguf_bytes(reader, len)),
         GGUF_TYPE_ARRAY => {
             // Array: element_type (u32) + count (u64) + elements
-            let elem_type = match read_u32_le(reader) {
-                Some(t) => t,
-                None => return false,
+            let Some(elem_type) = read_u32_le(reader) else {
+                return false;
             };
-            let count = match read_u64_le(reader) {
-                Some(c) => c,
-                None => return false,
+            let Some(count) = read_u64_le(reader) else {
+                return false;
             };
+            // Fixed-width elements are skipped in one seek. A seek per
+            // element that leaves the reader's buffer discards it, and the
+            // next one finds it empty again: every element became a system
+            // call, over 500,000 of them for the scores and token types of a
+            // 262,144-entry vocabulary.
+            if let Some(width) = gguf_fixed_width(elem_type) {
+                return count
+                    .checked_mul(width)
+                    .is_some_and(|bytes| skip_gguf_bytes(reader, bytes));
+            }
             // Returning success after skipping only part of an array loses
             // header alignment and can hide a later decision marker.
             // GGUF arrays cannot nest, and the bound covers modern vocabularies.
             if count > 1_000_000 || elem_type == GGUF_TYPE_ARRAY {
                 return false;
             }
-            for _ in 0..count {
-                if !skip_gguf_value(reader, elem_type) {
-                    return false;
-                }
-            }
-            return true;
+            (0..count).all(|_| skip_gguf_value(reader, elem_type))
         }
-        _ => return false,
-    };
-    // Preserve buffered bytes while walking large vocabulary arrays.
-    reader.seek_relative(skip_bytes).is_ok()
+        _ => false,
+    }
 }
 
 // ============================================================================
@@ -2691,6 +2703,82 @@ mod tests {
         assert!(matches!(
             inspect_and_generate(dir.path(), "test/model", None),
             Err(SdkError::MetadataInvalid(_))
+        ));
+    }
+
+    /// Counts the seeks that reach the file, each of which is a system call.
+    struct CountingSeeks<R> {
+        inner: R,
+        seeks: usize,
+    }
+
+    impl<R: Read> Read for CountingSeeks<R> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.inner.read(buf)
+        }
+    }
+
+    impl<R: Seek> Seek for CountingSeeks<R> {
+        fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+            self.seeks += 1;
+            self.inner.seek(pos)
+        }
+    }
+
+    #[test]
+    fn fixed_width_arrays_are_skipped_without_a_seek_per_element() {
+        // The scores of a 262,144-entry vocabulary, then the next value.
+        let mut value = Vec::new();
+        value.extend(GGUF_TYPE_FLOAT32.to_le_bytes());
+        value.extend(262_144u64.to_le_bytes());
+        value.resize(value.len() + 262_144 * 4, 0);
+        value.extend(0xfeed_u32.to_le_bytes());
+        let mut reader = std::io::BufReader::new(CountingSeeks {
+            inner: std::io::Cursor::new(value),
+            seeks: 0,
+        });
+
+        assert!(skip_gguf_value(&mut reader, GGUF_TYPE_ARRAY));
+        assert_eq!(read_u32_le(&mut reader), Some(0xfeed));
+        assert!(reader.get_ref().seeks <= 2, "{}", reader.get_ref().seeks);
+    }
+
+    #[test]
+    fn an_array_longer_than_any_file_ends_the_scan() {
+        // The byte count overflows for one, and exceeds a seek offset for the other.
+        for element_type in [GGUF_TYPE_UINT64, GGUF_TYPE_UINT8] {
+            let mut value = Vec::new();
+            value.extend(element_type.to_le_bytes());
+            value.extend(u64::MAX.to_le_bytes());
+            let mut reader = std::io::BufReader::new(std::io::Cursor::new(value));
+            assert!(!skip_gguf_value(&mut reader, GGUF_TYPE_ARRAY));
+        }
+    }
+
+    #[test]
+    fn decision_marker_is_found_after_a_long_fixed_width_array() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("model.gguf");
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(b"GGUF").unwrap();
+        file.write_all(&3u32.to_le_bytes()).unwrap();
+        file.write_all(&0u64.to_le_bytes()).unwrap();
+        file.write_all(&2u64.to_le_bytes()).unwrap();
+        // One element more than the bound that string arrays keep.
+        write_gguf_test_string(&mut file, "tokenizer.ggml.token_type");
+        file.write_all(&GGUF_TYPE_ARRAY.to_le_bytes()).unwrap();
+        file.write_all(&GGUF_TYPE_INT32.to_le_bytes()).unwrap();
+        file.write_all(&1_000_001u64.to_le_bytes()).unwrap();
+        file.write_all(&vec![0; 1_000_001 * 4]).unwrap();
+        write_gguf_test_string(&mut file, "lfm3.decision.type");
+        file.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut file, "lfm3-d1");
+        drop(file);
+
+        let metadata = generate_metadata_for_gguf_file(&path).unwrap();
+        assert!(matches!(
+            metadata.execution_template,
+            ExecutionTemplate::Decision(_)
         ));
     }
 
