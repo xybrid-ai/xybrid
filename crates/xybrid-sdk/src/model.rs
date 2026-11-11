@@ -628,6 +628,8 @@ pub struct SeamInfo {
 const FALLBACK_POLICY_RESOURCE_MAX_AGE: Duration = Duration::from_millis(500);
 const CLOUD_FALLBACK_UNSUPPORTED_TOOLS_REASON: &str = "cloud_fallback_unsupported_tools";
 const CLOUD_FALLBACK_UNSUPPORTED_CHOICE_REASON: &str = "cloud_fallback_unsupported_choice_request";
+const CLOUD_FALLBACK_UNSUPPORTED_DECISION_REASON: &str =
+    "cloud_fallback_unsupported_decision_request";
 
 static FALLBACK_AUTHORITY: OnceLock<LocalAuthority> = OnceLock::new();
 
@@ -894,11 +896,31 @@ where
                 )));
             }
 
-            // Choice requests never leave the device: no cloud leg scores
-            // candidates, and the gateway would read the request as text. The
-            // entry guards refuse them before a local run can abort, so this
-            // only backs them up.
+            // Decision and choice requests never leave the device: no cloud
+            // leg answers them, and the gateway would read the request as
+            // text. The entry guards refuse them before a local run can abort,
+            // so this only backs them up, and records the refusal as the
+            // other cloud-leg refusals are.
             if envelope.kind.contains_decision_kind() {
+                crate::telemetry::publish_cloud_denied_by_policy(
+                    &correlation_id,
+                    cloud_model_id,
+                    reason,
+                    CLOUD_FALLBACK_UNSUPPORTED_DECISION_REASON,
+                    local_latency_ms,
+                );
+                record_cloud_outcome(
+                    authority,
+                    cloud_model_id,
+                    cloud_provider.as_deref(),
+                    0,
+                    false,
+                    Some(CLOUD_FALLBACK_UNSUPPORTED_DECISION_REASON.to_string()),
+                    OutcomeCategory::HardFail {
+                        reason: CLOUD_FALLBACK_UNSUPPORTED_DECISION_REASON.to_string(),
+                    },
+                    signal_context,
+                );
                 return Err(decision_capability_refusal(model_id, "cloud fallback"));
             }
             if envelope.kind.contains_choice_kind() {
@@ -11540,6 +11562,53 @@ mod tests {
             outcomes[1].category,
             Some(xybrid_core::orchestrator::authority::OutcomeCategory::HardFail { ref reason })
                 if reason == CLOUD_FALLBACK_UNSUPPORTED_CHOICE_REASON
+        ));
+    }
+
+    #[test]
+    fn dispatch_after_local_refuses_decision_requests_before_the_cloud() {
+        let cloud = FakeCloudAdapter::new("must not run");
+        let authority = FakeAuthority::allow();
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        let result = dispatch_after_local(
+            local_result,
+            &decision_warmup_request(),
+            &cloud,
+            "corr-decision".to_string(),
+            "local-model",
+            0,
+            50,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            None,
+            &mut on_token,
+            &mut on_seam,
+        );
+
+        match result {
+            Err(SdkError::UnsupportedModelCapability { capability, .. }) => {
+                assert_eq!(capability, "cloud fallback");
+            }
+            other => panic!("expected a decision refusal, got {other:?}"),
+        }
+        assert_eq!(cloud.call_count(), 0);
+        assert!(authority.policy_requests().is_empty());
+        // The refusal is recorded, as a choice request's is.
+        let outcomes = authority.outcomes();
+        assert_eq!(outcomes.len(), 2);
+        assert!(matches!(
+            outcomes[1].category,
+            Some(xybrid_core::orchestrator::authority::OutcomeCategory::HardFail { ref reason })
+                if reason == CLOUD_FALLBACK_UNSUPPORTED_DECISION_REASON
         ));
     }
 
