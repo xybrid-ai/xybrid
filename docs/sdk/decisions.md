@@ -13,8 +13,9 @@ quantization or accelerator has been qualified. See
 [decision conformance](../development/decision-conformance.md) for the evidence
 gates and outstanding reference/device qualification. Image, video, audio,
 browser execution, additional question types and legacy decision models remain
-separate profiles. Registry publication is separate from implementing the client
-capability `llamacpp-lfm3-d1-text-v1`.
+separate profiles. The registry capability for this profile is
+`llamacpp-lfm3-d1-text-v1`. No SDK build reports it yet, so the registry does
+not serve decision models: load a local artifact, as below.
 
 ## Loading a local artifact
 

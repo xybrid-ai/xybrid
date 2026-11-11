@@ -30,12 +30,12 @@ const ALL_FEATURES: &[(&str, bool)] = &[
     // LFM3: 0.15.0 and earlier lack the `lfm3` architecture, and 0.16.0 loads
     // it without LFM3's prompt format, tool calls or image-token cap.
     ("llamacpp-lfm3", cfg!(feature = "llm-llamacpp")),
-    // Protocol support is separate from architecture support. Artifact/device
-    // qualification is still enforced by the registry's published entries.
-    (
-        "llamacpp-lfm3-d1-text-v1",
-        cfg!(all(feature = "llm-llamacpp", not(target_arch = "wasm32"))),
-    ),
+    // `llamacpp-lfm3-d1-text-v1`, the registry capability for Liquid d1
+    // decisions, is deliberately absent. The registry serves a decision
+    // artifact to every client that lists it, and the reference comparison is
+    // still open (P02 in docs/development/decision-conformance.md). Add it
+    // here and to the SDK's `ARTIFACT_BACKENDS` when that closes. A local
+    // load needs no capability.
     ("llamacpp-lfm3vl", cfg!(feature = "llm-llamacpp-vision")),
     ("llm-llamacpp", cfg!(feature = "llm-llamacpp")),
     ("llm-llamacpp-vision", cfg!(feature = "llm-llamacpp-vision")),
@@ -173,10 +173,6 @@ mod tests {
     #[test]
     fn lfm3_backends_follow_the_llama_cpp_features() {
         assert_eq!(
-            enabled().contains(&"llamacpp-lfm3-d1-text-v1"),
-            cfg!(all(feature = "llm-llamacpp", not(target_arch = "wasm32")))
-        );
-        assert_eq!(
             enabled().contains(&"llamacpp-lfm3"),
             cfg!(feature = "llm-llamacpp")
         );
@@ -184,6 +180,12 @@ mod tests {
             enabled().contains(&"llamacpp-lfm3vl"),
             cfg!(feature = "llm-llamacpp-vision")
         );
+    }
+
+    #[test]
+    fn the_d1_decision_capability_is_not_reported_before_qualification() {
+        // Listing it lets the registry serve decision artifacts to this build.
+        assert!(!enabled().contains(&"llamacpp-lfm3-d1-text-v1"));
     }
 
     #[cfg(feature = "asr-whispercpp")]

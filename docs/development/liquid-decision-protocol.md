@@ -10,7 +10,10 @@ The protocol implementation lives in
 the protocol-neutral [decision IR](../../crates/xybrid-core/src/ir/decision).
 It follows the decision implementation at llama.cpp commit
 `8642541b255bfb5dc39cd351a178be09013a55d6`. The registry compatibility token is
-`llamacpp-lfm3-d1-text-v1`, separate from generic `llamacpp-lfm3`.
+`llamacpp-lfm3-d1-text-v1`, separate from generic `llamacpp-lfm3`. No build
+reports it yet, so the registry serves no decision artifact: the token is added
+to `xybrid_core::features` and the SDK's `ARTIFACT_BACKENDS` when the reference
+comparison in the conformance record (P02) closes. Local loads need no token.
 
 ## Admission and execution metadata
 

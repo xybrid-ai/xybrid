@@ -233,6 +233,12 @@ an `EnvelopeKind::DecisionRequest` on the ordinary `run` / `run_async` /
 contract is `docs/development/liquid-decision-protocol.md`, and
 `docs/development/decision-conformance.md` says what is and is not qualified.
 
+- **No build advertises the d1 registry capability.**
+  `llamacpp-lfm3-d1-text-v1` is absent on purpose from
+  `xybrid_core::features` and from the SDK's `ARTIFACT_BACKENDS`, so the
+  registry serves no decision artifact while the reference comparison (P02 in
+  the conformance record) is open. A test in each file fails if it is added.
+  Loads that do not go through the registry are unaffected.
 - **The chat path refuses decision artifacts that generate no text.** A GGUF
   carries a decision marker when a metadata key is
   `tokenizer.chat_template.systemone`, starts with `systemone.` or contains

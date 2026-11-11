@@ -119,10 +119,14 @@ fn build_client_header_with_optout(binding: &str, opted_out: bool) -> Option<Str
 /// Backends that pick which file the registry serves (`requires_backends`).
 /// Sent as `?backends=` because telemetry opt-out drops the header; only
 /// artifact-selecting names go here, never the full feature list.
+///
+/// `llamacpp-lfm3-d1-text-v1` (Liquid d1 decisions) is deliberately absent,
+/// as it is from `xybrid_core::features`: no build asks the registry for a
+/// decision artifact until the open reference comparison closes (P02 in
+/// docs/development/decision-conformance.md).
 const ARTIFACT_BACKENDS: &[&str] = &[
     "asr-whispercpp-coreml",
     "llamacpp-lfm3",
-    "llamacpp-lfm3-d1-text-v1",
     "llamacpp-lfm3vl",
     "zzz-phonon-31m",
 ];
@@ -3752,7 +3756,8 @@ mod tests {
     }
 
     #[test]
-    fn decision_protocol_backend_is_sent_independently_of_telemetry_headers() {
+    fn the_d1_decision_backend_is_never_sent_before_qualification() {
+        // Even a feature list that names it cannot ask for a decision artifact.
         let url = resolve_url(
             "http://r",
             "d1-2b",
@@ -3760,7 +3765,10 @@ mod tests {
             &["llm-llamacpp", "llamacpp-lfm3", "llamacpp-lfm3-d1-text-v1"],
             None,
         );
-        assert_eq!(url, "http://r/v1/models/d1-2b/resolve?platform=linux-x64&backends=llamacpp-lfm3,llamacpp-lfm3-d1-text-v1");
+        assert_eq!(
+            url,
+            "http://r/v1/models/d1-2b/resolve?platform=linux-x64&backends=llamacpp-lfm3"
+        );
     }
 
     #[test]
