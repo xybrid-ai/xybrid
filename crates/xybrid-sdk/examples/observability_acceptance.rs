@@ -57,6 +57,7 @@ const TTS_MODEL: &str = "kitten-tts-nano-0.8";
 const FRAMES: usize = 5;
 const FRAME_INTERVAL: Duration = Duration::from_secs(600);
 const CLOUD_MODEL: &str = "gpt-4o-mini";
+const FALLBACK_MAX_TOKENS: usize = 256;
 const TTS_TEXT: &str = "The lighthouse keeper climbed the spiral stairs every evening at dusk. \
     He wiped the great lens until it shone, then lit the lamp and watched its beam sweep across \
     the water. Ships far out on the dark sea saw the light and turned away from the rocks. Some \
@@ -610,19 +611,24 @@ fn case_fallback(
     references.insert("load".into(), reference(model.load_observation_ref()));
     let mut critical = ResourceSnapshot::unknown();
     critical.memory_pressure = MemoryPressure::Critical;
+    // One normal resource read, then critical pressure: the abort gate reads
+    // at most every ~500 ms, so a long local stream is cut mid-way and handed
+    // to the cloud leg (the gateway) instead of finishing locally.
     let options = RunOptions::new()
-        .with_generation_config(generation(32.0))
+        .with_generation_config(generation(FALLBACK_MAX_TOKENS as f64))
         .with_abort_policy(
             AbortPolicy::default()
                 .stop_on(AbortSignal::MemoryPressureCritical)
                 .with_cloud_fallback(true)
                 .with_max_grace_tokens(0),
         )
-        .with_resource_provider(Arc::new(StagedResourceProvider::new(3, critical)))
+        .with_resource_provider(Arc::new(StagedResourceProvider::new(1, critical)))
         .with_observation(child(context, None));
-    let mut envelope = text("Write two sentences about a lighthouse.".into());
+    let mut envelope = text(config.str("/constants/stopped/prompt")?);
     envelope.metadata.insert("model".into(), CLOUD_MODEL.into());
-    envelope.metadata.insert("max_tokens".into(), "32".into());
+    envelope
+        .metadata
+        .insert("max_tokens".into(), FALLBACK_MAX_TOKENS.to_string());
     let adapter = CloudRuntimeAdapter::with_gateway(&format!("{}/v1", api.trim_end_matches('/')));
     let mut tokens = 0usize;
     let mut seam: Option<Value> = None;
