@@ -26,10 +26,18 @@ The runtime validates the artifact's architecture, named `systemone` template,
 vocabulary and calibration against the profile when loading. A model name or a
 generic LFM3 architecture declaration alone does not establish compatibility.
 
+A GGUF that loads but is not this model (another architecture or decision
+type, no `systemone` template, or decision metadata the profile does not know)
+is refused with `SdkError::UnsupportedModelCapability`. A missing file (named
+in the message), a file that cannot be loaded and metadata that cannot be read
+are `SdkError::LoadError`.
+
 The reference configuration is CPU-only: 4,096 context, logical batch and
 physical batch tokens, with four CPU threads. Each question is one complete
 model pass. The 4,096-token bound is inclusive; requests are never truncated or
-split into smaller prefill batches.
+split into smaller prefill batches. These values are fixed by the profile, not
+tunable: `DecisionTemplate` refuses any other value. A device that needs a
+different thread count needs its own qualified profile.
 
 ```rust,no_run
 use xybrid_sdk::{decode_decision_request, ModelLoader, ir::Envelope};

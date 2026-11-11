@@ -51,7 +51,11 @@ pub(crate) struct DecisionRuntime {
 }
 
 impl DecisionRuntime {
-    pub(crate) fn load(path: &Path, spec: &DecisionTemplate) -> Result<Self, AdapterError> {
+    pub(crate) fn load(
+        model_id: &str,
+        path: &Path,
+        spec: &DecisionTemplate,
+    ) -> Result<Self, AdapterError> {
         spec.validate()?;
         if !path.is_file() {
             // Name the file: the native loader only reports a content-free failure.
@@ -63,7 +67,13 @@ impl DecisionRuntime {
                 .ok_or(DecisionProtocolError::InvalidMetadata)?,
         )
         .map_err(native_error)?;
-        let protocol = LiquidProtocol::load(&model)?;
+        // A GGUF without the decision template is some other model, not a
+        // damaged d1 artifact.
+        if matches!(model.named_chat_template("systemone"), Ok(None)) {
+            return Err(unadmitted_artifact(model_id));
+        }
+        let protocol =
+            LiquidProtocol::load(&model).map_err(|error| admission_error(model_id, error))?;
         let context = DecisionContext::new(&model).map_err(native_error)?;
         if identity != file_identity(path) {
             return Err(DecisionProtocolError::InvalidMetadata.into());
@@ -155,6 +165,29 @@ fn cancelled(abort: Option<&AtomicBool>) -> Result<(), AdapterError> {
     Ok(())
 }
 
+/// The content-free refusal for an artifact that loads but is not the
+/// admitted profile, so a host can tell "not a d1 text model" from a damaged
+/// or missing file.
+fn unadmitted_artifact(model_id: &str) -> AdapterError {
+    AdapterError::UnsupportedModelCapability {
+        model_id: model_id.into(),
+        capability: format!("{} decisions", crate::execution::template::LIQUID_TEXT_V1),
+        hint: "the artifact is not the admitted Liquid d1 text model: its architecture, \
+               decision type, template or decision metadata differs"
+            .into(),
+    }
+}
+
+/// Maps a failed admission. Metadata the profile does not admit is a
+/// capability the model lacks; metadata that cannot be read or parsed stays a
+/// load failure.
+fn admission_error(model_id: &str, error: DecisionProtocolError) -> AdapterError {
+    match error {
+        DecisionProtocolError::UnsupportedMetadata => unadmitted_artifact(model_id),
+        other => other.into(),
+    }
+}
+
 fn native_error(error: LlamaError) -> AdapterError {
     match error {
         LlamaError::DecisionCancelled => DecisionProtocolError::Cancelled.into(),
@@ -186,5 +219,26 @@ mod tests {
         assert_eq!(identity.length, replaced.length);
         assert_eq!(identity.modified, replaced.modified);
         assert!(identity != replaced);
+    }
+
+    #[test]
+    fn an_unadmitted_artifact_is_a_missing_capability_not_bad_input() {
+        let error = admission_error("some-model", DecisionProtocolError::UnsupportedMetadata);
+        let AdapterError::UnsupportedModelCapability {
+            model_id,
+            capability,
+            ..
+        } = error
+        else {
+            panic!("{error:?}");
+        };
+        assert_eq!(model_id, "some-model");
+        assert_eq!(capability, "lfm3-d1/text/v1 decisions");
+
+        // Metadata that cannot be read or parsed is a damaged artifact.
+        assert!(matches!(
+            admission_error("some-model", DecisionProtocolError::InvalidMetadata),
+            AdapterError::InvalidInput(_)
+        ));
     }
 }

@@ -662,7 +662,9 @@ impl TemplateExecutor {
             {
                 self.decision_cache = None;
                 self.decision_cache = Some(super::decision::runtime::DecisionRuntime::load(
-                    &path, spec,
+                    &metadata.model_id,
+                    &path,
+                    spec,
                 )?);
             }
             Ok(())
