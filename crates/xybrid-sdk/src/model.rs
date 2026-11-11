@@ -4642,9 +4642,12 @@ impl XybridModel {
         abort: Option<&AtomicBool>,
     ) -> SdkResult<InferenceResult> {
         if abort.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst)) {
-            return Err(SdkError::Cancelled {
+            // Recorded like any pre-run cancellation, without waiting for a
+            // busy model.
+            let error = SdkError::Cancelled {
                 message: "Decision execution cancelled".into(),
-            });
+            };
+            return self.refuse(envelope, &[], options, config, false, error);
         }
         crate::telemetry::maybe_emit_dev_nudge();
         self.touch();
@@ -4968,16 +4971,20 @@ impl XybridModel {
             .as_ref()
             .filter(|_| decision)
             .map(CancellationToken::flag);
+        // Both end the request before it runs, and are recorded as the other
+        // pre-run outcomes are: one request with its outcome, without waiting
+        // for a busy model.
         if abort.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst)) {
-            return Err(SdkError::Cancelled {
+            let error = SdkError::Cancelled {
                 message: "Decision execution cancelled".into(),
-            });
+            };
+            let config = options.generation_config.as_ref();
+            return self.refuse(envelope, &[], Some(options), config, false, error);
         }
         if decision && options.abort_policy.fallback_to_cloud {
-            return Err(decision_capability_refusal(
-                &self.model_id,
-                "cloud fallback",
-            ));
+            let error = decision_capability_refusal(&self.model_id, "cloud fallback");
+            let config = options.generation_config.as_ref();
+            return self.refuse(envelope, &[], Some(options), config, false, error);
         }
         let mut abort_state = AbortState::new(options);
         if let Err(reason) = abort_state.check_before_run() {
