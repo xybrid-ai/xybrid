@@ -29,7 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reachable only from Rust and Flutter, so the interval setting did nothing
   elsewhere. Swift `XybridRunOptions.make(frameSessionId:)`, Kotlin
   `runOptions(frameSessionId = …)`, Unity `ObservationOptions.FrameSessionId`
-  and React Native `frameSessionId` default to none. The generated
+  and React Native `frameSessionId` default to none. It applies to model
+  runs; a pipeline run ignores it. The generated
   `XybridRunOptions` record gained the field, so code that builds it directly
   (Python, or the Swift, Kotlin and C# initializers) passes one more
   argument: `None`, `nil` or `null` for a one-shot run.
@@ -66,8 +67,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of dropping the span. The clamp follows how the exporter writes content.
   OTLP/protobuf, the default protocol, sends it as retained, so the default
   retained-operation budget is 416 KiB; OTLP/JSON can double it, so the same
-  request carries 208 KiB. Providers the application owns are fitted as JSON
-  until the policy names protobuf (Rust
+  request carries 208 KiB. A packaged pipeline fits content as protobuf only
+  when its traces signal, and its logs signal if it has one (content sent as
+  events rides it within the same budget), both use protobuf. Providers the
+  application owns are fitted as JSON until the policy names protobuf (Rust
   `ContentPolicy::with_span_content_encoding`, JS
   `content.spanContentEncoding`). A request bound under 128 KiB reserves half
   of itself instead of 64 KiB, so a small bound still carries content.
@@ -104,8 +107,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`stream_close`) early already stopped its run. Observability records these
   runs as `cancelled`.
 - A token callback that returns an error stops a model stream as the
-  caller's cancellation whatever the error's type: observability records the
-  run as `cancelled`, as a streaming pipeline already did. An untyped
+  caller's cancellation whatever the error's type (a typed
+  `CloudFallbackAbort` aside, which hands over to the cloud leg):
+  observability records the run as `cancelled`, as a streaming pipeline
+  already did. An untyped
   callback error used to be recorded as `inference_error`, although the model
   had not failed. The error returned to the caller is unchanged.
 - JavaScript exporter support covers aligned OpenTelemetry 3.0/0.300 and

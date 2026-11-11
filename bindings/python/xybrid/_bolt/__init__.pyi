@@ -118,6 +118,7 @@ class XybridRunOptions:
     microphone loop). Every run of the session is counted in metrics, and
     detailed traces are kept for roughly one run per live trace interval
     per session (`set_live_trace_interval_ms`). Blank values are ignored.
+    Applies to model runs: a pipeline run ignores it.
     """
 
 

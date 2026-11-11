@@ -577,6 +577,68 @@ describe("content budgets fit one span in the request bound", () => {
     });
   }
 
+  for (const [logsProtocol, encoding, retained] of [
+    ["http/json", "json", 212_992],
+    ["http/protobuf", "protobuf", 425_984],
+  ] as const) {
+    test(`protobuf traces, ${logsProtocol} logs: event content fits the logs request`, async () => {
+      // The retained budget also bounds content sent as a details event on the logs signal.
+      // Fitted to the traces protocol alone, protobuf traces beside JSON logs would retain twice
+      // what the JSON logs request can carry, and the event would be dropped whole. So a pipeline
+      // fits content as protobuf only when no signal that carries it is JSON (delivery.rs
+      // event_content_fits_a_json_logs_signal_beside_protobuf_traces).
+      const server = await startServer();
+      const pipeline = track(
+        createOtlpPipeline({
+          traces: { endpoint: `${server.url}/v1/traces`, protocol: "http/protobuf" },
+          logs: { endpoint: `${server.url}/v1/logs`, protocol: logsProtocol },
+          batch: { scheduledDelayMs: 60_000 },
+        }),
+        server,
+      );
+      const observer = pipeline.observer({ capture: "event_only" });
+      expect(observer.contentBudgets).toMatchObject({
+        maxRetainedOperationBytes: retained,
+        spanContentEncoding: encoding,
+      });
+      // Quote-heavy prompt variables: every byte doubles in OTLP/JSON.
+      const variables = Object.fromEntries(
+        Array.from({ length: 26 }, (_, index) => [
+          `variable_${String(index).padStart(2, "0")}`,
+          '"'.repeat(16_000),
+        ]),
+      );
+      observer
+        .startInference({
+          operation: "chat",
+          provider: "llama.cpp",
+          model: "m",
+          prompt: { name: "template", variables },
+        })
+        .end();
+      expect(await pipeline.forceFlush(10_000)).toBe(true);
+      expect(pipeline.stats().logs).toMatchObject({ accepted: 1, exported: 1, dropped: 0 });
+      const sent = server.received("/v1/logs");
+      expect(sent).toHaveLength(1);
+      const size = sent[0]?.body.length ?? Infinity;
+      expect(size).toBeLessThanOrEqual(491_520);
+      // It still carries content: well over one variable's worth.
+      expect(size).toBeGreaterThan(100_000);
+    });
+  }
+
+  test("JSON traces keep the JSON ceiling whatever the logs protocol is", async () => {
+    const server = await startServer();
+    const pipeline = track(
+      createOtlpPipeline({
+        traces: { endpoint: `${server.url}/v1/traces`, protocol: "http/json" },
+        logs: { endpoint: `${server.url}/v1/logs`, protocol: "http/protobuf" },
+      }),
+      server,
+    );
+    expect(pipeline.observer().contentBudgets.spanContentEncoding).toBe("json");
+  });
+
   test("an explicit smaller bound wins; an invalid one still throws", async () => {
     const server = await startServer();
     const pipeline = track(

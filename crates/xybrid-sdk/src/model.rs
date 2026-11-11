@@ -5311,8 +5311,11 @@ impl XybridModel {
     /// because the consumer stopped the stream and the model did not fail.
     /// The error's type does not matter, as in a streaming pipeline;
     /// [`AbortReason::UserCancelled`](crate::AbortReason::UserCancelled) is
-    /// the conventional one. This holds for every token-stream entry point,
-    /// and `chunk_count` counts only the tokens `on_token` accepted.
+    /// the conventional one. The one exception is a typed
+    /// [`CloudFallbackAbort`](xybrid_core::abort::CloudFallbackAbort), which
+    /// hands the request to its cloud leg instead of ending it. This holds
+    /// for every token-stream entry point, and `chunk_count` counts only the
+    /// tokens `on_token` accepted.
     ///
     /// # Arguments
     ///

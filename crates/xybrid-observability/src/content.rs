@@ -528,9 +528,12 @@ impl ContentPolicy {
     ///
     /// - content goes only to the destinations both capture modes include
     ///   (`span_only` under `event_only` captures nothing);
-    /// - each byte budget and the request bound is the smaller of the two,
-    ///   fitted to this policy's span content encoding (its spans go to its
-    ///   own exporter);
+    /// - each byte budget is the smaller of the two effective budgets. The
+    ///   request bound and span content encoding it is fitted to come from
+    ///   one policy as a pair: the smaller bound when both exporters write
+    ///   content the same way, otherwise the pair that carries less. So the
+    ///   result is never fitted below either policy, and always fits this
+    ///   policy's own exporter;
     /// - `ceiling`'s redaction hooks run first and this policy's hooks that
     ///   `ceiling` does not already hold run on their output, so no hook
     ///   redacts a value twice; `ceiling`'s rules apply first, followed by
@@ -539,7 +542,12 @@ impl ContentPolicy {
     ///
     /// Capping by a policy at least as permissive changes nothing, and
     /// capping twice by the same ceiling, or again by a policy already
-    /// capped by this one, is the same as capping once.
+    /// capped by this one, is the same as capping once. A ceiling's budgets
+    /// are its effective ones: a policy that names no encoding is fitted as
+    /// JSON, so capping an OTLP/protobuf observer by a bare
+    /// [`ContentPolicy::default`] also lowers its retained budget to the JSON
+    /// ceiling. To lower capture alone, build the ceiling from the policy it
+    /// caps.
     #[must_use]
     pub fn capped_by(&self, ceiling: &ContentPolicy) -> Self {
         let (own, cap) = (self.capture(), ceiling.capture());
@@ -565,6 +573,27 @@ impl ContentPolicy {
                 .filter(|rule| !ceiling.rules.contains(rule))
                 .cloned(),
         );
+        // The request bound and the encoding describe one exporter, so they
+        // are taken together. Mixing one policy's bound with the other's
+        // encoding could fit the result below both.
+        let fit = |policy: &Self| {
+            span_content_ceiling(policy.max_request_body_bytes, policy.span_content_encoding)
+        };
+        let (max_request_body_bytes, span_content_encoding) =
+            if self.span_content_encoding == ceiling.span_content_encoding {
+                (
+                    self.max_request_body_bytes
+                        .min(ceiling.max_request_body_bytes),
+                    self.span_content_encoding,
+                )
+            } else if fit(ceiling) < fit(self) {
+                (
+                    ceiling.max_request_body_bytes,
+                    ceiling.span_content_encoding,
+                )
+            } else {
+                (self.max_request_body_bytes, self.span_content_encoding)
+            };
         Self {
             capture: Some(capture),
             snapshot: None,
@@ -574,10 +603,8 @@ impl ContentPolicy {
             max_retained_operation_bytes: self
                 .max_retained_operation_bytes()
                 .min(ceiling.max_retained_operation_bytes()),
-            max_request_body_bytes: self
-                .max_request_body_bytes
-                .min(ceiling.max_request_body_bytes),
-            span_content_encoding: self.span_content_encoding,
+            max_request_body_bytes,
+            span_content_encoding,
             max_traversal_bytes: self.max_traversal_bytes.min(ceiling.max_traversal_bytes),
             redactors: Arc::from(redactors),
             rules: Arc::from(rules),
@@ -1719,25 +1746,45 @@ mod tests {
             protobuf.max_attribute_bytes(),
             DEFAULT_MAX_CONTENT_ATTRIBUTE_BYTES
         );
-        // The encoding is a fact about a policy's own exporter: capping keeps
-        // it, and takes the smaller effective budgets.
-        assert_eq!(
-            protobuf.capped_by(&default).span_content_encoding(),
-            Protobuf
-        );
-        assert_eq!(
-            protobuf.capped_by(&default).max_retained_operation_bytes(),
-            ceiling
-        );
-        assert_eq!(default.capped_by(&protobuf).span_content_encoding(), Json);
-        assert_eq!(
-            default.capped_by(&protobuf).max_retained_operation_bytes(),
-            ceiling
-        );
-        assert_eq!(
-            protobuf.capped_by(&protobuf).max_retained_operation_bytes(),
-            room
-        );
+        // Capping takes the smaller effective budgets, fitted to the bound
+        // and encoding (one exporter's pair) that carries less.
+        for capped in [protobuf.capped_by(&default), default.capped_by(&protobuf)] {
+            assert_eq!(capped.span_content_encoding(), Json);
+            assert_eq!(capped.max_retained_operation_bytes(), ceiling);
+        }
+        let same = protobuf.capped_by(&protobuf);
+        assert_eq!(same.span_content_encoding(), Protobuf);
+        assert_eq!(same.max_retained_operation_bytes(), room);
+        // Never below both: a JSON policy with the default bound (208 KiB)
+        // capped by a protobuf one with a 300,000-byte bound (234,464) keeps
+        // 208 KiB. Fitting the smaller bound as JSON would leave 117,232.
+        let narrow = ContentPolicy::default()
+            .with_span_content_encoding(Protobuf)
+            .with_max_request_body_bytes(300_000);
+        assert_eq!(narrow.max_retained_operation_bytes(), 234_464);
+        for capped in [default.capped_by(&narrow), narrow.capped_by(&default)] {
+            assert_eq!(capped.max_retained_operation_bytes(), ceiling);
+            assert_eq!(capped.span_content_encoding(), Json);
+            assert_eq!(
+                capped.max_request_body_bytes(),
+                DEFAULT_MAX_REQUEST_BODY_BYTES
+            );
+            // Capping again changes nothing.
+            for again in [capped.capped_by(&narrow), capped.capped_by(&default)] {
+                assert_eq!(again.max_retained_operation_bytes(), ceiling);
+                assert_eq!(again.span_content_encoding(), Json);
+            }
+        }
+        // The pair that carries less wins whichever side holds it.
+        let tight = ContentPolicy::default()
+            .with_span_content_encoding(Protobuf)
+            .with_max_request_body_bytes(150_000);
+        assert_eq!(tight.max_retained_operation_bytes(), 84_464);
+        for capped in [default.capped_by(&tight), tight.capped_by(&default)] {
+            assert_eq!(capped.max_retained_operation_bytes(), 84_464);
+            assert_eq!(capped.span_content_encoding(), Protobuf);
+            assert_eq!(capped.max_request_body_bytes(), 150_000);
+        }
 
         let raised = ContentPolicy::default()
             .with_max_attribute_bytes(400_000)

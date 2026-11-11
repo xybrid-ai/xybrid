@@ -103,8 +103,10 @@ pub struct ObservabilityPipeline {
     meter_gate: Arc<tokio::sync::Mutex<()>>,
     runtime: Arc<TransportRuntime>,
     shutdown: Mutex<Option<Arc<Completion<Result<()>>>>>,
-    /// `max_request_body_bytes` and content encoding of the traces export, if
-    /// spans are exported.
+    /// `max_request_body_bytes` of the traces export and the encoding content
+    /// is fitted to, if spans are exported. The encoding is protobuf only
+    /// when the logs signal, which carries event content within the same
+    /// retained budget, is not JSON either.
     span_export: Option<(usize, SpanContentEncoding)>,
 }
 
@@ -227,10 +229,15 @@ impl ObservabilityPipeline {
             runtime,
             shutdown: Mutex::new(None),
             span_export: resolved.traces.as_ref().map(|traces| {
-                (
-                    limits.max_request_body_bytes,
-                    traces.protocol.span_content_encoding(),
-                )
+                let logs = resolved
+                    .logs
+                    .as_ref()
+                    .map(|logs| logs.protocol.span_content_encoding());
+                let encoding = match logs {
+                    Some(SpanContentEncoding::Json) => SpanContentEncoding::Json,
+                    _ => traces.protocol.span_content_encoding(),
+                };
+                (limits.max_request_body_bytes, encoding)
             }),
         })
     }
@@ -245,10 +252,13 @@ impl ObservabilityPipeline {
     /// An observer wired to this pipeline's providers. With a traces signal,
     /// the content budgets are clamped to fit this pipeline's
     /// `max_request_body_bytes` (or the policy's own bound, default 480 KiB,
-    /// if smaller) as its traces protocol writes content: `http/protobuf`
-    /// carries twice the content of `http/json` in the same request (416 KiB
-    /// against 208 KiB at the default bound). The pipeline's protocol
-    /// replaces the policy's own [`ContentPolicy::span_content_encoding`].
+    /// if smaller) as its protocol writes content: `http/protobuf` carries
+    /// twice the content of `http/json` in the same request (416 KiB against
+    /// 208 KiB at the default bound). Content is fitted as protobuf only when
+    /// the traces signal, and the logs signal if there is one (it carries
+    /// event content within the same budget), both use `http/protobuf`. The
+    /// pipeline's protocols replace the policy's own
+    /// [`ContentPolicy::span_content_encoding`].
     #[must_use]
     pub fn observer_with(&self, content: ContentPolicy) -> Observer {
         let content = match self.span_export {

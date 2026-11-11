@@ -173,7 +173,8 @@ Every content value goes through one pipeline, in order:
    key replaces it). The budget is clamped to what one export request can
    carry: 416 KiB over OTLP/protobuf, the default protocol of
    `createOtlpPipeline`, and 208 KiB over OTLP/JSON, which can double content
-   when it escapes it. An `Observer` over providers the application owns is
+   when it escapes it (a pipeline whose traces or logs signal is JSON uses the
+   JSON figure). An `Observer` over providers the application owns is
    fitted as JSON until `content.spanContentEncoding: "protobuf"` says
    otherwise.
 

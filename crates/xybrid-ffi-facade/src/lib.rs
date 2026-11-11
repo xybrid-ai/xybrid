@@ -1091,7 +1091,8 @@ pub struct RunOptions {
     /// counted in metrics, while detailed traces are kept for roughly one
     /// run per live trace interval per session (see
     /// [`ObservabilityConfigHandle::set_live_trace_interval_ms`]). A blank
-    /// value is ignored. `None` for one-shot runs.
+    /// value is ignored. `None` for one-shot runs. Applies to model runs: a
+    /// pipeline run ignores it and traces every run.
     pub frame_session_id: Option<String>,
 }
 
@@ -1904,7 +1905,10 @@ impl Pipeline {
     }
 }
 
-/// Keep the [`RunOptions`] fields a pipeline run honours; reject the rest.
+/// Keep the [`RunOptions`] fields a pipeline run honours and reject those
+/// that would change what it generates (`generation_config`, `abort_on`).
+/// The remaining fields are inert here and accepted: the cloud-fallback
+/// knobs, and `frame_session_id`, which samples model runs only.
 fn pipeline_run_options(options: RunOptions) -> Result<sdk::RunOptions> {
     if options.generation_config.is_some() {
         return Err(Error::ConfigError {
@@ -4313,6 +4317,16 @@ stages:
         let sdk_options = pipeline_run_options(options).expect("inert fields are accepted");
 
         assert_eq!(sdk_options.correlation_id.as_deref(), Some("turn-7"));
+
+        // A frame session samples model runs only: a pipeline run accepts the
+        // option and is not marked live.
+        let live = RunOptions {
+            frame_session_id: Some("camera-7".into()),
+            ..RunOptions::default()
+        };
+        let sdk_options = pipeline_run_options(live).expect("a frame session is inert here");
+        assert!(!sdk_options.live_mode);
+        assert_eq!(sdk_options.frame_session_id, None);
     }
 
     #[test]

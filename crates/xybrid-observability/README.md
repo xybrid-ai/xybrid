@@ -83,7 +83,8 @@ enforced (CONTRACT.md "Content pipeline", budgets). How much fits depends on
 how the exporter writes content: OTLP/protobuf, the default protocol, sends
 it as retained, so the default request carries the full 416 KiB; OTLP/JSON
 can double it, so the same request carries 208 KiB. The packaged pipeline
-applies its own protocol. A policy used with providers the application owns
+applies its own protocols: protobuf only when traces, and logs if configured,
+both use it. A policy used with providers the application owns
 is fitted as JSON until `ContentPolicy::with_span_content_encoding` names
 protobuf. Content for a span that is
 not recording is not processed, and a redaction hook that panics fails closed

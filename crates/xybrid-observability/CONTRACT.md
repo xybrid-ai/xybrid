@@ -626,25 +626,34 @@ package does not know (Rust `ContentPolicy::with_span_content_encoding`, JS
 `content.spanContentEncoding`). `R` is the policy's own bound (Rust
 `ContentPolicy::with_max_request_body_bytes`, JS `content.maxRequestBodyBytes`;
 default 491520). An observer built by a packaged pipeline with a traces signal
-uses that signal's protocol for `E`, whatever the policy names (`http/protobuf`,
-the default protocol, is `protobuf`; `http/json` is `json`), and the
-pipeline's `max_request_body_bytes` for `R` when it is smaller. Both packages
+takes `E` from the pipeline's protocols, whatever the policy names: `protobuf`
+when the traces signal, and the logs signal if there is one, both use
+`http/protobuf` (the default protocol), otherwise `json`. The logs signal
+counts because content sent as events rides it within the same retained
+budget. The observer takes the pipeline's `max_request_body_bytes` for `R`
+when it is smaller. Both packages
 expose the effective values (Rust `ContentPolicy::max_attribute_bytes`,
 `max_retained_operation_bytes`, `max_request_body_bytes`,
 `span_content_encoding`; JS `Observer.contentBudgets`). When one policy caps
-another (Rust `ContentPolicy::capped_by`), the result keeps the capped
-policy's own `E` and the smaller of each effective budget. The clamped
+another (Rust `ContentPolicy::capped_by`), each budget of the result is the
+smaller of the two effective budgets. Its `R` and `E` come from one policy as
+a pair, never one from each: the smaller `R` when both have the same `E`,
+otherwise the pair with the lower ceiling. So the result is never fitted
+below either policy, and it fits the capped policy's own exporter. A ceiling
+that names no encoding is fitted as `json`, like any policy. The clamped
 attribute budget can equal the retained-operation budget; a value truncated to
 near it still charges its key (and, for `span_and_event` with a recording
 span, both copies) against the retained budget, so it can be omitted and
 listed rather than kept.
 
-The clamp fits spans only. Event-destined content is bounded by the same
-retained-operation budget but is not fitted to a logs signal's
+The clamp fits spans. Event-destined content is bounded by the same
+retained-operation budget, and a packaged pipeline with a traces signal counts
+its logs protocol in `E` (above), so a details event fits a logs request of
+the same size. It is not fitted to a logs signal's own
 `max_request_body_bytes`: a packaged pipeline fits `R` to its traces bound
-only (and leaves the policy's own bound without a traces signal), so a details
-event can still exceed a lower logs bound and be dropped whole as an oversized
-item.
+only, and without a traces signal it leaves the policy's own bound and
+encoding. So a details event can still exceed a lower logs bound and be
+dropped whole as an oversized item.
 
 Preflight cost of the canonical JSON form (`preflight_node_bytes` = 16):
 

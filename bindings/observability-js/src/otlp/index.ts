@@ -89,7 +89,11 @@ export class OtlpPipeline {
   readonly #spans: BoundedBatchQueue<ReadableSpan> | undefined;
   readonly #logs: BoundedBatchQueue<ReadableLogRecord> | undefined;
   readonly #metrics: PipelineMetricReader | undefined;
-  /** `maxRequestBodyBytes` and content encoding of the traces export, if spans are exported. */
+  /**
+   * `maxRequestBodyBytes` of the traces export and the encoding content is fitted to, if spans
+   * are exported. The encoding is protobuf only when the logs signal, which carries event content
+   * within the same retained budget, is not JSON either.
+   */
   readonly #spanRequestBound: number | undefined;
   readonly #spanContentEncoding: SpanContentEncoding | undefined;
   #shutdown: Promise<boolean> | undefined;
@@ -106,7 +110,7 @@ export class OtlpPipeline {
     this.#spanContentEncoding =
       resolved.traces === undefined
         ? undefined
-        : resolved.traces.protocol === "http/json"
+        : resolved.traces.protocol === "http/json" || resolved.logs?.protocol === "http/json"
           ? "json"
           : "protobuf";
     if (resolved.traces !== undefined) {
@@ -152,9 +156,11 @@ export class OtlpPipeline {
    * disabled rather than read from globals, so evaluation events return `false` on a traces-only
    * pipeline. With a traces signal, the content budgets are clamped to fit this pipeline's
    * `maxRequestBodyBytes` (or `content.maxRequestBodyBytes`, default 480 KiB, if smaller) as its
-   * traces protocol writes content: `http/protobuf` carries twice the content of `http/json` in
-   * the same request (416 KiB against 208 KiB at the default bound). The pipeline's protocol
-   * replaces `content.spanContentEncoding`.
+   * protocol writes content: `http/protobuf` carries twice the content of `http/json` in the same
+   * request (416 KiB against 208 KiB at the default bound). Content is fitted as protobuf only
+   * when the traces signal, and the logs signal if there is one (it carries event content within
+   * the same budget), both use `http/protobuf`. The pipeline's protocols replace
+   * `content.spanContentEncoding`.
    */
   observer(content?: ContentOptions): Observer {
     const bound = this.#spanRequestBound;
