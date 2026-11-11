@@ -773,8 +773,9 @@ jobs:
             --readelf readelf --speech --min-sdk 29
 
       # The release zip: the AAR's jni/<abi>/ directories at the root (the
-      # bindings/kotlin/libs/ layout publish-kotlin stages from) plus
-      # assets/xybrid/zzz/, gated again as the exact bytes that ship.
+      # bindings/kotlin/libs/ layout publish-kotlin stages from) plus the
+      # notices (assets/xybrid/llama/NOTICE and assets/xybrid/zzz/), gated
+      # again as the exact bytes that ship.
       - name: Prepare artifact with version
         shell: bash
         env:
@@ -1497,7 +1498,7 @@ jobs:
             echo
             echo "**Android**"
             echo "- Maven Central: \`ai.xybrid:xybrid-kotlin:${TAG#v}\` (minSdk 29, Android 10); arm64-v8a includes Phonon/Kitten TTS 2 speech"
-            echo "- \`xybrid-android-${TAG}.zip\` — Native .so files for arm64-v8a (with Phonon/Kitten TTS 2 speech), armeabi-v7a and x86_64 (without speech), plus the speech engine's notices under \`assets/xybrid/zzz/\`. Copy only the ABI directories into \`jniLibs\`, ship \`assets/xybrid/zzz/\` with your app's assets, and set minSdk 29 (Android 10)"
+            echo "- \`xybrid-android-${TAG}.zip\` — Native .so files for arm64-v8a (with Phonon/Kitten TTS 2 speech), armeabi-v7a and x86_64 (without speech), plus the third-party notices under \`assets/xybrid/\`: \`llama/NOTICE\` for llama.cpp and \`zzz/\` for the speech engine. Copy only the ABI directories into \`jniLibs\`, ship all of \`assets/xybrid/\` with your app's assets, and set minSdk 29 (Android 10)"
             echo
             echo "**Flutter**"
             echo "- Precompiled native libraries auto-downloaded by cargokit"
