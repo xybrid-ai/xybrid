@@ -606,14 +606,20 @@ fn read_gguf_metadata_inner(path: &Path) -> Option<SdkResult<GgufInfo>> {
         match key.as_str() {
             k if xybrid_core::execution::decision::is_decision_metadata_key(k) => {
                 decision_marker = true;
+                // A marker whose value cannot be read or skipped still marks
+                // the file. End the scan and keep it: the decision runtime
+                // then refuses the artifact for what it is, where a chat
+                // sidecar would only fail later in the chat loader.
                 if xybrid_core::execution::decision::is_decision_type_key(k)
                     && value_type == GGUF_TYPE_STRING
                 {
-                    let kind = read_gguf_string(&mut reader)?;
+                    let Some(kind) = read_gguf_string(&mut reader) else {
+                        break;
+                    };
                     generates_text |=
                         xybrid_core::execution::decision::decision_type_generates_text(&kind);
                 } else if !skip_gguf_value(&mut reader, value_type) {
-                    return None;
+                    break;
                 }
             }
             "general.architecture" => {
@@ -2883,6 +2889,37 @@ mod tests {
             ExecutionTemplate::Gguf { .. }
         ));
         assert_ne!(metadata.metadata.get("task"), Some(&"decision".into()));
+    }
+
+    #[test]
+    fn a_decision_marker_whose_value_cannot_be_read_still_marks_the_file() {
+        // A type whose string is cut off, and a value type this reader does
+        // not know: the scan ends there, and the file is still a decision one.
+        for (key, value_type) in [
+            ("lfm3.decision.type", GGUF_TYPE_STRING),
+            ("lfm3.decision.temperature.choice", 99),
+        ] {
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join("model.gguf");
+            let mut file = std::fs::File::create(&path).unwrap();
+            file.write_all(b"GGUF").unwrap();
+            file.write_all(&3u32.to_le_bytes()).unwrap();
+            file.write_all(&0u64.to_le_bytes()).unwrap();
+            file.write_all(&2u64.to_le_bytes()).unwrap();
+            write_gguf_test_string(&mut file, "general.architecture");
+            file.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+            write_gguf_test_string(&mut file, "lfm3");
+            write_gguf_test_string(&mut file, key);
+            file.write_all(&value_type.to_le_bytes()).unwrap();
+            drop(file);
+
+            let metadata = generate_metadata_for_gguf_file(&path).unwrap();
+            assert!(
+                matches!(metadata.execution_template, ExecutionTemplate::Decision(_)),
+                "{key}"
+            );
+            assert_eq!(metadata.metadata["architecture"], "lfm3", "{key}");
+        }
     }
 
     /// A header with the architecture, then a decision type when `decision`.
