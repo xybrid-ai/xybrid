@@ -81,7 +81,9 @@ impl LlamaModel {
         // including when old explicit GGUF metadata bypasses SDK detection.
         // The scan cannot fail: its limits belong to decision admission, and
         // must not refuse a chat model that loaded before decisions existed.
-        if model.has_decision_marker() {
+        // That includes a model that answers decisions and generates text,
+        // which upstream serves as a chat model too.
+        if model.is_decision_only() {
             return Err(LlamaError::InvalidInput(
                 "decision artifact requires an explicit decision execution profile".into(),
             ));

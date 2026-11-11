@@ -233,13 +233,18 @@ an `EnvelopeKind::DecisionRequest` on the ordinary `run` / `run_async` /
 contract is `docs/development/liquid-decision-protocol.md`, and
 `docs/development/decision-conformance.md` says what is and is not qualified.
 
-- **The chat path refuses decision artifacts.** A GGUF is a decision artifact
-  when a metadata key is `tokenizer.chat_template.systemone`, starts with
-  `systemone.` or contains `.decision.`. The SDK's header sniff
-  (`execution::decision::is_decision_metadata_key`) is best effort; the
-  authority is `LlamaModel::load`, which scans every key after loading and
-  refuses (`xybrid_llama::is_decision_metadata_key`). Change both together: a
-  core test compares them.
+- **The chat path refuses decision artifacts that generate no text.** A GGUF
+  carries a decision marker when a metadata key is
+  `tokenizer.chat_template.systemone`, starts with `systemone.` or contains
+  `.decision.`. It stays a chat model only when its
+  `<architecture>.decision.type` is one that also generates text
+  (`decision_type_generates_text`: `granite-switch`, the one type the pinned
+  llama.cpp's `server_model_output_modalities` serves as text too); xybrid
+  answers no decisions with those. The SDK's header sniff
+  (`xybrid_core::execution::decision`) is best effort; the authority is
+  `LlamaModel::load`, which scans every key after loading and refuses.
+  `xybrid_llama` keeps its own copy of the rules. Change both together: core
+  tests compare them.
 - **`Decision CPU conformance` is a required check.**
   `test-decision-conformance.yml` has no path filter, and
   `tools/scripts/llamacpp_update.py` waits on that job name. It collects a
@@ -249,7 +254,8 @@ contract is `docs/development/liquid-decision-protocol.md`, and
   `tools/conformance/decision/{check.py,oracle.py}`,
   `integration-tests/fixtures/decision/{integrity.json,oracle.json}`,
   `integration-tests/tests/decision_conformance.rs`, and the commit named in
-  `crates/llama-cpp-sys/NOTICE`. A llama.cpp update PR migrates them by hand.
+  `crates/llama-cpp-sys/NOTICE`. A llama.cpp update PR migrates them by hand,
+  and rechecks `decision_type_generates_text` against upstream's list.
 - **`crates/llama-cpp-sys/NOTICE` is the notice source.** Byte-identical copies
   are committed for the Kotlin AAR (`assets/xybrid/llama/NOTICE`, gated by
   `verify_zzz_android.py`), Python and Unity; React Native, the web package,

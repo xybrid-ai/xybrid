@@ -63,17 +63,56 @@ pub fn is_decision_metadata_key(key: &str) -> bool {
         || key.contains(".decision.")
 }
 
+/// Whether a metadata key holds upstream's decision type,
+/// `<architecture>.decision.type`.
+pub fn is_decision_type_key(key: &str) -> bool {
+    key.ends_with(".decision.type")
+}
+
+/// Whether a model of this decision type also generates text.
+///
+/// The list is `server_model_output_modalities` in the pinned llama.cpp:
+/// every decision type serves decisions only, except these, which stay chat
+/// models. xybrid-core's header sniff
+/// (`execution::decision::decision_type_generates_text`) keeps the same list
+/// and a core test compares the two: change them together.
+pub fn decision_type_generates_text(decision_type: &str) -> bool {
+    decision_type == "granite-switch"
+}
+
+/// The chat loader's rule over a model's metadata keys: a decision marker
+/// refuses the model, unless its decision type also generates text.
+///
+/// `value` reads the value of one key, and is called for type keys only.
+fn chat_refuses(
+    keys: impl IntoIterator<Item = String>,
+    mut value: impl FnMut(&str) -> Option<String>,
+) -> bool {
+    let mut marked = false;
+    let mut generates_text = false;
+    for key in keys {
+        if is_decision_metadata_key(&key) {
+            marked = true;
+            generates_text |= is_decision_type_key(&key)
+                && value(&key).is_some_and(|kind| decision_type_generates_text(&kind));
+        }
+    }
+    marked && !generates_text
+}
+
 impl LlamaModel {
-    /// Whether any metadata key marks this model as a decision artifact.
+    /// Whether this model's metadata mark it as a decision artifact that
+    /// cannot generate text.
     ///
     /// Reads every key llama.cpp kept and skips one it cannot read (not
     /// UTF-8, or over the byte limit), so the answer never depends on the
     /// decision admission limits and the scan never fails a load. A marker
-    /// key is short ASCII, so skipping cannot hide one.
-    pub(crate) fn has_decision_marker(&self) -> bool {
+    /// key is short ASCII, so skipping cannot hide one. A decision type that
+    /// cannot be read counts as one that generates no text.
+    pub(crate) fn is_decision_only(&self) -> bool {
         // SAFETY: self retains the live model.
         let count = unsafe { sys::llama_model_metadata_count_c(self.as_ptr()) };
-        (0..count.max(0)).any(|index| {
+        let keys = (0..count.max(0)).filter_map(|index| {
             read_text(|out, capacity| {
                 // SAFETY: index is below the model's metadata count; out is
                 // writable for capacity bytes.
@@ -81,8 +120,8 @@ impl LlamaModel {
             })
             .ok()
             .flatten()
-            .is_some_and(|key| is_decision_metadata_key(&key))
-        })
+        });
+        chat_refuses(keys, |key| self.metadata(key).ok().flatten())
     }
 
     /// Load weights with an explicit empty offload-device list.
@@ -514,9 +553,60 @@ mod tests {
     }
 
     #[test]
-    fn a_model_without_metadata_has_no_decision_marker() {
+    fn a_model_without_metadata_is_not_a_decision_artifact() {
         // The stub has no native model: the scan reads nothing and cannot fail.
-        assert!(!LlamaModel::test_stub().has_decision_marker());
+        assert!(!LlamaModel::test_stub().is_decision_only());
+    }
+
+    #[test]
+    fn only_granite_switch_is_a_decision_type_that_generates_text() {
+        assert!(decision_type_generates_text("granite-switch"));
+        for kind in ["lfm3-d1", "lfm3-d1-omni", "lfm2-d1", "laya", "clef", ""] {
+            assert!(!decision_type_generates_text(kind), "{kind}");
+        }
+        assert!(is_decision_type_key("graniteswitch.decision.type"));
+        assert!(!is_decision_type_key("lfm3.decision.temperature.choice"));
+    }
+
+    #[test]
+    fn the_chat_loader_refuses_a_marked_model_that_generates_no_text() {
+        let refuses = |entries: &[(&str, &str)]| {
+            chat_refuses(entries.iter().map(|(key, _)| key.to_string()), |key| {
+                let (_, value) = entries.iter().find(|(name, _)| *name == key)?;
+                Some(value.to_string())
+            })
+        };
+        let template = ("tokenizer.chat_template.systemone", "{{ questions }}");
+
+        // A chat model has no marker.
+        assert!(!refuses(&[
+            ("general.architecture", "lfm3"),
+            ("tokenizer.chat_template", "{{ messages }}"),
+        ]));
+        // d1 answers decisions only.
+        assert!(refuses(&[
+            ("general.architecture", "lfm3"),
+            ("lfm3.decision.type", "lfm3-d1"),
+            template,
+        ]));
+        // A marker with no type says nothing about text.
+        assert!(refuses(&[template]));
+        assert!(refuses(&[("systemone.temperature", "1")]));
+        // Granite Switch answers decisions and generates text, whatever the
+        // order of its keys: it stays a chat model.
+        let granite = [
+            ("general.architecture", "graniteswitch"),
+            ("graniteswitch.decision.type", "granite-switch"),
+            template,
+        ];
+        assert!(!refuses(&granite));
+        assert!(!refuses(&[granite[2], granite[1], granite[0]]));
+    }
+
+    #[test]
+    fn a_decision_type_that_cannot_be_read_generates_no_text() {
+        let keys = ["graniteswitch.decision.type".to_string()];
+        assert!(chat_refuses(keys, |_| None));
     }
 
     #[test]

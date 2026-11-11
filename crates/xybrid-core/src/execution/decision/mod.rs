@@ -29,6 +29,23 @@ pub fn is_decision_metadata_key(key: &str) -> bool {
         || key.contains(".decision.")
 }
 
+/// Whether a GGUF metadata key holds upstream's decision type,
+/// `<architecture>.decision.type`.
+pub fn is_decision_type_key(key: &str) -> bool {
+    key.ends_with(".decision.type")
+}
+
+/// Whether a model of this decision type also generates text.
+///
+/// The list is `server_model_output_modalities` in the pinned llama.cpp:
+/// every decision type serves decisions only, except these. A marked GGUF of
+/// such a type stays a chat model, as it was before decision models existed.
+/// The native chat loader keeps the same list
+/// (`xybrid_llama::decision_type_generates_text`).
+pub fn decision_type_generates_text(decision_type: &str) -> bool {
+    decision_type == "granite-switch"
+}
+
 /// A content-free refusal for an unsupported decision entry point.
 pub fn unsupported(model_id: &str, capability: &str) -> AdapterError {
     AdapterError::UnsupportedModelCapability {
@@ -246,6 +263,45 @@ mod tests {
             keys.map(is_decision_metadata_key),
             keys.map(xybrid_llama::is_decision_metadata_key)
         );
+    }
+
+    #[test]
+    fn text_generating_decision_types_match_the_native_chat_loader() {
+        let kinds = [
+            "granite-switch",
+            "lfm3-d1",
+            "lfm3-d1-omni",
+            "lfm2-d1",
+            "laya",
+            "Granite-Switch",
+            "",
+        ];
+        assert_eq!(
+            kinds.map(decision_type_generates_text),
+            [true, false, false, false, false, false, false]
+        );
+        let keys = [
+            "graniteswitch.decision.type",
+            "lfm3.decision.type",
+            "lfm3.decision.temperature.choice",
+            "decision.type",
+            "general.type",
+        ];
+        assert_eq!(
+            keys.map(is_decision_type_key),
+            [true, true, false, false, false]
+        );
+        #[cfg(feature = "llm-llamacpp")]
+        {
+            assert_eq!(
+                kinds.map(decision_type_generates_text),
+                kinds.map(xybrid_llama::decision_type_generates_text)
+            );
+            assert_eq!(
+                keys.map(is_decision_type_key),
+                keys.map(xybrid_llama::is_decision_type_key)
+            );
+        }
     }
 
     #[cfg(not(feature = "llm-llamacpp"))]

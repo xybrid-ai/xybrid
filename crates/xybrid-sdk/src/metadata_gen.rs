@@ -500,7 +500,8 @@ pub(crate) struct GgufInfo {
     pub projector_type: Option<String>,
     pub image_size: Option<u64>,
     pub patch_size: Option<u64>,
-    /// A named decision template or decision calibration metadata is present.
+    /// A named decision template or decision calibration metadata is present,
+    /// and the decision type is not one that also generates text.
     pub decision_marked: bool,
 }
 
@@ -582,6 +583,8 @@ fn read_gguf_metadata_inner(path: &Path) -> Option<SdkResult<GgufInfo>> {
     }
 
     let mut vision_projector_type = None;
+    let mut decision_marker = false;
+    let mut generates_text = false;
 
     // A decision marker usually follows the architecture and context keys, so
     // read every declared entry instead of stopping at the first useful ones.
@@ -602,8 +605,14 @@ fn read_gguf_metadata_inner(path: &Path) -> Option<SdkResult<GgufInfo>> {
         // We only care about specific keys
         match key.as_str() {
             k if xybrid_core::execution::decision::is_decision_metadata_key(k) => {
-                info.decision_marked = true;
-                if !skip_gguf_value(&mut reader, value_type) {
+                decision_marker = true;
+                if xybrid_core::execution::decision::is_decision_type_key(k)
+                    && value_type == GGUF_TYPE_STRING
+                {
+                    let kind = read_gguf_string(&mut reader)?;
+                    generates_text |=
+                        xybrid_core::execution::decision::decision_type_generates_text(&kind);
+                } else if !skip_gguf_value(&mut reader, value_type) {
                     return None;
                 }
             }
@@ -658,6 +667,10 @@ fn read_gguf_metadata_inner(path: &Path) -> Option<SdkResult<GgufInfo>> {
         // Decision markers commonly appear after architecture/context keys.
         // Scan the whole header before classifying the execution protocol.
     }
+
+    // A decision type that also generates text stays a chat model, as it was
+    // before decision models existed. The native chat loader has the same rule.
+    info.decision_marked = decision_marker && !generates_text;
 
     if info.projector_type.is_none() {
         info.projector_type = vision_projector_type;
@@ -2840,6 +2853,36 @@ mod tests {
             metadata.execution_template,
             ExecutionTemplate::Decision(_)
         ));
+    }
+
+    #[test]
+    fn a_decision_type_that_generates_text_stays_a_chat_model() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("granite-switch.gguf");
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(b"GGUF").unwrap();
+        file.write_all(&3u32.to_le_bytes()).unwrap();
+        file.write_all(&0u64.to_le_bytes()).unwrap();
+        file.write_all(&3u64.to_le_bytes()).unwrap();
+        // Granite Switch as upstream converts it: a decision adapter on a
+        // text model, with the decision template next to the chat one.
+        for (key, value) in [
+            ("general.architecture", "graniteswitch"),
+            ("tokenizer.chat_template.systemone", "{{ questions }}"),
+            ("graniteswitch.decision.type", "granite-switch"),
+        ] {
+            write_gguf_test_string(&mut file, key);
+            file.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+            write_gguf_test_string(&mut file, value);
+        }
+        drop(file);
+
+        let metadata = generate_metadata_for_gguf_file(&path).unwrap();
+        assert!(matches!(
+            metadata.execution_template,
+            ExecutionTemplate::Gguf { .. }
+        ));
+        assert_ne!(metadata.metadata.get("task"), Some(&"decision".into()));
     }
 
     /// A header with the architecture, then a decision type when `decision`.
