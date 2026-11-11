@@ -159,8 +159,15 @@ fn outcome(result: Result<(), xybrid_sdk::SdkError>) -> Value {
     })
 }
 
-fn error_text(error: &dyn std::fmt::Display) -> String {
-    format!("error: {error}")
+/// `error: <message>: <source>: ...`, the whole source chain.
+fn error_text(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut text = format!("error: {error}");
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text.push_str(&format!(": {cause}"));
+        source = cause.source();
+    }
+    text
 }
 
 /// Step 1: export, identity and content rules of `session`, then init.
@@ -282,7 +289,7 @@ fn begin(config: &Config, session: &str, record: &mut Map<String, Value>) -> Out
         "init".into(),
         Value::from(
             init.as_ref()
-                .map_or_else(|e| error_text(e), |()| "ok".to_owned()),
+                .map_or_else(|e| error_text(&**e), |()| "ok".to_owned()),
         ),
     );
     init
@@ -436,7 +443,9 @@ fn case_tts(
     references.insert("load".into(), reference(model.load_observation_ref()));
     let options = RunOptions::new().with_observation(child(context, None));
     let speech =
-        text("The lighthouse keeper said good evening to the sea, and the sea answered.".into());
+        text("The lighthouse keeper said good evening to the sea. The sea answered with a long, slow wave. \
+              Then the gulls began to call across the harbour. Night came down over the quiet town."
+            .into());
     let mut chunks = 0u32;
     let completed = model.run_tts_streaming(&speech, &options, |_chunk| {
         chunks += 1;
@@ -662,7 +671,7 @@ fn run_case(
         Value::from(
             result
                 .as_ref()
-                .map_or_else(|e| error_text(e), |()| "ok".to_owned()),
+                .map_or_else(|e| error_text(&**e), |()| "ok".to_owned()),
         ),
     );
     record.insert("references".into(), Value::Object(references));
