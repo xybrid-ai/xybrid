@@ -155,6 +155,38 @@ Per session (`<lane>/<session>` in the report):
 | `collector.quality` | Both calls returned `true`; staging links exactly the two records to the run span with the sent names, scores and labels; the feedback comment is redacted. |
 | `collector.metric_ledger` | The sink holds one `gen_ai.client.inference.duration` measurement per run of the session, one of them `error.type = cancelled`. |
 
+Browser (`web-mac`): no Collector; its second session is `direct-logs`
+(traces and logs straight to staging, content captured with the literal
+redaction), checked by `content.redacted`, `quality.linked` and
+`direct_logs.delivery` instead of the interop and metric-ledger checks.
+
+### Rust-only cases (`rust-mac`)
+
+Five more sessions, each exporting to the Collector under its own T and P,
+cover what the foreign surface has no entry for. The shared sessions'
+stopped stream is already the token callback returning an error (delivery
+`callback`: the span counts exactly the accepted chunks).
+
+| Session | What runs | Check |
+|---|---|---|
+| `case-pipeline` | a one-stage streaming LLM pipeline (`target: device`) whose `on_token` fails after two chunks | `case.pipeline_on_token_failure`: the call fails; the stage's request is `cancelled` with exactly two chunks |
+| `case-tts` | `kitten-tts-nano-0.8`, a three-chunk text streamed to completion, then stopped by the chunk callback after one | `case.tts_streaming`: two `text_to_speech` requests, completed with the delivered chunk count, stopped `cancelled` after one |
+| `case-asr` | `whisper-tiny-ggml`: `integration-tests/fixtures/input/jfk.wav` as one batch run, then fed second by second to a live stream and flushed | `case.asr_batch_and_live`: a `speech_to_text` request, and one `invoke_workflow asr_session` with decoder runs, all without error |
+| `case-frames` | five runs of one frame session with a 10-minute live trace interval | `case.frame_session`: one traced run (the only returned reference), five `gen_ai.client.inference.duration` measurements in the sink |
+| `case-fallback` | a local stream aborted by a staged memory-pressure signal and finished by the staging gateway (`gpt-4o-mini`) | `case.cloud_fallback`: one counted request whose `attempt 0` is local and ended `aborted_for_cloud_fallback`, whose `attempt 1` is remote with reason `fallback`, and a gateway span under that remote attempt |
+
+### CLI lanes
+
+`cli-mac` runs the candidate CLI as customers do (key in `XYBRID_API_KEY`,
+`--platform-url https://staging.api.xybrid.dev --observability`): one local
+LLM run, one local pipeline and one cloud stage, each with `--trace-export`.
+`run_staging.py export-check` reads every exported trace back from staging
+with the export as the ground truth (the interop `ids.*`, `mapping.*`,
+`content`, `timing.*` checks), checks the `cli` binding and service, and the
+aggregate. `cli-legacy-mac` runs the released v0.17.0 CLI, which has no OTLP
+export and posts legacy events to `<platform-url>/v1/events/batch`; staging
+serves that route on the ingest host only, so that host is its platform URL.
+
 Per launch: `aggregate.stats` (the change in `GET /v1/telemetry/stats`
 `total_executions_24h` equals the counted request spans stored in this
 launch's traces; exact because the project receives nothing else),
