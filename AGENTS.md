@@ -270,7 +270,8 @@ contract is `docs/development/liquid-decision-protocol.md`, and
 - **The wrapper compiles llama.cpp's Jinja closure** (`common/jinja/*.cpp`,
   `common/json.cpp`, `common/unicode.cpp`). The list is in
   `crates/llama-cpp-sys/build.rs` and in `//:llama_decision_jinja`; keep them
-  equal. Keep llama.cpp's `src/` off the wrapper's include path: a second
+  equal (`tools/scripts/tests/test_decision_jinja_sources.py` fails when they
+  differ). Keep llama.cpp's `src/` off the wrapper's include path: a second
   `ggml.h` breaks the iOS build.
 
 ### Releases
