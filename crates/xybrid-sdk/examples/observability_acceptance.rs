@@ -57,6 +57,15 @@ const TTS_MODEL: &str = "kitten-tts-nano-0.8";
 const FRAMES: usize = 5;
 const FRAME_INTERVAL: Duration = Duration::from_secs(600);
 const CLOUD_MODEL: &str = "gpt-4o-mini";
+const TTS_TEXT: &str = "The lighthouse keeper climbed the spiral stairs every evening at dusk. \
+    He wiped the great lens until it shone, then lit the lamp and watched its beam sweep across \
+    the water. Ships far out on the dark sea saw the light and turned away from the rocks. Some \
+    nights the wind howled around the tower and rain beat against the glass, but the keeper \
+    stayed at his post and kept the flame burning until morning. When the sun rose he wrote in \
+    his logbook: the light was kept, the sea was rough, all ships passed safely. Then he walked \
+    down to the harbour, bought fresh bread from the baker, and talked with the fishermen about \
+    the weather, the tides and the gulls that followed their boats home. In the afternoon he \
+    slept, and at dusk he climbed the stairs again.";
 
 struct Args {
     config: PathBuf,
@@ -442,10 +451,9 @@ fn case_tts(
         .load()?;
     references.insert("load".into(), reference(model.load_observation_ref()));
     let options = RunOptions::new().with_observation(child(context, None));
-    let speech =
-        text("The lighthouse keeper said good evening to the sea. The sea answered with a long, slow wave. \
-              Then the gulls began to call across the harbour. Night came down over the quiet town."
-            .into());
+    // Over 700 characters: the ONNX TTS path synthesizes at most 350
+    // characters per chunk, so the stopped run really ends early.
+    let speech = text(TTS_TEXT.into());
     let mut chunks = 0u32;
     let completed = model.run_tts_streaming(&speech, &options, |_chunk| {
         chunks += 1;
