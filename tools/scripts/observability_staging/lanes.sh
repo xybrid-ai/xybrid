@@ -83,6 +83,21 @@ lane_unity_mac() {
         -xybridStagingConfig {config} -xybridStagingExpectations {expectations}
 }
 
+lane_react_native_pixel() {
+    # The CI debug APK (artifact xybrid-example-android-debug) carries the
+    # candidate's natives; Metro serves this checkout's JavaScript.
+    bash "$HERE/react-native-lane.sh" pixel-build "$ROOT" "$ART/xybrid-example-android-debug/app-debug.apk"
+    "${RUN[@]}" --lane react-native-pixel "$@" -- bash "$HERE/react-native-lane.sh" pixel-run \
+        {repo} {config} {expectations} {out_dir} {collector_port} {run}
+}
+
+lane_react_native_iphone() {
+    # The example's pod takes the CI XCFramework through XYBRID_XCFRAMEWORK_PATH.
+    bash "$HERE/react-native-lane.sh" iphone-build "$ROOT" "$ART/XybridFFI-xcframework"
+    "${RUN[@]}" --lane react-native-iphone --collector-host "$LAN_IP" "$@" -- \
+        bash "$HERE/react-native-lane.sh" iphone-run {repo} {config} {expectations} {out_dir} {run}
+}
+
 lane_web_mac() {
     # The CI web artifact (xybrid-web-wasm) served by the example as /sdk. The
     # example's asset step (copy the package, fetch and verify the GGUF) uses

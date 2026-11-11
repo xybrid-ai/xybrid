@@ -22,6 +22,7 @@ model-free capture scenario in
 | `run_staging.py` | Driver: `run` (one lane: Collector, config, lane command, readback, checks, report), `isolation` (cross-tenant reads, run where the other tenants' keys live), `recheck`, `summary`. |
 | `staging_checks.py` | Every check, as pure functions of the saved answers. |
 | `lanes.sh` | One subcommand per lane: build or stage the candidate, copy the config to the runtime, launch, copy `expectations.json` back. |
+| `react-native-lane.sh` | The React Native lanes' device steps (Metro, config copy, launch without tapping, polling for `expectations.json`), called by `lanes.sh`. |
 | `collector-lan.yaml` | Collector overlay: bind the OTLP receiver to the host's LAN address (iPhone lanes). |
 | `console.mjs` | Read-only console check: after you sign in once on a temporary Chrome profile, every launch trace's page and the overview KPIs against the staging API. |
 | `fixtures/` | A recorded passing run (Python lane), used by the unit tests. |
