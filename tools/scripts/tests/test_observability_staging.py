@@ -252,6 +252,57 @@ class PassingLaunchTest(unittest.TestCase):
             self.assertIn(name, names)
 
 
+FIXTURE = STAGING / "fixtures" / "python"
+
+
+def recorded_launch() -> sc.Launch:
+    """The passing Python lane launch recorded against staging on 2026-11-11."""
+    def load(name: str) -> Any:
+        return json.loads((FIXTURE / name).read_text(encoding="utf-8"))
+
+    def entries(name: str) -> List[Dict[str, Any]]:
+        return [json.loads(line) for line in (FIXTURE / name).read_text(encoding="utf-8").splitlines() if line]
+
+    config = load("config.public.json")
+    return sc.Launch(
+        config=config, expectations=load("expectations.json"),
+        readback={session: sc.SessionReadback.from_dict(load(f"readback/{session}.json"))
+                  for session in config["sessions"]},
+        ground_truth=entries("ground-truth.jsonl"), sinks=entries("sinks.jsonl"),
+        stats_before=load("stats-before.json"), stats_after=load("stats-after.json"),
+        deployments_before=load("deployments-before.json"), deployments_after=load("deployments-after.json"),
+        lane_exit=0, secret_hits=[])
+
+
+class RecordedLaunchTest(unittest.TestCase):
+    """The checks against what staging really answered (fixtures/python)."""
+
+    def test_recorded_launch_passes(self) -> None:
+        checks = sc.check_launch(recorded_launch(), SPEC)
+        self.assertEqual(failing(checks), [], [check.as_dict() for check in checks if check.failures])
+        self.assertEqual(sc.summarize(checks), {"pass": 42, "fail": 0, "skip": 0})
+
+    def test_recorded_launch_holds_no_key_material(self) -> None:
+        for path in FIXTURE.rglob("*"):
+            if path.is_file():
+                with self.subTest(path=path.name):
+                    self.assertNotIn(b"Bearer ", path.read_bytes())
+                    self.assertNotIn(b"sk_", path.read_bytes().replace(b"sk_dryrun", b""))
+
+    def test_recorded_direct_session_stores_no_content(self) -> None:
+        launch = recorded_launch()
+        launch.readback["direct"].spans["spans"][0]["content"] = {"bytes": 5, "keys": ["gen_ai.input.messages"],
+                                                                 "storage": "inline", "values": None}
+        self.assertIn("python-mac/direct:direct.no_content", failing(sc.check_launch(launch, SPEC)))
+
+    def test_recorded_collector_evaluation_lost(self) -> None:
+        launch = recorded_launch()
+        launch.readback["collector"].evaluations["items"] = launch.readback["collector"].evaluations["items"][:1]
+        found = failing(sc.check_launch(launch, SPEC))
+        self.assertIn("python-mac/collector:quality.linked", found)
+        self.assertIn("python-mac/collector:evaluations", found)
+
+
 class SingleFaultTest(unittest.TestCase):
     """Each mutation breaks one fact; the check that guards it must fail."""
 
