@@ -43,6 +43,19 @@ lane_rust_mac() {
         target/release/examples/observability_acceptance --config {config} --expectations {expectations}
 }
 
+lane_swift_iphone() {
+    # The CI XCFramework (artifact XybridFFI-xcframework) in local mode, with
+    # the staging scenario injected into examples/ios. Return Package.swift to
+    # remote mode afterwards (set-natives-mode.sh --set-remote); never commit it.
+    rm -rf bindings/apple/XCFrameworks/XybridFFI.xcframework
+    mkdir -p bindings/apple/XCFrameworks/XybridFFI.xcframework
+    cp -R "$ART/XybridFFI-xcframework/." bindings/apple/XCFrameworks/XybridFFI.xcframework/
+    ./bindings/apple/scripts/set-natives-mode.sh --set-local
+    bash bindings/apple/scripts/observability-scenario-ios-device.sh build-staging "$UDID" "$TEAM"
+    "${RUN[@]}" --lane swift-iphone --collector-host "$LAN_IP" "$@" -- \
+        bash bindings/apple/scripts/observability-scenario-ios-device.sh run-staging {config} {expectations} "$UDID"
+}
+
 lane_kotlin_pixel() {
     # The consumer-smoke APKs against the CI AAR (artifact android-dlopen-gate).
     [ -x jdk17/Contents/Home/bin/java ] && export JAVA_HOME="$ROOT/jdk17/Contents/Home"
@@ -73,6 +86,9 @@ lane_unity_mac() {
 lane_web_mac() {
     # The CI web artifact (xybrid-web-wasm) served by the example as /sdk.
     local web="$ROOT/bindings/web" package="$ART/xybrid-web-wasm"
+    # @xybrid/observability from this checkout. Its `build` script is Bun only
+    # to run tsdown and copy LICENSE/NOTICE; Node runs the same file.
+    (cd "$ROOT/bindings/observability-js" && pnpm install --frozen-lockfile && node scripts/build.ts)
     (cd "$web" && pnpm install --frozen-lockfile && pnpm run observability:prepare \
         && pnpm exec playwright install chromium && rm -rf example/public/sdk \
         && XYBRID_WEB_PACKAGE="$package" pnpm build:example \
