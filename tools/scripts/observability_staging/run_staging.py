@@ -583,7 +583,9 @@ def cmd_run(args: argparse.Namespace) -> int:
                    "device": expectations.get("device")})
     ground_truth = [json.loads(line) for line in (out / "ground-truth.jsonl").read_text(encoding="utf-8").splitlines()
                     if line.strip()] if (out / "ground-truth.jsonl").exists() else []
-    readback = readback_launch(out, client, public, expectations, ground_truth, args.readback_timeout)
+    # Nothing to wait for when the lane never ran its scenario.
+    timeout = args.readback_timeout if expectations_path.exists() else 10.0
+    readback = readback_launch(out, client, public, expectations, ground_truth, timeout)
     counted = sum(1 for session in readback.values()
                   for span in session.stored() if span.counted is True)
     if stats_before is not None:
