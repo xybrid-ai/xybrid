@@ -43,6 +43,44 @@ lane_rust_mac() {
         target/release/examples/observability_acceptance --config {config} --expectations {expectations}
 }
 
+lane_kotlin_pixel() {
+    # The consumer-smoke APKs against the CI AAR (artifact android-dlopen-gate).
+    [ -x jdk17/Contents/Home/bin/java ] && export JAVA_HOME="$ROOT/jdk17/Contents/Home"
+    export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}" PATH="${ANDROID_HOME:-$HOME/Library/Android/sdk}/platform-tools:$PATH"
+    mkdir -p bindings/kotlin/consumer-smoke/app/libs
+    cp "$ART/android-dlopen-gate/xybrid-kotlin.aar" bindings/kotlin/consumer-smoke/app/libs/xybrid-kotlin.aar
+    bindings/kotlin/gradlew -p bindings/kotlin/consumer-smoke :app:assembleDebug :app:assembleDebugAndroidTest
+    "${RUN[@]}" --lane kotlin-pixel "$@" -- \
+        bash bindings/kotlin/consumer-smoke/observability-scenario.sh staging {config} {expectations}
+}
+
+lane_unity_mac() {
+    # The macOS arm64 cdylib built from this checkout, staged into the smoke
+    # project; the marker stops the Editor fetching the release dylib.
+    local plugins=tools/unity-runtime-smoke/Assets/Xybrid/Plugins
+    local editor="${XYBRID_UNITY_EDITOR:-/Applications/Unity/Hub/Editor/6000.3.6f1/Unity.app/Contents/MacOS/Unity}"
+    cargo xtask build-ffi --target aarch64-apple-darwin --release --deploy-unity
+    rm -rf "$plugins/macOS" "$plugins/macOS.meta"
+    mkdir -p "$plugins"
+    python3 -c "import json;print(json.load(open('bindings/unity/package.json'))['version'])" \
+        > "$plugins/.xybrid-native-macos-version"
+    "${RUN[@]}" --lane unity-mac "$@" -- \
+        "$editor" -batchmode -projectPath "$ROOT/tools/unity-runtime-smoke" -runTests -testPlatform EditMode \
+        -testCategory ObservabilityStagingScenario -testResults {out_dir}/unity-editmode-results.xml -logFile - \
+        -xybridStagingConfig {config} -xybridStagingExpectations {expectations}
+}
+
+lane_web_mac() {
+    # The CI web artifact (xybrid-web-wasm) served by the example as /sdk.
+    local web="$ROOT/bindings/web" package="$ART/xybrid-web-wasm"
+    (cd "$web" && pnpm install --frozen-lockfile && pnpm run observability:prepare \
+        && pnpm exec playwright install chromium && rm -rf example/public/sdk \
+        && XYBRID_WEB_PACKAGE="$package" pnpm build:example \
+        && diff -rq "$package/dist" example/dist/sdk)
+    "${RUN[@]}" --lane web-mac "$@" -- \
+        pnpm --dir "$web" exec playwright test browser-test/staging.spec.ts
+}
+
 # A.5: the CLI as customers run it (key in XYBRID_API_KEY, staging platform):
 # one local LLM run, one local pipeline, one cloud stage through the staging
 # gateway, each with --trace-export; export-check reads every exported trace

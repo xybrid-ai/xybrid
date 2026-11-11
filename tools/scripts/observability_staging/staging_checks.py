@@ -281,8 +281,11 @@ class SessionChecks:
 
     def identity(self) -> Check:
         check = self.new("identity")
+        lane = self.spec["lanes"].get(str(self.launch.config.get("lane"))) or {}
         want = {
-            "xybrid.sdk.binding": self.constants["binding"],
+            # A lane may say what its host stamps instead (``sdk_binding``;
+            # ``null``: nothing does, the attribute must be absent).
+            "xybrid.sdk.binding": lane.get("sdk_binding", self.constants["binding"]),
             "service.name": self.constants["service_name"],
             "service.version": self.constants["service_version"],
             "device.id": self.constants["device_id"],

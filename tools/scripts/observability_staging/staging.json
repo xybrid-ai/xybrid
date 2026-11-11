@@ -47,7 +47,10 @@
       "sessions": [
         "direct",
         "direct-logs"
-      ]
+      ],
+      "model": "model",
+      "sdk_binding": null,
+      "note": "@xybrid/web runs on an application-owned @xybrid/observability provider: neither package stamps xybrid.sdk.binding, and fromUrl('/model.gguf') names the model after the file"
     },
     "unity-mac": {
       "binding": "unity",

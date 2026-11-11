@@ -542,7 +542,8 @@ def cmd_run(args: argparse.Namespace) -> int:
                                    f"http://{args.collector_host}:{port}")
         constants = {key_: value for key_, value in spec.items() if key_ not in ("lanes",)}
         config = {"schema": staging_checks.SCHEMA, "binding": lane["binding"], "lane": args.lane, "run": run,
-                  "commit": commit, "model_id": args.model or spec["model"]["id"], "sessions": sessions,
+                  "commit": commit, "model_id": args.model or lane.get("model") or spec["model"]["id"],
+                  "sessions": sessions,
                   "constants": constants}
         config_path = secret_dir / "config.json"
         write_private(config_path, config)
