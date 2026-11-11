@@ -12,7 +12,7 @@ set -euo pipefail
 
 PKG=com.anonymous.example                 # app.json android.package
 IOS_BUNDLE=dev.xybrid.rnexample           # set in the generated Xcode project only (team CPVMT4DS8N)
-IOS_UDID=00008130-001C446E1408001C
+IOS_UDID="${XYBRID_IPHONE_UDID:-00008130-001C446E1408001C}"
 IOS_TEAM=CPVMT4DS8N
 IOS_DERIVED="${TMPDIR:-/tmp}/xybrid-rn-staging-ios"
 # A Debug build without an embedded bundle looks for Metro on the phone
