@@ -100,6 +100,79 @@ lane_web_mac() {
         pnpm --dir "$web" exec playwright test browser-test/staging.spec.ts
 }
 
+lane_flutter_mac() {
+    # The Dart VM (flutter test) on the release FFI library built from this checkout.
+    cargo build --release -p xybrid_flutter --features platform-macos
+    (cd bindings/flutter && flutter pub get)
+    XYBRID_FLUTTER_NATIVE_LIB="$ROOT/target/release/libxybrid_flutter_ffi.dylib" "${RUN[@]}" --lane flutter-mac "$@" -- \
+        bash -c 'cd bindings/flutter && flutter test --no-pub test/observability_staging_test.dart'
+}
+
+lane_flutter_pixel() {
+    # flutter drive of examples/flutter (cargokit builds the native from this
+    # checkout); the config is copied once the app runs (README, Flutter).
+    (cd examples/flutter && flutter pub get)
+    "${RUN[@]}" --lane flutter-pixel --timeout 3600 "$@" -- bash "$HERE/lanes.sh" _flutter-drive-android
+}
+
+lane_flutter_iphone() {
+    (cd examples/flutter && flutter pub get)
+    "${RUN[@]}" --lane flutter-iphone --collector-host "$LAN_IP" --timeout 3600 "$@" -- \
+        bash "$HERE/lanes.sh" _flutter-drive-ios
+}
+
+# Internal: run by run_staging.py, with XYBRID_STAGING_CONFIG, _RUN,
+# _COLLECTOR_PORT and _EXPECTATIONS in the environment.
+flutter_drive() {
+    flutter drive --no-pub --keep-app-running -d "$1" --driver test_driver/integration_test.dart \
+        --target integration_test/observability_staging_test.dart --dart-define=XYBRID_STAGING_RUN="$XYBRID_STAGING_RUN"
+}
+
+_flutter_drive_android() {
+    local serial app=com.example.xybrid_example stage=app_flutter/xybrid-staging drive status=0
+    local port="$XYBRID_STAGING_COLLECTOR_PORT"
+    serial="${ANDROID_SERIAL:-$(adb get-serialno)}"
+    cd "$ROOT/examples/flutter"
+    adb -s "$serial" reverse "tcp:$port" "tcp:$port"
+    adb -s "$serial" shell am force-stop "$app" || true
+    adb -s "$serial" shell "run-as $app rm -rf $stage" 2>/dev/null || true
+    flutter_drive "$serial" &
+    drive=$!
+    # A temporary name and a rename: the app never reads a half-copied config.
+    until adb -s "$serial" shell pidof "$app" >/dev/null 2>&1 && adb -s "$serial" shell -T \
+        "run-as $app sh -c 'umask 077 && mkdir -p $stage && cat > $stage/config.json.tmp && mv $stage/config.json.tmp $stage/config.json'" \
+        < "$XYBRID_STAGING_CONFIG"; do
+        kill -0 "$drive" 2>/dev/null || break
+        sleep 1
+    done
+    wait "$drive" || status=$?
+    adb -s "$serial" shell "run-as $app rm -rf $stage" 2>/dev/null || true
+    adb -s "$serial" reverse --remove "tcp:$port" || true
+    return "$status"
+}
+
+_flutter_drive_ios() {
+    local bundle=dev.xybrid.flutterexample drive status=0 probe
+    cd "$ROOT/examples/flutter"
+    flutter_drive "$UDID" &
+    drive=$!
+    until xcrun devicectl device info processes --device "$UDID" 2>/dev/null | grep -q '/Runner.app/Runner' \
+        && xcrun devicectl device copy to --device "$UDID" --domain-type appDataContainer --domain-identifier "$bundle" \
+            --source "$XYBRID_STAGING_CONFIG" --destination Documents/xybrid-staging/config.json >/dev/null 2>&1; do
+        kill -0 "$drive" 2>/dev/null || break
+        sleep 1
+    done
+    wait "$drive" || status=$?
+    # A config the app never read must not stay on the phone: remove the app.
+    probe="$(mktemp -d)"
+    if xcrun devicectl device copy from --device "$UDID" --domain-type appDataContainer --domain-identifier "$bundle" \
+        --source Documents/xybrid-staging/config.json --destination "$probe/c" >/dev/null 2>&1; then
+        xcrun devicectl device uninstall app --device "$UDID" "$bundle" || true
+    fi
+    rm -rf "$probe"
+    return "$status"
+}
+
 # A.5: the CLI as customers run it (key in XYBRID_API_KEY, staging platform):
 # one local LLM run, one local pipeline, one cloud stage through the staging
 # gateway, each with --trace-export; export-check reads every exported trace
@@ -171,6 +244,8 @@ lanes() {
 case "${1:-}" in
     ""|-h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     list) lanes; exit 0 ;;
+    _flutter-drive-android) _flutter_drive_android; exit $? ;;
+    _flutter-drive-ios) _flutter_drive_ios; exit $? ;;
 esac
 lane="$1"; shift
 function="lane_${lane//-/_}"
