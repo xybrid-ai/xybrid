@@ -52,25 +52,60 @@
 
 // Log levels matching Rust's Severity enum
 // 0 = Silent (no logs), 1 = Error, 2 = Warn, 3 = Info, 4 = Debug
-// Mutes llama.cpp's logs while a native call whose diagnostics may quote
-// caller text is running (tokenization, decision load and passes).
+// Mutes llama.cpp's logs on a thread while it runs a native call whose
+// diagnostics may quote caller text (tokenization, decision load and passes).
 //
-// The gate is process-wide: logs from every thread are dropped until the call
-// returns, including those of an unrelated model generating elsewhere. Scoping
-// it to the calling thread needs thread-local storage, and this file must not
-// add any: the Android gate (tools/scripts/verify_zzz_android.py) requires a
-// library built without the speech engine to carry no PT_TLS segment.
-static std::atomic<unsigned> g_private_native_calls{0};
+// Only the calling thread is muted: llama.cpp writes those diagnostics on the
+// thread that made the call, and a model loading or generating on another
+// thread keeps its logs. The threads inside such a call sit in a small table
+// rather than in a thread_local flag, because this file must not add
+// thread-local storage: the Android gate (tools/scripts/verify_zzz_android.py)
+// requires a library built without the speech engine to carry no PT_TLS
+// segment.
+//
+// A call that finds the table full mutes every thread until it returns, as
+// one counter did for all calls before: a log is dropped rather than shown.
+static const int k_private_thread_slots = 32;
+static std::atomic<std::thread::id> g_private_threads[k_private_thread_slots];
+static std::atomic<unsigned> g_private_calls_without_slot{0};
 struct private_native_scope {
-    private_native_scope() { g_private_native_calls.fetch_add(1, std::memory_order_acq_rel); }
-    ~private_native_scope() { g_private_native_calls.fetch_sub(1, std::memory_order_acq_rel); }
+    private_native_scope() {
+        const std::thread::id self = std::this_thread::get_id();
+        for (int i = 0; i < k_private_thread_slots; ++i) {
+            std::thread::id unused;
+            if (g_private_threads[i].compare_exchange_strong(unused, self, std::memory_order_acq_rel)) {
+                slot = i;
+                return;
+            }
+        }
+        g_private_calls_without_slot.fetch_add(1, std::memory_order_acq_rel);
+    }
+    ~private_native_scope() {
+        if (slot >= 0) {
+            g_private_threads[slot].store(std::thread::id(), std::memory_order_release);
+        } else {
+            g_private_calls_without_slot.fetch_sub(1, std::memory_order_acq_rel);
+        }
+    }
+    private_native_scope(const private_native_scope&) = delete;
+    private_native_scope& operator=(const private_native_scope&) = delete;
+
+private:
+    int slot = -1;
 };
+static bool in_private_native_call() {
+    if (g_private_calls_without_slot.load(std::memory_order_acquire) != 0) return true;
+    const std::thread::id self = std::this_thread::get_id();
+    for (const auto& thread : g_private_threads) {
+        if (thread.load(std::memory_order_acquire) == self) return true;
+    }
+    return false;
+}
 static std::atomic<int> g_log_verbosity{0};  // Default: silent (suppress all library logs)
 
 // Custom log callback that filters based on verbosity level
 static void xybrid_log_callback(enum ggml_log_level level, const char* text, void* user_data) {
     (void)user_data;  // unused
-    if (g_private_native_calls.load(std::memory_order_acquire) != 0) return;
 
     int verbosity = g_log_verbosity.load(std::memory_order_relaxed);
 
@@ -93,8 +128,9 @@ static void xybrid_log_callback(enum ggml_log_level level, const char* text, voi
             break;
     }
 
-    // Only print if verbosity is high enough
-    if (verbosity >= required_verbosity) {
+    // Only print if verbosity is high enough, and never from inside a call
+    // whose diagnostics may quote caller text.
+    if (verbosity >= required_verbosity && !in_private_native_call()) {
         fputs(text, stderr);
     }
 }
