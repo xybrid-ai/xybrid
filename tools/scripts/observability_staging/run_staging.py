@@ -15,6 +15,7 @@ passed; 2 when the launch could not start.
     run_staging.py isolation --traces traces.json --env-file staging.env [--probe]
     run_staging.py recheck --run-dir DIR [--probe-file isolation-probe.json]
     run_staging.py readback --run-dir DIR     # re-read and re-check a finished launch
+    run_staging.py export-check --export run.json --out DIR   # the CLI lane's --trace-export files
     run_staging.py summary --root DIR         # every launch's result, and traces.json
 
 ``isolation`` runs where the other tenants' keys live (never on the host that
@@ -631,6 +632,81 @@ def cmd_readback(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# export-check (the CLI lane: --trace-export is the ground truth)
+# ---------------------------------------------------------------------------
+
+
+def cmd_export_check(args: argparse.Namespace) -> int:
+    """Reads every trace of each ``xybrid run --trace-export`` file back from
+    staging and runs the interop destination checks with the export as the
+    ground truth, plus the CLI's identity and the dashboard aggregate."""
+    import expectations as interop  # noqa: PLC0415 -- on the path set above
+    import workloads  # noqa: PLC0415
+
+    key = read_key(args.key_file)
+    _, api = staging_urls()
+    out = args.out.resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    raw = run_interop.RawLog()
+    client = destinations.Client(api, {"Authorization": f"Bearer {key}"}, raw)
+    checks: List[Any] = []
+    counted = 0
+    for export in args.export:
+        name = export.stem
+        body = read_json(export)
+        entries = [{"seq": 1, "signal": "traces", "encoding": "json", "path": "/v1/traces", "body": body}]
+        workload = workloads.Workload(name=name, language="cli", program=str(export), service_name="xybrid-cli",
+                                      content="captured", secrets=(), replacements=(), evaluations=0,
+                                      streaming_timing=True)
+        truth = interop.GroundTruth.build(workload, entries)
+        spans: List[destinations.DestSpan] = []
+        text = []
+        for trace_id in truth.trace_ids():
+            want = [span.span_id for span in truth.spans if span.trace_id == trace_id]
+            readback = read_trace(client, trace_id, name, len(want), want, 0, args.readback_timeout)
+            write_json(out / "readback" / f"{name}-{trace_id}.json", readback.as_dict())
+            stored = [span for span in readback.stored() if span.trace_id == trace_id]
+            spans += stored
+            text.append(readback.text())
+            counted += sum(1 for span in stored if span.counted is True)
+        found = interop.destination_checks("xybrid", truth, spans, [], "\n".join(text))
+        identity = interop.Check("staging", name, "identity")
+        for span in spans:
+            values = staging_checks.resource(span)
+            if values.get("xybrid.sdk.binding") != "cli" or values.get("service.name") != "xybrid-cli":
+                identity.failures.append(f"{staging_checks.label(span)}: binding {values.get('xybrid.sdk.binding')!r}, "
+                                         f"service {values.get('service.name')!r}")
+        if not spans:
+            identity.failures.append("nothing stored")
+        identity.notes.append(f"{len(truth.spans)} exported spans in {len(truth.trace_ids())} trace(s), "
+                              f"{len(spans)} stored")
+        checks += found + [identity]
+    stats_after = read_stats(client, "stats-after")
+    aggregate = interop.Check("staging", "cli", "aggregate.stats")
+    if args.stats_before is not None and stats_after is not None:
+        delta = staging_checks.stats_delta(read_json(args.stats_before), stats_after)
+        if delta != counted:
+            aggregate.failures.append(f"total_executions_24h changed by {delta}, the exports hold {counted} "
+                                      f"counted requests")
+        aggregate.notes.append(f"+{delta}, counted {counted}")
+    else:
+        aggregate.skipped = "no --stats-before"
+    checks.append(aggregate)
+    raw.write(out / "raw")
+    summary = interop.summarize(checks)
+    hits = scan_secrets(out, {"the key": key, "Bearer": "Bearer "})
+    report = {"schema": "xybrid-staging-cli/1", "at": utc_now().isoformat(), "passed": not summary.get("fail")
+              and not hits, "summary": summary, "secret_hits": hits, "counted_requests": counted,
+              "exports": [str(path) for path in args.export], "checks": [check.as_dict() for check in checks]}
+    write_json(out / "report.json", report)
+    for check in checks:
+        detail = "; ".join(check.failures) or check.skipped or ""
+        print(f"{check.status.upper()} {check.workload} {check.name}" + (f": {detail[:300]}" if detail else ""))
+    print(f"==> {'PASS' if report['passed'] else 'FAIL'}: {summary}; {out / 'report.json'}")
+    return 0 if report["passed"] else 1
+
+
+# ---------------------------------------------------------------------------
 # isolation and recheck
 # ---------------------------------------------------------------------------
 
@@ -757,6 +833,23 @@ def cmd_recheck(args: argparse.Namespace) -> int:
     return 0 if failures == 0 else 1
 
 
+def cmd_stats(args: argparse.Namespace) -> int:
+    """The launch project's dashboard aggregate, and optionally its newest traces."""
+    key = read_key(args.key_file)
+    _, api = staging_urls()
+    client = destinations.Client(api, {"Authorization": f"Bearer {key}"})
+    value: Dict[str, Any] = {"at": utc_now().isoformat(), "stats": read_stats(client, "stats")}
+    if args.traces:
+        try:
+            value["traces"] = client.get("/v1/telemetry/traces", [("limit", args.traces)], label="traces")
+        except destinations.HttpError as error:
+            value["traces"] = f"unavailable: {error}"
+    stats = value["stats"] if args.traces == 0 else value
+    write_json(args.out, stats)
+    print(json.dumps(value["stats"]))
+    return 0 if value["stats"] is not None else 1
+
+
 # ---------------------------------------------------------------------------
 # summary
 # ---------------------------------------------------------------------------
@@ -836,6 +929,18 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     recheck.add_argument("--probe-file", type=Path, default=None)
     recheck.add_argument("--out", type=Path, default=None)
 
+    export_check = commands.add_parser("export-check", help="CLI --trace-export files read back from staging")
+    export_check.add_argument("--export", type=Path, action="append", required=True)
+    export_check.add_argument("--out", type=Path, required=True)
+    export_check.add_argument("--key-file", type=Path, default=DEFAULT_KEY_FILE)
+    export_check.add_argument("--stats-before", type=Path, default=None)
+    export_check.add_argument("--readback-timeout", type=float, default=120.0)
+
+    stats = commands.add_parser("stats", help="the launch project's dashboard aggregate (and newest traces)")
+    stats.add_argument("--out", type=Path, required=True)
+    stats.add_argument("--key-file", type=Path, default=DEFAULT_KEY_FILE)
+    stats.add_argument("--traces", type=int, default=0, help="also list this many newest traces")
+
     summary = commands.add_parser("summary", help="every launch's result under a root, and traces.json")
     summary.add_argument("--root", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -847,7 +952,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     handlers = {"run": cmd_run, "readback": cmd_readback, "isolation": cmd_isolation, "recheck": cmd_recheck,
-                "summary": cmd_summary}
+                "export-check": cmd_export_check, "stats": cmd_stats, "summary": cmd_summary}
     try:
         return handlers[args.action](args)
     except (SetupError, otelcol.CollectorError, run_interop.SetupError) as error:
