@@ -463,10 +463,11 @@ fn a_consumer_that_goes_away_mid_stream_cancels_the_run_at_that_token() {
     const DELIVERED: usize = 2;
     for (consumer, expected) in [
         (consumer_gone as fn() -> StreamingError, "cancelled"),
-        // Any other callback failure is still an error.
+        // A callback that fails for any other reason also stopped the
+        // stream itself: the model did not fail, as in a streaming pipeline.
         (
             || -> StreamingError { "the consumer failed".into() },
-            "inference_error",
+            "cancelled",
         ),
     ] {
         let signals = memory_session_with_signals();
@@ -507,9 +508,7 @@ fn a_consumer_that_goes_away_mid_stream_cancels_the_run_at_that_token() {
         assert_eq!(chunk_count(&request).as_deref(), Some("2"), "{expected}");
         assert_ended(&signals.spans.named("attempt 1"), expected);
         assert_one_duration_point(&signals, expected);
-        if expected == "cancelled" {
-            assert_no_exception(&signals);
-        }
+        assert_no_exception(&signals);
     }
 }
 
@@ -517,14 +516,20 @@ fn a_consumer_that_goes_away_mid_stream_cancels_the_run_at_that_token() {
 fn a_consumer_that_goes_away_cancels_runs_of_both_options_entry_points() {
     // A local run emits one token (the batch result) through the same gate
     // and delivery as a token stream.
-    for context in [false, true] {
+    for (context, refusal) in [
+        (false, consumer_gone as fn() -> StreamingError),
+        (true, consumer_gone),
+        // The error's type does not matter: the consumer stopped the stream.
+        (false, || -> StreamingError { "the consumer failed".into() }),
+        (true, || -> StreamingError { "the consumer failed".into() }),
+    ] {
         let signals = memory_session_with_signals();
         let model = as_chat(test_model_with_runtime(Box::new(Answers("hello"))));
         let span_name = run_span_name(&model);
         let calls = AtomicUsize::new(0);
         let on_token = |_token: PartialToken| {
             calls.fetch_add(1, Ordering::SeqCst);
-            Err(consumer_gone())
+            Err(refusal())
         };
         let options = observed(RunOptions::new(), &signals);
         let input = text_envelope("hi");

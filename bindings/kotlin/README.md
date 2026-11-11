@@ -244,7 +244,10 @@ the session's final counters (what the shutdown failed or dropped included)
 until the next `start()`. A flush or shutdown that
 cannot deliver everything throws `XybridError.TelemetryDelivery`; the inference
 already succeeded, so do not rerun it. `suppressTrace = true` in `runOptions`
-skips the detailed trace for one run. Pipelines take the same trace fields and
+skips the detailed trace for one run. For a camera or microphone loop, pass
+the same `frameSessionId` on every run of the loop: each frame is counted in
+metrics, and detailed traces are kept for roughly one frame per
+`setLiveTraceIntervalMs` per session. Pipelines take the same trace fields and
 return `observation` references for the workflow and each stage; ASR sessions
 take them through `streamingConfigWithVad(..., observation = ...)` or the
 config's `observation`.

@@ -228,7 +228,7 @@ not to flag run-to-run noise.
 | E3 | first callback | <= max(2 ms, 2%) later | operation start plus one prompt through the content pipeline (tens of us for 2 KiB) |
 | E4 | median callback gap | <= max(50 us, 1%) longer | the per-chunk cost lands here directly |
 | E5 | p99 callback gap | <= max(0.5 ms, 5%) longer | tails catch blocking; `blocked` must look like any enabled mode |
-| E6, E7 | peak RSS; peak footprint | <= 16 MiB larger | runtime threads, HTTP client, a few spans; content retained <= 208 KiB per operation (the default budget, clamped to fit the 480 KiB request bound); the 32 MiB buffer cannot fill with a handful of operations |
+| E6, E7 | peak RSS; peak footprint | <= 16 MiB larger | runtime threads, HTTP client, a few spans; content retained <= 416 KiB per operation (the default budget over OTLP/protobuf, clamped to fit the 480 KiB request bound; 208 KiB over OTLP/JSON); the 32 MiB buffer cannot fill with a handful of operations |
 | E8 | shutdown, `blocked` | <= timeout + 2.5 s | timeout plus the pipeline's settle grace (2 x 1 s) and 250 ms slack |
 | E9 | shutdown, answering sink | <= 1 s | a final flush of a few spans and one metrics collection |
 | M1, J1 | per-chunk overhead / e2e per-token time | <= 0.1% | ~5-10 us at 100-200 tok/s, 10x the expected cost |

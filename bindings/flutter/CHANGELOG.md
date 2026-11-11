@@ -40,6 +40,13 @@
   without a `CancellationToken` now halts generation at the next token and
   releases the model write lock, as the docs already said; the run used to
   continue to the end. Observability records the run as cancelled.
+* Changed: a token callback that fails for any reason now ends its run as
+  cancelled in observability, as a streaming pipeline already did; an untyped
+  failure used to be recorded as an inference error. What the stream reports
+  to its listener is unchanged.
+* Changed: the default budget of captured content per run is 416 KiB when
+  traces are sent as OTLP/protobuf (the default) and 208 KiB as OTLP/JSON,
+  instead of 208 KiB for both.
 
 
 ## 0.17.0

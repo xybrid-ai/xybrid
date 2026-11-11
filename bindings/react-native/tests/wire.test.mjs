@@ -121,6 +121,13 @@ test('run options carry the trace fields, false suppressTrace included', () => {
   });
 });
 
+test('a frame session rides model run options, not the trace fields pipelines share', () => {
+  const live = { frameSessionId: 'camera-7', conversationId: 'conv-1' };
+  assert.deepEqual(wire.toWireRunOptions(live), live);
+  assert.deepEqual(wire.toWireTraceOptions(live), { conversationId: 'conv-1' });
+  assert.equal(wire.toWireRunOptions({}), null);
+});
+
 test('top-level sampling parameters are rejected instead of ignored', () => {
   assert.throws(
     () => wire.toWireRunOptions({ maxTokens: 64, temperature: 0 }),

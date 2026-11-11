@@ -29,6 +29,7 @@ export {
   type MetricName,
   OPERATIONS,
   PRESETS,
+  type SpanContentEncoding,
   WIRE,
 } from "./catalog.ts";
 export {
@@ -79,6 +80,7 @@ export {
   SpanOperation,
   type StartOptions,
   spanContentCeiling,
+  spanEnvelopeAllowance,
   type ToolCall,
   ToolOperation,
   type TraceMode,

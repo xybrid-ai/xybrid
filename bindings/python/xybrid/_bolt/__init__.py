@@ -2027,6 +2027,13 @@ class XybridRunOptions:
     """Caller-owned conversation id recorded on the run."""
     suppress_trace: bool
     """Skip the detailed trace for this run; metrics are still recorded."""
+    frame_session_id: str | None
+    """Your id for one continuous live-capture session (a camera or
+    microphone loop). Every run of the session is counted in metrics, and
+    detailed traces are kept for roughly one run per live trace interval
+    per session (`set_live_trace_interval_ms`). Blank values are ignored.
+    Applies to model runs: a pipeline run ignores it.
+    """
 
     def _boltffi_wire(self) -> bytes:
         return b"".join((
@@ -2039,6 +2046,7 @@ class XybridRunOptions:
             _boltffi_wire_optional(self.tracestate, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
             _boltffi_wire_optional(self.conversation_id, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
             _boltffi_wire_bool(self.suppress_trace),
+            _boltffi_wire_optional(self.frame_session_id, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
         ))
 
     @classmethod
@@ -2063,6 +2071,7 @@ class XybridRunOptions:
             tracestate=reader.optional(lambda: reader.string()),
             conversation_id=reader.optional(lambda: reader.string()),
             suppress_trace=reader.bool(),
+            frame_session_id=reader.optional(lambda: reader.string()),
         )
 
 
@@ -3903,8 +3912,9 @@ class XybridObservabilityConfig:
 
     def set_max_content_bytes(self, bytes: int) -> None:
         """Maximum bytes per captured content attribute, clamped to at most
-        208 KiB so that a span's content leaves 64 KiB of the 480 KiB export
-        request for its other data.
+        416 KiB (208 KiB when exporting OTLP/JSON, which can double content)
+        so that a span's content leaves 64 KiB of the 480 KiB export request
+        for its other data.
         """
         _native._boltffi_xybrid_observability_config_set_max_content_bytes(self._handle, bytes)
 

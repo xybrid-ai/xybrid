@@ -1389,6 +1389,10 @@ public extension XybridRunOptions {
     ///   - conversationId: your conversation id, recorded on the run's trace.
     ///   - suppressTrace: skip the detailed trace for this run; metrics are
     ///     still recorded.
+    ///   - frameSessionId: your id for one continuous live-capture session (a
+    ///     camera or microphone loop). Every run of the session is counted in
+    ///     metrics, and detailed traces are kept for roughly one run per live
+    ///     trace interval per session (`setLiveTraceIntervalMs`).
     static func make(
         generationConfig: XybridGenerationConfig? = nil,
         abortOn: [XybridAbortSignal] = [],
@@ -1398,7 +1402,8 @@ public extension XybridRunOptions {
         traceparent: String? = nil,
         tracestate: String? = nil,
         conversationId: String? = nil,
-        suppressTrace: Bool = false
+        suppressTrace: Bool = false,
+        frameSessionId: String? = nil
     ) -> XybridRunOptions {
         XybridRunOptions(
             generationConfig: generationConfig,
@@ -1409,7 +1414,8 @@ public extension XybridRunOptions {
             traceparent: traceparent,
             tracestate: tracestate,
             conversationId: conversationId,
-            suppressTrace: suppressTrace
+            suppressTrace: suppressTrace,
+            frameSessionId: frameSessionId
         )
     }
 }

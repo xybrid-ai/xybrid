@@ -22,8 +22,50 @@ use crate::semconv::{
     span_content_ceiling, CAPTURE_CONTENT_ENV, CAPTURE_CONTENT_LEGACY_ENV,
     DEFAULT_MAX_CONTENT_ATTRIBUTE_BYTES, DEFAULT_MAX_REQUEST_BODY_BYTES,
     DEFAULT_MAX_RETAINED_OPERATION_BYTES, DEFAULT_MAX_TRAVERSAL_BYTES, REDACTION_REPLACEMENT,
-    TRUNCATION_MARKER, TRUNCATION_MIN_STRING_BYTES,
+    SPAN_CONTENT_ENCODING_GROWTH_JSON, SPAN_CONTENT_ENCODING_GROWTH_PROTOBUF, TRUNCATION_MARKER,
+    TRUNCATION_MIN_STRING_BYTES,
 };
+
+/// How the exporter of an observer's spans writes content on the wire.
+///
+/// It decides how much larger than its retained charge a span's content can
+/// become, and so how much content one export request can carry (see
+/// [`crate::semconv::span_content_ceiling`]). An
+/// [`crate::otlp::ObservabilityPipeline`] with a traces signal sets it from
+/// that signal's protocol; set it with
+/// [`ContentPolicy::with_span_content_encoding`] for providers the
+/// application owns.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpanContentEncoding {
+    /// OTLP/JSON, and the assumption for an exporter the package does not
+    /// know: each content attribute is written as a JSON string, so escaping
+    /// can double it.
+    #[default]
+    Json,
+    /// OTLP/protobuf: content is written as it is retained.
+    Protobuf,
+}
+
+impl SpanContentEncoding {
+    /// How many encoded bytes one retained byte of content can become.
+    #[must_use]
+    pub const fn growth(self) -> usize {
+        match self {
+            Self::Json => SPAN_CONTENT_ENCODING_GROWTH_JSON,
+            Self::Protobuf => SPAN_CONTENT_ENCODING_GROWTH_PROTOBUF,
+        }
+    }
+
+    /// The catalog name: `json` or `protobuf`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Json => "json",
+            Self::Protobuf => "protobuf",
+        }
+    }
+}
 
 /// Where captured content is recorded.
 ///
@@ -324,9 +366,10 @@ impl RedactionRule {
 /// The content budgets are clamped so that one span's content cannot push
 /// its export request past `max_request_body_bytes` (CONTRACT.md "Content
 /// pipeline", budgets): the retained-operation budget is at most
-/// [`crate::semconv::span_content_ceiling`] of the request bound, and the
-/// attribute budget at most the retained-operation budget. Clamping never
-/// fails; the getters return the effective values.
+/// [`crate::semconv::span_content_ceiling`] of the request bound for the
+/// exporter's [`SpanContentEncoding`], and the attribute budget at most the
+/// retained-operation budget. Clamping never fails; the getters return the
+/// effective values.
 #[derive(Clone)]
 pub struct ContentPolicy {
     capture: Option<ContentCapture>,
@@ -335,6 +378,7 @@ pub struct ContentPolicy {
     max_attribute_bytes: usize,
     max_retained_operation_bytes: usize,
     max_request_body_bytes: usize,
+    span_content_encoding: SpanContentEncoding,
     max_traversal_bytes: usize,
     /// Redaction hooks in order, each on the previous one's output: none,
     /// the one [`ContentPolicy::with_redactor`] installs, or those
@@ -345,8 +389,9 @@ pub struct ContentPolicy {
 
 impl Default for ContentPolicy {
     /// Product default: capture mode from the environment (else span
-    /// attributes), 16 KiB per attribute, 208 KiB retained per operation
-    /// (the ceiling of the default 480 KiB request bound), 480 KiB traversed
+    /// attributes), 16 KiB per attribute, 416 KiB retained per operation,
+    /// a 480 KiB request bound written as JSON (so the retained budget is
+    /// 208 KiB until an OTLP/protobuf exporter is named), 480 KiB traversed
     /// per value, no redaction hook, no rules.
     fn default() -> Self {
         Self {
@@ -355,6 +400,7 @@ impl Default for ContentPolicy {
             max_attribute_bytes: DEFAULT_MAX_CONTENT_ATTRIBUTE_BYTES,
             max_retained_operation_bytes: DEFAULT_MAX_RETAINED_OPERATION_BYTES,
             max_request_body_bytes: DEFAULT_MAX_REQUEST_BODY_BYTES,
+            span_content_encoding: SpanContentEncoding::default(),
             max_traversal_bytes: DEFAULT_MAX_TRAVERSAL_BYTES,
             redactors: Arc::from(Vec::new()),
             rules: Arc::from(Vec::new()),
@@ -392,9 +438,9 @@ impl ContentPolicy {
         self
     }
 
-    /// Sets the budget of content retained by one operation (minimum 1). The
-    /// effective budget is at most the span content ceiling of the request
-    /// bound.
+    /// Sets the budget of content retained by one operation (minimum 1;
+    /// default 416 KiB). The effective budget is at most the span content
+    /// ceiling of the request bound for the exporter's encoding.
     #[must_use]
     pub fn with_max_retained_operation_bytes(mut self, bytes: usize) -> Self {
         self.max_retained_operation_bytes = bytes.max(1);
@@ -410,6 +456,19 @@ impl ContentPolicy {
     #[must_use]
     pub fn with_max_request_body_bytes(mut self, bytes: usize) -> Self {
         self.max_request_body_bytes = bytes.max(1);
+        self
+    }
+
+    /// Names how the exporter that sends this policy's spans writes content
+    /// (default [`SpanContentEncoding::Json`], which is also right for an
+    /// exporter the application cannot vouch for). OTLP/protobuf does not
+    /// escape content, so the same request bound carries twice as much. An
+    /// [`crate::otlp::ObservabilityPipeline`] with a traces signal applies
+    /// its own protocol when it builds an observer; set it here for
+    /// providers the application owns.
+    #[must_use]
+    pub fn with_span_content_encoding(mut self, encoding: SpanContentEncoding) -> Self {
+        self.span_content_encoding = encoding;
         self
     }
 
@@ -469,7 +528,12 @@ impl ContentPolicy {
     ///
     /// - content goes only to the destinations both capture modes include
     ///   (`span_only` under `event_only` captures nothing);
-    /// - each byte budget and the request bound is the smaller of the two;
+    /// - each byte budget is the smaller of the two effective budgets. The
+    ///   request bound and span content encoding it is fitted to come from
+    ///   one policy as a pair: the smaller bound when both exporters write
+    ///   content the same way, otherwise the pair that carries less. So the
+    ///   result is never fitted below either policy, and always fits this
+    ///   policy's own exporter;
     /// - `ceiling`'s redaction hooks run first and this policy's hooks that
     ///   `ceiling` does not already hold run on their output, so no hook
     ///   redacts a value twice; `ceiling`'s rules apply first, followed by
@@ -478,7 +542,12 @@ impl ContentPolicy {
     ///
     /// Capping by a policy at least as permissive changes nothing, and
     /// capping twice by the same ceiling, or again by a policy already
-    /// capped by this one, is the same as capping once.
+    /// capped by this one, is the same as capping once. A ceiling's budgets
+    /// are its effective ones: a policy that names no encoding is fitted as
+    /// JSON, so capping an OTLP/protobuf observer by a bare
+    /// [`ContentPolicy::default`] also lowers its retained budget to the JSON
+    /// ceiling. To lower capture alone, build the ceiling from the policy it
+    /// caps.
     #[must_use]
     pub fn capped_by(&self, ceiling: &ContentPolicy) -> Self {
         let (own, cap) = (self.capture(), ceiling.capture());
@@ -504,6 +573,27 @@ impl ContentPolicy {
                 .filter(|rule| !ceiling.rules.contains(rule))
                 .cloned(),
         );
+        // The request bound and the encoding describe one exporter, so they
+        // are taken together. Mixing one policy's bound with the other's
+        // encoding could fit the result below both.
+        let fit = |policy: &Self| {
+            span_content_ceiling(policy.max_request_body_bytes, policy.span_content_encoding)
+        };
+        let (max_request_body_bytes, span_content_encoding) =
+            if self.span_content_encoding == ceiling.span_content_encoding {
+                (
+                    self.max_request_body_bytes
+                        .min(ceiling.max_request_body_bytes),
+                    self.span_content_encoding,
+                )
+            } else if fit(ceiling) < fit(self) {
+                (
+                    ceiling.max_request_body_bytes,
+                    ceiling.span_content_encoding,
+                )
+            } else {
+                (self.max_request_body_bytes, self.span_content_encoding)
+            };
         Self {
             capture: Some(capture),
             snapshot: None,
@@ -513,9 +603,8 @@ impl ContentPolicy {
             max_retained_operation_bytes: self
                 .max_retained_operation_bytes()
                 .min(ceiling.max_retained_operation_bytes()),
-            max_request_body_bytes: self
-                .max_request_body_bytes
-                .min(ceiling.max_request_body_bytes),
+            max_request_body_bytes,
+            span_content_encoding,
             max_traversal_bytes: self.max_traversal_bytes.min(ceiling.max_traversal_bytes),
             redactors: Arc::from(redactors),
             rules: Arc::from(rules),
@@ -545,17 +634,26 @@ impl ContentPolicy {
 
     /// The effective retained-operation byte budget: the configured value, at
     /// most the span content ceiling of
-    /// [`ContentPolicy::max_request_body_bytes`].
+    /// [`ContentPolicy::max_request_body_bytes`] for
+    /// [`ContentPolicy::span_content_encoding`].
     #[must_use]
     pub fn max_retained_operation_bytes(&self) -> usize {
-        self.max_retained_operation_bytes
-            .min(span_content_ceiling(self.max_request_body_bytes))
+        self.max_retained_operation_bytes.min(span_content_ceiling(
+            self.max_request_body_bytes,
+            self.span_content_encoding,
+        ))
     }
 
     /// The request body bound the content budgets fit.
     #[must_use]
     pub fn max_request_body_bytes(&self) -> usize {
         self.max_request_body_bytes
+    }
+
+    /// How the exporter the content budgets fit writes span content.
+    #[must_use]
+    pub fn span_content_encoding(&self) -> SpanContentEncoding {
+        self.span_content_encoding
     }
 
     /// The traversal byte budget.
@@ -810,6 +908,7 @@ impl fmt::Debug for ContentPolicy {
                 &self.max_retained_operation_bytes(),
             )
             .field("max_request_body_bytes", &self.max_request_body_bytes)
+            .field("span_content_encoding", &self.span_content_encoding)
             .field("max_traversal_bytes", &self.max_traversal_bytes)
             .field("redactors", &self.redactors.len())
             .field("rules", &self.rules.len())
@@ -1464,9 +1563,17 @@ mod tests {
         // R-BUF-3
         let p = ContentPolicy::default();
         assert_eq!(p.max_attribute_bytes(), DEFAULT_MAX_CONTENT_ATTRIBUTE_BYTES);
+        // The catalog default, once the exporter is known to send protobuf;
+        // half of it while the encoding is the JSON assumption.
+        assert_eq!(
+            p.clone()
+                .with_span_content_encoding(SpanContentEncoding::Protobuf)
+                .max_retained_operation_bytes(),
+            DEFAULT_MAX_RETAINED_OPERATION_BYTES
+        );
         assert_eq!(
             p.max_retained_operation_bytes(),
-            DEFAULT_MAX_RETAINED_OPERATION_BYTES
+            DEFAULT_MAX_RETAINED_OPERATION_BYTES / 2
         );
         assert_eq!(p.max_traversal_bytes(), DEFAULT_MAX_TRAVERSAL_BYTES);
         let p = p
@@ -1582,18 +1689,102 @@ mod tests {
         // Retained <= (request - allowance) / growth, attribute
         // <= retained; clamping never fails and the getters are effective.
         use crate::semconv::{
-            span_content_ceiling, SPAN_CONTENT_ENCODING_GROWTH, SPAN_ENVELOPE_ALLOWANCE_BYTES,
+            span_content_ceiling, span_envelope_allowance, SPAN_ENVELOPE_ALLOWANCE_BYTES,
         };
-        let ceiling = (DEFAULT_MAX_REQUEST_BODY_BYTES - SPAN_ENVELOPE_ALLOWANCE_BYTES)
-            / SPAN_CONTENT_ENCODING_GROWTH;
+        use SpanContentEncoding::{Json, Protobuf};
+        // JSON escaping can double content; protobuf writes it as retained.
+        assert_eq!((Json.growth(), Protobuf.growth()), (2, 1));
+        let room = DEFAULT_MAX_REQUEST_BODY_BYTES - SPAN_ENVELOPE_ALLOWANCE_BYTES;
+        let ceiling = room / 2;
         assert_eq!(ceiling, 212_992);
         assert_eq!(
-            span_content_ceiling(DEFAULT_MAX_REQUEST_BODY_BYTES),
+            span_content_ceiling(DEFAULT_MAX_REQUEST_BODY_BYTES, Json),
             ceiling
         );
-        // A bound at or below the allowance leaves one byte.
-        assert_eq!(span_content_ceiling(SPAN_ENVELOPE_ALLOWANCE_BYTES), 1);
-        assert_eq!(span_content_ceiling(1), 1);
+        // The default retained budget is the protobuf ceiling of the default
+        // bound, so it is clamped only for JSON and unknown exporters.
+        assert_eq!(room, DEFAULT_MAX_RETAINED_OPERATION_BYTES);
+        assert_eq!(
+            span_content_ceiling(DEFAULT_MAX_REQUEST_BODY_BYTES, Protobuf),
+            room
+        );
+        // The allowance is 64 KiB, or half of a bound under 128 KiB, so a
+        // small bound still leaves room for content.
+        let allowance = SPAN_ENVELOPE_ALLOWANCE_BYTES;
+        assert_eq!(
+            span_envelope_allowance(DEFAULT_MAX_REQUEST_BODY_BYTES),
+            allowance
+        );
+        assert_eq!(span_envelope_allowance(2 * allowance), allowance);
+        assert_eq!(span_envelope_allowance(2 * allowance - 2), allowance - 1);
+        assert_eq!(span_content_ceiling(allowance, Json), allowance / 4);
+        assert_eq!(span_content_ceiling(allowance, Protobuf), allowance / 2);
+        assert_eq!(span_content_ceiling(1600, Json), 400);
+        assert_eq!(span_content_ceiling(800, Protobuf), 400);
+        // The ceiling never decreases as the bound grows, across the point
+        // where the allowance stops growing.
+        for encoding in [Json, Protobuf] {
+            let mut last = 0;
+            for bound in (0..4 * allowance).step_by(97) {
+                let now = span_content_ceiling(bound, encoding);
+                assert!(now >= last, "{encoding:?} at {bound}: {now} < {last}");
+                last = now;
+            }
+        }
+        // No bound leaves less than one byte.
+        assert_eq!(span_content_ceiling(1, Json), 1);
+        assert_eq!(span_content_ceiling(0, Protobuf), 1);
+
+        // A policy is fitted as JSON until an exporter is named.
+        let default = ContentPolicy::default();
+        assert_eq!(default.span_content_encoding(), Json);
+        assert_eq!(default.max_retained_operation_bytes(), ceiling);
+        let protobuf = ContentPolicy::default().with_span_content_encoding(Protobuf);
+        assert_eq!(protobuf.span_content_encoding(), Protobuf);
+        assert_eq!(protobuf.max_retained_operation_bytes(), room);
+        assert_eq!(
+            protobuf.max_attribute_bytes(),
+            DEFAULT_MAX_CONTENT_ATTRIBUTE_BYTES
+        );
+        // Capping takes the smaller effective budgets, fitted to the bound
+        // and encoding (one exporter's pair) that carries less.
+        for capped in [protobuf.capped_by(&default), default.capped_by(&protobuf)] {
+            assert_eq!(capped.span_content_encoding(), Json);
+            assert_eq!(capped.max_retained_operation_bytes(), ceiling);
+        }
+        let same = protobuf.capped_by(&protobuf);
+        assert_eq!(same.span_content_encoding(), Protobuf);
+        assert_eq!(same.max_retained_operation_bytes(), room);
+        // Never below both: a JSON policy with the default bound (208 KiB)
+        // capped by a protobuf one with a 300,000-byte bound (234,464) keeps
+        // 208 KiB. Fitting the smaller bound as JSON would leave 117,232.
+        let narrow = ContentPolicy::default()
+            .with_span_content_encoding(Protobuf)
+            .with_max_request_body_bytes(300_000);
+        assert_eq!(narrow.max_retained_operation_bytes(), 234_464);
+        for capped in [default.capped_by(&narrow), narrow.capped_by(&default)] {
+            assert_eq!(capped.max_retained_operation_bytes(), ceiling);
+            assert_eq!(capped.span_content_encoding(), Json);
+            assert_eq!(
+                capped.max_request_body_bytes(),
+                DEFAULT_MAX_REQUEST_BODY_BYTES
+            );
+            // Capping again changes nothing.
+            for again in [capped.capped_by(&narrow), capped.capped_by(&default)] {
+                assert_eq!(again.max_retained_operation_bytes(), ceiling);
+                assert_eq!(again.span_content_encoding(), Json);
+            }
+        }
+        // The pair that carries less wins whichever side holds it.
+        let tight = ContentPolicy::default()
+            .with_span_content_encoding(Protobuf)
+            .with_max_request_body_bytes(150_000);
+        assert_eq!(tight.max_retained_operation_bytes(), 84_464);
+        for capped in [default.capped_by(&tight), tight.capped_by(&default)] {
+            assert_eq!(capped.max_retained_operation_bytes(), 84_464);
+            assert_eq!(capped.span_content_encoding(), Protobuf);
+            assert_eq!(capped.max_request_body_bytes(), 150_000);
+        }
 
         let raised = ContentPolicy::default()
             .with_max_attribute_bytes(400_000)
@@ -1611,11 +1802,16 @@ mod tests {
             .with_max_retained_operation_bytes(1000);
         assert_eq!(lower.max_attribute_bytes(), 1000);
         // A smaller request bound lowers both; values under it are kept.
-        let bound = SPAN_ENVELOPE_ALLOWANCE_BYTES + 2 * 10_000;
+        // Half of a 40,000-byte bound is reserved, and JSON halves the rest.
+        let bound = 40_000;
         let small = raised.clone().with_max_request_body_bytes(bound);
         assert_eq!(small.max_request_body_bytes(), bound);
         assert_eq!(small.max_retained_operation_bytes(), 10_000);
         assert_eq!(small.max_attribute_bytes(), 10_000);
+        // The same bound carries twice the content as protobuf.
+        let binary = small.clone().with_span_content_encoding(Protobuf);
+        assert_eq!(binary.max_retained_operation_bytes(), 20_000);
+        assert_eq!(binary.max_attribute_bytes(), 20_000);
         let kept = ContentPolicy::default()
             .with_max_attribute_bytes(64)
             .with_max_request_body_bytes(bound);

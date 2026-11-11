@@ -97,7 +97,10 @@ await Observability.flush(2000); // e.g. when the app backgrounds
 ```
 
 `suppressTrace: true` skips a run's detailed trace (metrics are still
-recorded). Feedback and evaluations (`Observability.recordEvaluation`) need a
+recorded). For a camera or microphone loop, pass the same `frameSessionId` on
+every run of the loop: each frame is counted in metrics, and detailed traces
+are kept for roughly one frame per `liveTraceIntervalMs` per session, instead
+of one trace per frame. Feedback and evaluations (`Observability.recordEvaluation`) need a
 logs signal, so they resolve `false` with the Xybrid preset, which exports
 traces only. `Observability.stats()` reports accepted, exported, dropped,
 failed and pending counts per signal (`traces`, `logs`, `metrics`);

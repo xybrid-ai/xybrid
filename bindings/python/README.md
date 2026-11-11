@@ -162,6 +162,7 @@ options = xybrid.XybridRunOptions(
     tracestate=None,
     conversation_id=None,
     suppress_trace=False,
+    frame_session_id=None,  # one id per camera or microphone loop
 )
 
 result = model.run(xybrid.XybridEnvelope.text("Write a haiku"), options)
