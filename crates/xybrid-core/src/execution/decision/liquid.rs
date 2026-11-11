@@ -7,8 +7,6 @@ use crate::ir::decision::{
 };
 use crate::runtime_adapter::AdapterError;
 
-/// The Liquid decision protocol implemented by this runtime.
-pub const PROFILE: &str = "lfm3-d1/text/v1";
 /// Hash of the audited named `systemone` template.
 pub const TEMPLATE_SHA256: &str =
     "ee5fc62461a9bbbcb8389c57f4cd2cd694ccb0dec19521576bd1419049490d8b";

@@ -435,30 +435,36 @@ fn decision_capability_refusal(model_id: &str, capability: &str) -> SdkError {
     }
 }
 
-/// Adds a choice scorer's decision fields to its `ModelComplete` data: the
-/// task, the backend and how many candidates were scored. Never their ids,
-/// texts or scores. Other models' data is left as it is.
-fn add_choice_telemetry(data: &mut serde_json::Value, metadata: &ModelMetadata, output: &Envelope) {
-    if let EnvelopeKind::Decisions(decisions) = &output.kind {
-        data["task"] = "decision".into();
-        data["backend"] = "llamacpp".into();
-        data["decision_protocol"] = "lfm3-d1/text/v1".into();
-        data["question_count"] = decisions.answers().len().into();
-        for key in ["tokens_in", "tokens_out"] {
-            if let Some(value) = output.metadata.get(key).and_then(|v| v.parse::<u64>().ok()) {
-                data[key] = value.into();
+/// Adds a decision run's fields to its `ModelComplete` data: the task and the
+/// backend, then the protocol, question count and token counts of a decision
+/// model, or how many candidates a choice scorer scored. Never ids, texts,
+/// answers or scores. Other models' data is left as it is.
+fn add_decision_telemetry(
+    data: &mut serde_json::Value,
+    metadata: &ModelMetadata,
+    output: &Envelope,
+) {
+    match &output.kind {
+        EnvelopeKind::Decisions(decisions) => {
+            if let ExecutionTemplate::Decision(spec) = &metadata.execution_template {
+                data["decision_protocol"] = spec.protocol.as_str().into();
+            }
+            data["question_count"] = decisions.answers().len().into();
+            for key in ["tokens_in", "tokens_out"] {
+                if let Some(value) = output.metadata.get(key).and_then(|v| v.parse::<u64>().ok()) {
+                    data[key] = value.into();
+                }
             }
         }
-        return;
+        EnvelopeKind::ChoiceScores(scores) => {
+            data["choice_count"] = scores.entries.len().into();
+        }
+        _ => return,
     }
-    let EnvelopeKind::ChoiceScores(scores) = &output.kind else {
-        return;
-    };
     data["task"] = "decision".into();
     if let Some(backend) = backend_label_from_template(&metadata.execution_template, None) {
         data["backend"] = backend.into();
     }
-    data["choice_count"] = scores.entries.len().into();
 }
 
 fn streaming_execution_error(error: xybrid_core::runtime_adapter::AdapterError) -> SdkError {
@@ -4697,7 +4703,7 @@ impl XybridModel {
                 "version": self.version,
                 "output_type": format!("{:?}", self.output_type),
             });
-            add_choice_telemetry(&mut data, &metadata, &output);
+            add_decision_telemetry(&mut data, &metadata, &output);
             let event = crate::telemetry::TelemetryEvent {
                 event_type: "ModelComplete".to_string(),
                 stage_name: Some(self.model_id.clone()),
@@ -11377,7 +11383,14 @@ mod tests {
         output.metadata.insert("tokens_in".into(), "11".into());
         output.metadata.insert("tokens_out".into(), "0".into());
         let mut data = serde_json::json!({});
-        add_choice_telemetry(&mut data, &liquid_metadata(), &output);
+        add_decision_telemetry(&mut data, &liquid_metadata(), &output);
+        // The backend and the protocol come from the model's template.
+        assert_eq!(data["task"], "decision");
+        assert_eq!(data["backend"], "llamacpp");
+        assert_eq!(
+            data["decision_protocol"],
+            xybrid_core::execution::template::LIQUID_TEXT_V1
+        );
         assert_eq!(data["question_count"], 1);
         assert_eq!(data["tokens_in"], 11);
         assert_eq!(data["tokens_out"], 0);
@@ -11446,7 +11459,7 @@ mod tests {
             label_mass: None,
         }));
         let mut data = serde_json::json!({ "model_id": "scorer" });
-        add_choice_telemetry(&mut data, &metadata, &output);
+        add_decision_telemetry(&mut data, &metadata, &output);
         assert_eq!(
             data,
             serde_json::json!({
@@ -11459,7 +11472,7 @@ mod tests {
 
         // Any other output leaves the data as it was.
         let mut untouched = serde_json::json!({ "model_id": "scorer" });
-        add_choice_telemetry(&mut untouched, &metadata, &text_envelope("hello"));
+        add_decision_telemetry(&mut untouched, &metadata, &text_envelope("hello"));
         assert_eq!(untouched, serde_json::json!({ "model_id": "scorer" }));
     }
 
