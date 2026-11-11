@@ -173,6 +173,15 @@ _flutter_drive_ios() {
     return "$status"
 }
 
+# A.3: the Collector interop harness (Rust, JS, JS metadata-only and Python
+# producers through the pinned Collector) against staging, with the launch key.
+lane_interop_xybrid() {
+    (cd bindings/observability-js && pnpm install --frozen-lockfile && node scripts/build.ts)
+    cargo build -p xybrid-observability --example standalone
+    XYBRID_STAGING_API_KEY="$(cat "$HOME/.xybrid-step6/key")" python3 tools/scripts/observability_interop/run_interop.py \
+        --destination xybrid --python "$(command -v python3)" --out-dir "$EV/a3-interop" "$@"
+}
+
 # A.5: the CLI as customers run it (key in XYBRID_API_KEY, staging platform):
 # one local LLM run, one local pipeline, one cloud stage through the staging
 # gateway, each with --trace-export; export-check reads every exported trace

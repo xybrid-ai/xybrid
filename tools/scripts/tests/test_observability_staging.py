@@ -499,8 +499,9 @@ class DriverTest(unittest.TestCase):
         listed = subprocess.run(["bash", str(script), "list"], check=True, capture_output=True, text=True,
                                 env={**os.environ, "XYBRID_MAC_LAN_IP": "127.0.0.1"}).stdout.split()
         for lane in listed:
-            # The CLI lanes check --trace-export files (export-check), not a scenario.
-            if lane not in ("cli-mac", "cli-legacy-mac"):
+            # The CLI lanes check --trace-export files (export-check) and the interop
+            # lane runs run_interop.py: neither is a scenario lane.
+            if lane not in ("cli-mac", "cli-legacy-mac", "interop-xybrid"):
                 self.assertIn(lane, SPEC["lanes"])
         self.assertIn("python-mac", listed)
         self.assertIn("cli-mac", listed)
