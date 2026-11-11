@@ -23,6 +23,7 @@ model-free capture scenario in
 | `staging_checks.py` | Every check, as pure functions of the saved answers. |
 | `lanes.sh` | One subcommand per lane: build or stage the candidate, copy the config to the runtime, launch, copy `expectations.json` back. |
 | `collector-lan.yaml` | Collector overlay: bind the OTLP receiver to the host's LAN address (iPhone lanes). |
+| `console.mjs` | Read-only console check: after you sign in once on a temporary Chrome profile, every launch trace's page and the overview KPIs against the staging API. |
 | `fixtures/` | A recorded passing run (Python lane), used by the unit tests. |
 
 Python 3.9+ standard library only. Unit tests:
