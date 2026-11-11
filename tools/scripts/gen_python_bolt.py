@@ -61,8 +61,9 @@ def _release_run_gil(source: str) -> str:
 
     The target is a Rust function with no Python callbacks or Python API use.
     Parsing, reference counting and error/result decoding still hold the GIL.
-    The public wrapper in _sugar.py holds model/token lifetime locks during
-    this call, since Bolt's synchronous borrowed handles are not retained.
+    The public wrapper in _sugar.py owns the model and keeps a shared hold on
+    the token during this call, since Bolt's synchronous borrowed handles are
+    not retained.
     """
     target = (
         "    return_error = boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run"

@@ -350,6 +350,60 @@ def test_active_native_borrow_delays_explicit_disposal() -> None:
     assert id(handle) not in xybrid._sugar._HANDLE_LOCKS
 
 
+def test_models_sharing_a_cancellation_token_run_at_the_same_time(monkeypatch) -> None:
+    """One stop button for several models must not run them one at a time."""
+
+    token = xybrid.XybridCancellationToken()
+    both_inside = threading.Barrier(2, timeout=2)
+    outcomes = []
+
+    def native_run(*_args):
+        # Returns only once the other model's run is inside the native call
+        # too; a run that waited for the shared token would break the barrier.
+        both_inside.wait()
+        raise RuntimeError("stop before a result is decoded")
+
+    monkeypatch.setattr(bolt._native, "_boltffi_xybrid_model_run", native_run)
+
+    def run_one() -> None:
+        model = xybrid.XybridModel.__new__(xybrid.XybridModel)
+        model._handle = None
+        try:
+            model.run(xybrid.XybridEnvelope.text("hi"), cancel=token)
+        except Exception as error:  # noqa: BLE001 - the kind is the assertion
+            outcomes.append(type(error))
+
+    runs = [threading.Thread(target=run_one) for _ in range(2)]
+    for run in runs:
+        run.start()
+    for run in runs:
+        run.join(timeout=5)
+
+    assert outcomes == [RuntimeError, RuntimeError]
+
+
+def test_a_cancellation_token_is_released_only_after_the_runs_that_borrow_it() -> None:
+    token = xybrid.XybridCancellationToken()
+    borrows = xybrid._sugar._handle_lifetime_lock(token)
+    released = threading.Event()
+
+    def dispose() -> None:
+        token.__del__()
+        released.set()
+
+    with borrows.shared(), borrows.shared():
+        disposer = threading.Thread(target=dispose)
+        disposer.start()
+        assert not released.wait(timeout=0.05)
+        # Still usable by the runs that hold it, and by the caller's stop.
+        token.cancel()
+        assert token.is_cancelled()
+    disposer.join(timeout=1)
+    assert released.is_set()
+    assert token._handle is None
+    assert id(token) not in xybrid._sugar._HANDLE_LOCKS
+
+
 def test_model_property_waiter_keeps_cancellation_live(monkeypatch) -> None:
     model = xybrid.XybridModel.__new__(xybrid.XybridModel)
     model._handle = None

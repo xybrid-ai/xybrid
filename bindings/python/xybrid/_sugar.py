@@ -24,8 +24,9 @@ from __future__ import annotations
 
 import concurrent.futures
 import threading
+from contextlib import contextmanager
 from functools import wraps
-from typing import Any
+from typing import Any, Iterator
 
 from . import _bolt
 from ._errors import ConfigError
@@ -37,10 +38,55 @@ _HANDLE_LOCKS: dict[int, Any] = {}
 _HANDLE_LOCKS_GUARD = threading.RLock()
 
 
+class _SharedBorrows:
+    """A handle several runs lend to Rust at once.
+
+    One cancellation token can stop several models, so the runs that borrow it
+    must not wait for each other: each takes a ``shared()`` hold. Releasing
+    the handle is the exclusive ``with`` block, which waits until no run holds
+    it.
+    """
+
+    def __init__(self) -> None:
+        self._changed = threading.Condition()
+        self._holds = 0
+
+    @contextmanager
+    def shared(self) -> Iterator[None]:
+        with self._changed:
+            self._holds += 1
+        try:
+            yield
+        finally:
+            with self._changed:
+                self._holds -= 1
+                self._changed.notify_all()
+
+    def __enter__(self) -> "_SharedBorrows":
+        self._changed.acquire()
+        try:
+            while self._holds:
+                self._changed.wait()
+        except BaseException:
+            self._changed.release()
+            raise
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._changed.release()
+
+
 def _handle_lifetime_lock(instance: Any) -> Any:
-    """Generated opaque objects have slots but no weakrefs or lock field."""
+    """Generated opaque objects have slots but no weakrefs or lock field.
+
+    A model's lock is exclusive: one call at a time owns its handle. A
+    cancellation token's is a :class:`_SharedBorrows`.
+    """
+    shared = isinstance(instance, _bolt.XybridCancellationToken)
     with _HANDLE_LOCKS_GUARD:
-        return _HANDLE_LOCKS.setdefault(id(instance), threading.RLock())
+        return _HANDLE_LOCKS.setdefault(
+            id(instance), _SharedBorrows() if shared else threading.RLock()
+        )
 
 
 def _guard_handle_finalizer(klass: type) -> None:
@@ -402,7 +448,9 @@ def _install_model_accessors() -> None:
         run_token = cancel if cancel is not None else token()
         if not isinstance(run_token, token):
             raise TypeError("cancel must be an XybridCancellationToken")
-        with _handle_lifetime_lock(self), _handle_lifetime_lock(run_token):
+        # The model is owned for the call. The token is only kept alive, so
+        # models that share one stop button still run at the same time.
+        with _handle_lifetime_lock(self), _handle_lifetime_lock(run_token).shared():
             return run(self, envelope, options, run_token)
 
     def _run_stream(self: Any, envelope: Any, options: Any = None, *, cancel: Any = None) -> int:
