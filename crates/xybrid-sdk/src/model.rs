@@ -3495,8 +3495,17 @@ impl ModelLoader {
         let metadata_path = model_dir.join("model_metadata.json");
         let metadata_str = std::fs::read_to_string(&metadata_path)
             .map_err(|e| SdkError::load_src("Failed to read model_metadata.json", e))?;
-        let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
+        let mut metadata: ModelMetadata = serde_json::from_str(&metadata_str)
             .map_err(|e| SdkError::load_src("Failed to parse metadata", e))?;
+        // A sidecar generated before decision models existed names a decision
+        // artifact as a chat model. Every directory load passes here, so a
+        // cache or a model file from an older SDK loads again without a
+        // manual cleanup.
+        if let Some(refreshed) =
+            crate::metadata_gen::refresh_generated_decision_sidecar(model_dir, &metadata)
+        {
+            metadata = refreshed;
+        }
         Self::validate_native_execution_template(&metadata)?;
         if speculative && matches!(metadata.execution_template, ExecutionTemplate::Decision(_)) {
             return Err(decision_capability_refusal(
@@ -11228,6 +11237,58 @@ mod tests {
             Err(error) => error,
         };
         assert!(is_speculation_refusal(&error), "{error:?}");
+    }
+
+    #[test]
+    fn a_directory_load_refreshes_a_sidecar_generated_before_decisions() {
+        // A GGUF header with `entries` metadata entries and no tensors.
+        let header = |entries: &[(&str, &str)]| {
+            let mut bytes = b"GGUF".to_vec();
+            bytes.extend(3u32.to_le_bytes());
+            bytes.extend(0u64.to_le_bytes());
+            bytes.extend((entries.len() as u64).to_le_bytes());
+            for (key, value) in entries {
+                bytes.extend((key.len() as u64).to_le_bytes());
+                bytes.extend(key.as_bytes());
+                bytes.extend(8u32.to_le_bytes()); // a string value
+                bytes.extend((value.len() as u64).to_le_bytes());
+                bytes.extend(value.as_bytes());
+            }
+            bytes
+        };
+        let temp_dir = tempfile::tempdir().expect("temporary model directory should exist");
+        let dir = temp_dir.path().to_path_buf();
+        let gguf = dir.join("d1.gguf");
+        // An SDK without decision support generated a chat sidecar for it.
+        std::fs::write(&gguf, header(&[])).unwrap();
+        let stale = crate::metadata_gen::generate_metadata_for_gguf_file(&gguf).unwrap();
+        assert!(matches!(
+            stale.execution_template,
+            ExecutionTemplate::Gguf { .. }
+        ));
+        crate::metadata_gen::write_metadata(&dir, &stale).unwrap();
+        std::fs::write(&gguf, header(&[("lfm3.decision.type", "lfm3-d1")])).unwrap();
+
+        // The handle is built for a decision model: the speculative swap,
+        // which refuses only those, refuses it without loading anything.
+        let error = match ModelLoader::create_model_handle(&dir, true) {
+            Ok(_) => panic!("a speculative swap must refuse a decision model"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(&error, SdkError::UnsupportedModelCapability { capability, .. }
+                if capability == "speculative execution"),
+            "{error:?}"
+        );
+        let on_disk: ModelMetadata = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("model_metadata.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            on_disk.execution_template,
+            ExecutionTemplate::Decision(_)
+        ));
+        assert_eq!(on_disk.model_id, stale.model_id);
     }
 
     #[test]

@@ -150,6 +150,66 @@ pub fn write_metadata(dir: &Path, metadata: &ModelMetadata) -> SdkResult<()> {
     Ok(())
 }
 
+/// Turns a sidecar generated before decision models existed into a decision
+/// sidecar, when the GGUF it names is a decision artifact.
+///
+/// An SDK without decision support generated a chat template for every GGUF.
+/// Such a sidecar can never load now: the chat loader refuses the artifact,
+/// and it would stay that way until someone deleted the file by hand. Only a
+/// sidecar marked `auto_generated` is touched, and only its execution template
+/// and task change. A sidecar a person wrote is theirs.
+///
+/// Returns the new metadata and replaces the file in `dir`. A directory that
+/// cannot be written still gets the new metadata for this load.
+pub(crate) fn refresh_generated_decision_sidecar(
+    dir: &Path,
+    metadata: &ModelMetadata,
+) -> Option<ModelMetadata> {
+    let generated = metadata
+        .metadata
+        .get("auto_generated")
+        .and_then(serde_json::Value::as_bool);
+    let ExecutionTemplate::Gguf { model_file, .. } = &metadata.execution_template else {
+        return None;
+    };
+    if generated != Some(true) {
+        return None;
+    }
+    let info = read_gguf_metadata(&dir.join(model_file)).ok().flatten()?;
+    if !info.decision_marked {
+        return None;
+    }
+
+    let mut refreshed = metadata.clone();
+    refreshed.execution_template = ExecutionTemplate::Decision(
+        xybrid_core::execution::template::DecisionTemplate::new(model_file.clone()),
+    );
+    refreshed
+        .metadata
+        .insert("task".to_string(), serde_json::json!("decision"));
+    if let Err(error) = replace_metadata(dir, &refreshed) {
+        log::warn!(
+            target: "xybrid_sdk",
+            "Could not rewrite the generated model_metadata.json in {}: {}",
+            dir.display(),
+            error
+        );
+    }
+    Some(refreshed)
+}
+
+/// Replaces `model_metadata.json` with a new file. Writing through the old
+/// one would also change a cache snapshot it is hard-linked to.
+fn replace_metadata(dir: &Path, metadata: &ModelMetadata) -> std::io::Result<()> {
+    let json = serde_json::to_string_pretty(metadata)?;
+    let staged = dir.join(format!(".model_metadata.json.{}.tmp", uuid::Uuid::new_v4()));
+    std::fs::write(&staged, json)
+        .and_then(|()| std::fs::rename(&staged, dir.join("model_metadata.json")))
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&staged);
+        })
+}
+
 /// Sanitize a name to lowercase kebab-case for use as a model_id.
 /// Strips non-alphanumeric characters (except hyphens), replaces spaces and underscores with hyphens.
 fn sanitize_model_id(name: &str) -> String {
@@ -2780,6 +2840,80 @@ mod tests {
             metadata.execution_template,
             ExecutionTemplate::Decision(_)
         ));
+    }
+
+    /// A header with the architecture, then a decision type when `decision`.
+    fn write_minimal_gguf(path: &Path, decision: bool) {
+        let mut file = std::fs::File::create(path).unwrap();
+        file.write_all(b"GGUF").unwrap();
+        file.write_all(&3u32.to_le_bytes()).unwrap();
+        file.write_all(&0u64.to_le_bytes()).unwrap();
+        file.write_all(&(1 + u64::from(decision)).to_le_bytes())
+            .unwrap();
+        write_gguf_test_string(&mut file, "general.architecture");
+        file.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut file, "lfm3");
+        if decision {
+            write_gguf_test_string(&mut file, "lfm3.decision.type");
+            file.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+            write_gguf_test_string(&mut file, "lfm3-d1");
+        }
+    }
+
+    #[test]
+    fn a_sidecar_generated_before_decisions_is_refreshed_for_a_decision_artifact() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("d1.gguf");
+        // What an SDK without decision support generated: a chat template.
+        write_minimal_gguf(&path, false);
+        let stale = generate_metadata_for_gguf_file(&path).unwrap();
+        assert!(matches!(
+            stale.execution_template,
+            ExecutionTemplate::Gguf { .. }
+        ));
+        assert_eq!(stale.metadata["auto_generated"], true);
+        write_metadata(dir.path(), &stale).unwrap();
+        write_minimal_gguf(&path, true);
+
+        let refreshed = refresh_generated_decision_sidecar(dir.path(), &stale).unwrap();
+
+        // The template a fresh generation gives, on the old sidecar's identity.
+        let fresh = generate_metadata_for_gguf_file(&path).unwrap();
+        assert_eq!(
+            serde_json::to_value(&refreshed.execution_template).unwrap(),
+            serde_json::to_value(&fresh.execution_template).unwrap()
+        );
+        assert_eq!(refreshed.metadata["task"], "decision");
+        assert_eq!(refreshed.model_id, stale.model_id);
+        // The file was replaced, so the next load reads a decision sidecar
+        // and has nothing left to refresh.
+        let on_disk: ModelMetadata = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("model_metadata.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            on_disk.execution_template,
+            ExecutionTemplate::Decision(_)
+        ));
+        assert!(refresh_generated_decision_sidecar(dir.path(), &on_disk).is_none());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn only_a_generated_chat_sidecar_of_a_decision_artifact_is_refreshed() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("model.gguf");
+        write_minimal_gguf(&path, false);
+        let generated = generate_metadata_for_gguf_file(&path).unwrap();
+        // A chat model keeps its generated sidecar.
+        assert!(refresh_generated_decision_sidecar(dir.path(), &generated).is_none());
+
+        // A sidecar a person wrote is theirs, even for a decision artifact.
+        write_minimal_gguf(&path, true);
+        let mut authored = generated;
+        authored.metadata.remove("auto_generated");
+        assert!(refresh_generated_decision_sidecar(dir.path(), &authored).is_none());
+        assert!(!dir.path().join("model_metadata.json").exists());
     }
 
     #[test]
