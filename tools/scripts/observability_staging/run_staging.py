@@ -224,11 +224,19 @@ class HostCollector(otelcol.RunningCollector):
 # ---------------------------------------------------------------------------
 
 
-def gh_json(argv: Sequence[str], runner: Callable[..., Any] = subprocess.run) -> Any:
-    completed = runner(["gh", *argv], capture_output=True, text=True, timeout=60)
-    if completed.returncode != 0:
-        raise RuntimeError(f"gh {' '.join(argv[:3])}: {completed.stderr.strip()[:300]}")
-    return json.loads(completed.stdout or "null")
+def gh_json(argv: Sequence[str], runner: Callable[..., Any] = subprocess.run, attempts: int = 4,
+            pause: float = 5.0) -> Any:
+    """``gh <argv>`` as JSON, retried: GitHub's API answers 502 now and then,
+    and a missed deployment record voids the launch's deployment check."""
+    error = ""
+    for attempt in range(attempts):
+        completed = runner(["gh", *argv], capture_output=True, text=True, timeout=60)
+        if completed.returncode == 0:
+            return json.loads(completed.stdout or "null")
+        error = completed.stderr.strip()[:300]
+        if attempt + 1 < attempts:
+            time.sleep(pause * (attempt + 1))
+    raise RuntimeError(f"gh {' '.join(argv[:3])}: {error}")
 
 
 def deployments(runner: Callable[..., Any] = subprocess.run) -> Dict[str, Any]:

@@ -544,6 +544,21 @@ class DriverTest(unittest.TestCase):
                 for session in sc.lane_sessions(SPEC, lane):
                     sc.session_kind(session)
 
+    def test_gh_json_retries_transient_errors(self) -> None:
+        answers = [(1, "", "HTTP 502: Server Error"), (0, '{"ok": true}', "")]
+        calls = []
+
+        def runner(argv, **_):
+            calls.append(argv)
+            code, out, err = answers[len(calls) - 1]
+            return subprocess.CompletedProcess(argv, code, out, err)
+
+        self.assertEqual(run_staging.gh_json(["run", "list"], runner, pause=0), {"ok": True})
+        self.assertEqual(len(calls), 2)
+        with self.assertRaises(RuntimeError):
+            run_staging.gh_json(["run", "list"], lambda argv, **_: subprocess.CompletedProcess(argv, 1, "", "502"),
+                                attempts=2, pause=0)
+
     def test_lanes_script(self) -> None:
         script = STAGING / "lanes.sh"
         subprocess.run(["bash", "-n", str(script)], check=True)
