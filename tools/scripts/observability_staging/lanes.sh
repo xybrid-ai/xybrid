@@ -84,14 +84,17 @@ lane_unity_mac() {
 }
 
 lane_web_mac() {
-    # The CI web artifact (xybrid-web-wasm) served by the example as /sdk.
-    local web="$ROOT/bindings/web" package="$ART/xybrid-web-wasm"
-    # @xybrid/observability from this checkout. Its `build` script is Bun only
-    # to run tsdown and copy LICENSE/NOTICE; Node runs the same file.
+    # The CI web artifact (xybrid-web-wasm) served by the example as /sdk. The
+    # example's asset step (copy the package, fetch and verify the GGUF) uses
+    # Bun APIs: run it with CI's Bun (1.3.9) through npx when bun is not
+    # installed, then build with vite directly (no Bun pre-script).
+    local web="$ROOT/bindings/web" package="$ART/xybrid-web-wasm" bun=(bun)
+    command -v bun >/dev/null || bun=(npx -y bun@1.3.9)
     (cd "$ROOT/bindings/observability-js" && pnpm install --frozen-lockfile && node scripts/build.ts)
     (cd "$web" && pnpm install --frozen-lockfile && pnpm run observability:prepare \
         && pnpm exec playwright install chromium && rm -rf example/public/sdk \
-        && XYBRID_WEB_PACKAGE="$package" pnpm build:example \
+        && XYBRID_WEB_PACKAGE="$package" "${bun[@]}" run example/scripts/prepare-assets.ts \
+        && XYBRID_WEB_PACKAGE="$package" pnpm exec vite build --config example/vite.config.ts \
         && diff -rq "$package/dist" example/dist/sdk)
     "${RUN[@]}" --lane web-mac "$@" -- \
         pnpm --dir "$web" exec playwright test browser-test/staging.spec.ts
