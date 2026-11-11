@@ -15,6 +15,10 @@ IOS_BUNDLE=dev.xybrid.rnexample           # set in the generated Xcode project o
 IOS_UDID=00008130-001C446E1408001C
 IOS_TEAM=CPVMT4DS8N
 IOS_DERIVED="${TMPDIR:-/tmp}/xybrid-rn-staging-ios"
+# A Debug build without an embedded bundle looks for Metro on the phone
+# itself unless told the Mac's address: the RCT_jsLocation user default,
+# passed as a launch argument.
+METRO_HOST="${XYBRID_MAC_LAN_IP:-$(ipconfig getifaddr en0 2>/dev/null || true)}"
 POLL_SECONDS=1200
 metro="" copied="" received="" part="" port=""
 
@@ -136,6 +140,7 @@ iphone_build() {
         ios/example/Info.plist
     # The pod's own override (ios/xybrid_natives.rb): the candidate XCFramework, never a release download.
     (cd ios && XYBRID_XCFRAMEWORK_PATH="$xcframework" pod install)
+    patch_expo_jsi_for_xcode27 "$example"
     # As in build-react-native.yml: prebuild ExpoModulesJSI so its nested xcodebuild phase is a no-op.
     jsi=node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh
     if [ -x "$jsi" ]; then
@@ -145,6 +150,30 @@ iphone_build() {
         -destination "platform=iOS,id=$IOS_UDID" -derivedDataPath "$IOS_DERIVED" -allowProvisioningUpdates \
         DEVELOPMENT_TEAM="$IOS_TEAM"
     xcrun devicectl device install app --device "$IOS_UDID" "$IOS_DERIVED/Build/Products/Debug-iphoneos/example.app"
+}
+
+# Expo 56's expo-modules-jsi forms a C function pointer from a ternary, which
+# Xcode 27's Swift rejects ("a C function pointer can only be formed from a
+# reference to a 'func' or a literal closure"). Rewrite that one expression in
+# the installed node_modules copy (never committed); a no-op once Expo has it.
+patch_expo_jsi_for_xcode27() {
+    local file="$1/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptRuntime.swift"
+    [ -f "$file" ] || return 0
+    python3 - "$file" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path).read()
+old = """    let callbacks = expo.HostObjectCallbacks(
+      context, getter, set == nil ? nil : setter, propertyNamesGetter, deallocate)"""
+new = """    // Step 6 lane patch (local node_modules only): Xcode 27's Swift forms a C
+    // function pointer only from a direct reference, not from a ternary.
+    let callbacks = set == nil
+      ? expo.HostObjectCallbacks(context, getter, nil, propertyNamesGetter, deallocate)
+      : expo.HostObjectCallbacks(context, getter, setter, propertyNamesGetter, deallocate)"""
+if old in text:
+    open(path, "w").write(text.replace(old, new))
+    print("==> patched expo-modules-jsi for Xcode 27 (local node_modules only)")
+PY
 }
 
 ios_copy_config() {
@@ -159,7 +188,7 @@ ios_stage_config() {
     ios_copy_config "$1" && return 0
     echo "==> creating Documents/xybrid-staging in the app's container, then copying again"
     xcrun devicectl device process launch --device "$IOS_UDID" --terminate-existing "$IOS_BUNDLE" \
-        -XybridStagingPrepare YES
+        -XybridStagingPrepare YES -RCT_jsLocation "$METRO_HOST:8081"
     for _ in $(seq 12); do
         sleep 5
         ios_copy_config "$1" > /dev/null 2>&1 && return 0
@@ -189,7 +218,9 @@ iphone_run() {
     start_metro "$example" "$out" ios
     ios_stage_config "$config"
     copied=1
-    xcrun devicectl device process launch --device "$IOS_UDID" --terminate-existing "$IOS_BUNDLE"
+    [ -n "$METRO_HOST" ] || { echo "error: no LAN address for Metro (set XYBRID_MAC_LAN_IP)" >&2; exit 1; }
+    xcrun devicectl device process launch --device "$IOS_UDID" --terminate-existing "$IOS_BUNDLE" \
+        -RCT_jsLocation "$METRO_HOST:8081"
     deadline=$((SECONDS + POLL_SECONDS))
     until rm -f "$part" && xcrun devicectl device copy from --device "$IOS_UDID" --domain-type appDataContainer \
             --domain-identifier "$IOS_BUNDLE" --source Documents/xybrid-staging/expectations.json \
