@@ -401,7 +401,8 @@ enum XybridCodec {
       traceparent: try optionalString(object, "traceparent", what),
       tracestate: try optionalString(object, "tracestate", what),
       conversationId: try optionalString(object, "conversationId", what),
-      suppressTrace: try optionalBool(object, "suppressTrace", what) ?? false
+      suppressTrace: try optionalBool(object, "suppressTrace", what) ?? false,
+      frameSessionId: try optionalString(object, "frameSessionId", what)
     )
     return RunRequest(
       options: options,

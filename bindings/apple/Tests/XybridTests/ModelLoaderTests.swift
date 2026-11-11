@@ -107,6 +107,12 @@ final class ModelLoaderTests: XCTestCase {
         XCTAssertNil(options.tracestate)
         XCTAssertEqual(options.conversationId, "conv-1")
         XCTAssertTrue(options.suppressTrace)
+        XCTAssertNil(options.frameSessionId)
+
+        // A live-capture loop names its session; nothing else changes.
+        let live = XybridRunOptions.make(frameSessionId: "camera-7")
+        XCTAssertEqual(live.frameSessionId, "camera-7")
+        XCTAssertFalse(live.suppressTrace)
     }
 
     /// Guards the `hasToolCalls` conveniences. They exist so the branch a

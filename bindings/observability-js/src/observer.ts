@@ -35,6 +35,7 @@ import {
   type MemoryPressure,
   type MetricName,
   OPERATIONS,
+  type SpanContentEncoding,
 } from "./catalog.ts";
 import {
   boundCodePoints,
@@ -106,9 +107,11 @@ export type ContentOptions = {
    */
   readonly maxAttributeBytes?: number | undefined;
   /**
-   * Content retained by one operation until it ends (default 212992 = 208 KiB, integer >= 1);
-   * clamped to `(maxRequestBodyBytes - 65536) / 2` (at least 1) so that one span's content cannot
-   * push its export request past `maxRequestBodyBytes` (CONTRACT.md "Content pipeline").
+   * Content retained by one operation until it ends (default 425984 = 416 KiB, integer >= 1);
+   * clamped to the span content ceiling of `maxRequestBodyBytes` for `spanContentEncoding` (see
+   * {@link spanContentCeiling}) so that one span's content cannot push its export request past
+   * `maxRequestBodyBytes` (CONTRACT.md "Content pipeline"). At the default bound that is 416 KiB
+   * as protobuf and 208 KiB as JSON.
    */
   readonly maxRetainedOperationBytes?: number | undefined;
   /**
@@ -117,6 +120,14 @@ export type ContentOptions = {
    * applies its own bound (the smaller one wins); set it for providers the application owns.
    */
   readonly maxRequestBodyBytes?: number | undefined;
+  /**
+   * How the exporter that sends this observer's spans writes content: `"json"` (default; also
+   * right for an exporter the application cannot vouch for) or `"protobuf"`, which does not
+   * escape content and so carries twice as much in the same request. `OtlpPipeline.observer`
+   * applies its own traces protocol; set it for providers the application owns. Any other value
+   * throws `RangeError`.
+   */
+  readonly spanContentEncoding?: SpanContentEncoding | undefined;
   /** Preflight cost bound of one content value (default 491520 = 480 KiB). */
   readonly maxTraversalBytes?: number | undefined;
   /** Callback redactor; runs on a canonical copy before the declarative rules. */
@@ -130,6 +141,7 @@ export type ContentBudgets = {
   readonly maxAttributeBytes: number;
   readonly maxRetainedOperationBytes: number;
   readonly maxRequestBodyBytes: number;
+  readonly spanContentEncoding: SpanContentEncoding;
 };
 
 export type ObserverOptions = {
@@ -465,18 +477,38 @@ const positiveInteger = (value: unknown, fallback: number, name: string): number
 };
 
 /**
- * The largest retained-operation (and so attribute) budget that keeps one span's content within
- * `maxRequestBodyBytes` less `span_envelope_allowance_bytes`: `(request - allowance) / growth`,
- * at least 1.
+ * The part of `maxRequestBodyBytes` reserved for a span's non-content data:
+ * `span_envelope_allowance_bytes`, or half the bound when that is less, so that a small bound still
+ * leaves room for content.
  */
-export const spanContentCeiling = (maxRequestBodyBytes: number): number =>
+export const spanEnvelopeAllowance = (maxRequestBodyBytes: number): number =>
+  Math.min(DEFAULTS.span_envelope_allowance_bytes, Math.floor(maxRequestBodyBytes / 2));
+
+/**
+ * The largest retained-operation (and so attribute) budget that keeps one span's content within
+ * `maxRequestBodyBytes` less {@link spanEnvelopeAllowance} when it is written as `encoding`
+ * (default `"json"`): `(request - allowance) / growth`, at least 1.
+ */
+export const spanContentCeiling = (
+  maxRequestBodyBytes: number,
+  encoding: SpanContentEncoding = DEFAULTS.span_content_encoding,
+): number =>
   Math.max(
     1,
     Math.floor(
-      Math.max(0, maxRequestBodyBytes - DEFAULTS.span_envelope_allowance_bytes) /
-        DEFAULTS.span_content_encoding_growth,
+      (maxRequestBodyBytes - spanEnvelopeAllowance(maxRequestBodyBytes)) /
+        DEFAULTS.span_content_encoding_growth[encoding],
     ),
   );
+
+/** Validates `content.spanContentEncoding` (`RangeError` otherwise); absent means the default. */
+export const spanContentEncodingOf = (value: unknown): SpanContentEncoding => {
+  if (value === undefined) return DEFAULTS.span_content_encoding;
+  if (value !== "json" && value !== "protobuf") {
+    throw new RangeError('content.spanContentEncoding must be "json" or "protobuf".');
+  }
+  return value;
+};
 
 type Instrument = Histogram | Counter;
 
@@ -486,6 +518,7 @@ class ObserverCore {
   readonly budget: number;
   readonly maxRetained: number;
   readonly maxRequestBodyBytes: number;
+  readonly spanContentEncoding: SpanContentEncoding;
   readonly content: ContentProcessor;
   readonly tracer: otel.Tracer | undefined;
   readonly #clock: (() => number) | undefined;
@@ -510,15 +543,16 @@ class ObserverCore {
       "content.maxRequestBodyBytes",
     );
     this.maxRequestBodyBytes = maxRequestBodyBytes;
+    this.spanContentEncoding = spanContentEncodingOf(content.spanContentEncoding);
     // Budgets are clamped, never rejected: the attribute budget fits the retained budget, which
-    // fits the span content ceiling of the request bound.
+    // fits the span content ceiling of the request bound for the exporter's encoding.
     this.maxRetained = Math.min(
       positiveInteger(
         content.maxRetainedOperationBytes,
         DEFAULTS.max_retained_operation_bytes,
         "content.maxRetainedOperationBytes",
       ),
-      spanContentCeiling(maxRequestBodyBytes),
+      spanContentCeiling(maxRequestBodyBytes, this.spanContentEncoding),
     );
     this.budget = Math.min(this.budget, this.maxRetained);
     const maxTraversalBytes = positiveInteger(
@@ -558,6 +592,7 @@ class ObserverCore {
       maxAttributeBytes: this.budget,
       maxRetainedOperationBytes: this.maxRetained,
       maxRequestBodyBytes: this.maxRequestBodyBytes,
+      spanContentEncoding: this.spanContentEncoding,
     });
   }
 
@@ -1625,7 +1660,8 @@ export class Observer {
 
   /**
    * The effective content budgets: `maxRetainedOperationBytes` at most the span content ceiling
-   * of `maxRequestBodyBytes`, `maxAttributeBytes` at most `maxRetainedOperationBytes`.
+   * of `maxRequestBodyBytes` for `spanContentEncoding`, `maxAttributeBytes` at most
+   * `maxRetainedOperationBytes`.
    */
   get contentBudgets(): ContentBudgets {
     return this.#core.budgets;

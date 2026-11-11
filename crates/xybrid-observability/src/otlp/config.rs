@@ -14,6 +14,7 @@ use reqwest::Url;
 use super::defaults;
 use super::encode::Signal;
 use super::hook::ResponseHook;
+use crate::content::SpanContentEncoding;
 use crate::error::{Error, Result};
 
 /// Default Xybrid trace ingest endpoint.
@@ -55,6 +56,16 @@ impl Protocol {
         match self {
             Self::HttpProtobuf => "application/x-protobuf",
             Self::HttpJson => "application/json",
+        }
+    }
+
+    /// How this protocol writes span content, which the content budgets of
+    /// an observer are fitted to.
+    #[must_use]
+    pub fn span_content_encoding(self) -> SpanContentEncoding {
+        match self {
+            Self::HttpProtobuf => SpanContentEncoding::Protobuf,
+            Self::HttpJson => SpanContentEncoding::Json,
         }
     }
 }

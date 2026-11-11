@@ -505,15 +505,20 @@ describe("bounded buffers (R-BUF-1, R-BUF-2, R-CNT-5)", () => {
 });
 
 describe("content budgets fit one span in the request bound", () => {
-  // A quote-heavy 300 KB output doubles in OTLP/JSON. With the attribute budget raised past what
+  // A quote-heavy 600 KB output doubles in OTLP/JSON. With the attribute budget raised past what
   // one request can carry, the clamp truncates it and the span is exported; unclamped, the span
-  // would be dropped whole as an oversized item. Each pipeline also fits the budgets to its own,
-  // smaller, request bound.
-  const quoted = '"'.repeat(300_000);
-  for (const [bound, protocol] of [
-    [491_520, "http/json"],
-    [491_520, "http/protobuf"],
-    [200_000, "http/json"],
+  // would be dropped whole as an oversized item. The ceiling follows the traces protocol:
+  // OTLP/protobuf sends content as retained and so carries twice as much. Each pipeline also fits
+  // the budgets to its own, smaller, request bound, and a bound under the envelope allowance
+  // still carries content.
+  const quoted = '"'.repeat(600_000);
+  for (const [bound, protocol, encoding, expected] of [
+    [491_520, "http/json", "json", 212_992],
+    [491_520, "http/protobuf", "protobuf", 425_984],
+    [200_000, "http/json", "json", (200_000 - 65_536) / 2],
+    [200_000, "http/protobuf", "protobuf", 200_000 - 65_536],
+    [40_000, "http/json", "json", 10_000],
+    [40_000, "http/protobuf", "protobuf", 20_000],
   ] as const) {
     test(`${protocol}, bound ${bound}: a raised budget is clamped and the span exported`, async () => {
       const server = await startServer();
@@ -525,16 +530,23 @@ describe("content budgets fit one span in the request bound", () => {
         }),
         server,
       );
+      // The options name the other encoding: the pipeline's protocol wins.
       const observer = pipeline.observer({
         capture: "span_only",
-        maxAttributeBytes: 400_000,
+        spanContentEncoding: encoding === "json" ? "protobuf" : "json",
+        maxAttributeBytes: 1_000_000,
         maxRetainedOperationBytes: 1_000_000,
+        // The 600 KB value is past the default 480 KiB preflight bound, which would omit it
+        // before any truncation.
+        maxTraversalBytes: 1_000_000,
       });
-      const ceiling = spanContentCeiling(bound);
+      const ceiling = spanContentCeiling(bound, encoding);
+      expect(ceiling).toBe(expected);
       expect(observer.contentBudgets).toEqual({
         maxAttributeBytes: ceiling,
         maxRetainedOperationBytes: ceiling,
         maxRequestBodyBytes: bound,
+        spanContentEncoding: encoding,
       });
       const op = observer.startInference({ operation: "chat", provider: "llama.cpp", model: "m" });
       op.recordOutputMessages([
@@ -552,6 +564,10 @@ describe("content budgets fit one span in the request bound", () => {
         span.attributes.find((entry: Json) => entry.key === key)?.value;
       const output = String(value("gen_ai.output.messages")?.stringValue);
       expect(Buffer.byteLength(output)).toBeLessThanOrEqual(ceiling);
+      // The budget is used, not just respected. Truncation halves the string until it fits, so
+      // more than half the ceiling arrives: over protobuf that is more than the same bound
+      // carries as JSON.
+      expect(Buffer.byteLength(output)).toBeGreaterThan(ceiling / 2);
       expect(output.includes(DEFAULTS.truncation_marker)).toBe(true);
       expect(
         value("xybrid.genai.content.truncated_attributes")?.arrayValue.values.map(
@@ -560,6 +576,68 @@ describe("content budgets fit one span in the request bound", () => {
       ).toEqual(["gen_ai.output.messages"]);
     });
   }
+
+  for (const [logsProtocol, encoding, retained] of [
+    ["http/json", "json", 212_992],
+    ["http/protobuf", "protobuf", 425_984],
+  ] as const) {
+    test(`protobuf traces, ${logsProtocol} logs: event content fits the logs request`, async () => {
+      // The retained budget also bounds content sent as a details event on the logs signal.
+      // Fitted to the traces protocol alone, protobuf traces beside JSON logs would retain twice
+      // what the JSON logs request can carry, and the event would be dropped whole. So a pipeline
+      // fits content as protobuf only when no signal that carries it is JSON (delivery.rs
+      // event_content_fits_a_json_logs_signal_beside_protobuf_traces).
+      const server = await startServer();
+      const pipeline = track(
+        createOtlpPipeline({
+          traces: { endpoint: `${server.url}/v1/traces`, protocol: "http/protobuf" },
+          logs: { endpoint: `${server.url}/v1/logs`, protocol: logsProtocol },
+          batch: { scheduledDelayMs: 60_000 },
+        }),
+        server,
+      );
+      const observer = pipeline.observer({ capture: "event_only" });
+      expect(observer.contentBudgets).toMatchObject({
+        maxRetainedOperationBytes: retained,
+        spanContentEncoding: encoding,
+      });
+      // Quote-heavy prompt variables: every byte doubles in OTLP/JSON.
+      const variables = Object.fromEntries(
+        Array.from({ length: 26 }, (_, index) => [
+          `variable_${String(index).padStart(2, "0")}`,
+          '"'.repeat(16_000),
+        ]),
+      );
+      observer
+        .startInference({
+          operation: "chat",
+          provider: "llama.cpp",
+          model: "m",
+          prompt: { name: "template", variables },
+        })
+        .end();
+      expect(await pipeline.forceFlush(10_000)).toBe(true);
+      expect(pipeline.stats().logs).toMatchObject({ accepted: 1, exported: 1, dropped: 0 });
+      const sent = server.received("/v1/logs");
+      expect(sent).toHaveLength(1);
+      const size = sent[0]?.body.length ?? Infinity;
+      expect(size).toBeLessThanOrEqual(491_520);
+      // It still carries content: well over one variable's worth.
+      expect(size).toBeGreaterThan(100_000);
+    });
+  }
+
+  test("JSON traces keep the JSON ceiling whatever the logs protocol is", async () => {
+    const server = await startServer();
+    const pipeline = track(
+      createOtlpPipeline({
+        traces: { endpoint: `${server.url}/v1/traces`, protocol: "http/json" },
+        logs: { endpoint: `${server.url}/v1/logs`, protocol: "http/protobuf" },
+      }),
+      server,
+    );
+    expect(pipeline.observer().contentBudgets.spanContentEncoding).toBe("json");
+  });
 
   test("an explicit smaller bound wins; an invalid one still throws", async () => {
     const server = await startServer();
@@ -592,7 +670,27 @@ describe("content budgets fit one span in the request bound", () => {
     expect(
       raised.observer({ maxRetainedOperationBytes: 1_000_000 }).contentBudgets
         .maxRetainedOperationBytes,
-    ).toBe(spanContentCeiling(491_520));
+    ).toBe(spanContentCeiling(491_520, "protobuf"));
+    // The default protocol is protobuf, so a default observer keeps the catalog default of
+    // 416 KiB; over JSON the same bound carries 208 KiB.
+    expect(raised.observer().contentBudgets).toMatchObject({
+      maxRetainedOperationBytes: DEFAULTS.max_retained_operation_bytes,
+      spanContentEncoding: "protobuf",
+    });
+    const json = track(
+      createOtlpPipeline({
+        traces: { endpoint: `${server.url}/v1/traces`, protocol: "http/json" },
+      }),
+    );
+    expect(json.observer().contentBudgets).toMatchObject({
+      maxRetainedOperationBytes: 212_992,
+      spanContentEncoding: "json",
+    });
+    // The pipeline's protocol replaces the option; an invalid one still throws.
+    expect(
+      json.observer({ spanContentEncoding: "protobuf" }).contentBudgets.spanContentEncoding,
+    ).toBe("json");
+    expect(() => json.observer({ spanContentEncoding: "binary" as never })).toThrow(RangeError);
     // Without a traces signal there is no span request to fit.
     const metricsOnly = track(
       createOtlpPipeline({
@@ -601,5 +699,10 @@ describe("content budgets fit one span in the request bound", () => {
       }),
     );
     expect(metricsOnly.observer().contentBudgets.maxRequestBodyBytes).toBe(491_520);
+    // ...and no protocol to take the encoding from: the option (default JSON) stands.
+    expect(metricsOnly.observer().contentBudgets.spanContentEncoding).toBe("json");
+    expect(
+      metricsOnly.observer({ spanContentEncoding: "protobuf" }).contentBudgets.spanContentEncoding,
+    ).toBe("protobuf");
   });
 });

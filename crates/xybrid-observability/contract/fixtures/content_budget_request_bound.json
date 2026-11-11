@@ -3,11 +3,11 @@
     "content_capture": "span_only",
     "logs": true,
     "max_content_attribute_bytes": 4096,
-    "max_request_body_bytes": 66336,
+    "max_request_body_bytes": 1600,
     "max_retained_operation_bytes": 100000,
     "redact_substrings": []
   },
-  "description": "Content budgets are clamped to fit one span in max_request_body_bytes: with a 66336-byte bound the span content ceiling is (66336 - 65536) / 2 = 400, so the configured budgets (attribute 4096, retained 100000) act as 400 each. Plain text (a prompt variable) is charged at its JSON-escaped length: 150 quotes cost 16 + 24 + 300 = 340 bytes, so the input messages that follow (16 + 21 + 58 = 95) no longer fit and are omitted and listed (charged at the raw 150 bytes they would have fit). A 1000-byte output is truncated to the clamped attribute budget and kept.",
+  "description": "Content budgets are clamped to fit one span in max_request_body_bytes. A 1600-byte bound is under twice the 65536-byte envelope allowance, so half of it is reserved, and the span content ceiling as JSON (the default encoding) is (1600 - 800) / 2 = 400: the configured budgets (attribute 4096, retained 100000) act as 400 each. Plain text (a prompt variable) is charged at its JSON-escaped length: 150 quotes cost 16 + 24 + 300 = 340 bytes, so the input messages that follow (16 + 21 + 58 = 95) no longer fit and are omitted and listed (charged at the raw 150 bytes they would have fit). A 1000-byte output is truncated to the clamped attribute budget and kept.",
   "expect": {
     "logs": [],
     "metrics": [

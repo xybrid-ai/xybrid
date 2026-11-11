@@ -1757,10 +1757,18 @@ data class XybridRunOptions(
     /**
      * Skip the detailed trace for this run; metrics are still recorded.
      */
-    val suppressTrace: Boolean
+    val suppressTrace: Boolean,
+    /**
+     * Your id for one continuous live-capture session (a camera or
+     * microphone loop). Every run of the session is counted in metrics, and
+     * detailed traces are kept for roughly one run per live trace interval
+     * per session (`set_live_trace_interval_ms`). Blank values are ignored.
+     * Applies to model runs: a pipeline run ignores it.
+     */
+    val frameSessionId: String?
 ) {
     internal fun wireSize(): Int {
-        return 1 + (this.generationConfig?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0) + 4 + this.abortOn.sumOf { __boltffi_value_0 -> (4).toInt() } + 1 + 4 + 1 + (this.correlationId?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.traceparent?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.tracestate?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.conversationId?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1
+        return 1 + (this.generationConfig?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0) + 4 + this.abortOn.sumOf { __boltffi_value_0 -> (4).toInt() } + 1 + 4 + 1 + (this.correlationId?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.traceparent?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.tracestate?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.conversationId?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + 1 + (this.frameSessionId?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0)
     }
 
     internal fun writeTo(writer: WireWriter) {
@@ -1773,6 +1781,7 @@ data class XybridRunOptions(
         writer.writeOptionalValue(this.tracestate, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
         writer.writeOptionalValue(this.conversationId, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
         writer.writeBool(this.suppressTrace)
+        writer.writeOptionalValue(this.frameSessionId, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
     }
 
     internal fun toByteArray(): ByteArray {
@@ -1797,7 +1806,8 @@ data class XybridRunOptions(
                 reader.readOptionalValue({ reader -> reader.readString() }),
                 reader.readOptionalValue({ reader -> reader.readString() }),
                 reader.readOptionalValue({ reader -> reader.readString() }),
-                reader.readBool()
+                reader.readBool(),
+                reader.readOptionalValue({ reader -> reader.readString() })
             )
         }
 
@@ -5274,8 +5284,9 @@ class XybridObservabilityConfig internal constructor(internal val handle: Long) 
 
     /**
      * Maximum bytes per captured content attribute, clamped to at most
-     * 208 KiB so that a span's content leaves 64 KiB of the 480 KiB export
-     * request for its other data.
+     * 416 KiB (208 KiB when exporting OTLP/JSON, which can double content)
+     * so that a span's content leaves 64 KiB of the 480 KiB export request
+     * for its other data.
      */
     fun setMaxContentBytes(bytes: UInt) {
         Native.boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_max_content_bytes(this.boltffiHandle(), bytes.toInt())

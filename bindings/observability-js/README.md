@@ -169,8 +169,14 @@ Every content value goes through one pipeline, in order:
    halved (at code point boundaries, with `…[truncated]`), then the oldest
    messages are dropped, then the attribute is omitted;
 6. content retained by one operation is bounded by `maxRetainedOperationBytes`
-   (default 208 KiB) and written once, at the end (a later record of the same
-   key replaces it).
+   (default 416 KiB) and written once, at the end (a later record of the same
+   key replaces it). The budget is clamped to what one export request can
+   carry: 416 KiB over OTLP/protobuf, the default protocol of
+   `createOtlpPipeline`, and 208 KiB over OTLP/JSON, which can double content
+   when it escapes it (a pipeline whose traces or logs signal is JSON uses the
+   JSON figure). An `Observer` over providers the application owns is
+   fitted as JSON until `content.spanContentEncoding: "protobuf"` says
+   otherwise.
 
 Content headed for a span that is not recording (a sampler drop, an unsampled
 parent, `trace: "suppress"`, no tracer) is not processed at all; event capture

@@ -405,6 +405,7 @@ internal object XybridCodec {
       tracestate = optionalString(o, "tracestate", what),
       conversationId = optionalString(o, "conversationId", what),
       suppressTrace = optionalBoolean(o, "suppressTrace", what) ?: false,
+      frameSessionId = optionalString(o, "frameSessionId", what),
     )
     return RunRequest(
       options = options,

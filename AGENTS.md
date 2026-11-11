@@ -292,12 +292,22 @@ extends the same runtime without replacing the offline path:
    the engine — the direction being actively built out. When a developer
    authenticates, these light up *on top of* the same local runtime:
    - **Auth / API keys** — `crates/xybrid-core/src/cloud/config.rs`
-     (`set_xybrid_api_key`, `XYBRID_API_KEY`). Gates the cloud gateway *and* the
-     telemetry exporter. Default gateway: `api.xybrid.dev`.
+     (`set_xybrid_api_key`, `XYBRID_API_KEY`). Gates the cloud gateway. Default
+     gateway: `api.xybrid.dev`. A key alone exports no telemetry (see the
+     observability bullet).
    - **Cloud routing** — `crates/xybrid-core/src/cloud/` +
      `crates/xybrid-core/src/orchestrator/routing_engine.rs` (local→cloud fallback under device stress).
-   - **Telemetry / observability** — `crates/xybrid-core/src/telemetry/`;
-     SDK exporter in `crates/xybrid-sdk/src/telemetry.rs`; ingest at `ingest.xybrid.dev`.
+   - **Observability** — OpenTelemetry (GenAI conventions, OTLP/HTTP) in the
+     portable `crates/xybrid-observability` and `bindings/observability-js`
+     (`@xybrid/observability`), which depend on OpenTelemetry only, never on
+     xybrid crates; their shared contract is
+     `crates/xybrid-observability/CONTRACT.md`. The SDK wires them in
+     `crates/xybrid-sdk/src/observability.rs`. Export is **off until
+     configured explicitly** (a Xybrid preset to `ingest.xybrid.dev/v1/traces`,
+     or any OTLP endpoint or application-owned provider). `xybrid-core` stays
+     free of observability types: it reports stages through
+     `crates/xybrid-core/src/tracing.rs`. `crates/xybrid-sdk/src/telemetry.rs`
+     is the in-process event stream only and never leaves the process.
    - **Remote routing authority** — `crates/xybrid-core/src/orchestrator/authority/remote.rs`
      (`GET /v1/routing/advice`; partial).
    - **Control sync** — `crates/xybrid-core/src/control_sync.rs` (policy /
@@ -318,7 +328,8 @@ Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
 | Crate                          | Role                                                       | Layer    |
 |--------------------------------|------------------------------------------------------------|----------|
 | `crates/xybrid-core`           | ML execution + pipelines; **additive platform plane** (cloud routing, telemetry, control sync) | core lib |
-| `crates/xybrid-sdk`            | Public Rust SDK; model load/run/stream + platform init (auth, telemetry) | lib      |
+| `crates/xybrid-sdk`            | Public Rust SDK; model load/run/stream + platform init (auth, observability) | lib      |
+| `crates/xybrid-observability`  | Portable OpenTelemetry instrumentation and OTLP export; no xybrid dependencies (JS twin: `bindings/observability-js`) | lib |
 | `crates/xybrid-cli`            | `xybrid` binary                                            | bin      |
 | `crates/xybrid-ffi-facade`     | FFI-agnostic POD/Arc facade over the SDK (one canonical translation) | FFI |
 | `crates/xybrid-bolt`           | BoltFFI bindings: Swift / Kotlin / Java / C# (Unity) / WASM + C header — the sole native binding crate | FFI |
@@ -382,6 +393,7 @@ xybrid-bolt ──► xybrid-ffi-facade ─► xybrid-sdk ─► xybrid-core
 flutter rust──► xybrid-ffi-facade ─► xybrid-sdk ─► xybrid-core
 xtask ────────────────────────────► xybrid-core
 integration-tests ────────────────► xybrid-core
+xybrid-sdk, xybrid-cli ───────────► xybrid-observability (depends on no xybrid crate)
 ```
 
 Workspace **package metadata** is inherited via `[workspace.package]` —

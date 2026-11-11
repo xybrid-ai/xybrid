@@ -987,6 +987,12 @@ pub struct XybridRunOptions {
     pub conversation_id: Option<String>,
     /// Skip the detailed trace for this run; metrics are still recorded.
     pub suppress_trace: bool,
+    /// Your id for one continuous live-capture session (a camera or
+    /// microphone loop). Every run of the session is counted in metrics, and
+    /// detailed traces are kept for roughly one run per live trace interval
+    /// per session (`set_live_trace_interval_ms`). Blank values are ignored.
+    /// Applies to model runs: a pipeline run ignores it.
+    pub frame_session_id: Option<String>,
 }
 
 impl From<XybridRunOptions> for facade::RunOptions {
@@ -1001,6 +1007,7 @@ impl From<XybridRunOptions> for facade::RunOptions {
             tracestate: o.tracestate,
             conversation_id: o.conversation_id,
             suppress_trace: o.suppress_trace,
+            frame_session_id: o.frame_session_id,
         }
     }
 }
@@ -2928,8 +2935,9 @@ impl XybridObservabilityConfig {
     }
 
     /// Maximum bytes per captured content attribute, clamped to at most
-    /// 208 KiB so that a span's content leaves 64 KiB of the 480 KiB export
-    /// request for its other data.
+    /// 416 KiB (208 KiB when exporting OTLP/JSON, which can double content)
+    /// so that a span's content leaves 64 KiB of the 480 KiB export request
+    /// for its other data.
     pub fn set_max_content_bytes(&self, bytes: u32) {
         self.inner.set_max_content_bytes(bytes);
     }
@@ -3327,6 +3335,7 @@ stages:
             tracestate: None,
             conversation_id: None,
             suppress_trace: false,
+            frame_session_id: None,
         };
 
         let envelope = XybridEnvelope {
@@ -3418,8 +3427,10 @@ stages:
             tracestate: None,
             conversation_id: None,
             suppress_trace: true,
+            frame_session_id: Some("camera-7".into()),
         };
         let facade_opts: facade::RunOptions = opts.into();
+        assert_eq!(facade_opts.frame_session_id.as_deref(), Some("camera-7"));
         assert!(facade_opts.suppress_trace);
         assert!(facade_opts.traceparent.is_some());
         assert!(facade_opts.fallback_to_cloud);

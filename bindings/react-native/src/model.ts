@@ -51,6 +51,13 @@ export interface RunOptions {
   /** Skip the detailed trace for this run; metrics are still recorded. */
   suppressTrace?: boolean;
   /**
+   * Your id for one continuous live-capture session (a camera or microphone
+   * loop). Every run of the session is counted in metrics, and detailed
+   * traces are kept for roughly one run per live trace interval per session
+   * (`liveTraceIntervalMs` in the observability config).
+   */
+  frameSessionId?: string;
+  /**
    * Seed the run with this conversation's history (multi-turn chat). The
    * context is not modified: push the turns you want to keep yourself.
    */

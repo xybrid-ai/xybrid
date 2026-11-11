@@ -1134,6 +1134,15 @@ pub struct RunOptions {
     pub conversation_id: Option<String>,
     /// Skip the detailed trace for this run (metrics are still recorded).
     pub suppress_trace: bool,
+
+    /// Caller-supplied id of one continuous live-capture session (a camera
+    /// or microphone loop), opaque to the SDK. Every run of the session is
+    /// counted in metrics, while detailed traces are kept for roughly one
+    /// run per live trace interval per session (see
+    /// [`ObservabilityConfigHandle::set_live_trace_interval_ms`]). A blank
+    /// value is ignored. `None` for one-shot runs. Applies to model runs: a
+    /// pipeline run ignores it and traces every run.
+    pub frame_session_id: Option<String>,
 }
 
 /// Observation controls shared by load, pipeline, inference and ASR entry points.
@@ -1232,6 +1241,16 @@ impl RunOptions {
         }
         if let Some(observation) = self.observation()? {
             opts = opts.with_observation(observation);
+        }
+        // A frame session marks the run as live capture: every frame is
+        // counted, and traces are sampled per session.
+        if let Some(id) = self
+            .frame_session_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        {
+            opts = opts.with_frame_session(id);
         }
         if let Some(tok) = cancel {
             opts = opts.with_cancellation_token(tok.inner.clone());
@@ -1964,7 +1983,10 @@ impl Pipeline {
     }
 }
 
-/// Keep the [`RunOptions`] fields a pipeline run honours; reject the rest.
+/// Keep the [`RunOptions`] fields a pipeline run honours and reject those
+/// that would change what it generates (`generation_config`, `abort_on`).
+/// The remaining fields are inert here and accepted: the cloud-fallback
+/// knobs, and `frame_session_id`, which samples model runs only.
 fn pipeline_run_options(options: RunOptions) -> Result<sdk::RunOptions> {
     if options.generation_config.is_some() {
         return Err(Error::ConfigError {
@@ -3692,9 +3714,10 @@ impl ObservabilityConfigHandle {
 
     /// Maximum bytes per captured content attribute (longer content is
     /// truncated with a marker). The value is clamped, never rejected, to the
-    /// retained-operation budget: at most 208 KiB, which keeps a span's
-    /// content within the 480 KiB export request with 64 KiB left for its
-    /// other data.
+    /// retained-operation budget: at most 416 KiB (208 KiB with
+    /// [`Self::set_json_protocol`], because OTLP/JSON can double content),
+    /// which keeps a span's content within the 480 KiB export request with
+    /// 64 KiB left for its other data.
     pub fn set_max_content_bytes(&self, bytes: u32) {
         self.with_draft(|d| d.max_content_bytes = Some(bytes));
     }
@@ -4024,6 +4047,34 @@ mod tests {
             tracestate: None,
             conversation_id: None,
             suppress_trace: false,
+            frame_session_id: None,
+        }
+    }
+
+    #[test]
+    fn a_frame_session_marks_the_run_as_live_capture() {
+        // Every binding that goes through this conversion gets live frame
+        // sessions: the id reaches the SDK run and flips live mode, which is
+        // what `live_trace_interval` samples by.
+        let live = RunOptions {
+            frame_session_id: Some(" camera-7 ".into()),
+            ..bare_run_options()
+        }
+        .to_sdk(None)
+        .unwrap();
+        assert!(live.live_mode);
+        assert_eq!(live.frame_session_id.as_deref(), Some("camera-7"));
+
+        // One-shot runs, and blank ids, are untouched.
+        for blank in [None, Some(String::new()), Some("  ".into())] {
+            let one_shot = RunOptions {
+                frame_session_id: blank.clone(),
+                ..bare_run_options()
+            }
+            .to_sdk(None)
+            .unwrap();
+            assert!(!one_shot.live_mode, "{blank:?}");
+            assert_eq!(one_shot.frame_session_id, None, "{blank:?}");
         }
     }
 
@@ -4375,6 +4426,16 @@ stages:
         let sdk_options = pipeline_run_options(options).expect("inert fields are accepted");
 
         assert_eq!(sdk_options.correlation_id.as_deref(), Some("turn-7"));
+
+        // A frame session samples model runs only: a pipeline run accepts the
+        // option and is not marked live.
+        let live = RunOptions {
+            frame_session_id: Some("camera-7".into()),
+            ..RunOptions::default()
+        };
+        let sdk_options = pipeline_run_options(live).expect("a frame session is inert here");
+        assert!(!sdk_options.live_mode);
+        assert_eq!(sdk_options.frame_session_id, None);
     }
 
     #[test]

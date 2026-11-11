@@ -202,7 +202,8 @@ redactors run first. Invalid redaction output fails closed before truncation.
 Metadata-only mode still permits explicit bounded error messages through the
 error redactor; use a classification alone when error text may contain secrets.
 
-The portable defaults include a 208 KiB retained-operation budget, a 480 KiB
+The portable defaults include a 416 KiB retained-operation budget (208 KiB
+when traces are sent as OTLP/JSON, which can double content), a 480 KiB
 traversal budget, 32 MiB of queued plus in-flight data per signal, and a
 128-level JSON guard. These bound library-owned data, not process RSS. The
 existing per-attribute content limit remains 16 KiB. Content budgets are

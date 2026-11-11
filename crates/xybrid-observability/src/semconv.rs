@@ -7,6 +7,8 @@
 //! `contract/catalog.json` is the source of truth; tests assert these
 //! constants against it.
 
+use crate::content::SpanContentEncoding;
+
 /// Revision of `open-telemetry/semantic-conventions-genai` this catalog follows.
 pub const GENAI_SEMCONV_REVISION: &str = "95aff9cdf605bbc7d7e8f7c4745a693bd0c4eea8";
 
@@ -325,34 +327,58 @@ pub const CAPTURE_CONTENT_ENV: &str = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTEN
 /// Legacy capture variable, honoured only when [`CAPTURE_CONTENT_ENV`] is
 /// unset (`true` means `span_only`; `false` and unknown values `no_content`).
 pub const CAPTURE_CONTENT_LEGACY_ENV: &str = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT";
-/// Default budget of content retained by one operation, in bytes (208 KiB):
+/// Default budget of content retained by one operation, in bytes (416 KiB):
 /// the most the content budgets may reach under the default request bound
-/// (see [`span_content_ceiling`]).
-pub const DEFAULT_MAX_RETAINED_OPERATION_BYTES: usize = 212_992;
+/// when spans are sent as OTLP/protobuf (see [`span_content_ceiling`]). Sent
+/// as OTLP/JSON, or through an exporter the package does not know, the
+/// effective default is the JSON ceiling of that bound, 208 KiB.
+pub const DEFAULT_MAX_RETAINED_OPERATION_BYTES: usize = 425_984;
 /// Default `max_request_body_bytes` of an OTLP export request (480 KiB). The
 /// content budgets are clamped so that a span's content fits it with
-/// [`SPAN_ENVELOPE_ALLOWANCE_BYTES`] left for the span's other data.
+/// [`span_envelope_allowance`] left for the span's other data.
 pub const DEFAULT_MAX_REQUEST_BODY_BYTES: usize = 491_520;
 /// Bytes of a span's request reserved for its non-content data (ids, name,
 /// resource and scope, metadata attributes, status, the truncation list)
-/// when the content budgets are fitted to the request bound (64 KiB).
+/// when the content budgets are fitted to the request bound (64 KiB; half
+/// the bound when that is less, see [`span_envelope_allowance`]).
 /// Reserved, not enforced: a span whose non-content data outgrows it can
 /// still exceed the request bound, and the exporter then drops it whole.
 pub const SPAN_ENVELOPE_ALLOWANCE_BYTES: usize = 65_536;
 /// How much larger a span's content can encode than the retained bytes it
-/// is charged: OTLP/JSON writes each content attribute as a JSON string, and
-/// escaping at most doubles a serialized JSON value (`"` and `\` take two
-/// bytes); plain text is charged at its escaped length.
-pub const SPAN_CONTENT_ENCODING_GROWTH: usize = 2;
+/// is charged when it is sent as OTLP/JSON: each content attribute is
+/// written as a JSON string, and escaping at most doubles a serialized JSON
+/// value (`"` and `\` take two bytes); plain text is charged at its escaped
+/// length. Also assumed for exporters the package does not know.
+pub const SPAN_CONTENT_ENCODING_GROWTH_JSON: usize = 2;
+/// The same factor for OTLP/protobuf, which writes content as it is
+/// retained.
+pub const SPAN_CONTENT_ENCODING_GROWTH_PROTOBUF: usize = 1;
+
+/// The part of `max_request_body_bytes` reserved for a span's non-content
+/// data: [`SPAN_ENVELOPE_ALLOWANCE_BYTES`], or half the bound when that is
+/// less, so that a small bound still leaves room for content.
+#[must_use]
+pub const fn span_envelope_allowance(max_request_body_bytes: usize) -> usize {
+    let half = max_request_body_bytes / 2;
+    if half < SPAN_ENVELOPE_ALLOWANCE_BYTES {
+        half
+    } else {
+        SPAN_ENVELOPE_ALLOWANCE_BYTES
+    }
+}
 
 /// The largest retained-operation (and so attribute) budget that keeps one
 /// span's content within `max_request_body_bytes` less
-/// [`SPAN_ENVELOPE_ALLOWANCE_BYTES`]: `(request − allowance) / growth`, at
-/// least 1 (CONTRACT.md "Content pipeline", budgets).
+/// [`span_envelope_allowance`] when it is written as `encoding`:
+/// `(request − allowance) / growth`, at least 1 (CONTRACT.md "Content
+/// pipeline", budgets).
 #[must_use]
-pub const fn span_content_ceiling(max_request_body_bytes: usize) -> usize {
-    let ceiling = max_request_body_bytes.saturating_sub(SPAN_ENVELOPE_ALLOWANCE_BYTES)
-        / SPAN_CONTENT_ENCODING_GROWTH;
+pub const fn span_content_ceiling(
+    max_request_body_bytes: usize,
+    encoding: SpanContentEncoding,
+) -> usize {
+    let ceiling = (max_request_body_bytes - span_envelope_allowance(max_request_body_bytes))
+        / encoding.growth();
     if ceiling == 0 {
         1
     } else {

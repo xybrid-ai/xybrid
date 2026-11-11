@@ -2220,34 +2220,83 @@ fn span_string(request: &Received, key: &str) -> Option<String> {
 #[test]
 fn raised_content_budgets_are_clamped_so_the_span_is_exported() {
     // An attribute budget raised past what one request can carry
-    // is clamped at configuration, so a quote-heavy 300 KB output (it doubles
-    // in OTLP/JSON) is truncated and its span exported, not dropped whole as
-    // an oversized item. Each pipeline also fits the budgets to its own,
-    // smaller, request bound.
+    // is clamped at configuration, so a quote-heavy 600 KB output is
+    // truncated and its span exported, not dropped whole as an oversized
+    // item. The ceiling follows the traces protocol: OTLP/JSON can double the
+    // content (every quote is escaped), OTLP/protobuf sends it as retained
+    // and so carries twice as much. Each pipeline also fits the budgets to
+    // its own, smaller, request bound, and a bound under the envelope
+    // allowance still carries content.
     use xybrid_observability::semconv::{
         attr, span_content_ceiling, DEFAULT_MAX_REQUEST_BODY_BYTES,
+        DEFAULT_MAX_RETAINED_OPERATION_BYTES, SPAN_ENVELOPE_ALLOWANCE_BYTES,
     };
-    use xybrid_observability::OutputMessage;
+    use xybrid_observability::{OutputMessage, SpanContentEncoding};
 
-    let quoted = "\"".repeat(300_000);
-    for (bound, protocol) in [
-        (DEFAULT_MAX_REQUEST_BODY_BYTES, Protocol::HttpJson),
-        (DEFAULT_MAX_REQUEST_BODY_BYTES, Protocol::HttpProtobuf),
-        (200_000, Protocol::HttpJson),
+    let quoted = "\"".repeat(600_000);
+    for (bound, protocol, encoding, expected) in [
+        (
+            DEFAULT_MAX_REQUEST_BODY_BYTES,
+            Protocol::HttpJson,
+            SpanContentEncoding::Json,
+            212_992,
+        ),
+        (
+            DEFAULT_MAX_REQUEST_BODY_BYTES,
+            Protocol::HttpProtobuf,
+            SpanContentEncoding::Protobuf,
+            DEFAULT_MAX_RETAINED_OPERATION_BYTES,
+        ),
+        (
+            200_000,
+            Protocol::HttpJson,
+            SpanContentEncoding::Json,
+            (200_000 - SPAN_ENVELOPE_ALLOWANCE_BYTES) / 2,
+        ),
+        (
+            200_000,
+            Protocol::HttpProtobuf,
+            SpanContentEncoding::Protobuf,
+            200_000 - SPAN_ENVELOPE_ALLOWANCE_BYTES,
+        ),
+        // Under the 64 KiB allowance: half the bound is reserved instead.
+        (
+            40_000,
+            Protocol::HttpJson,
+            SpanContentEncoding::Json,
+            10_000,
+        ),
+        (
+            40_000,
+            Protocol::HttpProtobuf,
+            SpanContentEncoding::Protobuf,
+            20_000,
+        ),
     ] {
         let what = format!("{protocol:?}, bound {bound}");
         let server = Server::ok();
         let mut config = server.traces_config(protocol);
         config.max_request_body_bytes = bound;
         let pipeline = ObservabilityPipeline::build(config).unwrap();
+        // The policy names the other encoding: the pipeline's protocol wins.
+        let other = match encoding {
+            SpanContentEncoding::Json => SpanContentEncoding::Protobuf,
+            SpanContentEncoding::Protobuf => SpanContentEncoding::Json,
+        };
         let observer = pipeline.observer_with(
             ContentPolicy::default()
                 .with_capture(ContentCapture::SpanOnly)
-                .with_max_attribute_bytes(400_000)
-                .with_max_retained_operation_bytes(1_000_000),
+                .with_span_content_encoding(other)
+                .with_max_attribute_bytes(1_000_000)
+                .with_max_retained_operation_bytes(1_000_000)
+                // The 600 KB value is past the default 480 KiB preflight
+                // bound, which would omit it before any truncation.
+                .with_max_traversal_bytes(1_000_000),
         );
-        let ceiling = span_content_ceiling(bound);
+        let ceiling = span_content_ceiling(bound, encoding);
+        assert_eq!(ceiling, expected, "{what}");
         let policy = observer.content_policy();
+        assert_eq!(policy.span_content_encoding(), encoding, "{what}");
         assert_eq!(policy.max_request_body_bytes(), bound, "{what}");
         assert_eq!(policy.max_retained_operation_bytes(), ceiling, "{what}");
         assert_eq!(policy.max_attribute_bytes(), ceiling, "{what}");
@@ -2272,13 +2321,152 @@ fn raised_content_budgets_are_clamped_so_the_span_is_exported() {
             "{what}: {}",
             sent[0].body.len()
         );
-        let output = span_string(&sent[0], attr::OUTPUT_MESSAGES).expect("the output");
+        let output = span_string(&sent[0], attr::OUTPUT_MESSAGES)
+            .unwrap_or_else(|| panic!("{what}: the output was omitted"));
         assert!(output.len() <= ceiling, "{what}: {}", output.len());
+        // The budget is used, not just respected. Truncation halves the
+        // string until it fits, so more than half the ceiling arrives: over
+        // protobuf that is more than the same bound carries as JSON.
+        assert!(output.len() > ceiling / 2, "{what}: {}", output.len());
         assert!(output.contains("…[truncated]"), "{what}");
         let listed = span_string(&sent[0], attr::CONTENT_TRUNCATED_ATTRIBUTES).unwrap();
         assert!(listed.contains(attr::OUTPUT_MESSAGES), "{what}: {listed}");
         pipeline.shutdown(Duration::from_secs(5)).unwrap();
     }
+}
+
+#[test]
+fn a_default_observer_keeps_the_protobuf_ceiling_of_content() {
+    // With no budget configured, the packaged pipeline over OTLP/protobuf
+    // (the default protocol) retains 416 KiB of content per operation; over
+    // OTLP/JSON the same request bound carries 208 KiB.
+    use xybrid_observability::semconv::attr;
+
+    for (protocol, retained) in [
+        (Protocol::HttpProtobuf, 425_984),
+        (Protocol::HttpJson, 212_992),
+    ] {
+        let what = format!("{protocol:?}");
+        let server = Server::ok();
+        let pipeline = ObservabilityPipeline::build(server.traces_config(protocol)).unwrap();
+        let observer =
+            pipeline.observer_with(ContentPolicy::default().with_capture(ContentCapture::SpanOnly));
+        let policy = observer.content_policy();
+        assert_eq!(policy.max_retained_operation_bytes(), retained, "{what}");
+
+        // Thirty 16,000-byte prompt variables ask for 480 KB: the operation
+        // keeps what fits the retained budget and lists the rest.
+        let mut request = InferenceRequest::new("chat", "llama.cpp").with_model("m");
+        request.prompt = Some(xybrid_observability::PromptRef {
+            name: "template".into(),
+            version: None,
+            variables: (0..30)
+                .map(|index| (format!("variable_{index:02}"), "v".repeat(16_000)))
+                .collect(),
+        });
+        let op = observer.start_inference(request, StartOptions::default());
+        op.end();
+        pipeline.force_flush(Duration::from_secs(10)).unwrap();
+        let stats = pipeline.stats().traces;
+        assert_eq!(
+            (stats.accepted, stats.exported, stats.dropped),
+            (1, 1, 0),
+            "{what}"
+        );
+        let sent = server.requests_to("/v1/traces");
+        assert_eq!(sent.len(), 1, "{what}");
+        assert!(
+            sent[0].body.len() <= 491_520,
+            "{what}: {}",
+            sent[0].body.len()
+        );
+        let key = |index: usize| format!("{}variable_{index:02}", attr::PROMPT_VARIABLE_PREFIX);
+        let kept = (0..30)
+            .filter(|index| span_string(&sent[0], &key(*index)).is_some())
+            .count();
+        // Each variable is charged 16 + its key + 16,000 bytes.
+        let each = 16 + key(0).len() + 16_000;
+        assert_eq!(kept, retained / each, "{what}");
+        pipeline.shutdown(Duration::from_secs(5)).unwrap();
+    }
+}
+
+#[test]
+fn event_content_fits_a_json_logs_signal_beside_protobuf_traces() {
+    // The retained budget also bounds content sent as a details event on the
+    // logs signal. With protobuf traces and JSON logs, fitting it to the
+    // traces protocol alone would retain twice what the JSON logs request can
+    // carry, and the event would be dropped whole with all its content. So a
+    // pipeline fits content as protobuf only when no signal that carries it
+    // is JSON.
+    use xybrid_observability::SpanContentEncoding;
+
+    for (logs_protocol, encoding, retained) in [
+        (Protocol::HttpJson, SpanContentEncoding::Json, 212_992),
+        (
+            Protocol::HttpProtobuf,
+            SpanContentEncoding::Protobuf,
+            425_984,
+        ),
+    ] {
+        let what = format!("protobuf traces, {logs_protocol:?} logs");
+        let server = Server::ok();
+        let config = server
+            .traces_config(Protocol::HttpProtobuf)
+            .with_logs(Some(server.endpoint("logs", logs_protocol)));
+        let pipeline = ObservabilityPipeline::build(config).unwrap();
+        let observer = pipeline
+            .observer_with(ContentPolicy::default().with_capture(ContentCapture::EventOnly));
+        let policy = observer.content_policy();
+        assert_eq!(policy.span_content_encoding(), encoding, "{what}");
+        assert_eq!(policy.max_retained_operation_bytes(), retained, "{what}");
+
+        // Quote-heavy prompt variables: every byte doubles in OTLP/JSON.
+        let mut request = InferenceRequest::new("chat", "llama.cpp").with_model("m");
+        request.prompt = Some(xybrid_observability::PromptRef {
+            name: "template".into(),
+            version: None,
+            variables: (0..26)
+                .map(|index| (format!("variable_{index:02}"), "\"".repeat(16_000)))
+                .collect(),
+        });
+        observer
+            .start_inference(request, StartOptions::default())
+            .end();
+        pipeline.force_flush(Duration::from_secs(10)).unwrap();
+        let logs = pipeline.stats().logs;
+        assert_eq!(
+            (logs.accepted, logs.exported, logs.dropped),
+            (1, 1, 0),
+            "{what}: the details event is exported, not dropped as oversized"
+        );
+        let sent = server.requests_to("/v1/logs");
+        assert_eq!(sent.len(), 1, "{what}");
+        assert!(
+            sent[0].body.len() <= 491_520,
+            "{what}: {}",
+            sent[0].body.len()
+        );
+        // It still carries content: well over one variable's worth.
+        assert!(
+            sent[0].body.len() > 100_000,
+            "{what}: {}",
+            sent[0].body.len()
+        );
+        pipeline.shutdown(Duration::from_secs(5)).unwrap();
+    }
+
+    // JSON traces keep the JSON ceiling whatever the logs protocol is.
+    let server = Server::ok();
+    let config = server
+        .traces_config(Protocol::HttpJson)
+        .with_logs(Some(server.endpoint("logs", Protocol::HttpProtobuf)));
+    let pipeline = ObservabilityPipeline::build(config).unwrap();
+    assert_eq!(
+        pipeline.observer().content_policy().span_content_encoding(),
+        SpanContentEncoding::Json
+    );
+    pipeline.shutdown(Duration::from_secs(5)).unwrap();
 }
 
 #[test]

@@ -849,7 +849,8 @@
         "traceparent": "traceparent",
         "tracestate": "tracestate",
         "conversation_id": "conversationId",
-        "suppress_trace": "suppressTrace"
+        "suppress_trace": "suppressTrace",
+        "frame_session_id": "frameSessionId"
       }
     },
     "XybridObservationRef": {
