@@ -463,6 +463,12 @@ class SingleFaultTest(unittest.TestCase):
             launch.deployments_after["Tinybird - CD / deploy-staging"] = "0badc0de"
         self.assert_fails(mutate, "python-mac:deployment.unchanged")
 
+    def test_unknown_deployment(self) -> None:
+        def mutate(launch: sc.Launch) -> None:
+            launch.deployments_before["Tinybird - CD / deploy-staging"] = None
+            launch.deployments_after["Tinybird - CD / deploy-staging"] = None
+        self.assert_fails(mutate, "python-mac:deployment.unchanged")
+
     def test_key_in_evidence(self) -> None:
         def mutate(launch: sc.Launch) -> None:
             launch.secret_hits = ["lane.log: the key"]
@@ -558,6 +564,25 @@ class DriverTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             run_staging.gh_json(["run", "list"], lambda argv, **_: subprocess.CompletedProcess(argv, 1, "", "502"),
                                 attempts=2, pause=0)
+
+    @unittest.skipUnless(os.name == "posix", "process groups")
+    def test_a_timed_out_lane_runs_its_cleanup_before_it_is_killed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker = root / "cleaned"
+            # As the device lanes do: cleanup in an EXIT trap, the work in a child.
+            lane = (f"trap 'echo cleaned > {marker}' EXIT; trap 'exit 143' TERM; "
+                    "sleep 30 & wait $!")
+            status = run_staging.stream_command(["bash", "-c", lane], dict(os.environ), root / "lane.log",
+                                                timeout=1, cwd=root, grace=10)
+            self.assertEqual(status, 124)
+            self.assertTrue(marker.exists(), (root / "lane.log").read_text(encoding="utf-8"))
+
+            # A lane that ignores SIGTERM is still killed once the grace period ends.
+            stubborn = "trap '' TERM; sleep 30"
+            status = run_staging.stream_command(["bash", "-c", stubborn], dict(os.environ), root / "stubborn.log",
+                                                timeout=1, cwd=root, grace=1)
+            self.assertEqual(status, 124)
 
     def test_lanes_script(self) -> None:
         script = STAGING / "lanes.sh"

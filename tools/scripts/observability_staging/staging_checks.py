@@ -852,6 +852,10 @@ def deployment_check(launch: Launch) -> Check:
     if not before or not after:
         check.failures.append("the platform deployments were not recorded before and after")
         return check
+    unknown = sorted(key for key in set(before) | set(after) if not before.get(key) or not after.get(key))
+    if unknown:
+        check.failures.append(f"no successful deploy found, so the version is unknown: {unknown}")
+        return check
     changed = sorted(key for key in set(before) | set(after) if before.get(key) != after.get(key))
     if changed:
         check.failures.append(f"staging redeployed during the launch: {changed}")

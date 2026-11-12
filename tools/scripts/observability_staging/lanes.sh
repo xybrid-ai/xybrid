@@ -143,48 +143,71 @@ flutter_drive() {
         --target integration_test/observability_staging_test.dart --dart-define=XYBRID_STAGING_RUN="$XYBRID_STAGING_RUN"
 }
 
+# The device cleanup runs from an EXIT trap, so it also runs when run_staging.py
+# stops the lane (SIGTERM, then SIGKILL after a grace period). The cleanup's
+# variables are global: the trap runs after the function has returned.
+FLUTTER_APP=com.example.xybrid_example
+FLUTTER_STAGE=app_flutter/xybrid-staging
+FLUTTER_BUNDLE=dev.xybrid.flutterexample
+flutter_serial="" flutter_port=""
+
+flutter_android_cleanup() {
+    adb -s "$flutter_serial" shell "run-as $FLUTTER_APP rm -rf $FLUTTER_STAGE" 2>/dev/null || true
+    adb -s "$flutter_serial" reverse --remove "tcp:$flutter_port" || true
+}
+
 _flutter_drive_android() {
-    local serial app=com.example.xybrid_example stage=app_flutter/xybrid-staging drive status=0
-    local port="$XYBRID_STAGING_COLLECTOR_PORT"
-    serial="${ANDROID_SERIAL:-$(adb get-serialno)}"
+    local drive status=0
+    flutter_port="$XYBRID_STAGING_COLLECTOR_PORT"
+    flutter_serial="${ANDROID_SERIAL:-$(adb get-serialno)}"
+    trap flutter_android_cleanup EXIT
+    trap 'exit 143' TERM
+    trap 'exit 130' INT
     cd "$ROOT/examples/flutter"
-    adb -s "$serial" reverse "tcp:$port" "tcp:$port"
-    adb -s "$serial" shell am force-stop "$app" || true
-    adb -s "$serial" shell "run-as $app rm -rf $stage" 2>/dev/null || true
-    flutter_drive "$serial" &
+    adb -s "$flutter_serial" reverse "tcp:$flutter_port" "tcp:$flutter_port"
+    adb -s "$flutter_serial" shell am force-stop "$FLUTTER_APP" || true
+    adb -s "$flutter_serial" shell "run-as $FLUTTER_APP rm -rf $FLUTTER_STAGE" 2>/dev/null || true
+    flutter_drive "$flutter_serial" &
     drive=$!
     # A temporary name and a rename: the app never reads a half-copied config.
-    until adb -s "$serial" shell pidof "$app" >/dev/null 2>&1 && adb -s "$serial" shell -T \
-        "run-as $app sh -c 'umask 077 && mkdir -p $stage && cat > $stage/config.json.tmp && mv $stage/config.json.tmp $stage/config.json'" \
+    until adb -s "$flutter_serial" shell pidof "$FLUTTER_APP" >/dev/null 2>&1 && adb -s "$flutter_serial" shell -T \
+        "run-as $FLUTTER_APP sh -c 'umask 077 && mkdir -p $FLUTTER_STAGE && cat > $FLUTTER_STAGE/config.json.tmp && mv $FLUTTER_STAGE/config.json.tmp $FLUTTER_STAGE/config.json'" \
         < "$XYBRID_STAGING_CONFIG"; do
         kill -0 "$drive" 2>/dev/null || break
         sleep 1
     done
     wait "$drive" || status=$?
-    adb -s "$serial" shell "run-as $app rm -rf $stage" 2>/dev/null || true
-    adb -s "$serial" reverse --remove "tcp:$port" || true
     return "$status"
 }
 
+flutter_ios_cleanup() {
+    local probe
+    # A config the app never read must not stay on the phone: remove the app.
+    probe="$(mktemp -d)"
+    if xcrun devicectl device copy from --device "$UDID" --domain-type appDataContainer \
+        --domain-identifier "$FLUTTER_BUNDLE" --source Documents/xybrid-staging/config.json \
+        --destination "$probe/c" >/dev/null 2>&1; then
+        xcrun devicectl device uninstall app --device "$UDID" "$FLUTTER_BUNDLE" || true
+    fi
+    rm -rf "$probe"
+}
+
 _flutter_drive_ios() {
-    local bundle=dev.xybrid.flutterexample drive status=0 probe
+    local drive status=0
+    trap flutter_ios_cleanup EXIT
+    trap 'exit 143' TERM
+    trap 'exit 130' INT
     cd "$ROOT/examples/flutter"
     flutter_drive "$UDID" &
     drive=$!
     until xcrun devicectl device info processes --device "$UDID" 2>/dev/null | grep -q '/Runner.app/Runner' \
-        && xcrun devicectl device copy to --device "$UDID" --domain-type appDataContainer --domain-identifier "$bundle" \
-            --source "$XYBRID_STAGING_CONFIG" --destination Documents/xybrid-staging/config.json >/dev/null 2>&1; do
+        && xcrun devicectl device copy to --device "$UDID" --domain-type appDataContainer \
+            --domain-identifier "$FLUTTER_BUNDLE" --source "$XYBRID_STAGING_CONFIG" \
+            --destination Documents/xybrid-staging/config.json >/dev/null 2>&1; do
         kill -0 "$drive" 2>/dev/null || break
         sleep 1
     done
     wait "$drive" || status=$?
-    # A config the app never read must not stay on the phone: remove the app.
-    probe="$(mktemp -d)"
-    if xcrun devicectl device copy from --device "$UDID" --domain-type appDataContainer --domain-identifier "$bundle" \
-        --source Documents/xybrid-staging/config.json --destination "$probe/c" >/dev/null 2>&1; then
-        xcrun devicectl device uninstall app --device "$UDID" "$bundle" || true
-    fi
-    rm -rf "$probe"
     return "$status"
 }
 

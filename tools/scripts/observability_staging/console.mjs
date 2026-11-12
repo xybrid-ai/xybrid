@@ -42,12 +42,14 @@ const pass = (name, details = {}) => {
   console.log(`PASS ${name}`);
 };
 
-async function apiRead(route) {
+// `notFound` is returned for a 404; any other non-200 answer fails the check.
+async function apiRead(route, { notFound } = {}) {
   const response = await fetch(api + route, {
     headers: { Authorization: `Bearer ${key}` },
     redirect: "error",
     signal: AbortSignal.timeout(20_000),
   });
+  if (notFound !== undefined && response.status === 404) return notFound;
   assert.equal(response.status, 200, `API ${route}`);
   return response.json();
 }
@@ -104,7 +106,9 @@ try {
 
   for (const trace of traces) {
     const answer = await apiRead(`/v1/telemetry/traces/${trace.trace_id}/spans`);
-    const evaluations = await apiRead(`/v1/telemetry/traces/${trace.trace_id}/evaluations`).catch(() => ({ items: [] }));
+    const evaluations = await apiRead(`/v1/telemetry/traces/${trace.trace_id}/evaluations`, {
+      notFound: { items: [] },
+    });
     const spans = answer.spans ?? [];
     const requests = spans.filter((span) => span.counted_request === true).length;
     const route = `${workspace}/traces/${trace.trace_id}`;

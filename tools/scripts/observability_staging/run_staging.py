@@ -34,6 +34,7 @@ import argparse
 import json
 import os
 import secrets
+import signal
 import socket
 import stat
 import subprocess
@@ -67,6 +68,9 @@ DEPLOY_JOBS = {
                                    "deploy-staging", "deploy-registry-staging"),
     "Tinybird - CD": ("deploy-staging",),
 }
+# How long a stopped lane gets to run its cleanup (removing the config, and so
+# the key, from the device) before everything it started is killed.
+LANE_STOP_GRACE_SECONDS = 60.0
 STRIPPED_ENV = ("XYBRID_API_KEY", "XYBRID_STAGING_API_KEY", "XYBRID_STAGING_API_KEY_B", "XYBRID_PLATFORM_API_KEY")
 
 
@@ -335,10 +339,24 @@ def read_stats(client: destinations.Client, label: str) -> Optional[Dict[str, An
 # ---------------------------------------------------------------------------
 
 
+def stop_lane(process: "subprocess.Popen[Any]", grace: float = LANE_STOP_GRACE_SECONDS) -> None:
+    """Sends SIGTERM to the lane's process group so its EXIT traps clean up the
+    device, then kills whatever is left after ``grace`` seconds."""
+    try:
+        if os.name == "posix":
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=grace)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    finally:
+        run_interop.kill_group(process)
+
+
 def stream_command(command: Sequence[str], env: Mapping[str, str], log_path: Path, timeout: float,
-                   cwd: Path) -> int:
+                   cwd: Path, grace: float = LANE_STOP_GRACE_SECONDS) -> int:
     """Runs the lane command in its own process group, copying its output to
-    ``log_path`` and to stdout; a timeout stops everything it started."""
+    ``log_path`` and to stdout; a timeout or an interruption stops everything it
+    started, after giving the lane ``grace`` seconds to clean up."""
     with log_path.open("w", encoding="utf-8") as log:
         log.write(f"$ {' '.join(command)}\n")
         log.flush()
@@ -364,11 +382,11 @@ def stream_command(command: Sequence[str], env: Mapping[str, str], log_path: Pat
             status = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             log.write(f"timed out after {timeout:.0f}s\n")
-            run_interop.kill_group(process)
+            stop_lane(process, grace)
             process.wait()
             status = 124
         except BaseException:
-            run_interop.kill_group(process)
+            stop_lane(process, grace)
             process.wait()
             raise
         reader.join(timeout=10)

@@ -87,25 +87,29 @@ pixel_run() {
     local example="$repo/bindings/react-native/example" deadline
     port="$5" part="$expectations.part"
     trap pixel_cleanup EXIT
+    trap 'exit 143' TERM
+    trap 'exit 130' INT
     adb wait-for-device
     start_metro "$example" "$out" android
     adb reverse tcp:8081 tcp:8081                 # Metro
     adb reverse "tcp:$port" "tcp:$port"           # the Collector session's http://127.0.0.1:<port>
     adb shell am force-stop "$PKG"
     # <files> is expo-file-system's Paths.document (Context.getFilesDir()).
+    # Always copy: a config left by an interrupted run often has the same size.
     # `adb exec-in` returns once stdin is sent, not when the device has written
     # it (and exits 0 either way): wait for the file to reach the config's size.
     local size tries=0
     size="$(wc -c < "$config" | tr -d ' ')"
-    until [ "$(adb exec-out run-as "$PKG" sh -c 'wc -c < files/xybrid-staging/config.json' 2>/dev/null \
-            | tr -d ' \r\n')" = "$size" ]; do
-        tries=$((tries + 1))
-        [ "$tries" -le 5 ] || { echo "error: the config did not reach $PKG's files/xybrid-staging" >&2; exit 1; }
+    while :; do
         adb exec-in run-as "$PKG" sh -c \
             'umask 077 && rm -rf files/xybrid-staging && mkdir -p files/xybrid-staging && cat > files/xybrid-staging/config.json' \
             < "$config"
         copied=1
         sleep 2
+        [ "$(adb exec-out run-as "$PKG" sh -c 'wc -c < files/xybrid-staging/config.json' 2>/dev/null \
+            | tr -d ' \r\n')" != "$size" ] || break
+        tries=$((tries + 1))
+        [ "$tries" -lt 5 ] || { echo "error: the config did not reach $PKG's files/xybrid-staging" >&2; exit 1; }
     done
     adb logcat -c
     adb logcat -v time ReactNativeJS:V AndroidRuntime:E '*:S' > "$out/logcat.txt" 2>&1 &
@@ -215,6 +219,8 @@ iphone_run() {
     local example="$repo/bindings/react-native/example" deadline
     part="$expectations.part"
     trap iphone_cleanup EXIT
+    trap 'exit 143' TERM
+    trap 'exit 130' INT
     start_metro "$example" "$out" ios
     ios_stage_config "$config"
     copied=1
