@@ -72,7 +72,15 @@ try {
   const deadline = Date.now() + 15 * 60_000;
   while (workspace === null && Date.now() < deadline) {
     await page.waitForTimeout(5_000);
-    const match = /^(\/o\/[^/]+\/[^/]+)\//.exec(new URL(page.url()).pathname);
+    // Sign-in may happen in any tab of the window: take the workspace from any of them.
+    const paths = context.pages().map((tab) => {
+      try {
+        return new URL(tab.url()).pathname;
+      } catch {
+        return "";
+      }
+    });
+    const match = paths.map((path) => /^(\/o\/[^/]+\/[^/]+)(\/|$)/.exec(path)).find(Boolean);
     if (!match) continue;
     const candidate = match[1];
     const check = await context.newPage();
