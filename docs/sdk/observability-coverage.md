@@ -114,8 +114,8 @@ policy and first-terminal-wins implementation.
 | Python | Generated options and result fields, Python properties | Four `Xybrid*Observation` classes; context managers and explicit `close()` | Generated config, native stats/flush/shutdown | Compiled-bridge tests cover load/run/cloud pipeline, parentage, content and handle lifecycle; real ASR/TTS runs require model fixtures. CI runtime lane: the `Python SDK (ubuntu-latest)` job in [`ci.yml`](../../.github/workflows/ci.yml) runs the [shared scenario](../../tools/scripts/observability_capture/scenario.md) through the reference implementation on the compiled bridge and checks what reaches a local OTLP receiver, with the same checks as the Swift, Kotlin, Unity and Flutter lanes. A second run without the omit rule must export the omitted content, which shows that the scenario records it. Both runs pass in CI (PR #752) and locally on Linux against the compiled bridge |
 | Unity C# | Wrapper options and result references | Four wrapper handles implement `IDisposable` | Same native config; `using` releases final owner | Generation and .NET compilation checks. CI runtime lane: the `Run the observability runtime scenario (EditMode)` step of the `Unity Editor (Linux, Mono + IL2CPP)` job in [`unity-editor.yml`](../../.github/workflows/unity-editor.yml) runs the [shared scenario](../../tools/scripts/observability_capture/scenario.md) through the public C# API in the Unity 6000.3 Editor on Linux (Mono), against the Bazel-built Linux native the job stages, and checks what reaches a local OTLP receiver on the runner: parent-in, reference-out from the manual handles and the model load, manual operations, content redaction, the omitted attribute never reaching the receiver, release, the weightless model load and failed run, flush and shutdown. It passed all 18 checks in CI inside the Unity Editor (PR #752). IL2CPP player, Android, iOS, macOS and Windows runtimes are not covered |
 | Flutter | Existing load/run/pipeline/ASR options; stage references in stage latencies | `XybridObservability.start*`; generated opaque handles expose disposal | Native config/rules and asynchronous flush/shutdown | Reproducible FRB generation, Dart wrapper and Rust API tests. CI runtime lane: the `Observability runtime scenario (flutter test on Linux)` job in [`build-flutter.yml`](../../.github/workflows/build-flutter.yml) runs the [shared scenario](../../tools/scripts/observability_capture/scenario.md) through the public Dart API under `flutter test` on Linux, loading the release `libxybrid_flutter_ffi.so` the Linux build job produces, and checks what reaches a local OTLP receiver: parent-in, reference-out from the manual handles and the model load, manual operations, content redaction, the omitted attribute never reaching the receiver, release, the weightless model load and failed run, flush and shutdown. It passed all 18 checks in CI on Linux (PR #752). Android, iOS, macOS and Windows runtimes are not covered |
-| React Native | TurboModule codec and both native shims | `WorkflowObservation`, `ToolObservation`, `InferenceObservation`, `ModelLoadObservation`; explicit `dispose()` and module invalidation | Native config/rules and lifecycle | Type, facade, wire, parity and Kotlin codec tests. No runtime lane: [`scenario.md`](../../tools/scripts/observability_capture/scenario.md) maps its API, but nothing runs the scenario through the TurboModule on iOS or Android yet, so this row is the one native surface the matrix does not demonstrate at runtime |
-| Browser | Worker propagation and generation result reference | Portable JS observer handles; browser model dispose | Application-owned provider lifecycle | Worker/control tests and typecheck; browser/model acceptance is a separate lane |
+| React Native | TurboModule codec and both native shims | `WorkflowObservation`, `ToolObservation`, `InferenceObservation`, `ModelLoadObservation`; explicit `dispose()` and module invalidation | Native config/rules and lifecycle | Type, facade, wire, parity and Kotlin codec tests. Staging runtime lane (step 6, run by hand): the example app runs the [staging scenario](../../tools/scripts/observability_staging/README.md) through the TurboModule on a Pixel 8 (the CI debug APK's natives) and an iPhone 15 Pro Max on iOS 26.6 (the CI XCFramework), exporting to Xybrid staging directly and through the Collector; all 42 checks passed on both. iOS 27 is not covered: the Expo 56 example template does not adopt the UIScene lifecycle iOS 27 requires, so the app stops at launch |
+| Browser | Worker propagation and generation result reference | Portable JS observer handles; browser model dispose | Application-owned provider lifecycle | Worker/control tests and typecheck. Staging runtime lane (step 6, run by hand): Chromium 149 runs the [staging scenario](../../tools/scripts/observability_staging/README.md) on the CI web artifact with the pinned SmolLM2 GGUF, exporting traces, and in a second session evaluation logs, straight to Xybrid staging; all 25 checks passed. Neither `@xybrid/web` nor `@xybrid/observability` stamps `xybrid.sdk.binding` (the application owns the provider), so browser rows carry no binding |
 | Portable JS | Explicit W3C controls / references | Workflow/tool/inference/load operations | Callback plus declarative policy, cancellable exporters | Shared fixtures, decoded wire and transport/lifecycle tests; real packed OTel 3.0/0.300 and 3.1/0.301 installations |
 
 The `lifecycle.shutdown` check requires the final counters after shutdown
@@ -155,6 +155,42 @@ does not establish a parent/reference round trip or a runtime lifecycle result.
 Native application examples below assume the usual SDK initialization has
 completed. They describe the public wrapper shapes without adding model or
 runtime dependencies to the portable package.
+
+## Staging acceptance (step 6)
+
+On 2026-11-11 and 2026-11-12 every binding ran the
+[staging scenario](../../tools/scripts/observability_staging/README.md) through its real
+caller and runtime, with a real registry model (`lfm2.5-230m`; SmolLM2-135M in the
+browser), against Xybrid staging in a fresh project. Each launch has two sessions:
+the Xybrid preset straight from the runtime (metadata only) and OTLP through the
+pinned Collector (content captured, one literal redaction). Everything stored is then
+read back from the staging API by trace id. The SDK under test is `00e61710`, with CI-built
+natives where CI builds them (XCFramework, AAR, React Native debug APK, web WASM).
+
+| Lane | Runtime | Result |
+|---|---|---|
+| Python | macOS (compiled bridge) | 42/42 |
+| Rust | macOS, plus pipeline `on_token` failure, streaming TTS, batch and live ASR, frame session, cloud fallback | 66/67: the fallback reaches the staging gateway, which answers 502 (no provider key) |
+| Swift | iPhone 15 Pro Max, iOS 26.6 | 42/42 |
+| Kotlin | Pixel 8, Android 16 | 42/42 |
+| React Native | Pixel 8; iPhone 15 Pro Max | 42/42; 42/42 |
+| Unity | Editor 6000.3.6f1, macOS | 42/42 |
+| Flutter | Dart VM on macOS; Pixel 8 | 42/42; 42/42 |
+| Browser | Chromium 149, macOS | 25/25 |
+| CLI | candidate CLI, `--trace-export` read back | 25 pass, 15 not applicable |
+
+The checks: references stored, parent chain rooted at the caller's span, identity
+(binding, service, device, launch), model, local execution, tokens and chunks as
+reported, the stopped stream recorded `cancelled`, direct sessions with no content and
+no quality records, Collector sessions with redacted content, linked feedback and
+evaluation and the metric ledger, the exact dashboard aggregate, and no key material in
+the evidence. Cross-tenant reads of every launch trace answered 404 for another
+organization and for another project in the same organization (190/190), and spans
+written by the other project under the same trace ids stayed separate (25/25).
+
+Not covered: Flutter on an iPhone (`flutter drive` needs macOS local-network access on
+the host to reach the app's VM service), iOS 27 for the React Native and Flutter example
+apps (their templates lack UIScene adoption), Unity players and Windows.
 
 ## Binding examples
 
