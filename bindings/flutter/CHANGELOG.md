@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.18.0
+
 * Liquid d1 decision models (`lfm3-d1/text/v1`). `XybridEnvelope.decisionRequest`
   and `XybridEnvelope.decisionRequestJson` build a request for a local d1 model
   from a state and 1 to 16 questions (`DecisionQuestion.choice`, `.yesNo`,

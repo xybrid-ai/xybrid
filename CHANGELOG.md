@@ -7,7 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-12
+
 ### Added
+
+- **CLI:** `xybrid connect` gives a project a Xybrid key without an account,
+  for coding agents. It creates (or reuses) a claimable workspace with a
+  restricted client key, saves the key privately, and writes it to an
+  untracked, gitignored project file with `--write-env`. It never enables
+  trace export and never prints the key; `--json` prints one object with
+  `tell_the_user`, the claim link and the workspace's deadlines. A second
+  repository on the same machine becomes a new project in the same unclaimed
+  workspace; `--new` starts another. Exit codes: 0 created or existing, 3
+  signup closed, 4 offline, 5 CI or opted out, 6 project file tracked by Git,
+  7 workspace expired but still claimable. Agent signup is turned on per
+  environment by Xybrid; until then `connect` exits with 3.
+- **CLI:** `xybrid auth status` shows the project's key source, the
+  workspace's lifecycle and whether traces have arrived; `xybrid auth claim`
+  shows the private link to claim the workspace with GitHub; `xybrid auth
+  logout` removes the project's saved credentials. `--platform-url` accepts
+  the production and staging APIs and pins their console and ingest; other
+  hosts need `--allow-custom-host`.
 
 - Application-owned observability sessions and typed workflow, tool, inference
   and model-load handles, with explicit parents, first-terminal-wins completion
