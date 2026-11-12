@@ -74,7 +74,7 @@ use crate::registry_client::RegistryClient;
 use crate::result::{output_type_for_envelope, OutputType};
 use crate::run_options::RunOptions;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use std::path::Path;
 use std::path::PathBuf;
@@ -663,6 +663,9 @@ struct PipelineHandle {
     stage_configs: Vec<StageConfig>,
     /// Bundle paths for each stage (set after downloading)
     bundle_paths: HashMap<String, PathBuf>,
+    /// Stage ids whose own model has been fetched. `bundle_paths` is keyed by
+    /// stage ids and model ids alike, so it cannot answer this.
+    loaded_stages: HashSet<String>,
 }
 
 // ============================================================================
@@ -768,6 +771,7 @@ impl Pipeline {
             registry_url,
             stage_configs,
             bundle_paths: HashMap::new(),
+            loaded_stages: HashSet::new(),
         };
 
         let handle = Arc::new(RwLock::new(handle));
@@ -938,20 +942,19 @@ impl Pipeline {
     /// Check if all device models are cached and ready.
     ///
     /// Must hold BOTH: every stage is cached on disk (can run locally)
-    /// AND this handle has loaded each Cached stage's bundle path into
-    /// `handle.bundle_paths`. A freshly-constructed `Pipeline` with a
-    /// warm on-disk cache satisfies the first but not the second, so
-    /// `run()` used to skip `load_models()` and hit the core's mock
-    /// fallback. Integration (cloud-routed) stages don't need a local
+    /// AND this handle has fetched each stage's own model (`loaded_stages`).
+    /// A freshly-constructed `Pipeline` with a warm on-disk cache satisfies
+    /// the first but not the second, so `run()` used to skip `load_models()`
+    /// and hit the core's mock fallback. Integration (cloud-routed) stages don't need a local
     /// bundle and pass through. A stage downloaded by `load_models()` keeps
-    /// its `NeedsDownload` status but is ready once its path is loaded.
+    /// its `NeedsDownload` status but is ready once its model is fetched.
     pub fn is_ready(&self) -> bool {
         let Ok(handle) = self.handle.read() else {
             return false;
         };
         self.stages.iter().all(|s| match s.status {
             StageStatus::Cached | StageStatus::NeedsDownload => {
-                handle.bundle_paths.contains_key(&s.id)
+                handle.loaded_stages.contains(&s.id)
             }
             StageStatus::Integration => true,
             _ => false,
@@ -1062,6 +1065,7 @@ impl Pipeline {
                     .bundle_paths
                     .insert(stage_id.clone(), model_dir.clone());
                 handle.bundle_paths.insert(model_id, model_dir);
+                handle.loaded_stages.insert(stage_id);
                 continue;
             }
 
@@ -1094,6 +1098,7 @@ impl Pipeline {
                 .bundle_paths
                 .insert(stage_id.clone(), model_dir.clone());
             handle.bundle_paths.insert(model_id, model_dir);
+            handle.loaded_stages.insert(stage_id);
         }
 
         Ok(())
@@ -2410,8 +2415,14 @@ mod tests {
         const GGUF: &[u8] = b"not really a gguf";
 
         /// A registry that resolves `model_id` to a passthrough GGUF served
-        /// from the same server, as the platform does for external repos.
-        fn registry<'a>(server: &'a MockServer, model_id: &str) -> httpmock::Mock<'a> {
+        /// from the same server (answering `download_status`), as the
+        /// platform does for external repos.
+        fn registry<'a>(
+            server: &'a MockServer,
+            model_id: &str,
+            download_status: u16,
+        ) -> httpmock::Mock<'a> {
+            let file = format!("/{model_id}.gguf");
             server.mock(|when, then| {
                 when.method(GET)
                     .path_contains(format!("/v1/models/{model_id}/resolve"));
@@ -2423,7 +2434,7 @@ mod tests {
                         "resolved": {
                             "hf_repo": "xybrid-ai/external",
                             "file": "model.gguf",
-                            "download_url": server.url("/model.gguf"),
+                            "download_url": server.url(&file),
                             "format": "gguf",
                             "quantization": "q4_k_m",
                             "size_bytes": GGUF.len(),
@@ -2440,8 +2451,8 @@ mod tests {
                     }));
             });
             server.mock(|when, then| {
-                when.method(GET).path("/model.gguf");
-                then.status(200).body(GGUF);
+                when.method(GET).path(file.as_str());
+                then.status(download_status).body(GGUF);
             })
         }
 
@@ -2459,7 +2470,7 @@ mod tests {
         fn an_extracted_passthrough_model_is_cached_and_loads_without_a_download() {
             let model_id = "pipeline-passthrough-extracted";
             let server = MockServer::start();
-            let download = registry(&server, model_id);
+            let download = registry(&server, model_id, 200);
             let client = RegistryClient::with_url(server.base_url()).unwrap();
             let dir = client.extraction_dir(model_id);
             std::fs::create_dir_all(&dir).unwrap();
@@ -2490,7 +2501,7 @@ mod tests {
         fn a_provider_less_stage_downloads_its_passthrough_model() {
             let model_id = "pipeline-passthrough-download";
             let server = MockServer::start();
-            let download = registry(&server, model_id);
+            let download = registry(&server, model_id, 200);
 
             let pipeline = provider_less_pipeline(&server, model_id);
             assert_eq!(pipeline.stages()[0].status, StageStatus::NeedsDownload);
@@ -2504,6 +2515,28 @@ mod tests {
                 std::fs::read(client.extraction_dir(model_id).join("model.gguf")).unwrap(),
                 GGUF
             );
+        }
+
+        #[test]
+        fn a_stage_whose_model_failed_is_not_ready_when_its_id_names_another_model() {
+            // Stage `first` runs model B; stage B runs model C, whose download fails.
+            let fetched = "pipeline-passthrough-collide-b";
+            let failing = "pipeline-passthrough-collide-c";
+            let server = MockServer::start();
+            registry(&server, fetched, 200);
+            registry(&server, failing, 500);
+            let pipeline = PipelineRef::from_yaml(&format!(
+                "name: collide\nregistry: {}\nstages:\n  - id: first\n    model: {fetched}\n  - id: {fetched}\n    model: {failing}\n",
+                server.base_url()
+            ))
+            .unwrap()
+            .load()
+            .unwrap();
+
+            pipeline
+                .load_models()
+                .expect_err("model C cannot be downloaded");
+            assert!(!pipeline.is_ready(), "{:?}", pipeline.stages());
         }
     }
 
