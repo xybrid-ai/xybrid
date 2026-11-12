@@ -296,7 +296,7 @@ pub enum GenerationEnd {
 /// # Errors
 ///
 /// The errors the generate functions return for the same stop sequences:
-/// [`LlamaError::InvalidInput`] for one that holds a NUL byte, and
+/// [`LlamaError::InvalidInput`] for one exceeding the native length limit, and
 /// [`LlamaError::TokenizationFailed`] when llama.cpp cannot tokenize one.
 pub fn generation_end(
     model: &LlamaModel,

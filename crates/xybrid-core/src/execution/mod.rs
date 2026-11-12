@@ -65,6 +65,9 @@ pub mod template;
 // Choice-scoring primitives (decision models)
 pub mod choice;
 
+// Versioned typed decision inference.
+pub mod decision;
+
 // Chat template formatting for LLM prompts
 pub mod chat_template;
 pub use chat_template::{ChatTemplateFormat, ChatTemplateFormatter};

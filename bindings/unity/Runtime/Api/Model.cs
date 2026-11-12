@@ -47,11 +47,10 @@ namespace Xybrid
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
         /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures (including a not-loaded model) set <see cref="InferenceResult.Success"/> to false instead.</exception>
         /// <param name="cancellationToken">
-        /// Optional stop button. A batch run is only cancellable <em>before</em>
-        /// generation starts — once the backend is producing there is no
-        /// token-aware batch path to stop it, so the call finishes normally. Use
-        /// <c>RunStreaming</c> when a mid-flight stop button matters. A cancelled
-        /// run reports failure rather than throwing
+        /// Optional stop button. Decision runs check cancellation before
+        /// preparation, between passes and during native decoding. Other batch
+        /// runs check it before generation; streaming checks token boundaries.
+        /// A cancelled run reports failure rather than throwing
         /// <see cref="OperationCanceledException"/>.
         /// </param>
         public InferenceResult Run(

@@ -11,12 +11,21 @@ with it stage by stage, and what xybrid must do.
 | `cases/<id>.json` | One case per file |
 | `oracle.json` | How the upstream observations were made: whether the collector was official, the identity stamped into the executables (llama.cpp commit and clean state, source hashes, build profile, CPU-only backends), the settings as they ran (server arguments, effective context, devices), the recipe hashes, the platform, the facts read from the artifact |
 | `NOTICE` | The llama.cpp material held here (the `systemone` template in `oracle.json`) and its MIT license |
+| `integrity.json` | Reviewed digests of the 143-case corpus, native identity and independent-reference inputs |
+| `hf/` | Pinned HF code/checkpoint asset manifest and a 63-case calibration/held-out input corpus; compatibility differences are summarized in its README |
 
 The cases are written by the upstream oracle,
 [`tools/conformance/decision`](../../../tools/conformance/decision), which runs
 llama.cpp's own decision code (`tools/server/server-decision.cpp`, unmodified)
 and cross-checks every case against the stock `llama-server`. Its README says
 how to rebuild them.
+
+The xybrid implementation now has a separate stage-isolated runner in
+[`decision_conformance.rs`](../../tests/decision_conformance.rs). Its required
+CPU lane evaluates supplied upstream token arrays against a freshly collected,
+matched-build reference. See
+[`decision-conformance.md`](../../../docs/development/decision-conformance.md)
+for commands and the remaining independent-reference/device promotion gates.
 
 ## A case
 

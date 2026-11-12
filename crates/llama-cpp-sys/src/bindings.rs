@@ -1070,6 +1070,119 @@ unsafe extern "C" {
     pub fn llama_model_has_recurrent_state_c(model: *const ::std::os::raw::c_void) -> bool;
 }
 unsafe extern "C" {
+    pub fn llama_load_decision_model_c(
+        path_model: *const ::std::os::raw::c_char,
+        vocab_only: bool,
+    ) -> *mut ::std::os::raw::c_void;
+}
+unsafe extern "C" {
+    pub fn llama_model_metadata_c(
+        model: *const ::std::os::raw::c_void,
+        key: *const ::std::os::raw::c_char,
+        out: *mut ::std::os::raw::c_char,
+        capacity: usize,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn llama_model_metadata_count_c(
+        model: *const ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn llama_model_metadata_key_c(
+        model: *const ::std::os::raw::c_void,
+        index: ::std::os::raw::c_int,
+        out: *mut ::std::os::raw::c_char,
+        capacity: usize,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn llama_model_named_template_c(
+        model: *const ::std::os::raw::c_void,
+        name: *const ::std::os::raw::c_char,
+        out: *mut ::std::os::raw::c_char,
+        capacity: usize,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn llama_vocab_text_c(
+        model: *const ::std::os::raw::c_void,
+        token: ::std::os::raw::c_int,
+        out: *mut ::std::os::raw::c_char,
+        capacity: usize,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn llama_vocab_is_control_c(
+        model: *const ::std::os::raw::c_void,
+        token: ::std::os::raw::c_int,
+    ) -> bool;
+}
+unsafe extern "C" {
+    pub fn llama_decision_context_new_c(
+        model: *mut ::std::os::raw::c_void,
+    ) -> *mut ::std::os::raw::c_void;
+}
+unsafe extern "C" {
+    pub fn llama_decision_context_valid_c(ctx: *const ::std::os::raw::c_void) -> bool;
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct llama_decision_settings_c {
+    pub n_ctx: u32,
+    pub n_ctx_seq: u32,
+    pub n_batch: u32,
+    pub n_ubatch: u32,
+    pub n_seq_max: u32,
+    pub n_threads: i32,
+    pub n_threads_batch: i32,
+    pub n_devices: i32,
+    pub causal_attn: bool,
+    pub has_memory: bool,
+}
+unsafe extern "C" {
+    pub fn llama_decision_context_settings_c(
+        ctx: *const ::std::os::raw::c_void,
+        settings: *mut llama_decision_settings_c,
+    ) -> bool;
+}
+pub type llama_decision_abort_c =
+    ::std::option::Option<unsafe extern "C" fn(data: *mut ::std::os::raw::c_void) -> bool>;
+unsafe extern "C" {
+    pub fn llama_decision_evaluate_c(
+        ctx: *mut ::std::os::raw::c_void,
+        tokens: *const i32,
+        n_tokens: ::std::os::raw::c_int,
+        labels: *const i32,
+        n_labels: ::std::os::raw::c_int,
+        selected: *mut f32,
+        abort_callback: llama_decision_abort_c,
+        abort_data: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn llama_decision_renderer_new_c(
+        source: *const ::std::os::raw::c_char,
+        source_len: usize,
+    ) -> *mut ::std::os::raw::c_void;
+}
+unsafe extern "C" {
+    pub fn llama_decision_renderer_free_c(renderer: *mut ::std::os::raw::c_void);
+}
+unsafe extern "C" {
+    pub fn llama_decision_renderer_render_c(
+        renderer: *mut ::std::os::raw::c_void,
+        json: *const ::std::os::raw::c_char,
+        json_len: usize,
+        max_output_bytes: usize,
+        output: *mut *mut ::std::os::raw::c_char,
+        output_len: *mut usize,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn llama_decision_rendered_free_c(output: *mut ::std::os::raw::c_char);
+}
+unsafe extern "C" {
     pub fn llama_decode_c(
         ctx: *mut ::std::os::raw::c_void,
         batch: *const llama_batch,

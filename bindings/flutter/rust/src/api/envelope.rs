@@ -140,6 +140,18 @@ impl From<FfiYuvColorInfo> for YuvColorInfo {
 pub struct FfiEnvelope(pub(crate) Envelope);
 
 impl FfiEnvelope {
+    /// Decode a bounded Liquid SystemOne request without a Dart JSON round trip.
+    ///
+    /// The loaded model stays authoritative; an optional wire `model` field
+    /// cannot select a model or change local-only execution policy.
+    #[frb(sync)]
+    pub fn decision_request_json(json: String) -> Result<FfiEnvelope, String> {
+        facade::Envelope::decision_request_json(json)
+            .and_then(facade::Envelope::into_sdk)
+            .map(FfiEnvelope)
+            .map_err(|error| error.to_string())
+    }
+
     /// Create audio envelope with raw bytes and format metadata.
     #[frb(sync)]
     pub fn audio(bytes: Vec<u8>, sample_rate: u32, channels: u32) -> FfiEnvelope {

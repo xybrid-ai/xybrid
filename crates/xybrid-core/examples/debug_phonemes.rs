@@ -60,6 +60,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output = executor.execute(&metadata, &input, None)?;
 
     match &output.kind {
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            return Err("Unexpected decision output".into());
+        }
         EnvelopeKind::Audio(bytes) => {
             let sample_rate = 24000;
             let num_samples = bytes.len() / 2;

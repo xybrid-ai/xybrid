@@ -15,13 +15,20 @@ use crate::frb_generated::StreamSink;
 
 use super::context::FfiConversationContext;
 use super::device;
-use super::result::FfiResult;
+use super::result::{FfiResult, FfiRunResult};
 use super::spawn_reporting_panics;
 
 // Use the canonical SDK-to-FFI conversion to retain the source chain when
 // crossing Flutter's string-only error boundary.
 fn sdk_error_message(error: xybrid_sdk::SdkError) -> String {
     facade::Error::from(error).to_string()
+}
+
+fn decision_io_refusal() -> String {
+    facade::Error::UnsupportedModelCapability {
+        message: "decision inference requires a local batch run without context".into(),
+    }
+    .to_string()
 }
 
 /// Generation parameters for LLM inference.
@@ -184,7 +191,7 @@ pub fn json_schema_to_gbnf(schema_json: String) -> Result<String, String> {
 /// Wraps the SDK [`CancellationToken`] (an `Arc<AtomicBool>` inside, hence
 /// `Clone + Send + Sync`). A Dart caller constructs one, passes it into a
 /// streaming run via the run options, and calls [`FfiCancellationToken::cancel`]
-/// to halt Rust generation at the next token boundary — releasing the model
+/// to halt Rust execution at its next abort boundary — releasing the model
 /// write lock promptly.
 ///
 /// The handle is cheap to clone; cloning shares the same underlying flag, so
@@ -198,6 +205,15 @@ impl FfiCancellationToken {
     #[frb(sync)]
     pub fn new() -> FfiCancellationToken {
         FfiCancellationToken(CancellationToken::new())
+    }
+
+    /// Create a separate FFI handle sharing this token's cancellation flag.
+    ///
+    /// Runs consume their opaque argument. Dart retains the original handle
+    /// and transfers this fork so cancellation remains callable while running.
+    #[frb(sync)]
+    pub fn fork(&self) -> FfiCancellationToken {
+        self.clone()
     }
 
     /// Request cooperative cancellation of the associated run.
@@ -456,6 +472,12 @@ fn apply_cloud_fallback_metadata(
     options: &FfiRunOptions,
     config: Option<&FfiGenerationConfig>,
 ) -> Result<Option<String>, String> {
+    if envelope.kind.contains_decision_kind() {
+        return Err(facade::Error::UnsupportedModelCapability {
+            message: "decision inference is local-only and does not support cloud overrides".into(),
+        }
+        .to_string());
+    }
     let provider = non_empty(options.cloud_provider.as_deref()).unwrap_or("openai");
     let model = non_empty(options.cloud_model.as_deref()).unwrap_or("gpt-4o-mini");
     envelope
@@ -1027,22 +1049,31 @@ impl FfiModel {
     ///
     /// Pass an optional `config` to control generation parameters.
     /// When `None`, the model's default parameters are used.
+    /// Decision requests reject explicit generation parameters. Cancellation
+    /// is checked before preparation, between passes, and by the native engine.
     pub fn run(
         &self,
         envelope: super::envelope::FfiEnvelope,
         config: Option<FfiGenerationConfig>,
+        cancellation_token: Option<FfiCancellationToken>,
         options: Option<FfiRunOptions>,
-    ) -> Result<FfiResult, String> {
+    ) -> Result<FfiRunResult, String> {
+        if envelope.0.kind.contains_decision_kind() && config.is_some() {
+            return Err(facade::Error::UnsupportedModelCapability {
+                message: "decision inference does not support generation settings".into(),
+            }
+            .to_string());
+        }
         let options = options.unwrap_or_default().to_sdk_with_cancellation_over(
             config.map(|c| c.to_facade()),
             self.0.default_generation_config(),
-            None,
+            cancellation_token.as_ref(),
         )?;
         let result = self
             .0
             .run_with_options(&envelope.into_envelope(), &options)
             .map_err(sdk_error_message)?;
-        FfiResult::try_from_inference_result(&result)
+        FfiRunResult::try_from_inference_result(&result)
     }
 
     /// Run inference with streaming output.
@@ -1087,6 +1118,10 @@ impl FfiModel {
         options: Option<FfiRunOptions>,
         sink: StreamSink<FfiStreamEvent>,
     ) {
+        if envelope.0.kind.contains_decision_kind() {
+            let _ = sink.add(FfiStreamEvent::Error(decision_io_refusal()));
+            return;
+        }
         let model = self.0.clone();
         let env = envelope.into_envelope();
         let facade_config = config.map(|c| c.to_facade());
@@ -1170,6 +1205,10 @@ impl FfiModel {
         options: Option<FfiRunOptions>,
         sink: StreamSink<FfiTtsStreamEvent>,
     ) {
+        if envelope.0.kind.contains_decision_kind() {
+            let _ = sink.add(FfiTtsStreamEvent::Error(decision_io_refusal()));
+            return;
+        }
         let model = self.0.clone();
         let env = envelope.into_envelope();
         let facade_config = config.map(|c| c.to_facade());
@@ -1274,7 +1313,10 @@ impl FfiModel {
         context: &FfiConversationContext,
         config: Option<FfiGenerationConfig>,
         options: Option<FfiRunOptions>,
-    ) -> Result<FfiResult, String> {
+    ) -> Result<FfiRunResult, String> {
+        if envelope.0.kind.contains_decision_kind() {
+            return Err(decision_io_refusal());
+        }
         let options = options.unwrap_or_default().to_sdk_with_cancellation_over(
             config.map(|c| c.to_facade()),
             self.0.default_generation_config(),
@@ -1290,7 +1332,7 @@ impl FfiModel {
             .run_with_context_options(&envelope.into_envelope(), &ctx_guard, &options)
             .map_err(sdk_error_message)?;
 
-        FfiResult::try_from_inference_result(&result)
+        FfiResult::try_from_inference_result(&result).map(FfiRunResult::Legacy)
     }
 
     /// Run inference with streaming output and conversation context.
@@ -1335,6 +1377,10 @@ impl FfiModel {
         options: Option<FfiRunOptions>,
         sink: StreamSink<FfiStreamEvent>,
     ) {
+        if envelope.0.kind.contains_decision_kind() {
+            let _ = sink.add(FfiStreamEvent::Error(decision_io_refusal()));
+            return;
+        }
         let model = self.0.clone();
         let env = envelope.into_envelope();
         let ctx = context.0.clone();
@@ -1543,6 +1589,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cancellation_forks_share_the_original_flag() {
+        let original = FfiCancellationToken::new();
+        let transferred = original.fork();
+        assert!(!transferred.is_cancelled());
+        original.cancel();
+        assert!(transferred.is_cancelled());
+        assert!(original.is_cancelled());
+    }
+
+    #[test]
     fn sdk_diagnostics_retain_load_and_inference_causes() {
         let load = xybrid_sdk::SdkError::LoadError {
             message: "Failed to parse metadata".into(),
@@ -1644,6 +1700,22 @@ mod tests {
             sdk.observation.as_ref().unwrap().conversation_id.as_deref(),
             Some("stream-1")
         );
+    }
+
+    #[test]
+    fn decision_cloud_overrides_fail_before_metadata_changes() {
+        use xybrid_sdk::ir::{DecisionRequest, DecisionState, Envelope, EnvelopeKind};
+        let request = Envelope::new(EnvelopeKind::DecisionRequest(DecisionRequest::new(
+            DecisionState::default(),
+            vec![],
+        )));
+        let mut nested = Envelope::new(EnvelopeKind::MultiPart(vec![request]));
+        let before = nested.metadata.clone();
+        let error =
+            apply_cloud_fallback_metadata(&mut nested, &sample_options(), None).unwrap_err();
+        assert!(error.starts_with("Unsupported model capability:"));
+        assert!(error.contains("local-only"));
+        assert_eq!(nested.metadata, before);
     }
 
     #[test]

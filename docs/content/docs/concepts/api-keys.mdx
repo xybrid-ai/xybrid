@@ -136,7 +136,7 @@ what happens to such a workspace.
 | Day 0 | Created with a client-scoped `sk_live_` key, which works immediately. The agent gives you a private claim link. |
 | Day 7 | The key stops working: trace ingest and the cloud gateway refuse it. Local inference keeps working. |
 | Days 7 to 14 | The workspace can still be claimed. Claiming restores the key, unless you rotate it. |
-| Day 14 | The workspace is deleted, with its keys and stored traces. |
+| Day 14 | The workspace and its keys are deleted. Traces it sent stay until they expire, currently up to 90 days, and records of its gateway calls have no expiry yet. |
 
 To claim, open the claim link, sign in to the console with GitHub, review the
 workspace and claim it. The link is private: anyone who opens it and signs in

@@ -262,11 +262,21 @@ pub enum XybridEnvelopeKind {
     Embedding { values: Vec<f32> },
     Image { bytes: Vec<u8>, format: String },
     MultiPart { parts: Vec<XybridEnvelope> },
+    DecisionRequest { request: XybridDecisionRequest },
+    Decisions { decisions: XybridDecisions },
 }
 
 impl From<XybridEnvelopeKind> for facade::EnvelopeKind {
     fn from(k: XybridEnvelopeKind) -> Self {
         match k {
+            XybridEnvelopeKind::DecisionRequest { request } => {
+                facade::EnvelopeKind::DecisionRequest {
+                    request: request.into(),
+                }
+            }
+            XybridEnvelopeKind::Decisions { decisions } => facade::EnvelopeKind::Decisions {
+                decisions: decisions.into(),
+            },
             XybridEnvelopeKind::Text { text } => facade::EnvelopeKind::Text { text },
             XybridEnvelopeKind::Audio { bytes } => facade::EnvelopeKind::Audio { bytes },
             XybridEnvelopeKind::Embedding { values } => facade::EnvelopeKind::Embedding { values },
@@ -283,6 +293,14 @@ impl From<XybridEnvelopeKind> for facade::EnvelopeKind {
 impl From<facade::EnvelopeKind> for XybridEnvelopeKind {
     fn from(k: facade::EnvelopeKind) -> Self {
         match k {
+            facade::EnvelopeKind::DecisionRequest { request } => {
+                XybridEnvelopeKind::DecisionRequest {
+                    request: request.into(),
+                }
+            }
+            facade::EnvelopeKind::Decisions { decisions } => XybridEnvelopeKind::Decisions {
+                decisions: decisions.into(),
+            },
             facade::EnvelopeKind::Text { text } => XybridEnvelopeKind::Text { text },
             facade::EnvelopeKind::Audio { bytes } => XybridEnvelopeKind::Audio { bytes },
             facade::EnvelopeKind::Embedding { values } => XybridEnvelopeKind::Embedding { values },
@@ -358,6 +376,395 @@ impl From<XybridMessageRole> for facade::MessageRole {
             XybridMessageRole::Assistant => facade::MessageRole::Assistant,
         }
     }
+}
+
+// ============================================================================
+// Ordered decision data (append-only foreign contract)
+// ============================================================================
+
+/// Foreign DecisionOption; field order is frozen.
+#[data]
+#[derive(Clone)]
+pub struct XybridDecisionOption {
+    pub key: String,
+    pub description: Option<XybridDecisionContent>,
+}
+
+impl From<XybridDecisionOption> for facade::DecisionOption {
+    fn from(value: XybridDecisionOption) -> Self {
+        Self {
+            key: value.key,
+            description: value.description.map(Into::into),
+        }
+    }
+}
+
+impl From<facade::DecisionOption> for XybridDecisionOption {
+    fn from(value: facade::DecisionOption) -> Self {
+        Self {
+            key: value.key,
+            description: value.description.map(Into::into),
+        }
+    }
+}
+
+/// Foreign DecisionLevel; field order is frozen.
+#[data]
+#[derive(Clone)]
+pub struct XybridDecisionLevel {
+    pub description: Option<XybridDecisionContent>,
+}
+
+impl From<XybridDecisionLevel> for facade::DecisionLevel {
+    fn from(value: XybridDecisionLevel) -> Self {
+        Self {
+            description: value.description.map(Into::into),
+        }
+    }
+}
+
+impl From<facade::DecisionLevel> for XybridDecisionLevel {
+    fn from(value: facade::DecisionLevel) -> Self {
+        Self {
+            description: value.description.map(Into::into),
+        }
+    }
+}
+
+/// Foreign DecisionQuestion; field order is frozen.
+#[data]
+#[derive(Clone)]
+pub struct XybridDecisionQuestion {
+    pub id: String,
+    pub instructions: Option<XybridDecisionContent>,
+    pub kind: XybridDecisionQuestionKind,
+}
+
+impl From<XybridDecisionQuestion> for facade::DecisionQuestion {
+    fn from(value: XybridDecisionQuestion) -> Self {
+        Self {
+            id: value.id,
+            instructions: value.instructions.map(Into::into),
+            kind: value.kind.into(),
+        }
+    }
+}
+
+impl From<facade::DecisionQuestion> for XybridDecisionQuestion {
+    fn from(value: facade::DecisionQuestion) -> Self {
+        Self {
+            id: value.id,
+            instructions: value.instructions.map(Into::into),
+            kind: value.kind.into(),
+        }
+    }
+}
+
+/// Foreign DecisionRequest; field order is frozen.
+#[data]
+#[derive(Clone)]
+pub struct XybridDecisionRequest {
+    pub state: Option<XybridDecisionContent>,
+    pub questions: Vec<XybridDecisionQuestion>,
+}
+
+impl From<XybridDecisionRequest> for facade::DecisionRequest {
+    fn from(value: XybridDecisionRequest) -> Self {
+        Self {
+            state: value.state.map(Into::into),
+            questions: value.questions.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<facade::DecisionRequest> for XybridDecisionRequest {
+    fn from(value: facade::DecisionRequest) -> Self {
+        Self {
+            state: value.state.map(Into::into),
+            questions: value.questions.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// Foreign DecisionScore; field order is frozen.
+#[data]
+#[derive(Clone)]
+pub struct XybridDecisionScore {
+    pub key: String,
+    pub raw_score: f32,
+    pub probability: f64,
+    pub origin: XybridDecisionOrigin,
+}
+
+impl From<XybridDecisionScore> for facade::DecisionScore {
+    fn from(value: XybridDecisionScore) -> Self {
+        Self {
+            key: value.key,
+            raw_score: value.raw_score,
+            probability: value.probability,
+            origin: value.origin.into(),
+        }
+    }
+}
+
+impl From<facade::DecisionScore> for XybridDecisionScore {
+    fn from(value: facade::DecisionScore) -> Self {
+        Self {
+            key: value.key,
+            raw_score: value.raw_score,
+            probability: value.probability,
+            origin: value.origin.into(),
+        }
+    }
+}
+
+/// Foreign DecisionAnswer; field order is frozen.
+#[data]
+#[derive(Clone)]
+pub struct XybridDecisionAnswer {
+    pub question_id: String,
+    pub distribution: Vec<XybridDecisionScore>,
+    pub value: XybridDecisionValue,
+    pub confidence: Option<f64>,
+}
+
+impl From<XybridDecisionAnswer> for facade::DecisionAnswer {
+    fn from(value: XybridDecisionAnswer) -> Self {
+        Self {
+            question_id: value.question_id,
+            distribution: value.distribution.into_iter().map(Into::into).collect(),
+            value: value.value.into(),
+            confidence: value.confidence,
+        }
+    }
+}
+
+impl From<facade::DecisionAnswer> for XybridDecisionAnswer {
+    fn from(value: facade::DecisionAnswer) -> Self {
+        Self {
+            question_id: value.question_id,
+            distribution: value.distribution.into_iter().map(Into::into).collect(),
+            value: value.value.into(),
+            confidence: value.confidence,
+        }
+    }
+}
+
+/// Foreign Decisions; field order is frozen.
+#[data]
+#[derive(Clone)]
+pub struct XybridDecisions {
+    pub answers: Vec<XybridDecisionAnswer>,
+    pub passes: u32,
+    pub input_tokens: u64,
+}
+
+impl From<XybridDecisions> for facade::Decisions {
+    fn from(value: XybridDecisions) -> Self {
+        Self {
+            answers: value.answers.into_iter().map(Into::into).collect(),
+            passes: value.passes,
+            input_tokens: value.input_tokens,
+        }
+    }
+}
+
+impl From<facade::Decisions> for XybridDecisions {
+    fn from(value: facade::Decisions) -> Self {
+        Self {
+            answers: value.answers.into_iter().map(Into::into).collect(),
+            passes: value.passes,
+            input_tokens: value.input_tokens,
+        }
+    }
+}
+
+/// Foreign DecisionContent; variants are append-only.
+#[data]
+#[derive(Clone)]
+pub enum XybridDecisionContent {
+    Text { text: String },
+    Json { json_text: String },
+}
+
+impl From<XybridDecisionContent> for facade::DecisionContent {
+    fn from(value: XybridDecisionContent) -> Self {
+        match value {
+            XybridDecisionContent::Text { text } => Self::Text { text },
+            XybridDecisionContent::Json { json_text } => Self::Json { json_text },
+        }
+    }
+}
+
+impl From<facade::DecisionContent> for XybridDecisionContent {
+    fn from(value: facade::DecisionContent) -> Self {
+        match value {
+            facade::DecisionContent::Text { text } => Self::Text { text },
+            facade::DecisionContent::Json { json_text } => Self::Json { json_text },
+        }
+    }
+}
+
+/// Foreign DecisionQuestionKind; variants are append-only.
+#[data]
+#[derive(Clone)]
+pub enum XybridDecisionQuestionKind {
+    Choice {
+        options: Vec<XybridDecisionOption>,
+    },
+    YesNo {
+        yes: Option<XybridDecisionContent>,
+        no: Option<XybridDecisionContent>,
+    },
+    Score {
+        levels: Vec<XybridDecisionLevel>,
+    },
+}
+
+impl From<XybridDecisionQuestionKind> for facade::DecisionQuestionKind {
+    fn from(value: XybridDecisionQuestionKind) -> Self {
+        match value {
+            XybridDecisionQuestionKind::Choice { options } => Self::Choice {
+                options: options.into_iter().map(Into::into).collect(),
+            },
+            XybridDecisionQuestionKind::YesNo { yes, no } => Self::YesNo {
+                yes: yes.map(Into::into),
+                no: no.map(Into::into),
+            },
+            XybridDecisionQuestionKind::Score { levels } => Self::Score {
+                levels: levels.into_iter().map(Into::into).collect(),
+            },
+        }
+    }
+}
+
+impl From<facade::DecisionQuestionKind> for XybridDecisionQuestionKind {
+    fn from(value: facade::DecisionQuestionKind) -> Self {
+        match value {
+            facade::DecisionQuestionKind::Choice { options } => Self::Choice {
+                options: options.into_iter().map(Into::into).collect(),
+            },
+            facade::DecisionQuestionKind::YesNo { yes, no } => Self::YesNo {
+                yes: yes.map(Into::into),
+                no: no.map(Into::into),
+            },
+            facade::DecisionQuestionKind::Score { levels } => Self::Score {
+                levels: levels.into_iter().map(Into::into).collect(),
+            },
+        }
+    }
+}
+
+/// Foreign DecisionOrigin; variants are append-only.
+#[data]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum XybridDecisionOrigin {
+    Caller,
+    Fixed,
+}
+
+impl From<XybridDecisionOrigin> for facade::DecisionOrigin {
+    fn from(value: XybridDecisionOrigin) -> Self {
+        match value {
+            XybridDecisionOrigin::Caller => Self::Caller,
+            XybridDecisionOrigin::Fixed => Self::Fixed,
+        }
+    }
+}
+
+impl From<facade::DecisionOrigin> for XybridDecisionOrigin {
+    fn from(value: facade::DecisionOrigin) -> Self {
+        match value {
+            facade::DecisionOrigin::Caller => Self::Caller,
+            facade::DecisionOrigin::Fixed => Self::Fixed,
+        }
+    }
+}
+
+/// Foreign ScoreStatistic; variants are append-only.
+#[data]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum XybridScoreStatistic {
+    Median,
+    Expected,
+}
+
+impl From<XybridScoreStatistic> for facade::ScoreStatistic {
+    fn from(value: XybridScoreStatistic) -> Self {
+        match value {
+            XybridScoreStatistic::Median => Self::Median,
+            XybridScoreStatistic::Expected => Self::Expected,
+        }
+    }
+}
+
+impl From<facade::ScoreStatistic> for XybridScoreStatistic {
+    fn from(value: facade::ScoreStatistic) -> Self {
+        match value {
+            facade::ScoreStatistic::Median => Self::Median,
+            facade::ScoreStatistic::Expected => Self::Expected,
+        }
+    }
+}
+
+/// Foreign DecisionValue; variants are append-only.
+#[data]
+#[derive(Clone)]
+pub enum XybridDecisionValue {
+    Choice {
+        key: String,
+    },
+    YesNo {
+        p_yes: f64,
+    },
+    Score {
+        value: f64,
+        statistic: XybridScoreStatistic,
+    },
+}
+
+impl From<XybridDecisionValue> for facade::DecisionValue {
+    fn from(value: XybridDecisionValue) -> Self {
+        match value {
+            XybridDecisionValue::Choice { key } => Self::Choice { key },
+            XybridDecisionValue::YesNo { p_yes } => Self::YesNo { p_yes },
+            XybridDecisionValue::Score { value, statistic } => Self::Score {
+                value,
+                statistic: statistic.into(),
+            },
+        }
+    }
+}
+
+impl From<facade::DecisionValue> for XybridDecisionValue {
+    fn from(value: facade::DecisionValue) -> Self {
+        match value {
+            facade::DecisionValue::Choice { key } => Self::Choice { key },
+            facade::DecisionValue::YesNo { p_yes } => Self::YesNo { p_yes },
+            facade::DecisionValue::Score { value, statistic } => Self::Score {
+                value,
+                statistic: statistic.into(),
+            },
+        }
+    }
+}
+
+/// Validate ordered typed decision data and build input for the existing run API.
+#[export]
+pub fn decision_request_envelope(
+    request: XybridDecisionRequest,
+) -> Result<XybridEnvelope, XybridError> {
+    facade::Envelope::decision_request(request.into())
+        .map(Into::into)
+        .map_err(Into::into)
+}
+
+/// Decode bounded Liquid SystemOne JSON without foreign dictionary conversion.
+#[export]
+pub fn decision_request_json_envelope(json: String) -> Result<XybridEnvelope, XybridError> {
+    facade::Envelope::decision_request_json(json)
+        .map(Into::into)
+        .map_err(Into::into)
 }
 
 // ============================================================================
@@ -643,6 +1050,7 @@ pub enum XybridOutputType {
     Audio,
     Embedding,
     Unknown,
+    Decisions,
 }
 
 impl From<facade::OutputType> for XybridOutputType {
@@ -652,6 +1060,7 @@ impl From<facade::OutputType> for XybridOutputType {
             facade::OutputType::Audio => XybridOutputType::Audio,
             facade::OutputType::Embedding => XybridOutputType::Embedding,
             facade::OutputType::Unknown => XybridOutputType::Unknown,
+            facade::OutputType::Decisions => XybridOutputType::Decisions,
         }
     }
 }
@@ -2677,6 +3086,12 @@ impl XybridBundle {
 mod tests {
     use super::*;
 
+    fn init_test_cache() {
+        static CACHE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| tempfile::tempdir().expect("create Bolt test cache"));
+        xybrid_sdk::init_sdk_cache_dir(cache.path());
+    }
+
     #[test]
     fn the_platform_fallback_yields_to_a_later_registration() {
         // One test, because the binding is process-wide and no other test here
@@ -2874,6 +3289,7 @@ mod tests {
 
     #[test]
     fn pipeline_handle_crosses_bolt_with_introspection() {
+        init_test_cache();
         let pipeline = XybridPipeline::from_yaml(
             r#"
 name: assistant
@@ -2894,6 +3310,7 @@ stages:
 
     #[test]
     fn pipeline_run_rejects_options_it_cannot_honour() {
+        init_test_cache();
         let pipeline = XybridPipeline::from_yaml(
             "stages:\n  - id: answer\n    model: gpt-4o-mini\n    provider: openai\n".into(),
         )

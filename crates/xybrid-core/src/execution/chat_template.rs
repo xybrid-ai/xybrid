@@ -102,6 +102,8 @@ impl ChatTemplateFormatter {
                 | EnvelopeKind::Image { .. }
                 | EnvelopeKind::MultiPart(_)
                 | EnvelopeKind::ChoiceRequest(_)
+                | EnvelopeKind::DecisionRequest(_)
+                | EnvelopeKind::Decisions(_)
                 | EnvelopeKind::ChoiceScores(_) => continue,
             };
 
@@ -142,6 +144,8 @@ impl ChatTemplateFormatter {
                 | EnvelopeKind::Image { .. }
                 | EnvelopeKind::MultiPart(_)
                 | EnvelopeKind::ChoiceRequest(_)
+                | EnvelopeKind::DecisionRequest(_)
+                | EnvelopeKind::Decisions(_)
                 | EnvelopeKind::ChoiceScores(_) => continue,
             };
 
@@ -232,6 +236,8 @@ impl ChatTemplateFormatter {
                 | EnvelopeKind::Image { .. }
                 | EnvelopeKind::MultiPart(_)
                 | EnvelopeKind::ChoiceRequest(_)
+                | EnvelopeKind::DecisionRequest(_)
+                | EnvelopeKind::Decisions(_)
                 | EnvelopeKind::ChoiceScores(_) => continue,
             };
 

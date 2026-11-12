@@ -159,6 +159,9 @@ impl CoreMLRuntimeAdapter {
             EnvelopeKind::MultiPart(_) => Envelope::new(EnvelopeKind::Text(
                 "coreml-multimodal-unsupported".to_string(),
             )),
+            EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+                return Err(crate::execution::decision::decision_kind_not_runtime_input());
+            }
             EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
                 return Err(crate::execution::choice::choice_kind_not_runtime_input());
             }

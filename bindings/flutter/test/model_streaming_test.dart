@@ -64,22 +64,23 @@ class _Model implements FfiModel {
   }
 
   @override
-  Future<FfiResult> run(
+  Future<FfiRunResult> run(
       {required FfiEnvelope envelope,
       FfiGenerationConfig? config,
+      FfiCancellationToken? cancellationToken,
       FfiRunOptions? options}) async {
     _api.options = options;
-    return FfiResult(
+    return FfiRunResult.legacy(FfiResult(
         success: true,
         text: 'Hello',
         latencyMs: 10,
         executionTarget: FfiExecutionTarget.local,
         metrics: const FfiInferenceMetrics(totalMs: 10, stageLatenciesMs: []),
-        toolCalls: const []);
+        toolCalls: const []));
   }
 
   @override
-  Future<FfiResult> runWithContext(
+  Future<FfiRunResult> runWithContext(
           {required FfiEnvelope envelope,
           required FfiConversationContext context,
           FfiGenerationConfig? config,
