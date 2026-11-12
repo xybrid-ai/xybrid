@@ -81,16 +81,20 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use xybrid_core::cache_provider::CacheProvider;
-use xybrid_core::context::{DeviceMetrics, StageDescriptor, DEVICE_CLASS_SCHEMA_VERSION};
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+use xybrid_core::context::DEVICE_CLASS_SCHEMA_VERSION;
+use xybrid_core::context::{DeviceMetrics, StageDescriptor};
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use xybrid_core::device::ResourceMonitor;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use xybrid_core::event_bus::{EventContext, OrchestratorEvent};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::routing_engine::LocalAvailability;
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use xybrid_core::orchestrator::{
-    LocalAuthority, OrchestrationAuthority, Orchestrator, ResolvedTarget, StageContext,
-    StageExecutionResult,
+    LocalAuthority, OrchestrationAuthority, ResolvedTarget, StageContext,
 };
+use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use xybrid_core::orchestrator::{PolicyOutcome, PolicyRequest};
 use xybrid_core::pipeline::{ExecutionTarget, IntegrationProvider, StageOptions};
@@ -752,7 +756,8 @@ impl Pipeline {
         if let Some(ref client) = client {
             for stage_config in &stage_configs {
                 let model_id = stage_config.model_id();
-                let is_cached = client.is_cached(&model_id, None).unwrap_or(false);
+                let is_cached = client.resolve_offline(&model_id).is_some()
+                    || client.is_cached(&model_id, None).unwrap_or(false);
                 availability_map.insert(model_id, is_cached);
             }
         }
@@ -856,11 +861,14 @@ impl Pipeline {
 
             let (status, download_bytes) =
                 if matches!(stage_target, StageTarget::Device | StageTarget::Auto) {
-                    // For device/auto stages, check if model is cached (might run locally)
+                    // For device/auto stages, check if model is cached (might run locally).
+                    // Passthrough models (GGUF) have no bundle, only an extracted
+                    // directory, which `is_cached` does not look at.
                     let model_id = stage_config.model_id();
                     match client.resolve(&model_id, None) {
                         Ok(resolved) => {
-                            let is_cached = client.is_cached(&model_id, None).unwrap_or(false);
+                            let is_cached = client.resolve_offline(&model_id).is_some()
+                                || client.is_cached(&model_id, None).unwrap_or(false);
                             if is_cached {
                                 (StageStatus::Cached, None)
                             } else {
@@ -935,13 +943,16 @@ impl Pipeline {
     /// warm on-disk cache satisfies the first but not the second, so
     /// `run()` used to skip `load_models()` and hit the core's mock
     /// fallback. Integration (cloud-routed) stages don't need a local
-    /// bundle and pass through.
+    /// bundle and pass through. A stage downloaded by `load_models()` keeps
+    /// its `NeedsDownload` status but is ready once its path is loaded.
     pub fn is_ready(&self) -> bool {
         let Ok(handle) = self.handle.read() else {
             return false;
         };
         self.stages.iter().all(|s| match s.status {
-            StageStatus::Cached => handle.bundle_paths.contains_key(&s.id),
+            StageStatus::Cached | StageStatus::NeedsDownload => {
+                handle.bundle_paths.contains_key(&s.id)
+            }
             StageStatus::Integration => true,
             _ => false,
         })
@@ -970,13 +981,9 @@ impl Pipeline {
 
     /// Preload models with progress callback.
     ///
-    /// **Routing-Aware Downloads**: Before downloading each model, this method
-    /// consults the `OrchestrationAuthority` to determine if the stage will
-    /// actually run locally. If the authority routes to cloud (e.g., low battery,
-    /// model too large), the download is skipped.
-    ///
-    /// This ensures we don't waste bandwidth downloading models that won't be
-    /// used locally.
+    /// Every device or auto stage gets its model. A stage that names a
+    /// provider is an integration stage and downloads nothing; any other
+    /// stage has no cloud leg to fall back to, so it must run locally.
     pub fn load_models_with_progress<F>(&self, progress_callback: F) -> PipelineResult<()>
     where
         F: Fn(DownloadProgress),
@@ -1024,39 +1031,25 @@ impl Pipeline {
             load.end(&result);
             result
         };
-        // Create authority for routing decisions
-        let authority = LocalAuthority::new();
-
-        // Get current device metrics for routing decisions
-        let metrics = DeviceMetrics::default();
 
         let stages_to_fetch: Vec<_> = self
             .stages
             .iter()
-            .enumerate()
-            .filter(|(_, s)| matches!(s.status, StageStatus::Cached | StageStatus::NeedsDownload))
-            .filter_map(|(idx, s)| {
-                s.model_id.as_ref().map(|m| {
-                    (
-                        idx,
-                        s.id.clone(),
-                        m.clone(),
-                        s.download_bytes,
-                        s.target.clone(),
-                        s.status.clone(),
-                    )
-                })
+            .filter(|s| matches!(s.status, StageStatus::Cached | StageStatus::NeedsDownload))
+            .filter_map(|s| {
+                s.model_id
+                    .as_ref()
+                    .map(|m| (s.id.clone(), m.clone(), s.download_bytes, s.status.clone()))
             })
             .collect();
 
         let total_stages = stages_to_fetch
             .iter()
-            .filter(|(_, _, _, _, _, status)| matches!(status, StageStatus::NeedsDownload))
+            .filter(|(_, _, _, status)| matches!(status, StageStatus::NeedsDownload))
             .count();
-        let mut skipped_count = 0;
 
         let mut download_stage_idx = 0;
-        for (_, stage_id, model_id, declared_bytes, stage_target, stage_status) in stages_to_fetch {
+        for (stage_id, model_id, declared_bytes, stage_status) in stages_to_fetch {
             let total_bytes = declared_bytes.unwrap_or(0);
             if matches!(stage_status, StageStatus::Cached) {
                 let model_dir = observed_fetch(&model_id, declared_bytes, &|| {
@@ -1075,89 +1068,32 @@ impl Pipeline {
             let stage_idx = download_stage_idx;
             download_stage_idx += 1;
 
-            // Convert StageTarget to ExecutionTarget for authority
-            // - Device: user explicitly wants local, authority should respect it
-            // - Auto: let authority decide based on device conditions
-            // - Cloud/Integration: shouldn't reach here (filtered earlier), but handle anyway
-            let explicit_target = match &stage_target {
-                StageTarget::Device => Some(ExecutionTarget::Device),
-                StageTarget::Auto => None, // Let authority decide
-                StageTarget::Cloud => Some(ExecutionTarget::Cloud),
-                StageTarget::Integration { .. } => Some(ExecutionTarget::Cloud),
+            // Byte counts come from the download itself; `total_bytes` (the
+            // registry listing's figure) is the fallback for sources that
+            // declare no size.
+            let progress_for_model = |status: crate::DownloadStatus| {
+                progress_callback(DownloadProgress {
+                    model_id: model_id.clone(),
+                    percent: (status.progress * 100.0) as u32,
+                    bytes_downloaded: status.downloaded_bytes,
+                    bytes_total: status.total_bytes.unwrap_or(total_bytes),
+                    stage_index: stage_idx,
+                    total_stages,
+                });
             };
 
-            // Consult authority before downloading
-            let stage_context = StageContext {
-                stage_id: stage_id.clone(),
-                model_id: model_id.clone(),
-                input_kind: EnvelopeKind::Text("".to_string()), // At preload time, we don't have actual input
-                metrics: metrics.clone(),
-                resource_monitor: ResourceMonitor::global(),
-                explicit_target,
-                local_availability: None,
-                device_class: Some(metrics.canonical_device_class()),
-                device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
-            };
+            let model_dir = observed_fetch(&model_id, declared_bytes, &|| {
+                client.fetch_extracted(&model_id, None, progress_for_model)
+            })?;
 
-            let decision = authority.resolve_target(&stage_context);
-
-            // Only download if authority routes to device
-            match decision.result {
-                ResolvedTarget::Device => {
-                    // Authority says run locally - proceed with download
-                    // Byte counts now come from the download itself rather
-                    // than being back-computed from a fraction; `total_bytes`
-                    // (the registry listing's figure) is the fallback for
-                    // sources that declare no size.
-                    let progress_for_model = |status: crate::DownloadStatus| {
-                        progress_callback(DownloadProgress {
-                            model_id: model_id.clone(),
-                            percent: (status.progress * 100.0) as u32,
-                            bytes_downloaded: status.downloaded_bytes,
-                            bytes_total: status.total_bytes.unwrap_or(total_bytes),
-                            stage_index: stage_idx,
-                            total_stages,
-                        });
-                    };
-
-                    // Fetch model and extract to permanent cache directory
-                    // Uses CacheManager.ensure_extracted() as single source of truth
-                    let model_dir = observed_fetch(&model_id, declared_bytes, &|| {
-                        client.fetch_extracted(&model_id, None, progress_for_model)
-                    })?;
-
-                    {
-                        // Recover from poisoned RwLock to prevent permanent lock errors
-                        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
-
-                        handle.availability_map.insert(model_id.clone(), true);
-                        handle.availability_map.insert(stage_id.clone(), true);
-                        // Store the extracted directory path for this stage
-                        handle
-                            .bundle_paths
-                            .insert(stage_id.clone(), model_dir.clone());
-                        handle.bundle_paths.insert(model_id.clone(), model_dir);
-                    }
-                }
-                ResolvedTarget::Cloud { .. } | ResolvedTarget::Server { .. } => {
-                    // Authority routes to cloud/server - skip download
-                    skipped_count += 1;
-                    // Log the skip decision (could use telemetry here)
-                    #[cfg(debug_assertions)]
-                    eprintln!(
-                        "[pipeline] Skipping download for '{}': authority routed to {:?} ({})",
-                        model_id, decision.result, decision.reason
-                    );
-                }
-            }
-        }
-
-        if skipped_count > 0 {
-            #[cfg(debug_assertions)]
-            eprintln!(
-                "[pipeline] Skipped {} downloads based on authority routing decisions",
-                skipped_count
-            );
+            // Recover from poisoned RwLock to prevent permanent lock errors
+            let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+            handle.availability_map.insert(model_id.clone(), true);
+            handle.availability_map.insert(stage_id.clone(), true);
+            handle
+                .bundle_paths
+                .insert(stage_id.clone(), model_dir.clone());
+            handle.bundle_paths.insert(model_id, model_dir);
         }
 
         Ok(())
@@ -2464,6 +2400,110 @@ mod tests {
             assert!(matches!(error, SdkError::UnsupportedModelCapability { .. }));
             assert!(!error.is_retryable());
             assert!(!format!("{error:?}").contains("private-pipeline-canary"));
+        }
+    }
+
+    mod passthrough_models {
+        use super::super::*;
+        use httpmock::prelude::*;
+
+        const GGUF: &[u8] = b"not really a gguf";
+
+        /// A registry that resolves `model_id` to a passthrough GGUF served
+        /// from the same server, as the platform does for external repos.
+        fn registry<'a>(server: &'a MockServer, model_id: &str) -> httpmock::Mock<'a> {
+            server.mock(|when, then| {
+                when.method(GET)
+                    .path_contains(format!("/v1/models/{model_id}/resolve"));
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(serde_json::json!({
+                        "mask": model_id,
+                        "platform": "test",
+                        "resolved": {
+                            "hf_repo": "xybrid-ai/external",
+                            "file": "model.gguf",
+                            "download_url": server.url("/model.gguf"),
+                            "format": "gguf",
+                            "quantization": "q4_k_m",
+                            "size_bytes": GGUF.len(),
+                            "sha256": "",
+                            "passthrough": true,
+                            "model_metadata": {
+                                "model_id": model_id,
+                                "version": "1.0",
+                                "execution_template": { "type": "Gguf", "model_file": "model.gguf" },
+                                "files": ["model.gguf"],
+                                "metadata": {}
+                            }
+                        }
+                    }));
+            });
+            server.mock(|when, then| {
+                when.method(GET).path("/model.gguf");
+                then.status(200).body(GGUF);
+            })
+        }
+
+        fn provider_less_pipeline(server: &MockServer, model_id: &str) -> Pipeline {
+            PipelineRef::from_yaml(&format!(
+                "name: passthrough\nregistry: {}\nstages:\n  - id: llm\n    model: {model_id}\n",
+                server.base_url()
+            ))
+            .unwrap()
+            .load()
+            .unwrap()
+        }
+
+        #[test]
+        fn an_extracted_passthrough_model_is_cached_and_loads_without_a_download() {
+            let model_id = "pipeline-passthrough-extracted";
+            let server = MockServer::start();
+            let download = registry(&server, model_id);
+            let client = RegistryClient::with_url(server.base_url()).unwrap();
+            let dir = client.extraction_dir(model_id);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("model.gguf"), GGUF).unwrap();
+            std::fs::write(
+                dir.join("model_metadata.json"),
+                serde_json::json!({
+                    "model_id": model_id,
+                    "version": "1.0",
+                    "execution_template": { "type": "Gguf", "model_file": "model.gguf" },
+                    "files": ["model.gguf"],
+                    "metadata": {}
+                })
+                .to_string(),
+            )
+            .unwrap();
+
+            let pipeline = provider_less_pipeline(&server, model_id);
+            assert_eq!(pipeline.stages()[0].status, StageStatus::Cached);
+            assert_eq!(pipeline.download_size(), 0);
+
+            pipeline.load_models().unwrap();
+            assert!(pipeline.is_ready());
+            assert_eq!(download.hits(), 0);
+        }
+
+        #[test]
+        fn a_provider_less_stage_downloads_its_passthrough_model() {
+            let model_id = "pipeline-passthrough-download";
+            let server = MockServer::start();
+            let download = registry(&server, model_id);
+
+            let pipeline = provider_less_pipeline(&server, model_id);
+            assert_eq!(pipeline.stages()[0].status, StageStatus::NeedsDownload);
+            assert_eq!(pipeline.stages()[0].target, StageTarget::Auto);
+
+            pipeline.load_models().unwrap();
+            assert!(pipeline.is_ready(), "{:?}", pipeline.stages());
+            assert_eq!(download.hits(), 1);
+            let client = RegistryClient::with_url(server.base_url()).unwrap();
+            assert_eq!(
+                std::fs::read(client.extraction_dir(model_id).join("model.gguf")).unwrap(),
+                GGUF
+            );
         }
     }
 
