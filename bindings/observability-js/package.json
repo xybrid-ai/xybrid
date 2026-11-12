@@ -1,6 +1,6 @@
 {
   "name": "@xybrid/observability",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "type": "module",
   "description": "Portable GenAI observability on OpenTelemetry: inference, tool, workflow and model-load spans, metrics and events, with an optional OTLP/HTTP pipeline.",
   "keywords": [

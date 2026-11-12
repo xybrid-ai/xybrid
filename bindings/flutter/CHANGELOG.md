@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.18.0
+
 * Observation controls for loading and live ASR; decoder/session, pipeline and
   streamed-TTS references. Typed manual workflow/tool/inference/load handles
   support explicit completion, failure and cancellation.
