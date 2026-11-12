@@ -88,9 +88,12 @@ try {
       waitUntil: "domcontentloaded",
       timeout: 60_000,
     });
+    // The heading shows the requested id even when the workspace cannot load
+    // the trace: require the loaded view (its summary with a Requests field).
     const found =
       response?.status() === 200 &&
-      (await check.getByRole("heading", { name: probe.trace_id, exact: true }).isVisible({ timeout: 15_000 }).catch(() => false));
+      (await check.getByRole("heading", { name: probe.trace_id, exact: true }).isVisible({ timeout: 15_000 }).catch(() => false)) &&
+      (await check.locator("dt").filter({ hasText: /^Requests$/ }).first().isVisible({ timeout: 15_000 }).catch(() => false));
     await check.close();
     if (found) workspace = candidate;
   }
