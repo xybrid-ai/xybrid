@@ -21,8 +21,8 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, "../../..");
 const require = createRequire(path.join(repo, "bindings/web/package.json"));
-const { chromium } = require("playwright");
-const { expect } = require("@playwright/test");
+// bindings/web depends on @playwright/test, which re-exports the browsers.
+const { chromium, expect } = require("@playwright/test");
 
 const [root, keyPath = path.join(os.homedir(), ".xybrid-step6/key")] = process.argv.slice(2);
 assert(root, "usage: node console.mjs <evidence lanes root> [key file]");
