@@ -1695,9 +1695,12 @@ mod tests {
 
     #[test]
     fn bolt_package_name_matches_its_manifest() {
+        // The runtime CARGO_MANIFEST_DIR, not `env!`: under Bazel the test
+        // runs in a sandbox where the compile-time path points nowhere.
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
         let manifest = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../crates/xybrid-bolt/Cargo.toml"),
+            std::path::Path::new(&manifest_dir).join("../crates/xybrid-bolt/Cargo.toml"),
         )
         .expect("crates/xybrid-bolt/Cargo.toml is readable");
         assert!(
