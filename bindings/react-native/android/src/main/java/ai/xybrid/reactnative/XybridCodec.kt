@@ -7,6 +7,18 @@ import ai.xybrid.XybridCacheStatus
 import ai.xybrid.XybridDownloadState
 import ai.xybrid.XybridDownloadStatus
 import ai.xybrid.XybridEnvelope
+import ai.xybrid.XybridDecisionContent
+import ai.xybrid.XybridDecisionRequest
+import ai.xybrid.XybridDecisionQuestionKind
+import ai.xybrid.XybridDecisionQuestion
+import ai.xybrid.XybridDecisionOption
+import ai.xybrid.XybridDecisionLevel
+import ai.xybrid.XybridDecisions
+import ai.xybrid.XybridDecisionValue
+import ai.xybrid.XybridDecisionOrigin
+import ai.xybrid.XybridScoreStatistic
+import ai.xybrid.decisionRequestEnvelope
+import ai.xybrid.decisionRequestJsonEnvelope
 import ai.xybrid.XybridEnvelopeKind
 import ai.xybrid.XybridError
 import ai.xybrid.XybridExecutionTarget
@@ -155,6 +167,13 @@ internal object XybridCodec {
     val kind = string(o, "kind", "envelope")
     val what = "$kind envelope"
     val payload = when (kind) {
+      "decisionRequest" -> {
+        if (o["requestJson"] != null) {
+          if (o["request"] != null) throw BridgeException.InvalidArgument("invalid decision request")
+          decisionRequestJsonEnvelope(string(o, "requestJson", "decision request")).kind
+        } else decisionRequestEnvelope(decodeDecisionRequest(o["request"])).kind
+      }
+      "decisions" -> throw BridgeException.InvalidArgument("decision results cannot be used as model input")
       "text" -> XybridEnvelopeKind.Text(string(o, "text", what))
       "audio" -> XybridEnvelopeKind.Audio(base64(o, "bytesBase64", what))
       "embedding" -> {
@@ -192,6 +211,14 @@ internal object XybridCodec {
   fun encodeEnvelope(envelope: XybridEnvelope): Map<String, Any?> {
     val out = linkedMapOf<String, Any?>()
     when (val kind = envelope.kind) {
+      is XybridEnvelopeKind.DecisionRequest -> {
+        out["kind"] = "decisionRequest"
+        out["request"] = encodeDecisionRequest(kind.request)
+      }
+      is XybridEnvelopeKind.Decisions -> {
+        out["kind"] = "decisions"
+        out["decisions"] = encodeDecisions(kind.decisions)
+      }
       is XybridEnvelopeKind.Text -> {
         out["kind"] = "text"
         out["text"] = kind.text
@@ -217,6 +244,93 @@ internal object XybridCodec {
     out["metadata"] = envelope.metadata.associate { it.key to it.value }
     return out
   }
+
+  // -- Ordered decisions -------------------------------------------------------
+
+  fun decodeDecisionContent(any: Any?): XybridDecisionContent? {
+    if (any == null) return null
+    val o = obj(any, "decision content")
+    return when (string(o, "kind", "decision content")) {
+      "text" -> XybridDecisionContent.Text(string(o, "text", "decision content"))
+      "json" -> XybridDecisionContent.Json(string(o, "jsonText", "decision content"))
+      else -> throw BridgeException.InvalidArgument("unsupported decision content")
+    }
+  }
+
+  fun decodeDecisionRequest(any: Any?): XybridDecisionRequest {
+    val o = obj(any, "decision request")
+    val questions = o["questions"] as? List<*>
+      ?: throw BridgeException.InvalidArgument("invalid decision questions")
+    if (questions.size > 16) throw BridgeException.InvalidArgument("invalid decision question count")
+    return XybridDecisionRequest(decodeDecisionContent(o["state"]), questions.map { any ->
+      val q = obj(any, "decision question")
+      val k = obj(q["kind"], "decision question kind")
+      val kind = when (string(k, "kind", "decision question kind")) {
+        "choice" -> {
+          val options = k["options"] as? List<*>
+            ?: throw BridgeException.InvalidArgument("invalid decision options")
+          if (options.size > 255) throw BridgeException.InvalidArgument("invalid decision option count")
+          XybridDecisionQuestionKind.Choice(options.map { any ->
+            val option = obj(any, "decision option")
+            XybridDecisionOption(string(option, "key", "decision option"), decodeDecisionContent(option["description"]))
+          })
+        }
+        "yesNo" -> XybridDecisionQuestionKind.YesNo(decodeDecisionContent(k["yes"]), decodeDecisionContent(k["no"]))
+        "score" -> {
+          val levels = k["levels"] as? List<*>
+            ?: throw BridgeException.InvalidArgument("invalid decision levels")
+          if (levels.size > 255) throw BridgeException.InvalidArgument("invalid decision level count")
+          XybridDecisionQuestionKind.Score(levels.map { any ->
+            XybridDecisionLevel(decodeDecisionContent(obj(any, "decision level")["description"]))
+          })
+        }
+        else -> throw BridgeException.InvalidArgument("unsupported decision question kind")
+      }
+      XybridDecisionQuestion(string(q, "id", "decision question"), decodeDecisionContent(q["instructions"]), kind)
+    })
+  }
+
+  fun encodeDecisionContent(content: XybridDecisionContent): Map<String, Any?> = when (content) {
+    is XybridDecisionContent.Text -> mapOf("kind" to "text", "text" to content.text)
+    is XybridDecisionContent.Json -> mapOf("kind" to "json", "jsonText" to content.jsonText)
+  }
+
+  fun encodeDecisionRequest(request: XybridDecisionRequest): Map<String, Any?> = mapOf(
+    "state" to request.state?.let(::encodeDecisionContent),
+    "questions" to request.questions.map { q ->
+      val kind = when (val k = q.kind) {
+        is XybridDecisionQuestionKind.Choice -> mapOf("kind" to "choice", "options" to k.options.map {
+          mapOf("key" to it.key, "description" to it.description?.let(::encodeDecisionContent))
+        })
+        is XybridDecisionQuestionKind.YesNo -> mapOf("kind" to "yesNo", "yes" to k.yes?.let(::encodeDecisionContent), "no" to k.no?.let(::encodeDecisionContent))
+        is XybridDecisionQuestionKind.Score -> mapOf("kind" to "score", "levels" to k.levels.map {
+          mapOf("description" to it.description?.let(::encodeDecisionContent))
+        })
+      }
+      mapOf("id" to q.id, "instructions" to q.instructions?.let(::encodeDecisionContent), "kind" to kind)
+    },
+  )
+
+  fun encodeDecisions(decisions: XybridDecisions): Map<String, Any?> = mapOf(
+    "passes" to decisions.passes.toDouble(), "inputTokens" to decisions.inputTokens.toDouble(),
+    "answers" to decisions.answers.map { answer ->
+      val value = when (val v = answer.value) {
+        is XybridDecisionValue.Choice -> mapOf("kind" to "choice", "key" to v.key)
+        is XybridDecisionValue.YesNo -> mapOf("kind" to "yesNo", "pYes" to v.pYes)
+        is XybridDecisionValue.Score -> mapOf("kind" to "score", "value" to v.value,
+          "statistic" to if (v.statistic == XybridScoreStatistic.MEDIAN) "median" else "expected")
+      }
+      val out = linkedMapOf<String, Any?>("questionId" to answer.questionId, "value" to value,
+        "distribution" to answer.distribution.map { entry -> mapOf(
+          "key" to entry.key,
+          "rawScore" to if (entry.rawScore == Float.NEGATIVE_INFINITY) "-Infinity" else entry.rawScore.toDouble(),
+          "probability" to entry.probability,
+          "origin" to if (entry.origin == XybridDecisionOrigin.CALLER) "caller" else "fixed",
+        ) })
+      answer.confidence?.let { out["confidence"] = it }
+      out
+    },
+  )
 
   // -- Generation and run options -----------------------------------------------
 
@@ -316,6 +430,7 @@ internal object XybridCodec {
     XybridOutputType.AUDIO -> "audio"
     XybridOutputType.EMBEDDING -> "embedding"
     XybridOutputType.UNKNOWN -> "unknown"
+    XybridOutputType.DECISIONS -> "decisions"
   }
 
   fun encodeExecutionTarget(target: XybridExecutionTarget): String =

@@ -509,6 +509,14 @@ classes:
     swift_name: XybridEnvelope
     csharp_name: Envelope
     factories:
+      decisionRequestJson:
+        params: [{ name: json, type: String }]
+        notes: "Bounded Liquid SystemOne JSON. Preserves ordered content and numeric identity. Local text/v1 only; package/device qualification is a separate release gate."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      decisionRequest:
+        params: [{ name: request, type: DecisionRequest }]
+        notes: "Ordered typed builders; structured JSON content crosses as text. Uses the existing run API."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       text:
         params:
           - { name: text, type: String }
@@ -605,6 +613,18 @@ classes:
     swift_name: XybridResult
     csharp_name: InferenceResult
     properties:
+      decisions:
+        type: "Decisions?"
+        notes: "Typed ordered answers with f64 probabilities and total passes/inputTokens; no generated text."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      tokensIn:
+        type: "int?"
+        notes: "Total evaluated input tokens from envelope metadata; no frozen wire-record fields added."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      tokensOut:
+        type: "int?"
+        notes: "Generated token usage from envelope metadata, zero for decisions."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       success:
         type: bool
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }

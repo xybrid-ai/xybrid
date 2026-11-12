@@ -68,6 +68,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parse output
     match &output_envelope.kind {
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            return Err("Unexpected decision output".into());
+        }
         EnvelopeKind::Embedding(embedding) => {
             println!("📊 Sentence embedding:");
             println!("   Dimensions: {}", embedding.len());

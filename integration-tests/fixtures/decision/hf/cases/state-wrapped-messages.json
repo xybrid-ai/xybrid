@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "state-wrapped-messages",
+  "profile": "lfm3-d1/text/v1",
+  "title": "An object state with a messages array: the messages are rebuilt, other keys kept",
+  "covers": [
+    "state-messages",
+    "state-object"
+  ],
+  "request_text": "{\"state\": {\"channel\": \"email\", \"messages\": [{\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"Refund please.\"}]}], \"priority\": 2}, \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}}",
+  "artifact": "d1-2b-hf"
+}

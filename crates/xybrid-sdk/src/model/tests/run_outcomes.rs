@@ -943,6 +943,59 @@ fn a_synthesis_cancelled_before_it_starts_is_one_cancelled_request() {
 }
 
 #[test]
+fn a_decision_request_that_ends_before_it_runs_is_one_request_with_its_outcome() {
+    // A decision model ends on a cancelled token whatever the abort policy
+    // observes, and refuses cloud fallback. Both return before the model is
+    // read, and both are counted like any other request that never ran.
+    let token = CancellationToken::new();
+    token.cancel();
+    let cases = [
+        (
+            "cancelled token",
+            RunOptions::new().with_cancellation_token(token),
+            "cancelled",
+        ),
+        (
+            "cloud fallback",
+            RunOptions::new().with_abort_policy(AbortPolicy::default().with_cloud_fallback(true)),
+            "unsupported",
+        ),
+    ];
+    for (name, options, expected) in cases {
+        let signals = memory_session_with_signals();
+        let model = test_model_with_metadata(liquid_metadata());
+        let span_name = run_span_name(&model);
+
+        model
+            .run_with_options(&decision_warmup_request(), &observed(options, &signals))
+            .expect_err(name);
+
+        let spans = signals.spans.spans();
+        assert_eq!(spans.len(), 1, "{name}: {spans:?}");
+        assert_eq!(spans[0].name, span_name, "{name}");
+        assert_ended(&spans[0], expected);
+        // A decision is not generative inference: its duration is recorded
+        // on the general operation metric.
+        let points = signals.points(semconv::metric::OPERATION_DURATION);
+        assert_eq!(points.len(), 1, "{name}: {points:?}");
+        assert_eq!(
+            (points[0].attr(semconv::attr::ERROR_TYPE), points[0].count),
+            (Some(expected), 1),
+            "{name}"
+        );
+        assert!(
+            signals
+                .points(semconv::metric::INFERENCE_DURATION)
+                .is_empty(),
+            "{name}"
+        );
+        if expected == "cancelled" {
+            assert_no_exception(&signals);
+        }
+    }
+}
+
+#[test]
 fn a_refused_run_stream_input_is_one_request() {
     use tokio_stream::StreamExt as _;
     let _default = default_session_lock();

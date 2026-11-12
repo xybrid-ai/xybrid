@@ -253,6 +253,32 @@ do {
 }
 expectInvalidArgument("partial float") { _ = try XybridCodec.float32Samples(Data([1, 2, 3]).base64EncodedString()) }
 
+// MARK: - Decisions (no native model required)
+
+do {
+  let raw = #"{"z":18446744073709551615,"a":9007199254740993,"zero":-0.0}"#
+  let request = try XybridCodec.decodeDecisionRequest(js([
+    "state": ["kind": "json", "jsonText": raw],
+    "questions": [["id": "q", "instructions": ["kind": "text", "text": "choose"],
+      "kind": ["kind": "choice", "options": [["key": "a"]]]]],
+  ]))
+  if case .json(let text)? = request.state { check(text == raw, "decision JSON is verbatim") }
+  else { check(false, "decision JSON content") }
+  let requestAgain = try XybridCodec.decodeDecisionRequest(js(XybridCodec.encodeDecisionRequest(request)))
+  check(requestAgain == request, "ordered decision request round trip")
+  let probability = 0.5000000018693014
+  let decisions = XybridDecisions(answers: [XybridDecisionAnswer(questionId: "q", distribution: [
+    XybridDecisionScore(key: "0", rawScore: 0, probability: 1 - probability, origin: .caller),
+    XybridDecisionScore(key: "1", rawScore: 0, probability: probability, origin: .caller),
+    XybridDecisionScore(key: "2", rawScore: -.infinity, probability: 0, origin: .caller),
+  ], value: .score(value: 1, statistic: .median), confidence: probability)], passes: 1, inputTokens: 512)
+  let encoded = js(XybridCodec.encodeDecisions(decisions)) as! [String: Any]
+  let answers = encoded["answers"] as! [[String: Any]]
+  let distribution = answers[0]["distribution"] as! [[String: Any]]
+  check((distribution[1]["probability"] as! NSNumber).doubleValue == probability, "decision f64 preserved")
+  check(distribution[2]["rawScore"] as? String == "-Infinity", "decision infinity is a string")
+} catch { check(false, "decision codec threw an error") }
+
 // MARK: - Errors
 
 check(XybridCodec.rejection(for: XybridError.rateLimited(retryAfterSecs: 3)).code == "xybrid_rate_limited", "sdk code")

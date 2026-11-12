@@ -21,6 +21,7 @@ use crate::utf8::Utf8Decoder;
 /// the native model stays loaded until the last of them is dropped.
 pub struct LlamaModel {
     handle: Arc<ModelHandle>,
+    pub(crate) decision_cpu: bool,
 }
 
 /// The native `llama_model*`, freed when its last owner drops.
@@ -51,11 +52,19 @@ impl Drop for ModelHandle {
 }
 
 impl LlamaModel {
+    pub(crate) fn from_decision_ptr(ptr: *mut c_void, decision_cpu: bool) -> Self {
+        Self {
+            handle: Arc::new(ModelHandle { ptr }),
+            decision_cpu,
+        }
+    }
+
     /// Load a model from a GGUF file.
     ///
     /// `n_gpu_layers` is forwarded verbatim to llama.cpp's loader (a
-    /// negative value means "all layers on the GPU"; zero forces CPU
-    /// inference).
+    /// negative value means "all layers on the GPU"; zero keeps model layers
+    /// on the CPU). For an explicit no-offload decision configuration, use
+    /// [`Self::load_decision_cpu`] instead.
     pub fn load(path: &str, n_gpu_layers: i32) -> LlamaResult<Self> {
         let c_path = ffi::cstring(path, "model path")?;
         // SAFETY: `c_path` outlives the call; `n_gpu_layers` is plain
@@ -64,9 +73,22 @@ impl LlamaModel {
         if ptr.is_null() {
             return Err(LlamaError::LoadFailed(path.to_string()));
         }
-        Ok(Self {
+        let model = Self {
             handle: Arc::new(ModelHandle { ptr }),
-        })
+            decision_cpu: false,
+        };
+        // A decision artifact must never silently enter causal generation,
+        // including when old explicit GGUF metadata bypasses SDK detection.
+        // The scan cannot fail: its limits belong to decision admission, and
+        // must not refuse a chat model that loaded before decisions existed.
+        // That includes a model that answers decisions and generates text,
+        // which upstream serves as a chat model too.
+        if model.is_decision_only() {
+            return Err(LlamaError::InvalidInput(
+                "decision artifact requires an explicit decision execution profile".into(),
+            ));
+        }
+        Ok(model)
     }
 
     /// Returns the raw pointer for the `xybrid-llama` internals.
@@ -92,6 +114,7 @@ impl LlamaModel {
             handle: Arc::new(ModelHandle {
                 ptr: std::ptr::null_mut(),
             }),
+            decision_cpu: false,
         }
     }
 
@@ -121,37 +144,37 @@ impl LlamaModel {
         add_special: bool,
         parse_special: bool,
     ) -> LlamaResult<Vec<i32>> {
-        let c_text = ffi::cstring(text, "tokenize text")?;
-        // SAFETY: `c_text` outlives both calls. Probe + real call follow
+        let text_len = i32::try_from(text.len()).map_err(|_| {
+            LlamaError::InvalidInput("tokenizer input exceeds native length limit".into())
+        })?;
+        // SAFETY: `text` is length-delimited and outlives both calls. Probe + real call follow
         // llama.cpp's documented two-pass tokenization protocol.
         let probe = unsafe {
-            ffi::tokenize_probe(
-                self.as_ptr(),
-                &c_text,
-                text.len(),
-                add_special,
-                parse_special,
-            )
+            ffi::tokenize_probe(self.as_ptr(), text, text_len, add_special, parse_special)
         };
-        let required = if probe < 0 { -probe } else { probe };
+        let required = probe.checked_abs().ok_or(LlamaError::TokenizationFailed)?;
         if required <= 0 {
             return Ok(Vec::new());
         }
-        let capacity = required as usize + 16; // padding for safety
-        let mut tokens = vec![0i32; capacity];
+        let capacity = required;
+        let mut tokens = Vec::new();
+        tokens
+            .try_reserve_exact(capacity as usize)
+            .map_err(|_| LlamaError::TokenizationFailed)?;
+        tokens.resize(capacity as usize, 0i32);
         // SAFETY: `tokens` is writable for `capacity` i32 elements.
         let result = unsafe {
             ffi::tokenize_into(
                 self.as_ptr(),
-                &c_text,
-                text.len(),
+                text,
+                text_len,
                 tokens.as_mut_ptr(),
                 capacity,
                 add_special,
                 parse_special,
             )
         };
-        if result < 0 {
+        if result < 0 || result > capacity {
             return Err(LlamaError::TokenizationFailed);
         }
         tokens.truncate(result as usize);

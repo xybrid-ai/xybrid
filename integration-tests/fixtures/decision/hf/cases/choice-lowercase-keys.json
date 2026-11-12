@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "choice-lowercase-keys",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Lowercase single-letter keys are codes too",
+  "covers": [
+    "choice-letter-keys",
+    "choice-lowercase-keys"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"y\": \"Yes, refund\", \"n\": \"No refund\", \"m\": \"Maybe later\"}}}}",
+  "artifact": "d1-2b-hf"
+}

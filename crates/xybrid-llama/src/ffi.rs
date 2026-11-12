@@ -187,8 +187,8 @@ pub(crate) unsafe fn state_seq_set_data(ctx: *mut c_void, src: &[u8], seq_id: i3
 /// a negative count carrying the required buffer length.
 pub(crate) unsafe fn tokenize_probe(
     model: *const c_void,
-    text: &CString,
-    text_len: usize,
+    text: &str,
+    text_len: c_int,
     add_special: bool,
     parse_special: bool,
 ) -> c_int {
@@ -196,8 +196,8 @@ pub(crate) unsafe fn tokenize_probe(
     record_native_call();
     sys::llama_tokenize_c(
         model,
-        text.as_ptr(),
-        text_len as c_int,
+        text.as_ptr().cast(),
+        text_len,
         std::ptr::null_mut(),
         0,
         add_special,
@@ -213,10 +213,10 @@ pub(crate) unsafe fn tokenize_probe(
 /// `capacity` `i32` elements.
 pub(crate) unsafe fn tokenize_into(
     model: *const c_void,
-    text: &CString,
-    text_len: usize,
+    text: &str,
+    text_len: c_int,
     out_tokens: *mut i32,
-    capacity: usize,
+    capacity: c_int,
     add_special: bool,
     parse_special: bool,
 ) -> c_int {
@@ -224,10 +224,10 @@ pub(crate) unsafe fn tokenize_into(
     record_native_call();
     sys::llama_tokenize_c(
         model,
-        text.as_ptr(),
-        text_len as c_int,
+        text.as_ptr().cast(),
+        text_len,
         out_tokens,
-        capacity as c_int,
+        capacity,
         add_special,
         parse_special,
     )

@@ -208,6 +208,7 @@ _SDK_INTEGRATION_TESTS = {
         ":xybrid-sdk",
         "@crates//:httpmock",
         "@crates//:serde_json",
+        "@crates//:tempfile",
     ],
     "metadata_gen_test": [
         ":xybrid-sdk",

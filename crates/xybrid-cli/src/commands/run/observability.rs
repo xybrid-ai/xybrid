@@ -217,7 +217,11 @@ fn request(metadata: &ModelMetadata, input: &Envelope) -> InferenceRequest {
 
 fn modalities(envelope: &Envelope) -> Vec<Modality> {
     match &envelope.kind {
-        EnvelopeKind::Text(_) | EnvelopeKind::ChoiceRequest(_) => vec![Modality::Text],
+        EnvelopeKind::Text(_)
+        | EnvelopeKind::ChoiceRequest(_)
+        | EnvelopeKind::DecisionRequest(_) => {
+            vec![Modality::Text]
+        }
         EnvelopeKind::Audio(_) => vec![Modality::Audio],
         EnvelopeKind::Image { .. } => vec![Modality::Image],
         EnvelopeKind::MultiPart(items) => {
@@ -229,7 +233,9 @@ fn modalities(envelope: &Envelope) -> Vec<Modality> {
             }
             result
         }
-        EnvelopeKind::Embedding(_) | EnvelopeKind::ChoiceScores(_) => Vec::new(),
+        EnvelopeKind::Embedding(_) | EnvelopeKind::ChoiceScores(_) | EnvelopeKind::Decisions(_) => {
+            Vec::new()
+        }
     }
 }
 
@@ -268,6 +274,8 @@ fn parts(envelope: &Envelope) -> Vec<Part> {
             .into_iter()
             .collect(),
         EnvelopeKind::Embedding(_) => Vec::new(),
+        // Decision state, questions and answers are never captured content.
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => Vec::new(),
     }
 }
 

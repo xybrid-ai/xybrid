@@ -225,6 +225,55 @@ cmake/cc/NDK versions. That is right for publisher/consumer cache parity and
 wrong for distribution, which is why the download path selects by target +
 feature set + ABI attributes from the manifest instead of recomputing it.
 
+### Liquid decision models (`lfm3-d1/text/v1`)
+
+Decision models answer typed questions without generating text. A request is
+an `EnvelopeKind::DecisionRequest` on the ordinary `run` / `run_async` /
+`run_with_options` surface; there is no decision-specific `run*` method. The
+contract is `docs/development/liquid-decision-protocol.md`, and
+`docs/development/decision-conformance.md` says what is and is not qualified.
+
+- **No build advertises the d1 registry capability.**
+  `llamacpp-lfm3-d1-text-v1` is absent on purpose from
+  `xybrid_core::features` and from the SDK's `ARTIFACT_BACKENDS`, so the
+  registry serves no decision artifact while the reference comparison (P02 in
+  the conformance record) is open. A test in each file fails if it is added.
+  Loads that do not go through the registry are unaffected.
+- **The chat path refuses decision artifacts that generate no text.** A GGUF
+  carries a decision marker when a metadata key is
+  `tokenizer.chat_template.systemone`, starts with `systemone.` or contains
+  `.decision.`. It stays a chat model only when its
+  `<architecture>.decision.type` is one that also generates text
+  (`decision_type_generates_text`: `granite-switch`, the one type the pinned
+  llama.cpp's `server_model_output_modalities` serves as text too); xybrid
+  answers no decisions with those. The SDK's header sniff
+  (`xybrid_core::execution::decision`) is best effort; the authority is
+  `LlamaModel::load`, which scans every key after loading and refuses.
+  `xybrid_llama` keeps its own copy of the rules. Change both together: core
+  tests compare them.
+- **`Decision CPU conformance` is a required check.**
+  `test-decision-conformance.yml` has no path filter, and
+  `tools/scripts/llamacpp_update.py` waits on that job name. It collects a
+  fresh upstream reference on the runner and compares bit for bit. Never loosen
+  the comparison to make it pass.
+- **The llama.cpp pin has copies the update automation does not rewrite:**
+  `tools/conformance/decision/{check.py,oracle.py}`,
+  `integration-tests/fixtures/decision/{integrity.json,oracle.json}`,
+  `integration-tests/tests/decision_conformance.rs`, and the commit named in
+  `crates/llama-cpp-sys/NOTICE`. A llama.cpp update PR migrates them by hand,
+  and rechecks `decision_type_generates_text` against upstream's list.
+- **`crates/llama-cpp-sys/NOTICE` is the notice source.** Byte-identical copies
+  are committed for the Kotlin AAR (`assets/xybrid/llama/NOTICE`, gated by
+  `verify_zzz_android.py`), Python and Unity; React Native, the web package,
+  native slices and the CLI release assets copy it at build time. Edit the
+  source, then the committed copies.
+- **The wrapper compiles llama.cpp's Jinja closure** (`common/jinja/*.cpp`,
+  `common/json.cpp`, `common/unicode.cpp`). The list is in
+  `crates/llama-cpp-sys/build.rs` and in `//:llama_decision_jinja`; keep them
+  equal (`tools/scripts/tests/test_decision_jinja_sources.py` fails when they
+  differ). Keep llama.cpp's `src/` off the wrapper's include path: a second
+  `ggml.h` breaks the iOS build.
+
 ### Releases
 
 **Releases are cut by branch name, not by hand.** Push a `release/v<version>`

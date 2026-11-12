@@ -26,18 +26,19 @@ tts-zzz = ["xybrid-sdk/tts-zzz"]
 llm-mistral = ["xybrid-core/llm-mistral"]              # mistral.rs (CPU)
 llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]  # mistral.rs + Metal (macOS)
 llm-mistral-cuda = ["xybrid-core/llm-mistral-cuda"]    # mistral.rs + CUDA (NVIDIA)
-llm-llamacpp = ["xybrid-core/llm-llamacpp"]            # llama.cpp (links native backend)
+llm-llamacpp = ["xybrid-core/llm-llamacpp", "dep:xybrid-llama"] # llama.cpp (links native backend)
 
 [dependencies]
 xybrid-core = { path = "../crates/xybrid-core" }
 tokio = { version = "1.0", features = ["full"] }
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["float_roundtrip", "unbounded_depth"] }
 serde_yaml = "0.9"
 log = "0.4"
 env_logger = "0.10"
 dirs = "6.0"
+xybrid-llama = { path = "../crates/xybrid-llama", optional = true }
 
 [dev-dependencies]
 # tests/system_validation.rs drives the public SDK end to end. It lives here
@@ -47,3 +48,4 @@ dirs = "6.0"
 xybrid-sdk = { path = "../crates/xybrid-sdk" }
 tempfile = "3.8"
 filetime = "0.2"
+sha2 = "0.10"

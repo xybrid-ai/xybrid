@@ -46,6 +46,7 @@ pub(crate) static OBSERVABILITY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mut
 use commands::{CacheCommand, ModelsCommand, TelemetryCommand};
 
 use anyhow::{Context, Result};
+use clap::builder::TypedValueParser;
 use clap::{ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand};
 use platform::host::{self, PlatformHost};
 use platform::resolve::{self, KeySource, ResolvedKey};
@@ -249,6 +250,15 @@ enum Commands {
         )]
         choices: Vec<Choice>,
 
+        /// Liquid decision request JSON from a file, or - for stdin.
+        /// Prints the machine-readable xybrid.decision.v1 result format.
+        #[arg(long, value_name = "FILE-OR--", value_parser = clap::builder::PathBufValueParser::new().map(Box::new), conflicts_with_all = [
+            "config", "pipeline", "input_audio", "input_text", "input_images", "choices",
+            "voice", "max_tokens", "speculative_cloud", "show_reasoning", "policy",
+            "trace", "trace_export", "target", "model_file", "dry_run"
+        ])]
+        decision_request: Option<Box<PathBuf>>,
+
         /// Voice ID for TTS models (e.g., "af_bella", "am_adam")
         #[arg(long, value_name = "VOICE")]
         voice: Option<String>,
@@ -426,6 +436,11 @@ impl Commands {
     fn json_output(&self) -> bool {
         match self {
             Commands::Init { json, .. } => *json,
+            // One `xybrid.decision.v1` record, and nothing else, on stdout.
+            Commands::Run {
+                decision_request: Some(_),
+                ..
+            } => true,
             _ => false,
         }
     }
@@ -494,6 +509,15 @@ fn main() -> Result<()> {
     configure_cloud_auth(key.as_ref(), host.as_ref());
 
     let json = cli.command.json_output();
+    // `run --decision-request` prints one JSON record on stdout: a failure
+    // goes to stderr through the returned error, with no hints printed.
+    let decision_output = matches!(
+        &cli.command,
+        Commands::Run {
+            decision_request: Some(_),
+            ..
+        }
+    );
     let (render_trace, trace_path) = match &cli.command {
         Commands::Run {
             trace,
@@ -632,6 +656,12 @@ fn main() -> Result<()> {
             );
         }
         platform::notices::report_workspace_notice(notice, saved_credential, quiet, json);
+    }
+
+    // Keep stdout a JSON-only channel even when telemetry is enabled or a
+    // registry load fails. Returning the error uses Rust's stderr reporting.
+    if decision_output {
+        return result;
     }
 
     if let Err(ref err) = result {
@@ -947,6 +977,7 @@ fn run_command(cli: Cli, telemetry_config: Option<OtlpConfig>) -> Result<()> {
             input_text,
             input_images,
             choices,
+            decision_request,
             voice,
             output,
             target,
@@ -957,6 +988,20 @@ fn run_command(cli: Cli, telemetry_config: Option<OtlpConfig>) -> Result<()> {
             trace_export: _,
             speculative_cloud,
         } => {
+            if let Some(request_path) = decision_request {
+                let loader = if let Some(model_id) = model {
+                    xybrid_sdk::ModelLoader::from_registry(&model_id)
+                } else if let Some(dir) = directory {
+                    xybrid_sdk::ModelLoader::from_directory(dir)?
+                } else if let Some(path) = bundle {
+                    xybrid_sdk::ModelLoader::from_bundle(path)?
+                } else if let Some(repo) = huggingface {
+                    xybrid_sdk::ModelLoader::from_huggingface_parsed(&repo)
+                } else {
+                    anyhow::bail!("--decision-request requires --model, --directory, --bundle, or --huggingface");
+                };
+                return commands::run::run_decisions(loader, &request_path, output.as_deref());
+            }
             if let Some(gguf_path) = model_file {
                 return commands::run::run_model_file(
                     &gguf_path,
@@ -1636,6 +1681,35 @@ mod tests {
                 Choice::new("name", "fill Name: Jane Doe"),
             ]
         );
+    }
+
+    #[test]
+    fn decision_request_accepts_stdin_and_refuses_conflicting_shapes_before_load() {
+        let args = [
+            "xybrid",
+            "run",
+            "--directory",
+            "model",
+            "--decision-request",
+            "-",
+        ];
+        let parsed = Cli::try_parse_from(args).unwrap();
+        assert!(
+            matches!(parsed.command, Commands::Run { decision_request: Some(path), .. } if path.as_path() == std::path::Path::new("-"))
+        );
+        for conflict in [
+            vec!["--input-text", "secret"],
+            vec!["--input-audio", "audio.wav"],
+            vec!["--input-image", "image.png"],
+            vec!["--choice", "a=secret"],
+            vec!["--max-tokens", "1"],
+            vec!["--speculative-cloud"],
+            vec!["--show-reasoning"],
+            vec!["--target", "cloud"],
+            vec!["--trace"],
+        ] {
+            assert!(Cli::try_parse_from(args.into_iter().chain(conflict)).is_err());
+        }
     }
 
     #[test]

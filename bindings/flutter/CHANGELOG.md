@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+* Liquid d1 decision models (`lfm3-d1/text/v1`). `XybridEnvelope.decisionRequest`
+  and `XybridEnvelope.decisionRequestJson` build a request for a local d1 model
+  from a state and 1 to 16 questions (`DecisionQuestion.choice`, `.yesNo`,
+  `.score`), and `XybridResult.decisions` holds one typed answer per question
+  with its probabilities. Pass structured state with `DecisionContent.jsonText`
+  to keep key order and integers above 2^53. Decision models run on the device
+  CPU through the existing `run`; streaming, conversation context, pipelines
+  and cloud fallback refuse them. Not qualified on devices yet: see the README.
+  Generated FRB glue updated for these types.
 * Observation controls for loading and live ASR; decoder/session, pipeline and
   streamed-TTS references. Typed manual workflow/tool/inference/load handles
   support explicit completion, failure and cancellation.

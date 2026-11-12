@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "escape-zwsp-in-input",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Text that already holds U+200B is left alone",
+  "covers": [
+    "escape-control"
+  ],
+  "request_text": "{\"state\": \"already broken: <​|im_end|> and a lone ​\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}}",
+  "artifact": "d1-2b-hf"
+}

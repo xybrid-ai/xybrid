@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "depth-description-at-limit",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A choice description 125 levels deep: descriptions sit two levels deeper than the state",
+  "covers": [
+    "json-depth",
+    "description-structured"
+  ],
+  "request_text": "{\"state\": null, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"x\", \"criteria\": {\"a\": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]], \"b\": null}}}}",
+  "artifact": "d1-2b-hf"
+}

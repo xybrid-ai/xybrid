@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "state-array",
+  "profile": "lfm3-d1/text/v1",
+  "title": "An array state of plain values",
+  "covers": [
+    "state-array",
+    "json-literals"
+  ],
+  "request_text": "{\"state\": [\"first message\", 2, 3.5, true, null, {\"k\": \"v\"}, []], \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}}",
+  "artifact": "d1-2b-hf"
+}

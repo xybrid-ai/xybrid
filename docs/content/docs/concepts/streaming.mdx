@@ -111,6 +111,8 @@ XYBRID_LLAMACPP_VERBOSITY=4 ./my-xybrid-app
 
 Use `4` when investigating model load failures: it surfaces the underlying llama.cpp diagnostic that the Rust-side error wraps. The variable is read once when the llama.cpp backend is initialized, so set it before launching the process. Available since `v0.1.0-beta5`.
 
+Two kinds of native call print nothing at any level, on the thread that makes them: tokenization, and the load and passes of a decision model. Their diagnostics can quote the prompt, so xybrid drops them. Logs from other threads, such as another model loading at the same time, are unaffected.
+
 ---
 
 ## Real-Time Audio Streaming (Planned)
