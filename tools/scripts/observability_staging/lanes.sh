@@ -215,12 +215,11 @@ lane_cli_legacy_mac() {
     local dir="$EV/released-cli-v0.17.0"
     if [ ! -x "$dir/xybrid" ]; then
         mkdir -p "$dir"
-        gh release download v0.17.0 -R xybrid-ai/xybrid -p 'xybrid-cli-*macos*arm64*' -p 'xybrid-*-aarch64-apple-darwin*' -D "$dir" --clobber
-        (cd "$dir" && for archive in *.tar.gz *.zip; do
-            [ -e "$archive" ] || continue
-            case "$archive" in *.zip) unzip -o -q "$archive" ;; *) tar -xzf "$archive" ;; esac
-        done)
-        find "$dir" -name xybrid -type f -perm -u+x -exec cp {} "$dir/xybrid" \; -quit
+        # The release ships the macOS CLI as a bare binary.
+        gh release download v0.17.0 -R xybrid-ai/xybrid -p 'xybrid-v0.17.0-macos-arm64' -D "$dir" --clobber
+        mv "$dir/xybrid-v0.17.0-macos-arm64" "$dir/xybrid"
+        chmod +x "$dir/xybrid"
+        xattr -d com.apple.quarantine "$dir/xybrid" 2>/dev/null || true
         shasum -a 256 "$dir"/* > "$dir/sha256.txt" 2>/dev/null || true
     fi
     cli_lane cli-legacy-mac "$dir/xybrid" https://staging.ingest.xybrid.dev
