@@ -16,6 +16,14 @@ using System;
 
 namespace XybridBolt
 {
+    /// <summary>Decision accessors without changing the generated result record.</summary>
+    public static class DecisionResults
+    {
+        /// <summary>Ordered typed decisions, or null for another output kind.</summary>
+        public static XybridDecisions? Decisions(this XybridResult result) =>
+            result.Envelope.Kind is XybridEnvelopeKind.Decisions value ? value.Value : null;
+    }
+
     public sealed partial class XybridModel
     {
         /// <summary>

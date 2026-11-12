@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "choice-one-option",
+  "profile": "lfm3-d1/text/v1",
+  "title": "One option: code A, probability 1",
+  "covers": [
+    "choice-one-option"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"only\": \"The only option\"}}}}",
+  "artifact": "d1-2b-hf"
+}

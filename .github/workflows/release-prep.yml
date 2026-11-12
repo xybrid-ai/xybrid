@@ -618,6 +618,7 @@ jobs:
           mkdir -p dist-cli
           BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=macos-metal -c opt)
           cp "$BIN" dist-cli/xybrid-${TAG}-macos-arm64
+          cp crates/llama-cpp-sys/NOTICE dist-cli/xybrid-${TAG}-macos-arm64.NOTICE
           chmod +w dist-cli/xybrid-${TAG}-macos-arm64   # bazel outputs are read-only
           strip dist-cli/xybrid-${TAG}-macos-arm64
           chmod +x dist-cli/xybrid-${TAG}-macos-arm64
@@ -772,8 +773,9 @@ jobs:
             --readelf readelf --speech --min-sdk 29
 
       # The release zip: the AAR's jni/<abi>/ directories at the root (the
-      # bindings/kotlin/libs/ layout publish-kotlin stages from) plus
-      # assets/xybrid/zzz/, gated again as the exact bytes that ship.
+      # bindings/kotlin/libs/ layout publish-kotlin stages from) plus the
+      # notices (assets/xybrid/llama/NOTICE and assets/xybrid/zzz/), gated
+      # again as the exact bytes that ship.
       - name: Prepare artifact with version
         shell: bash
         env:
@@ -1242,6 +1244,7 @@ jobs:
           ARTIFACT="dist/xybrid-${TAG}-linux-x86_64"
           BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote -c opt)
           cp "$BIN" "$ARTIFACT"
+          cp crates/llama-cpp-sys/NOTICE "${ARTIFACT}.NOTICE"
           chmod +w "$ARTIFACT"   # bazel-bin outputs are read-only
           strip "$ARTIFACT"
           chmod +x "$ARTIFACT"
@@ -1333,6 +1336,7 @@ jobs:
           ARTIFACT="dist/xybrid-${TAG}-windows-x86_64.exe"
           EXE=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=windows -c opt)
           cp "$EXE" "$ARTIFACT"
+          cp crates/llama-cpp-sys/NOTICE "${ARTIFACT}.NOTICE"
           echo "artifact_path=$ARTIFACT" >> "$GITHUB_OUTPUT"
 
       - name: Attest CLI provenance (windows-x86_64)
@@ -1494,7 +1498,7 @@ jobs:
             echo
             echo "**Android**"
             echo "- Maven Central: \`ai.xybrid:xybrid-kotlin:${TAG#v}\` (minSdk 29, Android 10); arm64-v8a includes Phonon/Kitten TTS 2 speech"
-            echo "- \`xybrid-android-${TAG}.zip\` — Native .so files for arm64-v8a (with Phonon/Kitten TTS 2 speech), armeabi-v7a and x86_64 (without speech), plus the speech engine's notices under \`assets/xybrid/zzz/\`. Copy only the ABI directories into \`jniLibs\`, ship \`assets/xybrid/zzz/\` with your app's assets, and set minSdk 29 (Android 10)"
+            echo "- \`xybrid-android-${TAG}.zip\` — Native .so files for arm64-v8a (with Phonon/Kitten TTS 2 speech), armeabi-v7a and x86_64 (without speech), plus the third-party notices under \`assets/xybrid/\`: \`llama/NOTICE\` for llama.cpp and \`zzz/\` for the speech engine. Copy only the ABI directories into \`jniLibs\`, ship all of \`assets/xybrid/\` with your app's assets, and set minSdk 29 (Android 10)"
             echo
             echo "**Flutter**"
             echo "- Precompiled native libraries auto-downloaded by cargokit"
@@ -1508,6 +1512,7 @@ jobs:
             echo
             echo "**CLI**"
             echo "- Cross-platform binaries for macOS (arm64), Linux (x86_64), and Windows (x86_64)"
+            echo "- Each CLI binary has a matching .NOTICE asset containing its llama.cpp/Jinja and JSON dependency licenses; retain it when redistributing the binary"
             echo
             echo "**Web (GGUF preview)**"
             echo "- \`xybrid-web-${TAG#v}.tgz\` — ESM, TypeScript declarations, worker, CPU/WASM SIMD and experimental WebGPU runtimes"

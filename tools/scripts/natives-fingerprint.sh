@@ -47,6 +47,7 @@ LLAMA_SHA="$(grep -E 'const LLAMA_CPP_COMMIT' "$SYS/build.rs" | grep -oE '[0-9a-
 WRAPPER_CPP="$(sha256 "$SYS/wrapper.cpp")"
 WRAPPER_H="$(sha256 "$SYS/wrapper.h")"
 BUILD_RS="$(sha256 "$SYS/build.rs")"
+NOTICE="$(sha256 "$SYS/NOTICE")"
 
 # 3. Toolchain identity — codegen depends on it, so a slice built by a
 #    different toolchain must NOT collide on the same fingerprint.
@@ -107,14 +108,12 @@ case "$TARGET" in
 esac
 
 # 4. Combine with a record separator (0x1f) so no two values can collide by
-#    concatenation. The android/linux payload is INTENTIONALLY byte-identical to
-#    the original formula so their already-published slices stay valid; apple
-#    and windows append a target-specific dimension (sdk/crt). Those targets
-#    have no published slices yet, so adding the dim costs no cache churn.
+#    concatenation. Notice changes also produce a new immutable package; the
+#    compiled closure is covered by the native pin, wrapper and build.rs hashes.
 US=$'\x1f'
 SUFFIX=""
 [ -n "$SDK_VER" ] && SUFFIX="${US}sdk=${SDK_VER}"
 [ -n "$DEPLOY" ] && SUFFIX="${SUFFIX}${US}deploy=${DEPLOY}"
 [ -n "$CRT" ] && SUFFIX="${US}crt=${CRT}"
-PAYLOAD="v1${US}llama=${LLAMA_SHA}${US}wrapper_cpp=${WRAPPER_CPP}${US}wrapper_h=${WRAPPER_H}${US}build_rs=${BUILD_RS}${US}target=${TARGET}${US}features=${FEATURES}${US}profile=release${US}cmake=${CMAKE_VER}${US}cc=${CC_VER}${US}ndk=${NDK_REV}${SUFFIX}"
+PAYLOAD="v1${US}llama=${LLAMA_SHA}${US}wrapper_cpp=${WRAPPER_CPP}${US}wrapper_h=${WRAPPER_H}${US}build_rs=${BUILD_RS}${US}notice=${NOTICE}${US}target=${TARGET}${US}features=${FEATURES}${US}profile=release${US}cmake=${CMAKE_VER}${US}cc=${CC_VER}${US}ndk=${NDK_REV}${SUFFIX}"
 printf '%s' "$PAYLOAD" | sha256

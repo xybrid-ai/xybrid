@@ -56,6 +56,11 @@ impl CancellationToken {
         self.cancelled.load(Ordering::SeqCst)
     }
 
+    /// Borrow the flag while a synchronous native decision call owns the token.
+    pub(crate) fn flag(&self) -> &AtomicBool {
+        &self.cancelled
+    }
+
     /// Whether two tokens share the same underlying cancellation flag.
     ///
     /// Cloning a [`CancellationToken`] shares its inner `Arc<AtomicBool>`, so

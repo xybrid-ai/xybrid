@@ -69,6 +69,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parse output
     match &output_envelope.kind {
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            return Err("Unexpected decision output".into());
+        }
         EnvelopeKind::Audio(audio_bytes) => {
             println!("═══════════════════════════════════════════════════════");
             println!("  Kokoro TTS Result (Misaki)");

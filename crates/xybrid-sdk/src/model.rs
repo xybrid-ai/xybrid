@@ -32,6 +32,7 @@ use xybrid_core::conversation::ConversationContext;
 use xybrid_core::execution::choice::{
     ensure_no_choice_kinds, validate_choice_request, validate_scorer_spec, EntryPoint,
 };
+use xybrid_core::execution::decision::{ensure_no_decision_kinds, validate_decision_request};
 use xybrid_core::execution::template::backend_label_from_template;
 use xybrid_core::execution::{
     ExecutionTemplate, ModelMetadata, TemplateExecutor, VoiceConfig, VoiceInfo,
@@ -216,8 +217,7 @@ pub enum SdkError {
     RateLimited { retry_after_secs: u64 },
     #[error("Request timeout after {timeout_ms}ms")]
     Timeout { timeout_ms: u64 },
-    /// The caller asked for the operation to stop — currently only
-    /// [`ModelDownload::cancel`](crate::download::ModelDownload::cancel).
+    /// The caller asked for a download or controlled decision execution to stop.
     /// Deliberately **not** retryable: retrying would undo the cancellation
     /// the caller just asked for.
     #[error("Cancelled: {message}")]
@@ -313,8 +313,7 @@ impl SdkError {
             SdkError::CacheError { .. } => false,
             SdkError::PipelineError { .. } => false,
             SdkError::CircuitOpen(_) => false, // Don't retry when circuit is open
-            // Retrying a cancelled download would resume exactly what the
-            // caller just stopped.
+            // Retrying would resume exactly what the caller just stopped.
             SdkError::Cancelled { .. } => false,
             SdkError::TelemetryDelivery(_) => false,
         }
@@ -337,12 +336,15 @@ impl SdkError {
     }
 }
 
-fn sdk_execution_error<E>(context: &str, error: E) -> SdkError
+pub(crate) fn sdk_execution_error<E>(context: &str, error: E) -> SdkError
 where
     E: Into<xybrid_core::error::XybridError>,
 {
     let error = error.into();
     match error {
+        xybrid_core::error::XybridError::Cancelled => SdkError::Cancelled {
+            message: "Execution cancelled".to_string(),
+        },
         xybrid_core::error::XybridError::MissingArtifact { artifact, path } => {
             SdkError::MissingArtifact { artifact, path }
         }
@@ -401,18 +403,68 @@ fn choice_warmup_request(fixed: &[Choice]) -> Envelope {
     Envelope::choice_request(Envelope::new(EnvelopeKind::Text(".".to_string())), caller)
 }
 
-/// Adds a choice scorer's decision fields to its `ModelComplete` data: the
-/// task, the backend and how many candidates were scored. Never their ids,
-/// texts or scores. Other models' data is left as it is.
-fn add_choice_telemetry(data: &mut serde_json::Value, metadata: &ModelMetadata, output: &Envelope) {
-    let EnvelopeKind::ChoiceScores(scores) = &output.kind else {
-        return;
+fn decision_warmup_request() -> Envelope {
+    use xybrid_core::ir::{
+        DecisionContent, DecisionQuestion, DecisionQuestionKind, DecisionRequest, DecisionState,
     };
+    Envelope::new(EnvelopeKind::DecisionRequest(DecisionRequest::new(
+        DecisionState::text("."),
+        vec![DecisionQuestion::new(
+            "warmup",
+            Some(DecisionContent::text("Is the state present?").into()),
+            DecisionQuestionKind::yes_no(None, None),
+        )],
+    )))
+}
+
+/// Maps a failure to load a decision model. Capability and missing-artifact
+/// errors keep their type; anything else is a load error, because no inference
+/// ran.
+fn decision_load_error(error: xybrid_core::runtime_adapter::AdapterError) -> SdkError {
+    match sdk_execution_error("decision runtime", error) {
+        SdkError::InferenceError { message, source } => SdkError::LoadError { message, source },
+        typed => typed,
+    }
+}
+
+fn decision_capability_refusal(model_id: &str, capability: &str) -> SdkError {
+    SdkError::UnsupportedModelCapability {
+        model_id: model_id.to_string(),
+        capability: capability.to_string(),
+        hint: "Liquid text/v1 accepts local batch decision requests only".to_string(),
+    }
+}
+
+/// Adds a decision run's fields to its `ModelComplete` data: the task and the
+/// backend, then the protocol, question count and token counts of a decision
+/// model, or how many candidates a choice scorer scored. Never ids, texts,
+/// answers or scores. Other models' data is left as it is.
+fn add_decision_telemetry(
+    data: &mut serde_json::Value,
+    metadata: &ModelMetadata,
+    output: &Envelope,
+) {
+    match &output.kind {
+        EnvelopeKind::Decisions(decisions) => {
+            if let ExecutionTemplate::Decision(spec) = &metadata.execution_template {
+                data["decision_protocol"] = spec.protocol.as_str().into();
+            }
+            data["question_count"] = decisions.answers().len().into();
+            for key in ["tokens_in", "tokens_out"] {
+                if let Some(value) = output.metadata.get(key).and_then(|v| v.parse::<u64>().ok()) {
+                    data[key] = value.into();
+                }
+            }
+        }
+        EnvelopeKind::ChoiceScores(scores) => {
+            data["choice_count"] = scores.entries.len().into();
+        }
+        _ => return,
+    }
     data["task"] = "decision".into();
     if let Some(backend) = backend_label_from_template(&metadata.execution_template, None) {
         data["backend"] = backend.into();
     }
-    data["choice_count"] = scores.entries.len().into();
 }
 
 fn streaming_execution_error(error: xybrid_core::runtime_adapter::AdapterError) -> SdkError {
@@ -576,6 +628,8 @@ pub struct SeamInfo {
 const FALLBACK_POLICY_RESOURCE_MAX_AGE: Duration = Duration::from_millis(500);
 const CLOUD_FALLBACK_UNSUPPORTED_TOOLS_REASON: &str = "cloud_fallback_unsupported_tools";
 const CLOUD_FALLBACK_UNSUPPORTED_CHOICE_REASON: &str = "cloud_fallback_unsupported_choice_request";
+const CLOUD_FALLBACK_UNSUPPORTED_DECISION_REASON: &str =
+    "cloud_fallback_unsupported_decision_request";
 
 static FALLBACK_AUTHORITY: OnceLock<LocalAuthority> = OnceLock::new();
 
@@ -842,10 +896,33 @@ where
                 )));
             }
 
-            // Choice requests never leave the device: no cloud leg scores
-            // candidates, and the gateway would read the request as text. The
-            // entry guards refuse them before a local run can abort, so this
-            // only backs them up.
+            // Decision and choice requests never leave the device: no cloud
+            // leg answers them, and the gateway would read the request as
+            // text. The entry guards refuse them before a local run can abort,
+            // so this only backs them up, and records the refusal as the
+            // other cloud-leg refusals are.
+            if envelope.kind.contains_decision_kind() {
+                crate::telemetry::publish_cloud_denied_by_policy(
+                    &correlation_id,
+                    cloud_model_id,
+                    reason,
+                    CLOUD_FALLBACK_UNSUPPORTED_DECISION_REASON,
+                    local_latency_ms,
+                );
+                record_cloud_outcome(
+                    authority,
+                    cloud_model_id,
+                    cloud_provider.as_deref(),
+                    0,
+                    false,
+                    Some(CLOUD_FALLBACK_UNSUPPORTED_DECISION_REASON.to_string()),
+                    OutcomeCategory::HardFail {
+                        reason: CLOUD_FALLBACK_UNSUPPORTED_DECISION_REASON.to_string(),
+                    },
+                    signal_context,
+                );
+                return Err(decision_capability_refusal(model_id, "cloud fallback"));
+            }
             if envelope.kind.contains_choice_kind() {
                 crate::telemetry::publish_cloud_denied_by_policy(
                     &correlation_id,
@@ -2657,7 +2734,7 @@ impl ModelLoader {
                         // `XybridModel::watch_download`.
                         |status| bg_download.set_progress(status),
                     )
-                    .and_then(|dir| Self::create_model_handle(&dir));
+                    .and_then(|dir| Self::create_model_handle(&dir, true));
                 if let Ok(real) = &built {
                     load.describe_directory(&id_owned, &real.model_dir);
                 }
@@ -2773,9 +2850,7 @@ impl ModelLoader {
         let extract_dir = cache.ensure_extracted(path)?;
 
         // Load from extracted directory (extraction is permanent in cache)
-        let handle = Self::create_model_handle(&extract_dir)?;
-
-        Ok(Self::publish_loaded_model(handle))
+        self.load_from_directory(&extract_dir)
     }
 
     /// Try to load `repo` entirely from the shared Hugging Face cache with
@@ -3397,7 +3472,11 @@ impl ModelLoader {
     }
 
     fn load_from_directory(&self, path: &PathBuf) -> SdkResult<XybridModel> {
-        let handle = Self::create_model_handle(path)?;
+        // A directory load is local whatever the speculative-cloud preference
+        // says: only `load_speculative` builds a cloud-backed model. The
+        // preference includes the process-global default, so passing it here
+        // would refuse decision models in any app that speculates for chat.
+        let handle = Self::create_model_handle(path, false)?;
 
         Ok(Self::publish_loaded_model(handle))
     }
@@ -3436,17 +3515,40 @@ impl ModelLoader {
         }
     }
 
-    fn create_model_handle(model_dir: &PathBuf) -> SdkResult<ModelHandle> {
+    /// Builds the handle for the bundle in `model_dir`. `speculative` is true
+    /// only for the handle a speculative download swaps into a cloud-backed
+    /// model, which must never become a decision model.
+    fn create_model_handle(model_dir: &PathBuf, speculative: bool) -> SdkResult<ModelHandle> {
         // Load metadata
         let metadata_path = model_dir.join("model_metadata.json");
         let metadata_str = std::fs::read_to_string(&metadata_path)
             .map_err(|e| SdkError::load_src("Failed to read model_metadata.json", e))?;
-        let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
+        let mut metadata: ModelMetadata = serde_json::from_str(&metadata_str)
             .map_err(|e| SdkError::load_src("Failed to parse metadata", e))?;
+        // A sidecar generated before decision models existed names a decision
+        // artifact as a chat model. Every directory load passes here, so a
+        // cache or a model file from an older SDK loads again without a
+        // manual cleanup.
+        if let Some(refreshed) =
+            crate::metadata_gen::refresh_generated_decision_sidecar(model_dir, &metadata)
+        {
+            metadata = refreshed;
+        }
         Self::validate_native_execution_template(&metadata)?;
+        if speculative && matches!(metadata.execution_template, ExecutionTemplate::Decision(_)) {
+            return Err(decision_capability_refusal(
+                &metadata.model_id,
+                "speculative execution",
+            ));
+        }
 
         // Create executor with base path
-        let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
+        let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
+        if matches!(metadata.execution_template, ExecutionTemplate::Decision(_)) {
+            executor
+                .load_decision(&metadata)
+                .map_err(decision_load_error)?;
+        }
 
         Ok(ModelHandle {
             executor: Arc::new(Mutex::new(executor)),
@@ -3504,7 +3606,7 @@ impl ModelLoader {
         // A scorer answers one batch run, whatever task its bundle declares.
         if matches!(
             metadata.execution_template,
-            ExecutionTemplate::ChoiceScorer { .. }
+            ExecutionTemplate::ChoiceScorer { .. } | ExecutionTemplate::Decision(_)
         ) {
             return false;
         }
@@ -3536,6 +3638,9 @@ impl ModelLoader {
     }
 
     fn infer_output_type(metadata: &ModelMetadata) -> OutputType {
+        if matches!(metadata.execution_template, ExecutionTemplate::Decision(_)) {
+            return OutputType::Decisions;
+        }
         if matches!(
             metadata.execution_template,
             ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. }
@@ -3679,6 +3784,9 @@ struct WarmupEventFields {
 }
 
 fn cap_warmup_generation(mut warmup_input: Envelope) -> Envelope {
+    if matches!(warmup_input.kind, EnvelopeKind::DecisionRequest(_)) {
+        return warmup_input;
+    }
     warmup_input
         .metadata
         .insert("max_tokens".to_string(), "1".to_string());
@@ -3767,6 +3875,18 @@ impl XybridModel {
     /// [`Self::touch`] at every run entry point.
     fn guard_input(&self, envelope: &Envelope, entry: EntryPoint) -> SdkResult<()> {
         let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
+        validate_decision_request(&handle.metadata, envelope, entry)
+            .map_err(|e| sdk_execution_error("Decision request refused", e))?;
+        if matches!(
+            handle.metadata.execution_template,
+            ExecutionTemplate::Decision(_)
+        ) && self.speculative.is_some()
+        {
+            return Err(decision_capability_refusal(
+                &self.model_id,
+                "speculative execution",
+            ));
+        }
         validate_choice_request(&handle.metadata, envelope, entry)
             .map_err(|e| sdk_execution_error("Execution failed", e))
     }
@@ -3780,6 +3900,14 @@ impl XybridModel {
         entry: EntryPoint,
     ) -> SdkResult<()> {
         self.guard_input(envelope, entry)?;
+        ensure_no_decision_kinds(
+            &self.model_id,
+            context
+                .system_envelope()
+                .into_iter()
+                .chain(context.history()),
+        )
+        .map_err(|e| sdk_execution_error("Decision history refused", e))?;
         ensure_no_choice_kinds(
             &self.model_id,
             context
@@ -3803,6 +3931,17 @@ impl XybridModel {
                 ExecutionTemplate::ChoiceScorer { .. }
             )
         })
+    }
+
+    /// Whether this model returns typed decisions through local batch execution.
+    ///
+    /// Reads the output type cached at load, never the model lock, so callers
+    /// (a UI thread starting a stream, a run's fast-fail checks) do not wait
+    /// behind a run in progress. The cache cannot go stale: a decision template
+    /// always loads as [`OutputType::Decisions`], and the speculative handle
+    /// swap, the only later change of template, refuses decision templates.
+    pub fn is_decision_model(&self) -> bool {
+        self.output_type == OutputType::Decisions
     }
 
     /// The candidates a choice scorer appends after the caller's, in order.
@@ -4337,6 +4476,7 @@ impl XybridModel {
 
         // Create a minimal input based on expected input type
         let warmup_input = match self.output_type {
+            OutputType::Decisions => decision_warmup_request(),
             OutputType::ChoiceScores => choice_warmup_request(&self.fixed_choices()),
             // For TTS models, use a short text
             OutputType::Audio => Envelope {
@@ -4508,25 +4648,40 @@ impl XybridModel {
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
-        self.run_observed(envelope, config, None, None)
+        self.run_observed(envelope, config, None, None, None)
     }
 
     /// [`Self::run`] with per-run options and a parent context captured
-    /// before a hop to a blocking worker.
+    /// before a hop to a blocking worker. `abort` is the caller's
+    /// cancellation flag, which decision execution polls between passes. It
+    /// is `None` for every other model, whose batch runs do not poll a token.
     fn run_observed(
         &self,
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
         options: Option<&RunOptions>,
         parent: Option<ObservationContext>,
+        abort: Option<&AtomicBool>,
     ) -> SdkResult<InferenceResult> {
+        if abort.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst)) {
+            // Recorded like any pre-run cancellation, without waiting for a
+            // busy model.
+            let error = SdkError::Cancelled {
+                message: "Decision execution cancelled".into(),
+            };
+            return self.refuse(envelope, &[], options, config, false, error);
+        }
         crate::telemetry::maybe_emit_dev_nudge();
         self.touch();
         if let Err(error) = self.guard_input(envelope, EntryPoint::Batch) {
             return self.refuse(envelope, &[], options, config, false, error);
         }
+        if self.is_decision_model() && config.is_some() {
+            let error = decision_capability_refusal(&self.model_id, "generation options");
+            return self.refuse(envelope, &[], options, config, false, error);
+        }
         let obs = self.observe(envelope, &[], options, config, false, parent);
-        let result = self.run_body(envelope, config, &obs);
+        let result = self.run_body(envelope, config, &obs, abort);
         obs.finish(result)
     }
 
@@ -4535,6 +4690,7 @@ impl XybridModel {
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
         obs: &RunObservation,
+        abort: Option<&AtomicBool>,
     ) -> SdkResult<InferenceResult> {
         // Speculative cloud: serve from the gateway until the local handle is
         // ready (see `cloud_serve`).
@@ -4561,7 +4717,7 @@ impl XybridModel {
                 .executor
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .execute(&metadata, envelope, config)
+                .execute_controlled(&metadata, envelope, config, abort)
                 .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
             let latency_ms = start.elapsed().as_millis() as u32;
@@ -4572,7 +4728,7 @@ impl XybridModel {
                 "version": self.version,
                 "output_type": format!("{:?}", self.output_type),
             });
-            add_choice_telemetry(&mut data, &metadata, &output);
+            add_decision_telemetry(&mut data, &metadata, &output);
             let event = crate::telemetry::TelemetryEvent {
                 event_type: "ModelComplete".to_string(),
                 stage_name: Some(self.model_id.clone()),
@@ -4826,6 +4982,32 @@ impl XybridModel {
         envelope: &Envelope,
         options: &RunOptions,
     ) -> SdkResult<InferenceResult> {
+        // Only a decision run takes the token as a cancellation flag: it ends
+        // with `Cancelled` whatever the abort policy observes. Every other
+        // model keeps its batch contract, where a cancelled token matters only
+        // through `AbortSignal::UserCancelled` (or, for speech, inside the
+        // synthesis itself).
+        let decision = self.is_decision_model();
+        let abort = options
+            .cancellation_token
+            .as_ref()
+            .filter(|_| decision)
+            .map(CancellationToken::flag);
+        // Both end the request before it runs, and are recorded as the other
+        // pre-run outcomes are: one request with its outcome, without waiting
+        // for a busy model.
+        if abort.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst)) {
+            let error = SdkError::Cancelled {
+                message: "Decision execution cancelled".into(),
+            };
+            let config = options.generation_config.as_ref();
+            return self.refuse(envelope, &[], Some(options), config, false, error);
+        }
+        if decision && options.abort_policy.fallback_to_cloud {
+            let error = decision_capability_refusal(&self.model_id, "cloud fallback");
+            let config = options.generation_config.as_ref();
+            return self.refuse(envelope, &[], Some(options), config, false, error);
+        }
         let mut abort_state = AbortState::new(options);
         if let Err(reason) = abort_state.check_before_run() {
             let error = SdkError::inference(format!("Execution aborted: {reason}"));
@@ -4889,6 +5071,7 @@ impl XybridModel {
             options.generation_config.as_ref(),
             Some(options),
             None,
+            abort,
         )
     }
 
@@ -6093,7 +6276,7 @@ impl XybridModel {
         let context = crate::observability::CapturedContext::capture();
         tokio::task::spawn_blocking(move || {
             let _context = context.enter();
-            model.run_observed(&envelope, config.as_ref(), None, None)
+            model.run_observed(&envelope, config.as_ref(), None, None, None)
         })
         .await
         .map_err(|e| SdkError::inference_src("Task join error", e))?
@@ -6919,10 +7102,11 @@ mod tests {
             std::fs::write(temp_dir.path().join("model_metadata.json"), metadata_json)
                 .expect("model metadata should be written");
 
-            let error = match ModelLoader::create_model_handle(&temp_dir.path().to_path_buf()) {
-                Ok(_) => panic!("{format} metadata must be rejected during load"),
-                Err(error) => error,
-            };
+            let error =
+                match ModelLoader::create_model_handle(&temp_dir.path().to_path_buf(), false) {
+                    Ok(_) => panic!("{format} metadata must be rejected during load"),
+                    Err(error) => error,
+                };
             let message = error.to_string();
 
             assert!(message.contains(&format!("browser-only {format} format")));
@@ -8025,6 +8209,8 @@ mod tests {
         let model_id = metadata.model_id.clone();
         let version = metadata.version.clone();
         let default_generation_config = xybrid_core::execution::model_default_gen_config(&metadata);
+        // As `publish_loaded_model` does: the cached type must match the template.
+        let output_type = ModelLoader::infer_output_type(&metadata);
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
                 executor: Arc::new(Mutex::new(TemplateExecutor::default())),
@@ -8034,7 +8220,7 @@ mod tests {
             })),
             model_id,
             version,
-            output_type: OutputType::Text,
+            output_type,
             supports_streaming: true,
             default_generation_config,
             current_run: Arc::new(Mutex::new(None)),
@@ -10943,6 +11129,305 @@ mod tests {
     // Choice scorers: warmup request and decision telemetry
     // =====================================================================
 
+    fn liquid_metadata() -> ModelMetadata {
+        let mut metadata = ModelMetadata::onnx("d1", "1.0", "model.gguf");
+        metadata.execution_template = ExecutionTemplate::Decision(
+            xybrid_core::execution::template::DecisionTemplate::new("model.gguf"),
+        );
+        metadata
+    }
+
+    #[test]
+    fn decision_batch_surface_refuses_generation_fallback_history_and_streaming() {
+        let metadata = liquid_metadata();
+        assert_eq!(
+            ModelLoader::infer_output_type(&metadata),
+            OutputType::Decisions
+        );
+        assert!(!ModelLoader::check_streaming_support(&metadata));
+        let model = test_model_with_metadata(metadata);
+        let request = decision_warmup_request();
+        let options = RunOptions::new().with_abort_policy(
+            crate::run_options::AbortPolicy::default().with_cloud_fallback(true),
+        );
+        for error in [
+            model
+                .run(&request, Some(&GenerationConfig::default()))
+                .unwrap_err(),
+            model.run_with_options(&request, &options).unwrap_err(),
+            model
+                .run_with_context(&request, &ConversationContext::new(), None)
+                .unwrap_err(),
+            model
+                .guard_input(&request, EntryPoint::Streaming)
+                .unwrap_err(),
+            model
+                .run(&text_envelope("private-canary"), None)
+                .unwrap_err(),
+        ] {
+            assert!(matches!(error, SdkError::UnsupportedModelCapability { .. }));
+            assert!(!error.is_retryable());
+            assert!(!format!("{error:?}").contains("private-canary"));
+        }
+        let async_error = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(model.run_async(&request, Some(&GenerationConfig::default())))
+            .unwrap_err();
+        assert!(matches!(
+            async_error,
+            SdkError::UnsupportedModelCapability { .. }
+        ));
+    }
+
+    #[test]
+    fn decision_checks_do_not_wait_for_a_run_holding_the_model() {
+        use crate::run_options::{AbortPolicy, AbortSignal};
+        let decision = test_model_with_metadata(liquid_metadata());
+        let chat = test_loaded_model(true);
+        // A run in progress holds its model's write lock for its whole length.
+        let held = (
+            decision.handle.write().unwrap(),
+            chat.handle.write().unwrap(),
+        );
+        let (send, recv) = std::sync::mpsc::channel();
+        let (worker_decision, worker_chat) = (decision.clone(), chat.clone());
+        let worker = std::thread::spawn(move || {
+            let cloud_fallback = RunOptions::new()
+                .with_abort_policy(AbortPolicy::default().with_cloud_fallback(true));
+            let memory_critical = RunOptions::new()
+                .with_abort_policy(
+                    AbortPolicy::default().stop_on(AbortSignal::MemoryPressureCritical),
+                )
+                .with_resource_provider(Arc::new(FixedUnitResourceProvider::new(
+                    xybrid_core::device::ResourceSnapshot {
+                        memory_pressure: xybrid_core::device::MemoryPressure::Critical,
+                        ..Default::default()
+                    },
+                )));
+            send.send((
+                worker_decision.is_decision_model(),
+                worker_chat.is_decision_model(),
+                worker_decision.run_with_options(&decision_warmup_request(), &cloud_fallback),
+                worker_chat.run_with_options(&text_envelope("hello"), &memory_critical),
+            ))
+            .unwrap();
+        });
+        let (decision_flag, chat_flag, refused, aborted) = recv
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("decision checks must not wait for the model lock");
+        assert!(decision_flag);
+        assert!(!chat_flag);
+        assert!(matches!(
+            refused,
+            Err(SdkError::UnsupportedModelCapability { .. })
+        ));
+        let aborted = match aborted {
+            Ok(_) => panic!("memory pressure must abort before the run"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(&aborted, SdkError::InferenceError { message, .. } if message.contains("memory_pressure_critical")),
+            "{aborted:?}"
+        );
+        drop(held);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn speculative_preference_does_not_refuse_a_local_decision_load() {
+        let is_speculation_refusal = |error: &SdkError| {
+            matches!(error, SdkError::UnsupportedModelCapability { capability, .. }
+                if capability == "speculative execution")
+        };
+        let temp_dir = tempfile::tempdir().expect("temporary model directory should exist");
+        let metadata_json =
+            serde_json::to_string(&liquid_metadata()).expect("model metadata should serialize");
+        std::fs::write(temp_dir.path().join("model_metadata.json"), metadata_json)
+            .expect("model metadata should be written");
+        let dir = temp_dir.path().to_path_buf();
+
+        // The load reaches the decision runtime, which fails here only because
+        // the fixture has no weights (or the build has no llama.cpp).
+        let loader = ModelLoader::from_directory(&dir)
+            .expect("fixture directory should be accepted")
+            .with_speculative_cloud(true);
+        let error = match loader.load() {
+            Ok(_) => panic!("the fixture has no weights"),
+            Err(error) => error,
+        };
+        assert!(!is_speculation_refusal(&error), "{error:?}");
+        // A model that cannot load is a load failure (or, without llama.cpp,
+        // a missing capability), never a failed inference.
+        assert!(
+            matches!(
+                error,
+                SdkError::LoadError { .. } | SdkError::UnsupportedModelCapability { .. }
+            ),
+            "{error:?}"
+        );
+
+        // The handle a speculative download swaps in still refuses decisions.
+        let error = match ModelLoader::create_model_handle(&dir, true) {
+            Ok(_) => panic!("a speculative swap must refuse a decision model"),
+            Err(error) => error,
+        };
+        assert!(is_speculation_refusal(&error), "{error:?}");
+    }
+
+    #[test]
+    fn a_directory_load_refreshes_a_sidecar_generated_before_decisions() {
+        // A GGUF header with `entries` metadata entries and no tensors.
+        let header = |entries: &[(&str, &str)]| {
+            let mut bytes = b"GGUF".to_vec();
+            bytes.extend(3u32.to_le_bytes());
+            bytes.extend(0u64.to_le_bytes());
+            bytes.extend((entries.len() as u64).to_le_bytes());
+            for (key, value) in entries {
+                bytes.extend((key.len() as u64).to_le_bytes());
+                bytes.extend(key.as_bytes());
+                bytes.extend(8u32.to_le_bytes()); // a string value
+                bytes.extend((value.len() as u64).to_le_bytes());
+                bytes.extend(value.as_bytes());
+            }
+            bytes
+        };
+        let temp_dir = tempfile::tempdir().expect("temporary model directory should exist");
+        let dir = temp_dir.path().to_path_buf();
+        let gguf = dir.join("d1.gguf");
+        // An SDK without decision support generated a chat sidecar for it.
+        std::fs::write(&gguf, header(&[])).unwrap();
+        let stale = crate::metadata_gen::generate_metadata_for_gguf_file(&gguf).unwrap();
+        assert!(matches!(
+            stale.execution_template,
+            ExecutionTemplate::Gguf { .. }
+        ));
+        crate::metadata_gen::write_metadata(&dir, &stale).unwrap();
+        std::fs::write(&gguf, header(&[("lfm3.decision.type", "lfm3-d1")])).unwrap();
+
+        // The handle is built for a decision model: the speculative swap,
+        // which refuses only those, refuses it without loading anything.
+        let error = match ModelLoader::create_model_handle(&dir, true) {
+            Ok(_) => panic!("a speculative swap must refuse a decision model"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(&error, SdkError::UnsupportedModelCapability { capability, .. }
+                if capability == "speculative execution"),
+            "{error:?}"
+        );
+        let on_disk: ModelMetadata = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("model_metadata.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            on_disk.execution_template,
+            ExecutionTemplate::Decision(_)
+        ));
+        assert_eq!(on_disk.model_id, stale.model_id);
+    }
+
+    #[test]
+    fn decision_warmup_has_no_generation_settings_and_is_protocol_valid() {
+        let input = cap_warmup_generation(decision_warmup_request());
+        assert!(!input.metadata.contains_key("max_tokens"));
+        validate_decision_request(&liquid_metadata(), &input, EntryPoint::Batch).unwrap();
+        let EnvelopeKind::DecisionRequest(request) = input.kind else {
+            panic!("decision warmup")
+        };
+        xybrid_core::execution::decision::liquid::validate_request(&request).unwrap();
+    }
+
+    #[test]
+    fn decision_cancelled_batch_returns_before_waiting_for_the_model_lock() {
+        let model = test_model_with_metadata(liquid_metadata());
+        let held = model.handle.write().unwrap();
+        let token = CancellationToken::new();
+        token.cancel();
+        let error = model
+            .run_with_options(
+                &decision_warmup_request(),
+                &RunOptions::new().with_cancellation_token(token),
+            )
+            .unwrap_err();
+        assert!(matches!(error, SdkError::Cancelled { .. }));
+        drop(held);
+    }
+
+    #[test]
+    fn a_cancelled_token_keeps_the_batch_contract_of_other_models() {
+        use crate::run_options::{AbortPolicy, AbortSignal};
+        let model = test_loaded_model(true);
+        let token = CancellationToken::new();
+        token.cancel();
+        // Unobserved, a cancelled token does not end a batch run by itself.
+        let unobserved = model.run_with_options(
+            &text_envelope("hello"),
+            &RunOptions::new().with_cancellation_token(token.clone()),
+        );
+        assert!(!matches!(unobserved, Err(SdkError::Cancelled { .. })));
+        // Observed, it is the abort policy's stop, as it was before decisions.
+        let observed = model.run_with_options(
+            &text_envelope("hello"),
+            &RunOptions::new()
+                .with_cancellation_token(token)
+                .with_abort_policy(AbortPolicy::default().stop_on(AbortSignal::UserCancelled)),
+        );
+        assert!(matches!(
+            &observed,
+            Err(SdkError::InferenceError { message, .. }) if message.contains("user_cancelled")
+        ));
+    }
+
+    #[test]
+    fn decision_native_cancellation_stays_typed_and_non_retryable_at_the_sdk_boundary() {
+        let error = sdk_execution_error(
+            "Execution failed",
+            xybrid_core::runtime_adapter::AdapterError::Cancelled,
+        );
+        assert!(matches!(error, SdkError::Cancelled { .. }));
+        assert!(!error.is_retryable());
+    }
+
+    #[test]
+    fn decision_telemetry_excludes_answer_content() {
+        use xybrid_core::ir::{
+            DecisionAnswer, DecisionOrigin, DecisionScore, DecisionUsage, DecisionValue, Decisions,
+        };
+        let answer = DecisionAnswer::new(
+            "private-question",
+            vec![DecisionScore::new(
+                "private-answer",
+                0.0,
+                1.0,
+                DecisionOrigin::Caller,
+            )],
+            DecisionValue::choice("private-answer"),
+            Some(1.0),
+        )
+        .unwrap();
+        let mut output = Envelope::new(EnvelopeKind::Decisions(Decisions::new(
+            vec![answer],
+            DecisionUsage::new(1, 11),
+        )));
+        output.metadata.insert("tokens_in".into(), "11".into());
+        output.metadata.insert("tokens_out".into(), "0".into());
+        let mut data = serde_json::json!({});
+        add_decision_telemetry(&mut data, &liquid_metadata(), &output);
+        // The backend and the protocol come from the model's template.
+        assert_eq!(data["task"], "decision");
+        assert_eq!(data["backend"], "llamacpp");
+        assert_eq!(
+            data["decision_protocol"],
+            xybrid_core::execution::template::LIQUID_TEXT_V1
+        );
+        assert_eq!(data["question_count"], 1);
+        assert_eq!(data["tokens_in"], 11);
+        assert_eq!(data["tokens_out"], 0);
+        assert!(!data.to_string().contains("private-"));
+        assert!(!data.to_string().contains("distribution"));
+        assert!(!data.to_string().contains("raw_score"));
+    }
+
     /// A scorer's metadata: one-byte fields that reject longer text, and
     /// `fixed` as its fixed choices.
     fn tight_scorer_metadata(fixed: &[Choice]) -> ModelMetadata {
@@ -11003,7 +11488,7 @@ mod tests {
             label_mass: None,
         }));
         let mut data = serde_json::json!({ "model_id": "scorer" });
-        add_choice_telemetry(&mut data, &metadata, &output);
+        add_decision_telemetry(&mut data, &metadata, &output);
         assert_eq!(
             data,
             serde_json::json!({
@@ -11016,7 +11501,7 @@ mod tests {
 
         // Any other output leaves the data as it was.
         let mut untouched = serde_json::json!({ "model_id": "scorer" });
-        add_choice_telemetry(&mut untouched, &metadata, &text_envelope("hello"));
+        add_decision_telemetry(&mut untouched, &metadata, &text_envelope("hello"));
         assert_eq!(untouched, serde_json::json!({ "model_id": "scorer" }));
     }
 
@@ -11077,6 +11562,53 @@ mod tests {
             outcomes[1].category,
             Some(xybrid_core::orchestrator::authority::OutcomeCategory::HardFail { ref reason })
                 if reason == CLOUD_FALLBACK_UNSUPPORTED_CHOICE_REASON
+        ));
+    }
+
+    #[test]
+    fn dispatch_after_local_refuses_decision_requests_before_the_cloud() {
+        let cloud = FakeCloudAdapter::new("must not run");
+        let authority = FakeAuthority::allow();
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        let result = dispatch_after_local(
+            local_result,
+            &decision_warmup_request(),
+            &cloud,
+            "corr-decision".to_string(),
+            "local-model",
+            0,
+            50,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            None,
+            &mut on_token,
+            &mut on_seam,
+        );
+
+        match result {
+            Err(SdkError::UnsupportedModelCapability { capability, .. }) => {
+                assert_eq!(capability, "cloud fallback");
+            }
+            other => panic!("expected a decision refusal, got {other:?}"),
+        }
+        assert_eq!(cloud.call_count(), 0);
+        assert!(authority.policy_requests().is_empty());
+        // The refusal is recorded, as a choice request's is.
+        let outcomes = authority.outcomes();
+        assert_eq!(outcomes.len(), 2);
+        assert!(matches!(
+            outcomes[1].category,
+            Some(xybrid_core::orchestrator::authority::OutcomeCategory::HardFail { ref reason })
+                if reason == CLOUD_FALLBACK_UNSUPPORTED_DECISION_REASON
         ));
     }
 

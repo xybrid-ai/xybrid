@@ -19,6 +19,10 @@ Documentation = "https://docs.xybrid.dev"
 [project.optional-dependencies]
 dev = ["pytest"]
 
+[tool.setuptools]
+# Retain the complete native dependency licenses in wheels and source archives.
+license-files = ["NOTICE"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["xybrid*"]

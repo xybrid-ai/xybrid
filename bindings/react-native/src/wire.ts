@@ -8,6 +8,8 @@
 // on Node.
 
 import type {
+  Decisions,
+  DecisionRequest,
   DownloadStatus,
   Envelope,
   EnvelopeMetadata,
@@ -41,7 +43,9 @@ export type WireEnvelope =
   | { kind: 'audio'; bytesBase64: string; metadata: EnvelopeMetadata }
   | { kind: 'embedding'; data: number[]; metadata: EnvelopeMetadata }
   | { kind: 'image'; bytesBase64: string; format: string; metadata: EnvelopeMetadata }
-  | { kind: 'multipart'; parts: WireEnvelope[]; metadata: EnvelopeMetadata };
+  | { kind: 'multipart'; parts: WireEnvelope[]; metadata: EnvelopeMetadata }
+  | { kind: 'decisionRequest'; request?: DecisionRequest; requestJson?: string; metadata: EnvelopeMetadata }
+  | { kind: 'decisions'; decisions: Decisions; metadata: EnvelopeMetadata };
 
 export interface WireToolDefinition {
   name: string;
@@ -142,6 +146,16 @@ export function toWireEnvelope(envelope: Envelope): WireEnvelope {
   setIfDefined(metadata, KEY_ROLE, envelope.role);
 
   switch (envelope.kind) {
+    case 'decisionRequest':
+      if (typeof envelope.requestJson === 'string' && envelope.request === undefined) {
+        return { kind: 'decisionRequest', requestJson: envelope.requestJson, metadata };
+      }
+      if (envelope.request !== undefined && envelope.requestJson === undefined) {
+        return { kind: 'decisionRequest', request: envelope.request, metadata };
+      }
+      throw new TypeError('decision request requires exactly one typed request or JSON string');
+    case 'decisions':
+      throw new TypeError('decision results cannot be used as model input');
     case 'text':
       requireType(envelope.text, 'string', 'text envelope: `text`');
       setIfDefined(metadata, KEY_VOICE_ID, envelope.voiceId);
@@ -186,6 +200,12 @@ export function fromWireEnvelope(wire: WireEnvelope): Envelope {
     metadata,
   };
   switch (wire.kind) {
+    case 'decisionRequest':
+      if (wire.request !== undefined) return { kind: 'decisionRequest', request: wire.request, ...base };
+      if (typeof wire.requestJson === 'string') return { kind: 'decisionRequest', requestJson: wire.requestJson, ...base };
+      throw new Error('invalid decision request from native');
+    case 'decisions':
+      return { kind: 'decisions', decisions: wire.decisions, ...base };
     case 'text': {
       const speed = parseNumber(metadata[KEY_SPEED]);
       return {
@@ -356,8 +376,11 @@ function payloadFields(envelope: WireEnvelope): {
   text?: string;
   audioBytesBase64?: string;
   embedding?: number[];
+  decisions?: Decisions;
 } {
   switch (envelope.kind) {
+    case 'decisions':
+      return { decisions: envelope.decisions };
     case 'text':
       return { text: envelope.text };
     case 'audio':
@@ -370,7 +393,11 @@ function payloadFields(envelope: WireEnvelope): {
 }
 
 export function fromWireResult(wire: WireResult): InferenceResult {
+  const tokensIn = parseNumber(wire.envelope.metadata?.tokens_in);
+  const tokensOut = parseNumber(wire.envelope.metadata?.tokens_out);
   return {
+    ...(tokensIn !== undefined ? { tokensIn } : {}),
+    ...(tokensOut !== undefined ? { tokensOut } : {}),
     envelope: fromWireEnvelope(wire.envelope),
     outputType: wire.outputType,
     modelId: wire.modelId,

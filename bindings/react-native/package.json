@@ -19,7 +19,8 @@
     "ios/XybridSwift",
     "react-native-xybrid.podspec",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit && tsc --noEmit -p tests/types",

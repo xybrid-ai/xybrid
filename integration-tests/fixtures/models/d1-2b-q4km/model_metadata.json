@@ -1,0 +1,29 @@
+{
+  "model_id": "d1-2b-q4km",
+  "version": "1.0",
+  "description": "Liquid d1-2B Q4_K_M, local text/JSON decision conformance fixture.",
+  "execution_template": {
+    "type": "Decision",
+    "protocol": "lfm3-d1/text/v1",
+    "model_file": "d1-2B-Q4_K_M.gguf",
+    "context_length": 4096,
+    "batch_size": 4096,
+    "ubatch_size": 4096,
+    "n_threads": 4
+  },
+  "preprocessing": [],
+  "postprocessing": [],
+  "files": ["d1-2B-Q4_K_M.gguf"],
+  "metadata": {
+    "task": "decision",
+    "architecture": "lfm3",
+    "backend": "llamacpp",
+    "protocol": "lfm3-d1/text/v1",
+    "quantization": "q4_k_m",
+    "source_repo": "LiquidAI/d1-2B-GGUF",
+    "source_revision": "e968f6575f0d4fad928312d7af15cad90fd365c0",
+    "sha256": "adca5789ad30ae6027e8e936749bb9f19673097492ab26fa1c5b69643ca50b4b",
+    "requires_backends": ["llamacpp-lfm3-d1-text-v1"],
+    "qualification": "conformance fixture; packaged-device qualification pending"
+  }
+}

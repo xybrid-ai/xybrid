@@ -65,9 +65,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`WorkspaceNotice`), read through `ObservabilitySession::workspace_feedback`
   or `observability::workspace_feedback`. The CLI prints it after a run's
   final export, with one claim line a day pointing at `xybrid auth claim`.
+- **Liquid d1 decision models (`lfm3-d1/text/v1`).** A local LiquidAI d1-2B
+  GGUF answers 1 to 16 typed questions about a text or ordered-JSON state,
+  without generating text: one choice among up to 255 options, yes/no, or an
+  ordinal score with 2 to 10 levels. A request is an
+  `EnvelopeKind::DecisionRequest` on the ordinary `run`, `run_async` and
+  `run_with_options`, and the result (`OutputType::Decisions`) holds one
+  answer per question with the probabilities it was read from. Model metadata
+  uses the new `ExecutionTemplate::Decision`. It needs `llm-llamacpp` and runs
+  on the CPU, one pass of at most 4,096 tokens per question. Streaming,
+  conversation history, pipelines, cloud fallback and the browser refuse
+  decision requests. This is an implementation, not a qualified release: see
+  `docs/sdk/decisions.md` and `docs/development/decision-conformance.md`. The
+  registry serves no decision model yet (no build reports the
+  `llamacpp-lfm3-d1-text-v1` capability), so load a local directory.
+  - **Rust:** `xybrid_sdk::decode_decision_request`,
+    `InferenceResult::decisions`, `tokens_in` and `tokens_out`.
+  - **CLI:** `xybrid run --decision-request <file|->` prints one
+    `xybrid.decision.v1` JSON record; `--output` writes it to a file.
+  - **Bindings:** a `decisionRequest` and a `decisionRequestJson` envelope and
+    a `decisions` result accessor in Swift, Kotlin, Flutter and React Native,
+    `XybridEnvelope.decision_request_json` in Python and
+    `Envelope.DecisionRequestJson` in Unity. Pass structured state as JSON
+    text: a dictionary or a JavaScript object can reorder keys and lose
+    integers above 2^53.
 
 ### Changed
 
+- A decision model ends a batch run with `SdkError::Cancelled` when its
+  `CancellationToken` is cancelled, before or during the run, whatever the
+  abort policy observes. Every other model keeps its batch contract.
+- llama.cpp chat loading refuses a GGUF that carries decision metadata (a
+  `systemone` template, `systemone.*` keys or `<architecture>.decision.*`
+  keys) and cannot generate text: it is a decision model, loaded through
+  `ExecutionTemplate::Decision`. A model that does both, such as Granite
+  Switch, still loads as a chat model.
+- At any `XYBRID_LLAMACPP_VERBOSITY`, a thread prints no llama.cpp log while
+  it tokenizes, or while it loads or runs a decision model: those diagnostics
+  can quote the prompt. Other threads keep their logs.
+- `Envelope::from_bytes` and `Envelope::from_json` errors no longer carry the
+  decoder's message, which could quote the payload. They name the kind of
+  failure, and for JSON its line and column.
+- Metadata generated from a GGUF (`from_model_file`, a Hugging Face repository
+  without `model_metadata.json`, `xybrid init`) reads the whole file header to
+  find decision metadata. A header that declares more than 65,536 metadata
+  entries is refused with `MetadataInvalid`. A sidecar marked `auto_generated`
+  that names a decision model as a chat model is rewritten on load.
+- **Python:** `XybridModel.run` releases the GIL during the native call, so
+  another thread can call `cancel()` on the run's token meanwhile. Calls on
+  one model run one at a time, and `close()` waits for an active run. Models
+  that share one cancellation token still run at the same time.
+- Packages that contain llama.cpp carry its notices (llama.cpp, ggml, Jinja
+  and nlohmann-json; the source is `crates/llama-cpp-sys/NOTICE`): the Kotlin
+  AAR and the Android zip at `assets/xybrid/llama/NOTICE`, the Flutter, Python,
+  Unity, React Native and web packages, the Apple XCFramework zip, and a `.NOTICE`
+  asset beside each CLI binary. Keep them when you redistribute.
 - When Xybrid's trace ingest reports that a key's unclaimed workspace expired
   (HTTP 401 with `X-Xybrid-Workspace: expired` and a `workspace_expired`
   status), every binding using the Xybrid preset stops sending traces to it

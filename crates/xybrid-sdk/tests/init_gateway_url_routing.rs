@@ -26,6 +26,12 @@ const FAKE_REPLY: &str = "FAKE_GATEWAY_REPLY";
 const API_KEY: &str = "xy_test_configured_gateway";
 const MODEL_ID: &str = "sdk-gateway-model";
 
+fn init_test_cache() {
+    static CACHE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(|| tempfile::tempdir().expect("create SDK test cache"));
+    xybrid_sdk::init_sdk_cache_dir(cache.path().join("models"));
+}
+
 fn completion_body() -> serde_json::Value {
     serde_json::json!({
         "id": "chatcmpl-1",
@@ -88,6 +94,7 @@ fn wrong_destination_mock(server: &MockServer) -> Mock<'_> {
 
 #[test]
 fn init_gateway_url_is_where_sdk_pipeline_cloud_stages_are_sent() {
+    init_test_cache();
     let configured = MockServer::start();
     let elsewhere = MockServer::start();
     let _registry = registry_resolve_mock(&configured);

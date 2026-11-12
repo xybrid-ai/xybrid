@@ -2766,9 +2766,11 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2",
  "tempfile",
  "tokio",
  "xybrid-core",
+ "xybrid-llama",
  "xybrid-sdk",
 ]
 
@@ -6630,6 +6632,7 @@ dependencies = [
  "boltffi",
  "log",
  "oslog",
+ "tempfile",
  "xybrid-ffi-facade",
  "xybrid-sdk",
 ]

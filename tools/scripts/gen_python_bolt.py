@@ -19,6 +19,8 @@ What it does:
   3. Prunes stale files so a removed export cannot linger.
   4. Makes the append-only `XybridResult.reasoning_content` and `observation`
      tails optional while decoding older wire shapes that omit them.
+  5. Releases the GIL around the blocking native model run, so another Python
+     thread can use the existing cancellation token during evaluation.
 
 The compiled extension is NOT built here — `tools/scripts/build-python-bolt.sh`
 runs `boltffi pack python`, which compiles `_native` and stages the cdylib.
@@ -52,6 +54,28 @@ TRACKED_SUFFIXES = (".py", ".pyi", ".c", ".typed")
 # generator output, so they must survive both the prune and the drift check —
 # otherwise regenerating silently breaks `import xybrid`.
 STAGED_SUFFIXES = (".dylib", ".so", ".dll", ".pyd")
+
+
+def _release_run_gil(source: str) -> str:
+    """Only the native call runs unlocked; owned wire buffers remain retained.
+
+    The target is a Rust function with no Python callbacks or Python API use.
+    Parsing, reference counting and error/result decoding still hold the GIL.
+    The public wrapper in _sugar.py owns the model and keeps a shared hold on
+    the token during this call, since Bolt's synchronous borrowed handles are
+    not retained.
+    """
+    target = (
+        "    return_error = boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run"
+        "(receiver, envelope_ptr, envelope_len, options_ptr, options_len, cancel, &return_success);"
+    )
+    if source.count(target) != 1:
+        sys.exit("error: expected one blocking Python model.run native call")
+    return source.replace(
+        target,
+        "    Py_BEGIN_ALLOW_THREADS\n" + target + "\n    Py_END_ALLOW_THREADS",
+        1,
+    )
 
 
 def _add_result_wire_compatibility(source: str) -> str:
@@ -177,6 +201,8 @@ def generate() -> list[Path]:
         if name == "__init__.py":
             source = _add_result_wire_compatibility(source)
         path.write_text(source)
+    native = RAW_DIR / "_native.c"
+    native.write_text(_release_run_gil(native.read_text()))
     sources = sorted(
         p for p in RAW_DIR.iterdir() if p.is_file() and p.suffix in TRACKED_SUFFIXES
     )

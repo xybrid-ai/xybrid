@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "choice-52-letter-keys",
+  "profile": "lfm3-d1/text/v1",
+  "title": "All 52 ASCII letters as keys: more than 26 options, and the keys are still the codes",
+  "covers": [
+    "choice-letter-keys",
+    "choice-lowercase-keys",
+    "choice-27"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"a\": \"Letter a\", \"b\": \"Letter b\", \"c\": \"Letter c\", \"d\": \"Letter d\", \"e\": \"Letter e\", \"f\": \"Letter f\", \"g\": \"Letter g\", \"h\": \"Letter h\", \"i\": \"Letter i\", \"j\": \"Letter j\", \"k\": \"Letter k\", \"l\": \"Letter l\", \"m\": \"Letter m\", \"n\": \"Letter n\", \"o\": \"Letter o\", \"p\": \"Letter p\", \"q\": \"Letter q\", \"r\": \"Letter r\", \"s\": \"Letter s\", \"t\": \"Letter t\", \"u\": \"Letter u\", \"v\": \"Letter v\", \"w\": \"Letter w\", \"x\": \"Letter x\", \"y\": \"Letter y\", \"z\": \"Letter z\", \"A\": \"Letter A\", \"B\": \"Letter B\", \"C\": \"Letter C\", \"D\": \"Letter D\", \"E\": \"Letter E\", \"F\": \"Letter F\", \"G\": \"Letter G\", \"H\": \"Letter H\", \"I\": \"Letter I\", \"J\": \"Letter J\", \"K\": \"Letter K\", \"L\": \"Letter L\", \"M\": \"Letter M\", \"N\": \"Letter N\", \"O\": \"Letter O\", \"P\": \"Letter P\", \"Q\": \"Letter Q\", \"R\": \"Letter R\", \"S\": \"Letter S\", \"T\": \"Letter T\", \"U\": \"Letter U\", \"V\": \"Letter V\", \"W\": \"Letter W\", \"X\": \"Letter X\", \"Y\": \"Letter Y\", \"Z\": \"Letter Z\"}}}}",
+  "artifact": "d1-2b-hf"
+}

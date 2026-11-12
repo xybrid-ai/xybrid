@@ -1,6 +1,6 @@
 /// Inference result types for Xybrid.
 ///
-/// This class wraps the FRB-generated [FfiResult] with a clean,
+/// This class wraps the FRB-generated [FfiRunResult] with a clean,
 /// idiomatic Dart API.
 library;
 
@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import 'rust/api/result.dart';
 import 'tools.dart';
 import 'observability.dart';
+import 'decisions.dart';
 import 'utils/audio.dart';
 
 /// Per-stage latency entry for pipeline runs.
@@ -82,30 +83,43 @@ class XybridInferenceMetrics {
 /// - [text] for ASR (speech-to-text) results
 /// - [audioBytes] for TTS (text-to-speech) results
 /// - [embedding] for embedding model results
+/// - [decisions] for typed text/JSON decision answers
 class XybridResult {
   /// The underlying FRB result.
-  final FfiResult _inner;
+  final FfiRunResult _inner;
+
+  FfiResult? get _legacy => switch (_inner) {
+        FfiRunResult_Legacy(:final field0) => field0,
+        FfiRunResult_Decision() => null,
+      };
+
+  FfiDecisionResult? get _decision => switch (_inner) {
+        FfiRunResult_Legacy() => null,
+        FfiRunResult_Decision(:final field0) => field0,
+      };
 
   /// Internal constructor from FRB result.
   /// @nodoc
   XybridResult.fromFfi(this._inner);
 
   /// Whether the inference completed successfully.
-  bool get success => _inner.success;
+  bool get success => _legacy?.success ?? true;
 
   /// Trace reference for feedback/evaluations; null when untraced or suppressed.
-  ObservationRef? get observation => _inner.observation;
+  ObservationRef? get observation =>
+      _legacy?.observation ?? _decision?.observation;
 
   /// Whether this answer came from the device or the cloud gateway.
   ///
   /// Cloud fallback — speculative or reactive — keeps the model id identical on
   /// both legs by design, so this is the only way to tell them apart.
-  FfiExecutionTarget get executionTarget => _inner.executionTarget;
+  FfiExecutionTarget get executionTarget =>
+      _legacy?.executionTarget ?? _decision!.executionTarget;
 
   /// Text output (for ASR models).
   ///
   /// Returns null if the model doesn't produce text output.
-  String? get text => _inner.text;
+  String? get text => _legacy?.text;
 
   /// The model's chain-of-thought / reasoning, if it emitted any.
   ///
@@ -115,7 +129,7 @@ class XybridResult {
   ///
   /// Returns null when the model emitted no reasoning, or the backend
   /// doesn't surface one.
-  String? get reasoningContent => _inner.reasoningContent;
+  String? get reasoningContent => _legacy?.reasoningContent;
 
   /// Audio bytes output (for TTS models).
   ///
@@ -123,7 +137,7 @@ class XybridResult {
   /// Use [audioAsWav] for playback-ready WAV format.
   ///
   /// Returns null if the model doesn't produce audio output.
-  Uint8List? get audioBytes => _inner.audioBytes;
+  Uint8List? get audioBytes => _legacy?.audioBytes;
 
   /// Audio output as WAV format (for TTS models).
   ///
@@ -147,7 +161,7 @@ class XybridResult {
   /// Embedding vector output (for embedding models).
   ///
   /// Returns null if the model doesn't produce embeddings.
-  List<double>? get embedding => _inner.embedding?.toList();
+  List<double>? get embedding => _legacy?.embedding?.toList();
 
   /// Tool calls the model asked for this turn.
   ///
@@ -158,19 +172,30 @@ class XybridResult {
   /// The raw tool-call block stays in [text] untouched, and malformed model
   /// output yields an empty list rather than an error.
   late final List<ToolCall> toolCalls =
-      _inner.toolCalls.map(ToolCall.fromFfi).toList(growable: false);
+      _legacy?.toolCalls.map(ToolCall.fromFfi).toList(growable: false) ??
+          const [];
+
+  /// Ordered typed decisions, or null for legacy outputs.
+  late final Decisions? decisions =
+      _decision == null ? null : Decisions.fromFfi(_decision!);
+
+  /// Total evaluated input tokens for a decision request.
+  int? get tokensIn => _decision?.inputTokens.toInt();
+
+  /// Decision models produce zero generated tokens.
+  int? get tokensOut => _decision != null ? 0 : metrics.tokensOut;
 
   /// Whether the model asked to call at least one tool.
   bool get hasToolCalls => toolCalls.isNotEmpty;
 
   /// Inference latency in milliseconds.
-  int get latencyMs => _inner.latencyMs;
+  int get latencyMs => _legacy?.latencyMs ?? _decision!.latencyMs;
 
   /// Typed metrics for this run (TTFT, tok/s, per-stage latencies, etc.).
   ///
   /// LLM-specific fields are null for ASR/TTS/embedding runs;
   /// `stageLatenciesMs` is empty for single-model runs.
   late final XybridInferenceMetrics metrics = XybridInferenceMetrics.fromFfi(
-    _inner.metrics,
+    _legacy?.metrics ?? _decision!.metrics,
   );
 }

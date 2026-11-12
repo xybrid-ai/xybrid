@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "state-numbers",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Number formatting in tojson: float repr, exponents, -0.0, integers, int/float identity",
+  "covers": [
+    "json-float",
+    "json-int"
+  ],
+  "request_text": "{\"state\": {\"one\": 1, \"one_float\": 1.0, \"neg_zero\": -0.0, \"tenth\": 0.1, \"tiny\": 1e-7, \"small\": 0.0001, \"e15\": 1e15, \"e16\": 1e16, \"pi\": 3.141592653589793, \"third\": 0.3333333333333333, \"max\": 1.7976931348623157e308, \"min_sub\": 5e-324, \"exp_int\": 1E2, \"neg\": -12.5, \"i64_max\": 9223372036854775807, \"i64_min\": -9223372036854775808, \"above_u64\": 18446744073709551616, \"list\": [0, -0, 0.0, 2.50]}, \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": {\"threshold\": 0.75, \"count\": 3, \"ratio\": 2.0, \"big\": 1e300}}}}",
+  "artifact": "d1-2b-hf"
+}

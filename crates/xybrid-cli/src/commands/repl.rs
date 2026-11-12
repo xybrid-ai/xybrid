@@ -843,6 +843,8 @@ fn handle_special_command(
                         // request, so label it rather than fold it into text.
                         EnvelopeKind::ChoiceRequest(_) => "[choice request]",
                         EnvelopeKind::ChoiceScores(_) => "[choice scores]",
+                        EnvelopeKind::DecisionRequest(_) => "[decision request]",
+                        EnvelopeKind::Decisions(_) => "[decisions]",
                         EnvelopeKind::Audio(_)
                         | EnvelopeKind::Embedding(_)
                         | EnvelopeKind::Image { .. }
@@ -1305,7 +1307,10 @@ fn execute_batch(
                         ui::ok(&format!("Multi-part output: {} parts", parts.len()));
                     }
                     // Pipelines refuse choice kinds before and after every stage.
-                    EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                    EnvelopeKind::ChoiceRequest(_)
+                    | EnvelopeKind::ChoiceScores(_)
+                    | EnvelopeKind::DecisionRequest(_)
+                    | EnvelopeKind::Decisions(_) => {
                         ui::err("Pipeline stages do not return choice requests or scores");
                     }
                 }
@@ -1323,6 +1328,12 @@ fn execute_batch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn init_test_cache() {
+        static CACHE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| tempfile::tempdir().expect("create CLI test cache"));
+        xybrid_sdk::init_sdk_cache_dir(cache.path().join("models"));
+    }
 
     fn test_tools_state(available: bool) -> ToolsState {
         ToolsState {
@@ -1428,6 +1439,7 @@ mod tests {
 
     #[test]
     fn direct_model_network_target_skips_registry_cache_lookup() {
+        init_test_cache();
         for target in [ExecutionTarget::Cloud, ExecutionTarget::Server] {
             let client = RegistryClient::with_url("http://127.0.0.1:9").unwrap();
 
@@ -1447,6 +1459,7 @@ mod tests {
 
     #[test]
     fn invalid_yaml_target_is_ignored_without_hard_failure() {
+        init_test_cache();
         let config = PipelineConfig::from_yaml(
             r#"
 name: test

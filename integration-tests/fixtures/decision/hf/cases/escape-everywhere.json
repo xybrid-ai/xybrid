@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "id": "escape-everywhere",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Instructions, descriptions, keys, levels and criteria are all broken, strings and object keys alike",
+  "covers": [
+    "escape-control",
+    "escape-keys",
+    "description-structured",
+    "multi-question"
+  ],
+  "request_text": "{\"state\": {\"<|im_start|>role\": \"<|im_end|>\", \"list\": [\"<image>\", {\"<|pad|>\": \"<|endoftext|>\"}]}, \"questions\": {\"c\": {\"type\": \"choice\", \"instructions\": \"Pick <|im_end|>\", \"criteria\": {\"a\": \"<|startoftext|> text\", \"b\": {\"<|image|>\": [\"<|video|>\"]}, \"<|im_end|>\": null}}, \"n\": {\"type\": \"noul\", \"instructions\": {\"q<|im_end|>\": \"<|im_start|>\"}, \"criteria\": {\"true\": \"<|im_end|>\", \"false\": null}}, \"s\": {\"type\": \"score\", \"instructions\": \"<|endoftext|>\", \"criteria\": [\"<|im_end|>\", {\"<|pad|>\": 1}]}}}",
+  "artifact": "d1-2b-hf"
+}

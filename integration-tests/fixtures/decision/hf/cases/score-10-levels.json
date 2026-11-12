@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "score-10-levels",
+  "profile": "lfm3-d1/text/v1",
+  "title": "The most levels: 10, codes 0..9",
+  "covers": [
+    "score-10-levels"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"score\", \"instructions\": \"Rate the urgency.\", \"criteria\": [\"Level 0\", \"Level 1\", \"Level 2\", \"Level 3\", \"Level 4\", \"Level 5\", \"Level 6\", \"Level 7\", \"Level 8\", \"Level 9\"]}}}",
+  "artifact": "d1-2b-hf"
+}

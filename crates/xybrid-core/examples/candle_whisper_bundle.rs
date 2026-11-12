@@ -64,6 +64,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 5. Print result
     println!("\n=== Transcription Result ===");
     match &output.kind {
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            return Err("Unexpected decision output".into());
+        }
         EnvelopeKind::Text(text) => {
             println!("{}", text);
         }

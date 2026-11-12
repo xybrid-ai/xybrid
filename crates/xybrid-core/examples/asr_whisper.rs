@@ -113,6 +113,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Parse output
         match &output_envelope.kind {
+            EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+                return Err("Unexpected decision output".into());
+            }
             EnvelopeKind::Text(text) => {
                 println!("═══════════════════════════════════════════════════════");
                 println!("  Whisper ASR Result");
@@ -165,6 +168,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Parse output
         match &output_envelope.kind {
+            EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+                return Err("Unexpected decision output".into());
+            }
             EnvelopeKind::Text(text) => {
                 println!("═══════════════════════════════════════════════════════");
                 println!("  Whisper ASR Result");

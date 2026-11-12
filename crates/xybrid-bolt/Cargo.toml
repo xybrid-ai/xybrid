@@ -26,6 +26,7 @@ log = "0.4"
 [dev-dependencies]
 # The facade's test seam paces a stream's tokens in the stream-close test.
 xybrid-ffi-facade = { path = "../xybrid-ffi-facade", features = ["test-util"] }
+tempfile = "3.10"
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.15"
