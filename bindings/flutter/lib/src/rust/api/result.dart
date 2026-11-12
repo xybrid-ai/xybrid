@@ -15,7 +15,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'result.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `ensure_ffi_payload`, `from_core`, `from_core`, `from_sdk`, `try_from_inference_result`, `try_from_inference_result`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `from`
 
 /// An answer in original question order.
 class FfiDecisionAnswer {
