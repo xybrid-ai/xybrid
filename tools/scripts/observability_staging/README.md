@@ -171,7 +171,7 @@ stopped stream is already the token callback returning an error (delivery
 
 | Session | What runs | Check |
 |---|---|---|
-| `case-pipeline` | a one-stage streaming LLM pipeline (`target: device`) whose `on_token` fails after two chunks | `case.pipeline_on_token_failure`: the call fails; the stage's request is `cancelled` with exactly two chunks |
+| `case-pipeline` | a one-stage streaming LLM pipeline (no `target:`, no provider) whose `on_token` fails after two chunks | `case.pipeline_on_token_failure`: the call fails; the stage's request is `cancelled` with exactly two chunks |
 | `case-tts` | `kitten-tts-nano-0.8`, a three-chunk text streamed to completion, then stopped by the chunk callback after one | `case.tts_streaming`: two `text_to_speech` requests, completed with the delivered chunk count, stopped `cancelled` after one |
 | `case-asr` | `whisper-tiny-ggml`: `integration-tests/fixtures/input/jfk.wav` as one batch run, then fed second by second to a live stream and flushed | `case.asr_batch_and_live`: a `speech_to_text` request, and one `invoke_workflow asr_session` with decoder runs, all without error |
 | `case-frames` | five runs of one frame session with a 10-minute live trace interval | `case.frame_session`: one traced run (the only returned reference), five `gen_ai.client.inference.duration` measurements in the sink |
