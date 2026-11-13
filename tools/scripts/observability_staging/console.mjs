@@ -111,8 +111,8 @@ try {
       // with the launch's span rows.
       const loaded =
         response?.status() === 200 &&
-        (await check.getByRole("heading", { name: probe.trace_id, exact: true }).isVisible({ timeout: 15_000 }).catch(() => false)) &&
-        (await check.locator("dt").filter({ hasText: /^Requests$/ }).first().isVisible({ timeout: 15_000 }).catch(() => false));
+        (await check.getByRole("heading", { name: probe.trace_id, exact: true }).waitFor({ state: "visible", timeout: 15_000 }).then(() => true, () => false)) &&
+        (await check.locator("dt").filter({ hasText: /^Requests$/ }).first().waitFor({ state: "visible", timeout: 15_000 }).then(() => true, () => false));
       const found =
         loaded &&
         (await expect(check.locator("[data-span-row]"))
