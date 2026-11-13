@@ -67,6 +67,6 @@ Write-Host "    xybrid --help"
 Write-Host "    xybrid models list"
 Write-Host '    xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav'
 Write-Host ""
-Write-Host "  Connect this project to the Xybrid console (optional, no sign-up):"
+Write-Host "  To connect a project to the Xybrid console (optional, no sign-up), run in its directory:"
 Write-Host "    xybrid connect --write-env .env"
 Write-Host ""

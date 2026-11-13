@@ -153,7 +153,7 @@ verify_install() {
     printf "    xybrid models list\n"
     printf "    xybrid run --model kokoro-82m --input-text \"Hello world\" -o output.wav\n"
     printf "\n"
-    printf "  Connect this project to the Xybrid console (optional, no sign-up):\n"
+    printf "  To connect a project to the Xybrid console (optional, no sign-up), run in its directory:\n"
     printf "    xybrid connect --write-env .env\n"
     printf "\n"
   fi

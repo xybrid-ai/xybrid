@@ -12,7 +12,8 @@
 #
 # xybrid-connect also ships a reference script, used where the xybrid CLI
 # can't be installed. It is downloaded next to the skill and checked against
-# the SHA-256 that the skill's SKILL.md prints.
+# the SHA-256 that the skill's SKILL.md prints; on a mismatch the installed
+# skill is left as it was.
 
 set -euo pipefail
 
@@ -56,6 +57,11 @@ echo ""
 # Create canonical location
 mkdir -p agents/skills
 
+# Downloads land here and move into place only once they are complete and
+# checked, so a failed or partial download never replaces an installed file.
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "${tmp_dir}"' EXIT
+
 for skill in "${SKILLS[@]}"; do
   url="${BASE_URL}/agents/skills/${skill}/SKILL.md"
   dest="agents/skills/${skill}"
@@ -68,24 +74,27 @@ for skill in "${SKILLS[@]}"; do
     echo "  Installing ${skill}..."
   fi
 
-  fetch "${url}" "${dest}/SKILL.md"
+  fetch "${url}" "${tmp_dir}/SKILL.md"
 
   if [ "${skill}" = "xybrid-connect" ]; then
     script="${dest}/${CONNECT_SCRIPT}"
-    mkdir -p "$(dirname "${script}")"
-    fetch "${BASE_URL}/${script}" "${script}"
+    fetch "${BASE_URL}/${script}" "${tmp_dir}/script"
 
-    expected="$(sed -n 's/^# sha256: \([0-9a-f]\{64\}\)$/\1/p' "${dest}/SKILL.md" | head -n 1)"
-    actual="$(sha256_of "${script}")"
+    expected="$(sed -n 's/^# sha256: \([0-9a-f]\{64\}\)$/\1/p' "${tmp_dir}/SKILL.md" | head -n 1)"
+    actual="$(sha256_of "${tmp_dir}/script")"
     if [ -z "${actual}" ]; then
       echo "  Warning: no sha256sum or shasum found, so ${script} was not checked"
     elif [ "${actual}" != "${expected}" ]; then
-      rm -f "${script}"
-      echo "Error: ${script} does not match the SHA-256 in ${dest}/SKILL.md." >&2
-      echo "The script was removed. Run this installer again in a few minutes." >&2
+      echo "Error: the downloaded ${script} does not match the SHA-256 in its SKILL.md." >&2
+      echo "${dest} was left as it was. Run this installer again in a few minutes." >&2
       exit 1
     fi
+
+    mkdir -p "$(dirname "${script}")"
+    mv -f "${tmp_dir}/script" "${script}"
   fi
+
+  mv -f "${tmp_dir}/SKILL.md" "${dest}/SKILL.md"
 done
 
 # Set up symlinks for AI tools that use their own directories
