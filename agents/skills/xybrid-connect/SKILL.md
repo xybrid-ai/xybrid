@@ -57,13 +57,15 @@ Otherwise tell the user what you're about to do, in one line, before running any
 
 ## Step 3: Make sure the CLI can connect
 
+`xybrid connect` and `xybrid auth` need Xybrid CLI 0.18.0 or newer. An older CLI has no `connect` command, so check for it:
+
 ```bash
 xybrid connect --help >/dev/null 2>&1; echo $?     # PowerShell: xybrid connect --help *> $null; $LASTEXITCODE
 ```
 
 - `0`: go on.
-- `2` (`unrecognized subcommand 'connect'`): this CLI predates `connect`. `127` (command not found): there is no CLI. If the user already approved installing the Xybrid CLI in this session, re-run that same installer once (`curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.sh | sh` on macOS/Linux, `irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex` on Windows) and check again. Never install anything the user didn't approve.
-- Still no `connect`, or the environment only has pip/npm/pub: use the [no-CLI path](#no-cli-path-pip-npm-or-pub-only-environments). If that isn't possible either, say: "This environment can't connect to the Xybrid console yet; on-device inference works without it." and stop.
+- `2` (`unrecognized subcommand 'connect'`): this CLI is older than 0.18.0. `127` (command not found): there is no CLI. If the user already approved installing the Xybrid CLI in this session, re-run that same installer once (`curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.sh | sh` on macOS/Linux, `irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex` on Windows) and check again. Never install anything the user didn't approve.
+- Still no `connect` (the CLI is still older than 0.18.0), or the environment only has pip/npm/pub: use the [no-CLI path](#no-cli-path-pip-npm-or-pub-only-environments). If that isn't possible either, say: "This environment can't connect to the Xybrid console yet; on-device inference works without it." and stop.
 
 If `~/.xybrid` isn't writable (some sandboxes), the CLI fails with a `credentials_*` error before creating anything. Then, and only then, prefix this and every later `xybrid` command with `XYBRID_CREDENTIALS_FILE=.xybrid/credentials.json`; the CLI gitignores that directory. Tell the user about the prefix in Step 8.
 
@@ -707,7 +709,7 @@ The Xybrid preset exports **traces only**. `record_feedback` / `recordFeedback` 
 
 ## No-CLI path (pip, npm or pub-only environments)
 
-When no CLI with `connect` can be installed, speak the same contract directly. The rules don't change: pinned hosts only, the key goes only into an untracked and gitignored project file, the claim token goes only into the private store and the user's chat, and nothing prints the key.
+When no CLI with `connect` (0.18.0 or newer) can be installed, speak the same contract directly. The rules don't change: pinned hosts only, the key goes only into an untracked and gitignored project file, the claim token goes only into the private store and the user's chat, and nothing prints the key.
 
 The reference implementation is [`scripts/xybrid_agent_connect.py`](scripts/xybrid_agent_connect.py) next to this file (Python 3.8+, standard library only). It prints the CLI's JSON shape and exit codes, and saves its recovery state in the CLI's own store, so a later `xybrid auth claim` or `xybrid auth status` finds it. Use the copy installed with this skill, or download it to a directory outside the repository and check its SHA-256 before running it:
 
@@ -765,6 +767,8 @@ Computed with Python's `hashlib` from the rule above (and cross-checked with Nod
 Two more checks: `xybrid-pow-test-vector:440422` has 0 leading zero bits, and the largest nonce, `xybrid-pow-test-vector:18446744073709551615`, has 4.
 
 ## Later
+
+These commands need CLI 0.18.0 or newer, like `connect`.
 
 - `xybrid auth status [--json]`: key source, workspace lifecycle and trace verification. Add `--show-claim-url` for the link.
 - `xybrid auth claim [--no-browser]`: the private claim link again; opens a browser only on a terminal.

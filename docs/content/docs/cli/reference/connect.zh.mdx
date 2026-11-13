@@ -1,0 +1,108 @@
+---
+title: xybrid connect
+description: 无需登录，把项目连接到一个可认领的 Xybrid 工作区
+---
+
+`xybrid connect` 让项目无需账号即可获得 Xybrid 密钥。它为编程代理而设计：不需要浏览器，
+也不需要注册。它会创建（或复用）一个[临时工作区](/zh/docs/concepts/api-keys#临时工作区)，
+附带一个受限的客户端作用域密钥，把密钥私密保存，并保留一个私密链接，供人使用 GitHub
+认领该工作区。
+
+它永远不会打印密钥，也永远不会开启轨迹导出。需要 CLI 0.18.0 或更高版本。
+
+## 用法
+
+```bash
+xybrid connect --write-env .env
+xybrid connect --write-env local.properties
+xybrid connect --agent claude-code --write-env .env --json
+```
+
+请在项目的代码仓库中运行。凭据按代码仓库和平台主机分别保存。
+
+## 选项
+
+| 选项 | 说明 |
+|------|------|
+| `--write-env <PATH>` | 把密钥写入这个未被 Git 跟踪的项目文件，并将其加入 gitignore |
+| `--env-name <VAR>` | 在 `--write-env` 文件中设置的变量。默认为 `XYBRID_API_KEY`，在 `.properties` 文件中为 `xybrid.apiKey`。Expo 项目请传入 `EXPO_PUBLIC_XYBRID_API_KEY` |
+| `--agent <NAME>` | 代理自行上报的名称，例如 `claude-code`。可能时会从 `CLAUDECODE=1` 检测 |
+| `--project-name <NAME>` | 新工作区或新项目的名称。默认为代码仓库的目录名 |
+| `--new` | 即使该项目已有保存的凭据，也创建新的工作区。绝不替换项目文件中已有的密钥 |
+| `--allow-ci` | 即使检测到 CI 环境也进行连接。隐私退出设置仍然生效 |
+| `--allow-custom-host` | 允许 `--platform-url` 使用 Xybrid 生产或预发布 API 以外的地址。除非主机是 localhost，否则必须使用 HTTPS |
+| `--json` | 输出一个 JSON 对象，而不是文本 |
+
+### 项目文件
+
+`--write-env` 接受三类文件，其他文件名会被拒绝。
+
+| 格式 | 文件名 | 默认变量 |
+|------|--------|----------|
+| dotenv | `.env`、`.env.*`（如 `.env.local`）、`*.env` | `XYBRID_API_KEY` |
+| Java properties | `local.properties`、`*.properties` | `xybrid.apiKey` |
+| xcconfig | `*.xcconfig` | `XYBRID_API_KEY` |
+
+文件中的其他行保持原样，已经设置的值绝不会被替换。`connect` 会在密钥上方写入一条注释，
+包含认领命令和工作区的日期。注释中永远不会出现认领链接。
+
+## 它做了什么
+
+1. **先检查，再创建。** 在 CI 中 `connect` 会停止，除非传入 `--allow-ci`。
+   设置了隐私退出变量（`XYBRID_TELEMETRY_OPTOUT`、`DO_NOT_TRACK` 或
+   `OTEL_SDK_DISABLED=true`）时它会停止。`--write-env` 文件被 Git 跟踪时它也会停止。
+   它还会检查项目是否已有密钥，以及私密凭据存储是否可写。
+2. **复用或创建。** 已保存密钥的项目会复用该密钥。同一台机器上的第二个代码仓库会成为
+   同一个未认领工作区中的新项目。否则 `connect` 会创建新的工作区，这需要几秒钟。
+3. **保存密钥。** 密钥和认领令牌保存到私密存储 `~/.xybrid/credentials.json`
+   （可用 `XYBRID_CREDENTIALS_FILE` 更改位置）。使用 `--write-env` 时，密钥还会写入项目文件，
+   该文件会被加入 `.gitignore`。
+
+之后在同一代码仓库中运行的命令，在既未设置 `--api-key` 也未设置 `XYBRID_API_KEY` 时，
+会使用已保存的密钥。
+
+## 退出码
+
+| 退出码 | 状态 | 含义 |
+|--------|------|------|
+| 0 | `created`、`existing` | 项目已有密钥：新建的，或原本就有的 |
+| 3 | `signup_closed` | Xybrid 目前不创建代理工作区 |
+| 4 | `offline` | 无法连接到 Xybrid |
+| 5 | `ci_skipped`、`opted_out` | 检测到 CI 环境或隐私退出设置 |
+| 6 | `env_file_tracked` | 项目文件被 Git 跟踪。请选择未被跟踪的文件 |
+| 7 | `workspace_expired` | 已保存工作区的密钥已过期，但工作区仍可认领 |
+| 1 | `error` | 其他情况。JSON 中的 `error.code` 说明原因 |
+
+## JSON 输出
+
+`--json` 输出一个对象。其中永远不包含密钥，只有类似 `sk_live_AbCd1234…` 的预览。
+
+| 字段 | 内容 |
+|------|------|
+| `schema_version` | `1` |
+| `status` | 上表中的状态之一 |
+| `tell_the_user` | 给用户的消息；有认领链接时会包含它 |
+| `key` | `source`、`preview` 和 `scope` |
+| `env_file` | `path`、`variable`、`written`、`already_configured`、`gitignored`，以及文件被跟踪时的 `suggestions` |
+| `credentials` | `path`、`saved` 和 `recovery`（`xybrid auth claim` 能否再次显示链接） |
+| `workspace` | 组织与项目、`key_expires_at`、`claim_expires_at`、`limits`，以及条款和隐私链接 |
+| `claim_url` | 私密的认领链接 |
+| `verification` | 该项目的轨迹是否已被存储 |
+| `next_steps` | `wire_init`、`verify` 和 `relay`，每项带有 `summary`，有时带有 `command` |
+
+认领链接是私密的。任何打开它并登录的人都能认领这个工作区，
+因此不要让它出现在提交、拉取请求、issue 或日志中。
+
+## 连接之后
+
+- **自行开启轨迹导出。** 密钥本身不会导出任何内容。请在应用中配置 Xybrid 可观测性预设，
+  或在 CLI 命令中添加 `--observability`。参见
+  [API 密钥](/zh/docs/concepts/api-keys#认证与轨迹导出相互独立)。
+- **确认轨迹已到达**：使用 [`xybrid auth status`](/zh/docs/cli/reference/auth)。
+- **认领工作区。** 如果不认领，密钥会在 7 天后停止工作，工作区会在 14 天后被删除。
+  在工作区被删除之前都可以认领，认领会恢复已停止的密钥。
+  [`xybrid auth claim`](/zh/docs/cli/reference/auth) 会再次显示链接。
+
+编程代理可以按照 `xybrid-connect` skill 操作，它还会为每个 SDK 接入仅元数据的导出。
+该 skill 位于
+[`agents/skills/xybrid-connect`](https://github.com/xybrid-ai/xybrid/tree/master/agents/skills/xybrid-connect)。

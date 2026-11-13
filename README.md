@@ -394,6 +394,8 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 
 Skills are agent-agnostic and live in [`agents/skills/`](agents/skills/). The installer symlinks them for Claude Code (`.claude/skills`) and Codex (`.codex/skills`).
 
+The installer also adds `/xybrid-connect`, which connects your project to the Xybrid console with no sign-up. It runs `xybrid connect` (CLI 0.18.0 or newer) to create a provisional workspace, keeps its restricted key in a gitignored file, and gives you a private link to claim the workspace with GitHub. Unclaimed, the key stops after 7 days and the workspace is deleted after 14. See [API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys#provisional-workspaces).
+
 **Manually** — create `model_metadata.json` in your model directory:
 
 ```json
