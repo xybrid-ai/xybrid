@@ -7,8 +7,13 @@
 # Or run directly:
 #   ./install-skills.sh
 #
-# This adds /xybrid-init and /test-model skills to Claude Code, Codex, and other
-# AI assistants that support the agents/skills/ convention.
+# This adds /xybrid-init, /test-model and /xybrid-connect skills to Claude Code,
+# Codex, and other AI assistants that support the agents/skills/ convention.
+#
+# xybrid-connect also ships a reference script, used where the xybrid CLI
+# can't be installed. It is downloaded next to the skill and checked against
+# the SHA-256 that the skill's SKILL.md prints; on a mismatch the installed
+# skill is left as it was.
 
 set -euo pipefail
 
@@ -19,13 +24,43 @@ BASE_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
 SKILLS=(
   "xybrid-init"
   "test-model"
+  "xybrid-connect"
 )
+
+# xybrid-connect's reference script, relative to the skill's directory.
+CONNECT_SCRIPT="scripts/xybrid_agent_connect.py"
+
+# Download one file. An HTTP error fails instead of saving the error page.
+fetch() {
+  if command -v curl &> /dev/null; then
+    curl -fsSL "$1" -o "$2"
+  elif command -v wget &> /dev/null; then
+    wget -q "$1" -O "$2"
+  else
+    echo "Error: curl or wget is required" >&2
+    exit 1
+  fi
+}
+
+# Print a file's SHA-256, or nothing when no tool for it is installed.
+sha256_of() {
+  if command -v sha256sum &> /dev/null; then
+    sha256sum "$1" | cut -d ' ' -f 1
+  elif command -v shasum &> /dev/null; then
+    shasum -a 256 "$1" | cut -d ' ' -f 1
+  fi
+}
 
 echo "Installing xybrid AI skills..."
 echo ""
 
 # Create canonical location
 mkdir -p agents/skills
+
+# Downloads land here and move into place only once they are complete and
+# checked, so a failed or partial download never replaces an installed file.
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "${tmp_dir}"' EXIT
 
 for skill in "${SKILLS[@]}"; do
   url="${BASE_URL}/agents/skills/${skill}/SKILL.md"
@@ -39,14 +74,27 @@ for skill in "${SKILLS[@]}"; do
     echo "  Installing ${skill}..."
   fi
 
-  if command -v curl &> /dev/null; then
-    curl -sSL "${url}" -o "${dest}/SKILL.md"
-  elif command -v wget &> /dev/null; then
-    wget -q "${url}" -O "${dest}/SKILL.md"
-  else
-    echo "Error: curl or wget is required" >&2
-    exit 1
+  fetch "${url}" "${tmp_dir}/SKILL.md"
+
+  if [ "${skill}" = "xybrid-connect" ]; then
+    script="${dest}/${CONNECT_SCRIPT}"
+    fetch "${BASE_URL}/${script}" "${tmp_dir}/script"
+
+    expected="$(sed -n 's/^# sha256: \([0-9a-f]\{64\}\)$/\1/p' "${tmp_dir}/SKILL.md" | head -n 1)"
+    actual="$(sha256_of "${tmp_dir}/script")"
+    if [ -z "${actual}" ]; then
+      echo "  Warning: no sha256sum or shasum found, so ${script} was not checked"
+    elif [ "${actual}" != "${expected}" ]; then
+      echo "Error: the downloaded ${script} does not match the SHA-256 in its SKILL.md." >&2
+      echo "${dest} was left as it was. Run this installer again in a few minutes." >&2
+      exit 1
+    fi
+
+    mkdir -p "$(dirname "${script}")"
+    mv -f "${tmp_dir}/script" "${script}"
   fi
+
+  mv -f "${tmp_dir}/SKILL.md" "${dest}/SKILL.md"
 done
 
 # Set up symlinks for AI tools that use their own directories
@@ -67,8 +115,10 @@ echo ""
 echo "Done! Skills installed to agents/skills/"
 echo ""
 echo "Available skills:"
-echo "  /xybrid-init    Generate model_metadata.json for any ML model"
-echo "  /test-model     Test a model end-to-end with xybrid"
+echo "  /xybrid-init     Generate model_metadata.json for any ML model"
+echo "  /test-model      Test a model end-to-end with xybrid"
+echo "  /xybrid-connect  Connect this project to the Xybrid console, no sign-up (xybrid CLI 0.18.0+)"
 echo ""
 echo "Quick start:"
 echo "  claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX"
+echo "  claude /xybrid-connect"

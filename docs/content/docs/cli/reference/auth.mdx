@@ -1,0 +1,98 @@
+---
+title: xybrid auth
+description: Inspect, recover or forget a project's Xybrid credentials
+---
+
+`xybrid auth` works with the credentials that
+[`xybrid connect`](/docs/cli/reference/connect) saved for the current
+repository. It shows the workspace's state, shows the claim link again, or
+removes the saved credentials. It needs CLI 0.18.0 or newer.
+
+## Usage
+
+```bash
+xybrid auth status
+xybrid auth status --json
+xybrid auth claim
+xybrid auth claim --no-browser
+xybrid auth logout
+```
+
+| Command | Purpose |
+|---------|---------|
+| `xybrid auth status` | Show the key's source, the workspace's lifecycle and whether traces have arrived |
+| `xybrid auth claim` | Show the private link to claim the workspace with GitHub |
+| `xybrid auth logout` | Remove this project's saved credentials from this machine |
+
+None of these commands exports traces.
+
+## auth status
+
+`xybrid auth status` checks the project's key with Xybrid. The key comes from
+`--api-key`, then `XYBRID_API_KEY`, then the credentials saved by
+`xybrid connect` for this platform host and repository.
+
+It reports:
+
+- **The key's source**, with a preview. It never prints the key.
+- **The workspace's lifecycle**: claimed or unclaimed and, while unclaimed, the
+  date its key stops and the date it is deleted.
+- **Trace verification**: whether traces from this project have been stored,
+  and how many spans. A key alone exports nothing, so `none` usually means
+  that trace export is not turned on yet.
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Print one JSON object |
+| `--show-claim-url` | Include the private claim link, which is left out by default |
+| `--allow-custom-host` | Allow a `--platform-url` other than the Xybrid production or staging API |
+
+In the JSON, `verification.state` is `received`, `none` or `unavailable`.
+`unavailable` means Xybrid cannot tell right now. It is not a confirmation.
+
+`auth status` exits with 7 when the workspace's key has expired but the
+workspace can still be claimed. The other
+[exit codes](/docs/cli/reference/connect#exit-codes) match `xybrid connect`.
+
+## auth claim
+
+`xybrid auth claim` prints the private claim link. On a terminal it also opens
+the link in a browser. Open the link, sign in to the console with GitHub and
+claim the workspace.
+
+| Option | Description |
+|--------|-------------|
+| `--no-browser` | Print the link without opening a browser |
+| `--json` | Print one JSON object |
+| `--allow-custom-host` | Allow a `--platform-url` other than the Xybrid production or staging API |
+
+The link is private. Anyone who opens it and signs in can claim the workspace,
+so keep it out of commits, pull requests and issues.
+
+An unclaimed workspace's key stops after 7 days, and the workspace is deleted
+after 14 days. You can claim until it is deleted, and claiming restores a
+stopped key. See [Provisional workspaces](/docs/concepts/api-keys#provisional-workspaces).
+
+The link is saved only in the private credentials store on the machine where
+`xybrid connect` ran. Run `xybrid auth claim` in the same repository.
+
+## auth logout
+
+`xybrid auth logout` removes this project's saved credentials from this
+machine. It does not revoke the key on the server, and it does not edit project
+files. The output says whether the project file still configures the key.
+
+The claim link of an unclaimed workspace is saved only with those credentials,
+so logging out removes it from this machine too.
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Print one JSON object |
+| `--allow-custom-host` | Allow a `--platform-url` other than the Xybrid production or staging API |
+
+## Claim reminder
+
+While a project's workspace is unclaimed, other `xybrid` commands print a claim
+reminder to stderr at most once a day. `-q`, JSON output, CI environments and
+`XYBRID_QUIET=1` suppress it. See
+[Workspace notices](/docs/concepts/api-keys#workspace-notices).

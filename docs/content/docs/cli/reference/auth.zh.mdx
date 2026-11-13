@@ -1,0 +1,89 @@
+---
+title: xybrid auth
+description: 查看、找回或移除项目的 Xybrid 凭据
+---
+
+`xybrid auth` 操作的是 [`xybrid connect`](/zh/docs/cli/reference/connect)
+为当前代码仓库保存的凭据。它可以显示工作区的状态、再次显示认领链接，或移除已保存的凭据。
+需要 CLI 0.18.0 或更高版本。
+
+## 用法
+
+```bash
+xybrid auth status
+xybrid auth status --json
+xybrid auth claim
+xybrid auth claim --no-browser
+xybrid auth logout
+```
+
+| 命令 | 用途 |
+|------|------|
+| `xybrid auth status` | 显示密钥来源、工作区的生命周期，以及轨迹是否已到达 |
+| `xybrid auth claim` | 显示用 GitHub 认领工作区的私密链接 |
+| `xybrid auth logout` | 从本机移除该项目已保存的凭据 |
+
+这些命令都不会导出轨迹。
+
+## auth status
+
+`xybrid auth status` 向 Xybrid 检查项目的密钥。密钥依次取自 `--api-key`、
+`XYBRID_API_KEY`，以及 `xybrid connect` 为当前平台主机和代码仓库保存的凭据。
+
+它会报告：
+
+- **密钥来源**，并附带预览。它永远不会打印密钥。
+- **工作区的生命周期**：已认领或未认领；未认领时，还有密钥停止工作的日期和工作区被删除的日期。
+- **轨迹验证**：该项目的轨迹是否已被存储，以及 span 的数量。密钥本身不会导出任何内容，
+  因此 `none` 通常表示尚未开启轨迹导出。
+
+| 选项 | 说明 |
+|------|------|
+| `--json` | 输出一个 JSON 对象 |
+| `--show-claim-url` | 包含私密的认领链接（默认不显示） |
+| `--allow-custom-host` | 允许 `--platform-url` 使用 Xybrid 生产或预发布 API 以外的地址 |
+
+在 JSON 中，`verification.state` 为 `received`、`none` 或 `unavailable`。
+`unavailable` 表示 Xybrid 暂时无法判断，并不代表已确认。
+
+当工作区的密钥已过期但工作区仍可认领时，`auth status` 以退出码 7 结束。其他
+[退出码](/zh/docs/cli/reference/connect#退出码)与 `xybrid connect` 相同。
+
+## auth claim
+
+`xybrid auth claim` 打印私密的认领链接。在终端中运行时，它还会在浏览器中打开该链接。
+打开链接，使用 GitHub 登录控制台，然后认领工作区。
+
+| 选项 | 说明 |
+|------|------|
+| `--no-browser` | 只打印链接，不打开浏览器 |
+| `--json` | 输出一个 JSON 对象 |
+| `--allow-custom-host` | 允许 `--platform-url` 使用 Xybrid 生产或预发布 API 以外的地址 |
+
+该链接是私密的。任何打开它并登录的人都能认领这个工作区，
+因此不要让它出现在提交、拉取请求或 issue 中。
+
+未认领工作区的密钥会在 7 天后停止工作，工作区会在 14 天后被删除。
+在工作区被删除之前都可以认领，认领会恢复已停止的密钥。
+参见[临时工作区](/zh/docs/concepts/api-keys#临时工作区)。
+
+该链接只保存在运行 `xybrid connect` 的那台机器的私密凭据存储中。
+请在同一个代码仓库中运行 `xybrid auth claim`。
+
+## auth logout
+
+`xybrid auth logout` 从本机移除该项目已保存的凭据。它不会在服务器上吊销密钥，
+也不会修改项目文件。输出会说明项目文件是否仍然配置了该密钥。
+
+未认领工作区的认领链接只与这些凭据一起保存，因此退出登录也会把它从本机移除。
+
+| 选项 | 说明 |
+|------|------|
+| `--json` | 输出一个 JSON 对象 |
+| `--allow-custom-host` | 允许 `--platform-url` 使用 Xybrid 生产或预发布 API 以外的地址 |
+
+## 认领提醒
+
+项目的工作区未被认领期间，其他 `xybrid` 命令每天最多向 stderr 打印一次认领提醒。
+`-q`、JSON 输出、CI 环境以及 `XYBRID_QUIET=1` 都会关闭它。
+参见[工作区通知](/zh/docs/concepts/api-keys#工作区通知)。
