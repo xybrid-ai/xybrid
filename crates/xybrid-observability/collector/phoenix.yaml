@@ -4,14 +4,16 @@
 # Instrumentation stays canonical (gen_ai.* + xybrid.genai.*); this profile
 # adds the OpenInference dialect at export time only.
 #
-# Requires otelcol-contrib (transform processor). Tested with the version
-# pinned in collector/README.md.
+# Requires otelcol-contrib (transform processor). Validated with the otelcol-contrib
+# release pinned in collector/README.md.
 #
 # Environment:
 #   PHOENIX_OTLP_ENDPOINT   e.g. http://localhost:6006 (exporter appends /v1/traces)
-#   PHOENIX_API_KEY         optional, for Phoenix Cloud / authenticated servers
-#   METRICS_OTLP_ENDPOINT   where metrics go (Phoenix accepts traces only)
-#   LOGS_OTLP_ENDPOINT      where log events (evaluations, details) go
+#   PHOENIX_API_KEY         only with phoenix-auth.yaml, for Phoenix Cloud or an
+#                           authenticated server: --config phoenix.yaml --config phoenix-auth.yaml
+#
+# Phoenix accepts traces only. Metrics and log events are discarded unless you
+# add sinks.yaml: --config phoenix.yaml --config sinks.yaml
 
 receivers:
   otlp:
@@ -41,6 +43,12 @@ processors:
           - set(attributes["llm.token_count.completion"], attributes["gen_ai.usage.output_tokens"]) where attributes["openinference.span.kind"] == "LLM" and attributes["gen_ai.usage.output_tokens"] != nil
           - set(attributes["llm.token_count.prompt_details.cache_read"], attributes["gen_ai.usage.cache_read.input_tokens"]) where attributes["openinference.span.kind"] == "LLM" and attributes["gen_ai.usage.cache_read.input_tokens"] != nil
           - set(attributes["llm.token_count.completion_details.reasoning"], attributes["gen_ai.usage.reasoning.output_tokens"]) where attributes["openinference.span.kind"] == "LLM" and attributes["gen_ai.usage.reasoning.output_tokens"] != nil
+          # Phoenix (21+) also derives llm.token_count.* from gen_ai.usage.* on
+          # every span kind it receives, and sums token counts over a trace. An
+          # attempt's usage would then count again next to its request's
+          # totals, so attempts reach Phoenix without gen_ai.usage.* (per-attempt
+          # usage stays in the canonical export to Xybrid or your own sinks).
+          - delete_matching_keys(attributes, "^gen_ai[.]usage[.]") where attributes["xybrid.genai.attempt.index"] != nil
           # Content.
           - set(attributes["input.value"], attributes["gen_ai.input.messages"]) where attributes["gen_ai.input.messages"] != nil
           - set(attributes["input.mime_type"], "application/json") where attributes["gen_ai.input.messages"] != nil
@@ -55,14 +63,13 @@ processors:
           - set(attributes["session.id"], attributes["gen_ai.conversation.id"]) where attributes["gen_ai.conversation.id"] != nil
 
 exporters:
+  # No Authorization header here, so an unauthenticated server never sees an
+  # empty "Bearer " value; phoenix-auth.yaml adds it.
   otlphttp/phoenix:
     endpoint: ${env:PHOENIX_OTLP_ENDPOINT}
-    headers:
-      Authorization: "Bearer ${env:PHOENIX_API_KEY}"
-  otlphttp/metrics:
-    endpoint: ${env:METRICS_OTLP_ENDPOINT}
-  otlphttp/logs:
-    endpoint: ${env:LOGS_OTLP_ENDPOINT}
+  # Metrics and log events are discarded unless sinks.yaml is added
+  # (--config <profile> --config sinks.yaml); a traces-only setup still starts.
+  nop: {}
 
 service:
   pipelines:
@@ -73,8 +80,8 @@ service:
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlphttp/metrics]
+      exporters: [nop]
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlphttp/logs]
+      exporters: [nop]

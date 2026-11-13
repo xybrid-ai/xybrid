@@ -22,6 +22,7 @@ use crate::cloud::{
     openai_chat_body, parse_gateway_usage, same_origin, Cloud, CloudBackend, CloudConfig,
     CompletionRequest, CompletionResponse, MissingModel, ThinkingMode, Usage,
 };
+use crate::execution::decision;
 use crate::gateway::ChatCompletionChunk;
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::pipeline::IntegrationProvider;
@@ -338,6 +339,7 @@ impl RuntimeAdapter for CloudRuntimeAdapter {
     }
 
     fn execute(&self, input: &Envelope) -> AdapterResult<Envelope> {
+        decision::ensure_no_decision_kinds("cloud", [input])?;
         // Validate provider is specified
         let provider = self.get_provider(input)?;
 
@@ -488,6 +490,7 @@ impl CloudStreaming for CloudRuntimeAdapter {
         input: &Envelope,
         mut on_token: StreamingCallback<'_>,
     ) -> AdapterResult<Envelope> {
+        decision::ensure_no_decision_kinds("cloud", [input])?;
         let provider = self.get_provider(input)?;
 
         let model_name = input
@@ -775,6 +778,7 @@ fn stream_usage_from_json(data: &str) -> Option<Usage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::{DecisionQuestion, DecisionQuestionKind, DecisionRequest, DecisionState};
     use serde_json::json;
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -808,6 +812,80 @@ mod tests {
 
         let result = adapter.execute(&input);
         assert!(matches!(result, Err(AdapterError::InvalidInput(_))));
+    }
+
+    fn decision_cloud_input(provider: Option<&str>, nested: bool) -> Envelope {
+        let request = Envelope::decision_request(DecisionRequest::new(
+            DecisionState::text("private-state"),
+            vec![DecisionQuestion::new(
+                "private-question",
+                None,
+                DecisionQuestionKind::yes_no(None, None),
+            )],
+        ));
+        let mut input = if nested {
+            Envelope::new(EnvelopeKind::MultiPart(vec![Envelope::new(
+                EnvelopeKind::MultiPart(vec![request]),
+            )]))
+        } else {
+            request
+        };
+        if let Some(provider) = provider {
+            input.metadata.insert("provider".into(), provider.into());
+        }
+        input
+            .metadata
+            .insert("backend".into(), "private-invalid-backend".into());
+        input
+            .metadata
+            .insert("model".into(), "private-model".into());
+        input
+    }
+
+    fn assert_cloud_decision_refusal(error: AdapterError) {
+        assert!(matches!(
+            &error,
+            AdapterError::UnsupportedModelCapability {
+                model_id,
+                capability,
+                ..
+            } if model_id == "cloud" && capability == "decision requests"
+        ));
+        assert!(!error.to_string().contains("private-"));
+        assert!(!format!("{error:?}").contains("private-"));
+    }
+
+    #[test]
+    fn decision_execute_refuses_before_provider_or_config_resolution() {
+        let adapter = CloudRuntimeAdapter::new();
+        for provider in [None, Some("private-invalid-provider"), Some("openai")] {
+            for nested in [false, true] {
+                let input = decision_cloud_input(provider, nested);
+                assert_cloud_decision_refusal(adapter.execute(&input).unwrap_err());
+            }
+        }
+    }
+
+    #[test]
+    fn decision_streaming_refuses_before_resolution_and_never_calls_callback() {
+        let adapter = CloudRuntimeAdapter::new();
+        for provider in [None, Some("private-invalid-provider"), Some("openai")] {
+            for nested in [false, true] {
+                let input = decision_cloud_input(provider, nested);
+                let mut callback_called = false;
+                let error = adapter
+                    .execute_streaming(
+                        &input,
+                        Box::new(|_| {
+                            callback_called = true;
+                            Ok(())
+                        }),
+                    )
+                    .unwrap_err();
+                assert_cloud_decision_refusal(error);
+                assert!(!callback_called);
+            }
+        }
     }
 
     #[test]
@@ -1739,5 +1817,47 @@ mod tests {
             "{message}"
         );
         assert!(!message.contains("FAKE_DEEPSEEK_REPLY"));
+    }
+
+    /// Both adapter paths (batch through `Cloud::complete`, and SSE) answer an
+    /// over-quota 429 with one request and the gateway's claim guidance, never
+    /// waiting on its `Retry-After`.
+    #[test]
+    fn insufficient_quota_fails_fast_on_batch_and_streaming_paths() {
+        use httpmock::prelude::*;
+
+        const CLAIM: &str = "Workspace quota used up. Claim it at https://xybrid.dev/claim.";
+        let server = MockServer::start();
+        let gateway = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(429)
+                .header("Retry-After", "86400")
+                .header("content-type", "application/json")
+                .body(
+                    json!({ "error": {
+                        "message": CLAIM,
+                        "type": "insufficient_quota",
+                        "code": "insufficient_quota",
+                    } })
+                    .to_string(),
+                );
+        });
+        let adapter = CloudRuntimeAdapter::with_gateway(&server.base_url());
+        let envelope = text_with(&[("provider", "openai"), ("model", "m")]);
+
+        let started = Instant::now();
+        let batch = adapter.execute(&envelope).expect_err("over quota");
+        assert!(started.elapsed() < Duration::from_secs(1), "batch waited");
+        assert!(batch.to_string().contains(CLAIM), "{batch}");
+        gateway.assert_hits(1);
+
+        let ignore: StreamingCallback<'_> = Box::new(|_: PartialToken| Ok(()));
+        let started = Instant::now();
+        let streamed = adapter
+            .execute_streaming(&envelope, ignore)
+            .expect_err("over quota");
+        assert!(started.elapsed() < Duration::from_secs(1), "stream waited");
+        assert!(streamed.to_string().contains(CLAIM), "{streamed}");
+        gateway.assert_hits(2);
     }
 }

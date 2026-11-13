@@ -71,6 +71,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parse output
     match &output_envelope.kind {
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            return Err("Unexpected decision output".into());
+        }
         EnvelopeKind::Audio(audio_bytes) => {
             println!("═══════════════════════════════════════════════════════");
             println!("  TTS Result");
@@ -107,10 +110,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
             println!("❌ Unexpected vision output");
             return Err("Expected audio output, got vision output".into());
-        }
-        EnvelopeKind::TokenIds(ids) => {
-            println!("❌ Unexpected token IDs output: {} ids", ids.len());
-            return Err("Expected audio output, got token IDs".into());
         }
         EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
             println!("❌ Unexpected choice output");

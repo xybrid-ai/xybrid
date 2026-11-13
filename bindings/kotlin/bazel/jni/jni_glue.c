@@ -2534,6 +2534,50 @@ JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bol
     return;
 }
 
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1decision_1request_1envelope(JNIEnv *env, jclass cls, jobject request, jint __boltffi_request_len) {
+    (void)cls;
+
+    void *__boltffi_request_ptr = NULL;
+    FfiBuf_u8 __boltffi_return = (FfiBuf_u8){0};
+
+    if (!boltffi_jni_direct_buffer_address(env, request, (jlong)__boltffi_request_len, &__boltffi_request_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_function_xybrid_bolt_decision_request_envelope((const uint8_t *)__boltffi_request_ptr, (uintptr_t)__boltffi_request_len, &__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return NULL;
+    }
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_return);
+__boltffi_error:
+    return NULL;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1decision_1request_1json_1envelope(JNIEnv *env, jclass cls, jobject json, jint __boltffi_json_len) {
+    (void)cls;
+
+    void *__boltffi_json_ptr = NULL;
+    FfiBuf_u8 __boltffi_return = (FfiBuf_u8){0};
+
+    if (!boltffi_jni_direct_buffer_address(env, json, (jlong)__boltffi_json_len, &__boltffi_json_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_function_xybrid_bolt_decision_request_json_envelope((const uint8_t *)__boltffi_json_ptr, (uintptr_t)__boltffi_json_len, &__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return NULL;
+    }
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_return);
+__boltffi_error:
+    return NULL;
+}
+
 JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1tool_1results_1envelope(JNIEnv *env, jclass cls, jobject user_text, jint __boltffi_user_text_len, jobject prior_assistant_text, jint __boltffi_prior_assistant_text_len, jobject results, jint __boltffi_results_len) {
     (void)cls;
 

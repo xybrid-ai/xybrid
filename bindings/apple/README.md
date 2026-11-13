@@ -12,14 +12,14 @@ Add Xybrid to your Xcode project:
 
 1. In Xcode, select **File > Add Package Dependencies...**
 2. Enter: `https://github.com/xybrid-ai/xybrid`
-3. Set **Dependency Rule** to **Up to Next Major Version** → `0.17.0`
+3. Set **Dependency Rule** to **Up to Next Major Version** → `0.18.0`
 4. Select the **Xybrid** library product
 
 Or add it to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.17.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.18.0")
 ]
 ```
 
@@ -83,9 +83,11 @@ if let reasoning = result.reasoningContent { print("Reasoning:", reasoning) }
 Export is off until you start it; an API key alone does not enable it. Once
 started, each run is exported as an OpenTelemetry trace, with prompts and
 outputs included unless you call `.metadataOnly()`.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
 
 ```swift
-// Traces to the Xybrid dashboard (free key at dashboard.xybrid.dev)
+// Traces to Xybrid (get a key at console.xybrid.dev)
 try Xybrid.Observability.xybrid(apiKey: key)
     .service("MyApp", version: "1.4.0")
     .start()
@@ -111,10 +113,15 @@ try await Xybrid.Observability.flushAsync()
 ```
 
 `Xybrid.Observability.stats` reports accepted, exported, dropped, failed, and
-pending counts per signal (`traces`, `logs`, `metrics`). A flush or shutdown that
+pending counts per signal (`traces`, `logs`, `metrics`); after `shutdown` they are
+the session's final counters (what the shutdown failed or dropped included)
+until the next `start()`. A flush or shutdown that
 cannot deliver everything throws `XybridError.telemetryDelivery`; the inference
 already succeeded, so do not rerun it. `suppressTrace: true` in
-`XybridRunOptions.make(...)` skips the detailed trace for one run. Pipelines
+`XybridRunOptions.make(...)` skips the detailed trace for one run. For a camera
+or microphone loop, pass the same `frameSessionId` on every run of the loop:
+each frame is counted in metrics, and detailed traces are kept for roughly one
+frame per `setLiveTraceIntervalMs` per session. Pipelines
 take the same trace fields and return `observation` references for the workflow
 and each stage; ASR sessions take them through
 `XybridStreamingConfig.default.observed(by:)` or

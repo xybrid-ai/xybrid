@@ -65,6 +65,8 @@ await Xybrid.initialize({ apiKey: XYBRID_API_KEY });
 
 Options apply once per app process; calling again with different options
 rejects with `xybrid_config_error` (restart the app to change them).
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
 
 ### Observability (OpenTelemetry)
 
@@ -95,11 +97,16 @@ await Observability.flush(2000); // e.g. when the app backgrounds
 ```
 
 `suppressTrace: true` skips a run's detailed trace (metrics are still
-recorded). Feedback and evaluations (`Observability.recordEvaluation`) need a
+recorded). For a camera or microphone loop, pass the same `frameSessionId` on
+every run of the loop: each frame is counted in metrics, and detailed traces
+are kept for roughly one frame per `liveTraceIntervalMs` per session, instead
+of one trace per frame. Feedback and evaluations (`Observability.recordEvaluation`) need a
 logs signal, so they resolve `false` with the Xybrid preset, which exports
 traces only. `Observability.stats()` reports accepted, exported, dropped,
 failed and pending counts per signal (`traces`, `logs`, `metrics`);
-`Observability.shutdown(timeoutMs)` flushes and stops export. A flush or
+`Observability.shutdown(timeoutMs)` flushes and stops export, after which
+`stats()` keeps the session's final counters (what the shutdown failed or
+dropped included) until the next `init()`. A flush or
 shutdown that cannot deliver everything rejects with
 `xybrid_telemetry_delivery`; the inference already succeeded, so do not rerun it.
 

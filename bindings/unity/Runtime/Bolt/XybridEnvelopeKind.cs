@@ -15,7 +15,8 @@ namespace XybridBolt
                 2 => new Embedding(reader.ReadArray(reader => reader.ReadF32())),
                 3 => new Image(reader.ReadBytes(), reader.ReadString()),
                 4 => new MultiPart(reader.ReadArray(reader => global::XybridBolt.XybridEnvelope.Decode(reader))),
-                5 => new TokenIds(reader.ReadArray(reader => reader.ReadI64())),
+                5 => new DecisionRequest(global::XybridBolt.XybridDecisionRequest.Decode(reader)),
+                6 => new Decisions(global::XybridBolt.XybridDecisions.Decode(reader)),
                 uint tag => throw new global::System.InvalidOperationException($"Invalid XybridEnvelopeKind tag: {tag}"),
             };
 
@@ -74,15 +75,19 @@ namespace XybridBolt
                     }
                     break;
                 }
-                case TokenIds value:
+                case DecisionRequest value:
                 {
                     writer.WriteU32(5);
                     {
-                        writer.WriteU32(checked((uint)value.Ids.Length));
-                        foreach (var boltffiValue0 in value.Ids)
-                        {
-                            writer.WriteI64(boltffiValue0);
-                        }
+                        value.Request.Encode(writer);
+                    }
+                    break;
+                }
+                case Decisions value:
+                {
+                    writer.WriteU32(6);
+                    {
+                        value.Value.Encode(writer);
                     }
                     break;
                 }
@@ -101,7 +106,9 @@ namespace XybridBolt
 
         public sealed record MultiPart(global::XybridBolt.XybridEnvelope[] Parts) : XybridEnvelopeKind;
 
-        public sealed record TokenIds(long[] Ids) : XybridEnvelopeKind;
+        public sealed record DecisionRequest(global::XybridBolt.XybridDecisionRequest Request) : XybridEnvelopeKind;
+
+        public sealed record Decisions(global::XybridBolt.XybridDecisions Value) : XybridEnvelopeKind;
 
     }
 }

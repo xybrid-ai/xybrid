@@ -80,6 +80,12 @@ _CLI_INTEGRATION_TESTS = {
         "@crates//:serde_json",
         "@crates//:tempfile",
     ],
+    "decision_cli_test": [
+        "//crates/xybrid-core:xybrid-core",
+        "//crates/xybrid-sdk:xybrid-sdk",
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
     "init_json_test": [
         "@crates//:serde_json",
         "@crates//:tempfile",
@@ -98,11 +104,21 @@ _CLI_INTEGRATION_TESTS = {
         "@crates//:serde_json",
         "@crates//:tempfile",
     ],
+    # `run`'s workspace notices against a loopback httpmock trace ingest, in an
+    # isolated HOME / XYBRID_CREDENTIALS_FILE. Offline: the run is a missing
+    # bundle, so its one span goes out in the final drain.
+    "workspace_notice_cli_test": [
+        "@crates//:chrono",
+        "@crates//:httpmock",
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
 }
 
-# Two of the four open with `#![cfg(feature = "llm-llamacpp")]`; without the
-# feature they compile to EMPTY binaries that still report success.
+# Native tests require this feature: some otherwise compile to empty binaries,
+# while decision parity explicitly skips unless model-required mode is enabled.
 _CLI_TEST_FEATURES = {
+    "decision_cli_test": ["llm-llamacpp"],
     "reasoning_budget_cli_test": ["llm-llamacpp"],
     "vlm_cli_test": ["llm-llamacpp"],
 }
@@ -113,6 +129,7 @@ _CLI_TEST_FEATURES = {
 # as do the scored cases wherever ONNX Runtime is not loadable.
 _CLI_TEST_DATA = {
     "choice_cli_test": ["//integration-tests:choice_fixtures"],
+    "decision_cli_test": ["//integration-tests:model_metadata_fixtures"],
 }
 
 [

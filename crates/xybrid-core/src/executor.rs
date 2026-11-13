@@ -36,6 +36,7 @@
 
 use crate::context::StageDescriptor;
 use crate::execution::choice::{ensure_no_choice_kinds, validate_choice_request, EntryPoint};
+use crate::execution::decision::{ensure_no_decision_kinds, validate_decision_request};
 use crate::execution::{ModelMetadata, TemplateExecutor};
 use crate::ir::Envelope;
 use crate::runtime_adapter::{AdapterError, BackendChoice, CloudRuntimeAdapter, RuntimeAdapter};
@@ -257,22 +258,30 @@ impl Executor {
     ) -> ExecutorResult<(Envelope, StageMetadata)> {
         // Public entry: callers may skip `prepare_stage_input`, so refuse
         // choice kinds here too, before any target runs.
+        ensure_no_decision_kinds(&stage.name, std::iter::once(input))
+            .map_err(ExecutorError::AdapterError)?;
         ensure_no_choice_kinds(&stage.name, std::iter::once(input))
             .map_err(ExecutorError::AdapterError)?;
         let start_time = Instant::now();
-        match target {
+        let result = match target {
             "cloud" => {
                 if stage.provider.is_some() {
-                    return self.execute_cloud(stage, input, start_time);
+                    self.execute_cloud(stage, input, start_time)
+                } else {
+                    self.execute_registered_cloud_adapter(stage, input, target, start_time)
                 }
-                self.execute_registered_cloud_adapter(stage, input, target, start_time)
             }
             "local" | "edge" => self.execute_local(stage, input, target, start_time),
             other => Err(ExecutorError::InvalidTarget(format!(
                 "Unknown target: {}",
                 other
             ))),
-        }
+        }?;
+        // Custom adapters are not permitted to introduce a decision payload on
+        // a pipeline's final stage or bury it inside another envelope shape.
+        ensure_no_decision_kinds(&stage.name, std::iter::once(&result.0))
+            .map_err(ExecutorError::AdapterError)?;
+        Ok(result)
     }
 
     /// Provider-free stage routed to cloud: only an explicitly registered
@@ -378,6 +387,8 @@ impl Executor {
                         );
 
                         // A choice scorer is never a pipeline stage.
+                        validate_decision_request(&model_metadata, input, EntryPoint::Pipeline)
+                            .map_err(ExecutorError::AdapterError)?;
                         validate_choice_request(&model_metadata, input, EntryPoint::Pipeline)
                             .map_err(ExecutorError::AdapterError)?;
 
@@ -735,6 +746,8 @@ const SHARED_GENERATION_OPTIONS: [&str; 4] =
 /// with the same settings on either leg.
 pub fn prepare_stage_input(stage: &StageDescriptor, input: &Envelope) -> ExecutorResult<Envelope> {
     // Pipelines never carry choice requests or scores, on either leg.
+    ensure_no_decision_kinds(&stage.name, std::iter::once(input))
+        .map_err(ExecutorError::AdapterError)?;
     ensure_no_choice_kinds(&stage.name, std::iter::once(input))
         .map_err(ExecutorError::AdapterError)?;
     let Some(options) = stage.options.as_ref() else {
@@ -1576,6 +1589,56 @@ mod tests {
                 crate::ir::Choice::new("name", "fill Name"),
             ],
         )
+    }
+
+    #[test]
+    fn pipeline_adapters_cannot_produce_decisions_even_on_the_final_stage() {
+        struct DecisionAdapter {
+            name: &'static str,
+            output: Envelope,
+        }
+        impl RuntimeAdapter for DecisionAdapter {
+            fn name(&self) -> &str {
+                self.name
+            }
+            fn supported_formats(&self) -> Vec<&'static str> {
+                vec![]
+            }
+            fn load_model(&mut self, _: &str) -> Result<(), AdapterError> {
+                Ok(())
+            }
+            fn execute(&self, _: &Envelope) -> Result<Envelope, AdapterError> {
+                Ok(self.output.clone())
+            }
+        }
+        let decision = Envelope::decisions(crate::ir::Decisions::new(
+            vec![],
+            crate::ir::DecisionUsage::default(),
+        ));
+        let nested = Envelope::choice_request(
+            Envelope::new(EnvelopeKind::MultiPart(vec![decision.clone()])),
+            vec![],
+        );
+        for target in ["local", "cloud", "edge"] {
+            for output in [decision.clone(), nested.clone()] {
+                let mut executor = Executor::new();
+                executor.register_adapter(Arc::new(DecisionAdapter {
+                    name: if target == "cloud" { "cloud" } else { "onnx" },
+                    output,
+                }));
+                let error = executor
+                    .execute_prepared(
+                        &StageDescriptor::new("final"),
+                        &Envelope::new(EnvelopeKind::Text("input".into())),
+                        target,
+                    )
+                    .unwrap_err();
+                assert!(matches!(
+                    error,
+                    ExecutorError::AdapterError(AdapterError::UnsupportedModelCapability { .. })
+                ));
+            }
+        }
     }
 
     fn assert_choice_refusal<T: std::fmt::Debug>(result: ExecutorResult<T>, capability: &str) {

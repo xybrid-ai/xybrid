@@ -2,6 +2,13 @@
 // (bindings/kotlin/.../XybridBolt.kt) on a plain JVM. Nothing here calls into
 // Rust — the codec is pure — so no native library is loaded.
 
+import ai.xybrid.XybridDecisions
+import ai.xybrid.XybridDecisionAnswer
+import ai.xybrid.XybridDecisionScore
+import ai.xybrid.XybridDecisionValue
+import ai.xybrid.XybridDecisionOrigin
+import ai.xybrid.XybridDecisionContent
+import ai.xybrid.XybridScoreStatistic
 import ai.xybrid.XybridAbortSignal
 import ai.xybrid.XybridDownloadState
 import ai.xybrid.XybridDownloadStatus
@@ -105,13 +112,6 @@ fun main() {
     XybridCodec.decodeEnvelope(js("kind" to "text", "text" to "x", "metadata" to js("n" to 1.0)))
   }
   expectInvalidArgument("not an object") { XybridCodec.decodeEnvelope("text") }
-  val tokenIds = XybridEnvelope(XybridEnvelopeKind.TokenIds(longArrayOf(1, 2)), emptyList())
-  expectInvalidArgument("internal token IDs cannot be encoded") {
-    XybridCodec.encodeEnvelope(tokenIds)
-  }
-  expectInvalidArgument("nested internal token IDs cannot be encoded") {
-    XybridCodec.encodeEnvelope(XybridEnvelope(XybridEnvelopeKind.MultiPart(listOf(tokenIds)), emptyList()))
-  }
 
   // -- Run options
   val request = XybridCodec.decodeRunRequest(
@@ -132,6 +132,7 @@ fun main() {
       "tracestate" to "vendor=1",
       "conversationId" to "conv-1",
       "suppressTrace" to true,
+      "frameSessionId" to "camera-7",
       "context" to "context:1",
       "cancel" to "cancel:1",
     ),
@@ -147,7 +148,9 @@ fun main() {
   check(options.traceparent == "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01", "traceparent")
   check(options.tracestate == "vendor=1" && options.conversationId == "conv-1", "trace context")
   check(options.suppressTrace, "suppress trace")
+  check(options.frameSessionId == "camera-7", "frame session")
   check(XybridCodec.decodeRunRequest(js()).options?.suppressTrace == false, "suppressTrace defaults off")
+  check(XybridCodec.decodeRunRequest(js()).options?.frameSessionId == null, "no frame session by default")
   check(request.context == "context:1" && request.cancel == "cancel:1", "handles")
   check(XybridCodec.decodeRunRequest(null).options == null, "null options")
 
@@ -259,6 +262,27 @@ fun main() {
   expectInvalidArgument("partial float") {
     XybridCodec.float32Samples(java.util.Base64.getEncoder().encodeToString(byteArrayOf(1, 2, 3)))
   }
+
+  // -- Decisions: raw content and double probabilities survive the JS codec.
+  val rawDecisionJson = """{"z":18446744073709551615,"a":9007199254740993,"zero":-0.0}"""
+  val decisionRequest = XybridCodec.decodeDecisionRequest(js(
+    "state" to js("kind" to "json", "jsonText" to rawDecisionJson),
+    "questions" to listOf(js("id" to "q", "instructions" to js("kind" to "text", "text" to "choose"),
+      "kind" to js("kind" to "choice", "options" to listOf(js("key" to "a"))))),
+  ))
+  check((decisionRequest.state as XybridDecisionContent.Json).jsonText == rawDecisionJson, "decision JSON verbatim")
+  check(XybridCodec.decodeDecisionRequest(XybridCodec.encodeDecisionRequest(decisionRequest)) == decisionRequest, "decision request round trip")
+  val probability = 0.5000000018693014
+  val decisions = XybridDecisions(listOf(XybridDecisionAnswer("q", listOf(
+    XybridDecisionScore("0", 0f, 1.0 - probability, XybridDecisionOrigin.CALLER),
+    XybridDecisionScore("1", 0f, probability, XybridDecisionOrigin.CALLER),
+    XybridDecisionScore("2", Float.NEGATIVE_INFINITY, 0.0, XybridDecisionOrigin.CALLER),
+  ), XybridDecisionValue.Score(1.0, XybridScoreStatistic.MEDIAN), probability)), 1u, 512uL)
+  val encodedDecisions = XybridCodec.encodeDecisions(decisions)
+  val decisionAnswers = encodedDecisions["answers"] as List<*>
+  val decisionDistribution = (decisionAnswers[0] as Map<*, *>)["distribution"] as List<*>
+  check((decisionDistribution[1] as Map<*, *>)["probability"] == probability, "decision f64 preserved")
+  check((decisionDistribution[2] as Map<*, *>)["rawScore"] == "-Infinity", "decision infinity string")
 
   // -- Errors
   check(XybridCodec.rejection(XybridError.RateLimited(3uL)).first == "xybrid_rate_limited", "sdk code")

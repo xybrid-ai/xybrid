@@ -2,6 +2,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { type ContextManager, context, ROOT_CONTEXT, TraceFlags, trace } from "@opentelemetry/api";
 import { LoggerProvider } from "@opentelemetry/sdk-logs";
 import {
+  type DataPoint,
+  type Histogram,
+  MeterProvider,
+  MetricReader,
+} from "@opentelemetry/sdk-metrics";
+import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
   TracerProvider,
@@ -46,18 +52,34 @@ const loadedMetrics: LoadMetrics = {
   memory,
 };
 
+/** Collects on demand only. */
+class CollectingReader extends MetricReader {
+  protected override async onForceFlush(): Promise<void> {}
+  protected override async onShutdown(): Promise<void> {}
+}
+
 const observe = (content?: ContentOptions) => {
   const spans = new InMemorySpanExporter();
   const tracerProvider = new TracerProvider({
     spanProcessors: [new SimpleSpanProcessor({ exporter: spans })],
   });
+  const reader = new CollectingReader();
   const observer = new Observer({
     tracerProvider,
-    meterProvider: null,
+    meterProvider: new MeterProvider({ readers: [reader] }),
     loggerProvider: new LoggerProvider(),
     ...(content === undefined ? {} : { content }),
   });
-  return { observer, spans };
+  /** `[error.type, count]` of every data point of the histogram `name`. */
+  const points = async (name: string) => {
+    const { resourceMetrics } = await reader.collect();
+    return resourceMetrics.scopeMetrics
+      .flatMap((scope) => scope.metrics)
+      .filter((metric) => metric.descriptor.name === name)
+      .flatMap((metric) => metric.dataPoints as DataPoint<Histogram>[])
+      .map((point) => [point.attributes["error.type"], point.value.count]);
+  };
+  return { observer, spans, points };
 };
 
 /** An arbitrary observer can fail even when the library's own hooks are guarded. */
@@ -419,7 +441,7 @@ describe("observed generation", () => {
   });
 
   test("abandoning the stream records a cancellation", async () => {
-    const { observer, spans } = observe();
+    const { observer, spans, points } = observe();
     const { runtime } = scriptedRuntime({ deltas: ["a", "b", "c"] }, true);
     const session = await load(runtime, { observer });
     for await (const _delta of session.generateStream("hi")) break;
@@ -427,6 +449,10 @@ describe("observed generation", () => {
     expect(inference?.attributes["error.type"]).toBe("cancelled");
     expect(inference?.status.message).toBe("cancelled");
     expect(inference?.attributes["gen_ai.usage.output_tokens"]).toBe(1);
+    // The duration metric records the span's outcome, once.
+    expect(await points("gen_ai.client.inference.duration")).toEqual([
+      [inference?.attributes["error.type"], 1],
+    ]);
   });
 
   test("a runtime failure records the error", async () => {

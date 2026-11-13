@@ -23,6 +23,8 @@ enum Inner {
     System,
     #[cfg(feature = "test-util")]
     Manual(Arc<ManualClock>),
+    #[cfg(feature = "test-util")]
+    ManualWall(Arc<ManualClock>),
 }
 
 impl Clock {
@@ -40,13 +42,25 @@ impl Clock {
         Self(Inner::Manual(clock))
     }
 
+    /// The system clock with its wall time read from `wall` (feature
+    /// `test-util`). Calls that belong to no operation read `wall`; each
+    /// operation anchors on `wall` when it starts and adds the monotonic time
+    /// elapsed since then, as with the system clock. Moving `wall` while an
+    /// operation runs models a wall-clock step (an NTP correction) that the
+    /// operation's readings do not follow.
+    #[cfg(feature = "test-util")]
+    #[must_use]
+    pub fn manual_wall(wall: Arc<ManualClock>) -> Self {
+        Self(Inner::ManualWall(wall))
+    }
+
     /// Current wall-clock time (or the manual clock's time).
     #[must_use]
     pub fn now(&self) -> SystemTime {
         match &self.0 {
             Inner::System => SystemTime::now(),
             #[cfg(feature = "test-util")]
-            Inner::Manual(clock) => clock.now(),
+            Inner::Manual(clock) | Inner::ManualWall(clock) => clock.now(),
         }
     }
 
@@ -59,6 +73,11 @@ impl Clock {
             }),
             #[cfg(feature = "test-util")]
             Inner::Manual(clock) => OperationClock(OpInner::Manual(clock.clone())),
+            #[cfg(feature = "test-util")]
+            Inner::ManualWall(wall) => OperationClock(OpInner::System {
+                wall: wall.now(),
+                mono: Instant::now(),
+            }),
         }
     }
 }
@@ -75,6 +94,8 @@ impl fmt::Debug for Clock {
             Inner::System => f.write_str("Clock::System"),
             #[cfg(feature = "test-util")]
             Inner::Manual(_) => f.write_str("Clock::Manual"),
+            #[cfg(feature = "test-util")]
+            Inner::ManualWall(_) => f.write_str("Clock::ManualWall"),
         }
     }
 }

@@ -879,10 +879,9 @@ impl RuntimeAdapter for LlmRuntimeAdapter {
             EnvelopeKind::MultiPart(_) => Err(AdapterError::InvalidInput(
                 "LLM adapter expects Text input, not MultiPart".to_string(),
             )),
-            EnvelopeKind::TokenIds(_) => Err(AdapterError::InvalidInput(
-                "Generic LLM adapter expects Text input; TokenIds is reserved for MLX prefill"
-                    .to_string(),
-            )),
+            EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+                Err(crate::execution::decision::decision_kind_not_runtime_input())
+            }
             EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
                 Err(crate::execution::choice::choice_kind_not_runtime_input())
             }

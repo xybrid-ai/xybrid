@@ -42,6 +42,13 @@ use std::time::Duration;
 
 use xybrid_sdk as sdk;
 
+mod decision;
+pub use decision::{
+    DecisionAnswer, DecisionContent, DecisionLevel, DecisionOption, DecisionOrigin,
+    DecisionQuestion, DecisionQuestionKind, DecisionRequest, DecisionScore, DecisionValue,
+    Decisions, ScoreStatistic,
+};
+
 // ============================================================================
 // Error
 // ============================================================================
@@ -341,9 +348,6 @@ pub enum EnvelopeKind {
     Embedding {
         values: Vec<f32>,
     },
-    TokenIds {
-        ids: Vec<i64>,
-    },
     /// Encoded image input (PNG/JPEG/WebP) for vision-capable models. The
     /// bytes are decode-validated and the dimensions derived when this is
     /// lowered to the SDK in [`Envelope::into_sdk`] — so construction is
@@ -355,6 +359,14 @@ pub enum EnvelopeKind {
     /// Ordered parts of one logical multimodal message (e.g. text + images).
     MultiPart {
         parts: Vec<Envelope>,
+    },
+    /// Ordered text/JSON decision input, appended for wire compatibility.
+    DecisionRequest {
+        request: DecisionRequest,
+    },
+    /// Typed atomic decision output, appended for wire compatibility.
+    Decisions {
+        decisions: Decisions,
     },
 }
 
@@ -370,6 +382,22 @@ pub struct Envelope {
 }
 
 impl Envelope {
+    /// Build an envelope from typed decision data after structural validation.
+    pub fn decision_request(request: DecisionRequest) -> Result<Self> {
+        let core = request.into_sdk()?;
+        Self::try_from_sdk(sdk::ir::Envelope::new(
+            sdk::ir::EnvelopeKind::DecisionRequest(core),
+        ))
+    }
+
+    /// Decode the bounded Liquid SystemOne JSON protocol without map round trips.
+    pub fn decision_request_json(json: String) -> Result<Self> {
+        let request = sdk::decode_decision_request(&json).map_err(Error::from)?;
+        Self::try_from_sdk(sdk::ir::Envelope::new(
+            sdk::ir::EnvelopeKind::DecisionRequest(request),
+        ))
+    }
+
     pub fn text(text: String) -> Self {
         Self {
             kind: EnvelopeKind::Text { text },
@@ -387,13 +415,6 @@ impl Envelope {
     pub fn embedding(values: Vec<f32>) -> Self {
         Self {
             kind: EnvelopeKind::Embedding { values },
-            metadata: HashMap::new(),
-        }
-    }
-
-    pub fn token_ids(ids: Vec<i64>) -> Self {
-        Self {
-            kind: EnvelopeKind::TokenIds { ids },
             metadata: HashMap::new(),
         }
     }
@@ -514,10 +535,15 @@ impl Envelope {
     pub fn into_sdk(self) -> Result<sdk::ir::Envelope> {
         let Envelope { kind, metadata } = self;
         let sdk_kind = match kind {
+            EnvelopeKind::DecisionRequest { request } => {
+                sdk::ir::EnvelopeKind::DecisionRequest(request.into_sdk()?)
+            }
+            EnvelopeKind::Decisions { decisions } => {
+                sdk::ir::EnvelopeKind::Decisions(decisions.into_sdk()?)
+            }
             EnvelopeKind::Text { text } => sdk::ir::EnvelopeKind::Text(text),
             EnvelopeKind::Audio { bytes } => sdk::ir::EnvelopeKind::Audio(bytes),
             EnvelopeKind::Embedding { values } => sdk::ir::EnvelopeKind::Embedding(values),
-            EnvelopeKind::TokenIds { ids } => sdk::ir::EnvelopeKind::TokenIds(ids),
             EnvelopeKind::Image { bytes, format } => {
                 // Decode-validates the bytes and derives dimensions, then carry
                 // this envelope's metadata onto the validated kind via
@@ -549,10 +575,15 @@ impl Envelope {
     /// [`MultiPart`]: EnvelopeKind::MultiPart
     pub fn try_from_sdk(env: sdk::ir::Envelope) -> Result<Self> {
         let kind = match env.kind {
+            sdk::ir::EnvelopeKind::DecisionRequest(request) => EnvelopeKind::DecisionRequest {
+                request: DecisionRequest::try_from_sdk(&request)?,
+            },
+            sdk::ir::EnvelopeKind::Decisions(decisions) => EnvelopeKind::Decisions {
+                decisions: Decisions::try_from_sdk(&decisions)?,
+            },
             sdk::ir::EnvelopeKind::Text(text) => EnvelopeKind::Text { text },
             sdk::ir::EnvelopeKind::Audio(bytes) => EnvelopeKind::Audio { bytes },
             sdk::ir::EnvelopeKind::Embedding(values) => EnvelopeKind::Embedding { values },
-            sdk::ir::EnvelopeKind::TokenIds(ids) => EnvelopeKind::TokenIds { ids },
             sdk::ir::EnvelopeKind::Image { source } => match source.as_encoded() {
                 Some((bytes, format)) => EnvelopeKind::Image {
                     bytes: bytes.to_vec(),
@@ -701,6 +732,9 @@ impl ConversationContextHandle {
     /// decode/validation (so multimodal history can't store a bad image).
     pub fn push(&self, envelope: Envelope) -> Result<()> {
         let sdk_env = envelope.into_sdk()?;
+        if sdk_env.kind.contains_decision_kind() {
+            return Err(unrepresentable("decisions in conversation history"));
+        }
         self.lock().push(sdk_env);
         Ok(())
     }
@@ -712,6 +746,9 @@ impl ConversationContextHandle {
     /// decode/validation.
     pub fn set_system(&self, envelope: Envelope) -> Result<()> {
         let sdk_env = envelope.into_sdk()?;
+        if sdk_env.kind.contains_decision_kind() {
+            return Err(unrepresentable("decisions in conversation history"));
+        }
         let mut guard = self.lock();
         let new_ctx = std::mem::take(&mut *guard).with_system(sdk_env);
         *guard = new_ctx;
@@ -1100,6 +1137,15 @@ pub struct RunOptions {
     pub conversation_id: Option<String>,
     /// Skip the detailed trace for this run (metrics are still recorded).
     pub suppress_trace: bool,
+
+    /// Caller-supplied id of one continuous live-capture session (a camera
+    /// or microphone loop), opaque to the SDK. Every run of the session is
+    /// counted in metrics, while detailed traces are kept for roughly one
+    /// run per live trace interval per session (see
+    /// [`ObservabilityConfigHandle::set_live_trace_interval_ms`]). A blank
+    /// value is ignored. `None` for one-shot runs. Applies to model runs: a
+    /// pipeline run ignores it and traces every run.
+    pub frame_session_id: Option<String>,
 }
 
 /// Observation controls shared by load, pipeline, inference and ASR entry points.
@@ -1199,6 +1245,16 @@ impl RunOptions {
         if let Some(observation) = self.observation()? {
             opts = opts.with_observation(observation);
         }
+        // A frame session marks the run as live capture: every frame is
+        // counted, and traces are sampled per session.
+        if let Some(id) = self
+            .frame_session_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        {
+            opts = opts.with_frame_session(id);
+        }
         if let Some(tok) = cancel {
             opts = opts.with_cancellation_token(tok.inner.clone());
         }
@@ -1242,6 +1298,7 @@ pub enum OutputType {
     Audio,
     Embedding,
     Unknown,
+    Decisions,
 }
 
 impl OutputType {
@@ -1250,6 +1307,7 @@ impl OutputType {
             sdk::OutputType::Text => OutputType::Text,
             sdk::OutputType::Audio => OutputType::Audio,
             sdk::OutputType::Embedding => OutputType::Embedding,
+            sdk::OutputType::Decisions => OutputType::Decisions,
             // A scorer never loads through the facade (`ensure_ffi_supported`).
             sdk::OutputType::Unknown | sdk::OutputType::ChoiceScores => OutputType::Unknown,
         }
@@ -1262,9 +1320,10 @@ impl OutputType {
             EnvelopeKind::Text { .. } => OutputType::Text,
             EnvelopeKind::Audio { .. } => OutputType::Audio,
             EnvelopeKind::Embedding { .. } => OutputType::Embedding,
+            EnvelopeKind::Decisions { .. } => OutputType::Decisions,
             EnvelopeKind::Image { .. }
             | EnvelopeKind::MultiPart { .. }
-            | EnvelopeKind::TokenIds { .. } => OutputType::Unknown,
+            | EnvelopeKind::DecisionRequest { .. } => OutputType::Unknown,
         }
     }
 }
@@ -1562,11 +1621,53 @@ impl StreamingSession {
         }
     }
 
+    /// Runs `run` on the worker as a token stream: each token it hands to the
+    /// callback goes to [`Self::next`], then the run's terminal event.
+    ///
+    /// Dropping the session before the terminal event is the caller's
+    /// cancellation. The next token finds no receiver and the callback
+    /// returns [`sdk::AbortReason::UserCancelled`], so the run stops at that
+    /// token and the SDK ends it `cancelled` (span, duration metric, no
+    /// exception), as if the caller had cancelled its token.
+    fn spawn_tokens(
+        run: impl FnOnce(&mut TokenCallback) -> sdk::SdkResult<sdk::InferenceResult> + Send + 'static,
+    ) -> std::io::Result<Arc<Self>> {
+        Self::spawn(move |sender| {
+            let tokens = sender.clone();
+            let mut on_token = move |token: sdk::PartialToken| {
+                tokens
+                    .send(StreamEvent::Token(StreamToken::from_sdk(token)))
+                    // The receiver is gone: the caller dropped the session.
+                    .map_err(|_| Box::new(sdk::AbortReason::UserCancelled) as sdk::StreamingError)
+            };
+            let result = run(&mut on_token);
+            let _ = sender.send(StreamEvent::terminal(result));
+        })
+    }
+
+    /// [`Self::spawn_tokens`] for tests of the crates that wrap the facade:
+    /// `run` stands in for the SDK run, so a test can pace its tokens and see
+    /// how the run stops (M-TEST-UTIL).
+    ///
+    /// # Panics
+    ///
+    /// When the worker thread cannot be spawned.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn spawn_tokens_for_test(
+        run: impl FnOnce(&mut TokenCallback) -> sdk::SdkResult<sdk::InferenceResult> + Send + 'static,
+    ) -> Arc<Self> {
+        Self::spawn_tokens(run).expect("test streaming worker should spawn")
+    }
+
     #[cfg(test)]
     fn spawn_for_test(produce: impl FnOnce(SyncSender<StreamEvent>) + Send + 'static) -> Arc<Self> {
         Self::spawn(produce).expect("test streaming worker should spawn")
     }
 }
+
+/// The token callback a streaming worker hands to the SDK run.
+type TokenCallback =
+    dyn FnMut(sdk::PartialToken) -> std::result::Result<(), sdk::StreamingError> + Send;
 
 impl Drop for StreamingSession {
     fn drop(&mut self) {
@@ -1603,6 +1704,30 @@ fn send_audio_event(
 }
 
 impl InferenceResult {
+    /// Typed decisions, without adding fields to the frozen result record.
+    pub fn decisions(&self) -> Option<&Decisions> {
+        match &self.envelope.kind {
+            EnvelopeKind::Decisions { decisions } => Some(decisions),
+            _ => None,
+        }
+    }
+
+    /// Total input token usage across decision passes, or ordinary model input.
+    pub fn tokens_in(&self) -> Option<u64> {
+        self.envelope
+            .metadata
+            .get("tokens_in")
+            .and_then(|value| value.parse().ok())
+    }
+
+    /// Generated output token usage (zero for decisions).
+    pub fn tokens_out(&self) -> Option<u64> {
+        self.envelope
+            .metadata
+            .get("tokens_out")
+            .and_then(|value| value.parse().ok())
+    }
+
     /// Convert an SDK result.
     ///
     /// # Errors
@@ -1861,7 +1986,10 @@ impl Pipeline {
     }
 }
 
-/// Keep the [`RunOptions`] fields a pipeline run honours; reject the rest.
+/// Keep the [`RunOptions`] fields a pipeline run honours and reject those
+/// that would change what it generates (`generation_config`, `abort_on`).
+/// The remaining fields are inert here and accepted: the cloud-fallback
+/// knobs, and `frame_session_id`, which samples model runs only.
 fn pipeline_run_options(options: RunOptions) -> Result<sdk::RunOptions> {
     if options.generation_config.is_some() {
         return Err(Error::ConfigError {
@@ -2348,6 +2476,15 @@ impl XybridModel {
 
     // -- Inference ----------------------------------------------------------
 
+    fn refuse_decision_surface(&self, envelope: &sdk::ir::Envelope, surface: &str) -> Result<()> {
+        if self.inner.is_decision_model() || envelope.kind.contains_decision_kind() {
+            return Err(Error::UnsupportedModelCapability {
+                message: format!("decision models do not support {surface}"),
+            });
+        }
+        Ok(())
+    }
+
     /// Run inference with no overrides.
     pub fn run(&self, envelope: Envelope) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;
@@ -2363,7 +2500,22 @@ impl XybridModel {
         options: RunOptions,
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<InferenceResult> {
+        // A decision run ends a cancelled token with `Cancelled`. Other models
+        // keep reporting it through the abort policy, as before decisions.
+        if self.inner.is_decision_model()
+            && cancel.as_ref().is_some_and(|token| token.is_cancelled())
+        {
+            return Err(Error::Cancelled {
+                message: "decision cancelled".into(),
+            });
+        }
         let env = envelope.into_sdk()?;
+        if options.generation_config.is_some() {
+            self.refuse_decision_surface(&env, "generation settings")?;
+        }
+        if options.fallback_to_cloud {
+            self.refuse_decision_surface(&env, "cloud fallback")?;
+        }
         let opts =
             options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
         let result = self
@@ -2385,6 +2537,7 @@ impl XybridModel {
         generation_config: Option<GenerationConfig>,
     ) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;
+        self.refuse_decision_surface(&env, "conversation history")?;
         let ctx = context.snapshot();
         let gc = generation_config
             .as_ref()
@@ -2413,6 +2566,7 @@ impl XybridModel {
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;
+        self.refuse_decision_surface(&env, "conversation history")?;
         let ctx = context.snapshot();
         let opts =
             options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
@@ -2424,6 +2578,14 @@ impl XybridModel {
     }
 
     /// Async inference. The SDK offloads to `spawn_blocking` internally.
+    ///
+    /// Takes no [`RunOptions`]: the run has no explicit parent, conversation
+    /// id or trace suppression, and takes its parent only from the ambient
+    /// OpenTelemetry context where the future first runs (a context the host
+    /// attached on another thread is not seen; poll the future under that
+    /// context or wrap it with `FutureExt::with_context`). Hosts that pass a
+    /// `traceparent` use [`Self::run_with_options`] or [`Self::run_stream`],
+    /// which take [`RunOptions`].
     pub async fn run_async(&self, envelope: Envelope) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;
         let result = self
@@ -2438,7 +2600,9 @@ impl XybridModel {
     ///
     /// The returned session owns a bounded channel and the inference worker
     /// owns a clone of the model, so both remain alive until inference ends.
-    /// Dropping the session disconnects the producer at its next token.
+    /// Dropping the session before its terminal event cancels the run: it
+    /// stops at its next token and is recorded as a user cancellation
+    /// (`error.type` `cancelled`), not as an error.
     ///
     /// # Errors
     ///
@@ -2451,6 +2615,7 @@ impl XybridModel {
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<Arc<StreamingSession>> {
         let envelope = envelope.into_sdk()?;
+        self.refuse_decision_surface(&envelope, "streaming")?;
         let options =
             options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
         let model = self.inner.clone();
@@ -2507,19 +2672,8 @@ impl XybridModel {
             }));
         }
 
-        StreamingSession::spawn(move |sender| {
-            let result = model.run_streaming_with_options(&envelope, &options, |token| {
-                sender
-                    .send(StreamEvent::Token(StreamToken::from_sdk(token)))
-                    .map_err(|_| {
-                        Box::new(std::io::Error::new(
-                            std::io::ErrorKind::BrokenPipe,
-                            "stream receiver dropped",
-                        )) as Box<dyn std::error::Error + Send + Sync>
-                    })
-            });
-
-            let _ = sender.send(StreamEvent::terminal(result));
+        StreamingSession::spawn_tokens(move |on_token| {
+            model.run_streaming_with_options(&envelope, &options, on_token)
         })
         .map_err(|error| Error::InferenceError {
             message: format!("failed to start streaming worker: {error}"),
@@ -2543,26 +2697,14 @@ impl XybridModel {
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<Arc<StreamingSession>> {
         let envelope = envelope.into_sdk()?;
+        self.refuse_decision_surface(&envelope, "streaming")?;
         let ctx = context.snapshot();
         let options =
             options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
         let model = self.inner.clone();
 
-        StreamingSession::spawn(move |sender| {
-            let result =
-                model.run_streaming_with_context_options(&envelope, &ctx, &options, |token| {
-                    sender
-                        .send(StreamEvent::Token(StreamToken::from_sdk(token)))
-                        .map_err(|_| {
-                            Box::new(std::io::Error::new(
-                                std::io::ErrorKind::BrokenPipe,
-                                "stream receiver dropped",
-                            ))
-                                as Box<dyn std::error::Error + Send + Sync>
-                        })
-                });
-
-            let _ = sender.send(StreamEvent::terminal(result));
+        StreamingSession::spawn_tokens(move |on_token| {
+            model.run_streaming_with_context_options(&envelope, &ctx, &options, on_token)
         })
         .map_err(|error| Error::InferenceError {
             message: format!("failed to start streaming worker: {error}"),
@@ -3574,7 +3716,11 @@ impl ObservabilityConfigHandle {
     }
 
     /// Maximum bytes per captured content attribute (longer content is
-    /// truncated with a marker).
+    /// truncated with a marker). The value is clamped, never rejected, to the
+    /// retained-operation budget: at most 416 KiB (208 KiB with
+    /// [`Self::set_json_protocol`], because OTLP/JSON can double content),
+    /// which keeps a span's content within the 480 KiB export request with
+    /// 64 KiB left for its other data.
     pub fn set_max_content_bytes(&self, bytes: u32) {
         self.with_draft(|d| d.max_content_bytes = Some(bytes));
     }
@@ -3684,7 +3830,15 @@ pub struct ObservabilityStats {
     pub metrics: SignalStats,
 }
 
-/// Current delivery counters (all zero when observability is off).
+/// Delivery counters of the observability pipeline.
+///
+/// While export is on, the live counters. After [`observability_shutdown`],
+/// `enabled` is `false` and the counters are the shut-down session's final
+/// ones, settled by the shutdown (what it failed in flight or dropped from
+/// the queue included, nothing pending), until the next
+/// [`ObservabilityConfigHandle::init`] starts a new session's. All zero
+/// before any init. An init that replaces a running session starts the new
+/// session's counters at once: shut down first to read the old one's.
 pub fn observability_stats() -> ObservabilityStats {
     let enabled = sdk::observability::is_enabled();
     sdk::observability::stats().map_or(
@@ -3711,6 +3865,9 @@ pub fn observability_flush(timeout_ms: u32) -> Result<()> {
 }
 
 /// Flush and stop exporting, waiting at most `timeout_ms`. Idempotent.
+///
+/// The session's final counters stay readable through
+/// [`observability_stats`] until the next init.
 ///
 /// # Errors
 /// When the bound is exceeded.
@@ -3893,6 +4050,34 @@ mod tests {
             tracestate: None,
             conversation_id: None,
             suppress_trace: false,
+            frame_session_id: None,
+        }
+    }
+
+    #[test]
+    fn a_frame_session_marks_the_run_as_live_capture() {
+        // Every binding that goes through this conversion gets live frame
+        // sessions: the id reaches the SDK run and flips live mode, which is
+        // what `live_trace_interval` samples by.
+        let live = RunOptions {
+            frame_session_id: Some(" camera-7 ".into()),
+            ..bare_run_options()
+        }
+        .to_sdk(None)
+        .unwrap();
+        assert!(live.live_mode);
+        assert_eq!(live.frame_session_id.as_deref(), Some("camera-7"));
+
+        // One-shot runs, and blank ids, are untouched.
+        for blank in [None, Some(String::new()), Some("  ".into())] {
+            let one_shot = RunOptions {
+                frame_session_id: blank.clone(),
+                ..bare_run_options()
+            }
+            .to_sdk(None)
+            .unwrap();
+            assert!(!one_shot.live_mode, "{blank:?}");
+            assert_eq!(one_shot.frame_session_id, None, "{blank:?}");
         }
     }
 
@@ -4099,6 +4284,9 @@ mod tests {
 
     #[test]
     fn pipeline_construction_collapses_ref_and_exposes_stage_ids() {
+        static CACHE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| tempfile::tempdir().expect("create facade test cache"));
+        sdk::init_sdk_cache_dir(cache.path());
         let pipeline = Pipeline::from_yaml(
             r#"
 name: assistant
@@ -4241,6 +4429,16 @@ stages:
         let sdk_options = pipeline_run_options(options).expect("inert fields are accepted");
 
         assert_eq!(sdk_options.correlation_id.as_deref(), Some("turn-7"));
+
+        // A frame session samples model runs only: a pipeline run accepts the
+        // option and is not marked live.
+        let live = RunOptions {
+            frame_session_id: Some("camera-7".into()),
+            ..RunOptions::default()
+        };
+        let sdk_options = pipeline_run_options(live).expect("a frame session is inert here");
+        assert!(!sdk_options.live_mode);
+        assert_eq!(sdk_options.frame_session_id, None);
     }
 
     #[test]
@@ -4940,6 +5138,73 @@ stages:
         ));
         assert!(matches!(session.next(), Some(StreamEvent::Complete(_))));
         assert!(session.next().is_none());
+    }
+
+    /// A token run the test paces: token `i` is handed to the callback once
+    /// the test sends its permit. Reports how many callbacks it made and the
+    /// error that stopped it.
+    fn paced_tokens(
+        permits: mpsc::Receiver<()>,
+        report: mpsc::Sender<(usize, Option<sdk::StreamingError>)>,
+    ) -> impl FnOnce(&mut TokenCallback) -> sdk::SdkResult<sdk::InferenceResult> + Send + 'static
+    {
+        move |on_token| {
+            let mut callbacks = 0;
+            let mut stopped = None;
+            for index in 0..5 {
+                permits
+                    .recv_timeout(Duration::from_secs(30))
+                    .expect("the test paces every token");
+                callbacks += 1;
+                let token = sdk::PartialToken {
+                    token: format!("t{index}"),
+                    token_id: None,
+                    index,
+                    cumulative_text: String::new(),
+                    finish_reason: None,
+                    tool_calls: Vec::new(),
+                    raw_text: None,
+                };
+                if let Err(error) = on_token(token) {
+                    stopped = Some(error);
+                    break;
+                }
+            }
+            report.send((callbacks, stopped)).unwrap();
+            Err(sdk::SdkError::InferenceError {
+                message: "stopped".into(),
+                source: None,
+            })
+        }
+    }
+
+    #[test]
+    fn dropping_a_token_stream_stops_its_run_at_the_next_token_as_a_user_cancellation() {
+        let (permit, permits) = mpsc::channel();
+        let (report, reported) = mpsc::channel();
+        let session = StreamingSession::spawn_tokens_for_test(paced_tokens(permits, report));
+        for index in 0..2 {
+            permit.send(()).unwrap();
+            assert!(
+                matches!(session.next(), Some(StreamEvent::Token(StreamToken { index: i, .. })) if i as usize == index)
+            );
+        }
+
+        drop(session);
+        // The next token finds no receiver.
+        permit.send(()).unwrap();
+        let (callbacks, stopped) = reported
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the run returns");
+
+        assert_eq!(callbacks, 3, "it stops at the token after the drop");
+        let stopped = stopped.expect("the callback stopped the run");
+        // The SDK records this error as the caller's cancellation.
+        assert_eq!(
+            stopped.downcast_ref::<sdk::AbortReason>(),
+            Some(&sdk::AbortReason::UserCancelled),
+            "{stopped}"
+        );
     }
 
     #[test]

@@ -79,6 +79,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parse output
     match &output_envelope.kind {
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            return Err("Unexpected decision output".into());
+        }
         EnvelopeKind::Text(response) => {
             println!("═══════════════════════════════════════════════════════");
             println!("📤 Response:");
@@ -110,9 +113,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
             println!("⚠️  Unexpected: Got vision output instead of text");
-        }
-        EnvelopeKind::TokenIds(_) => {
-            println!("⚠️  Unexpected: Got raw token IDs output instead of text");
         }
         EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
             println!("⚠️  Unexpected: Got choice output instead of text");

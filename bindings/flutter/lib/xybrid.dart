@@ -72,6 +72,7 @@
 /// - [ToolDefinition] / [ToolCall] / [ToolResult] - LLM tool (function) calling
 library;
 
+export 'src/decisions.dart';
 export 'src/context.dart' show ConversationContext, MessageRole;
 export 'src/device_snapshot.dart'
     show DeviceSnapshot, MemoryPressure, ThermalState;

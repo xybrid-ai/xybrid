@@ -115,6 +115,35 @@ int  llama_n_ctx_c(const XYBRID_LLAMA_CONTEXT* ctx);
 bool llama_model_is_recurrent_c(const XYBRID_LLAMA_MODEL* model);
 bool llama_model_has_recurrent_state_c(const XYBRID_LLAMA_MODEL* model);
 
+/* Decision-only primitives. All failures are content-free; C++ exceptions
+ * never cross these entry points. Vocab-only models must not create contexts. */
+XYBRID_LLAMA_MODEL* llama_load_decision_model_c(const char* path_model, bool vocab_only);
+int llama_model_metadata_c(const XYBRID_LLAMA_MODEL* model, const char* key, char* out, size_t capacity);
+int llama_model_metadata_count_c(const XYBRID_LLAMA_MODEL* model);
+int llama_model_metadata_key_c(const XYBRID_LLAMA_MODEL* model, int index, char* out, size_t capacity);
+int llama_model_named_template_c(const XYBRID_LLAMA_MODEL* model, const char* name, char* out, size_t capacity);
+int llama_vocab_text_c(const XYBRID_LLAMA_MODEL* model, int token, char* out, size_t capacity);
+bool llama_vocab_is_control_c(const XYBRID_LLAMA_MODEL* model, int token);
+XYBRID_LLAMA_CONTEXT* llama_decision_context_new_c(XYBRID_LLAMA_MODEL* model);
+bool llama_decision_context_valid_c(const XYBRID_LLAMA_CONTEXT* ctx);
+struct llama_decision_settings_c {
+    uint32_t n_ctx, n_ctx_seq, n_batch, n_ubatch, n_seq_max;
+    int32_t n_threads, n_threads_batch, n_devices;
+    bool causal_attn, has_memory;
+};
+bool llama_decision_context_settings_c(const XYBRID_LLAMA_CONTEXT* ctx,
+    struct llama_decision_settings_c* settings);
+typedef bool (*llama_decision_abort_c)(void* data);
+int llama_decision_evaluate_c(XYBRID_LLAMA_CONTEXT* ctx,
+    const int32_t* tokens, int n_tokens, const int32_t* labels, int n_labels,
+    float* selected, llama_decision_abort_c abort_callback, void* abort_data);
+void* llama_decision_renderer_new_c(const char* source, size_t source_len);
+void llama_decision_renderer_free_c(void* renderer);
+int llama_decision_renderer_render_c(void* renderer,
+    const char* json, size_t json_len, size_t max_output_bytes,
+    char** output, size_t* output_len);
+void llama_decision_rendered_free_c(char* output);
+
 /* Low-level generation primitives (carried in wrapper.cpp's exports
    even though xybrid-llama drives generation via the higher-level
    `llama_generate*_c` entry points below). */
@@ -142,6 +171,9 @@ int  llama_format_chat_with_model_c(
 llama_batch llama_batch_init_c(int n_tokens, int embd, int n_seq_max);
 void llama_batch_free_c(llama_batch batch);
 
+/* `banned_tokens` (NULL / 0 for none) are token ids the chain never picks:
+   their logits are set to -inf ahead of every other sampler. The generation
+   functions below take the same pair. */
 XYBRID_LLAMA_SAMPLER* llama_sampler_chain_create_c(
     const XYBRID_LLAMA_MODEL* model,
     float temperature,
@@ -152,7 +184,9 @@ XYBRID_LLAMA_SAMPLER* llama_sampler_chain_create_c(
     int penalty_last_n,
     uint32_t seed,
     const char* grammar,
-    const char* grammar_root);
+    const char* grammar_root,
+    const int32_t* banned_tokens,
+    int n_banned_tokens);
 void llama_sampler_free_c(XYBRID_LLAMA_SAMPLER* smpl);
 
 /* Streaming-callback token type (matches Rust's `TokenCallback`). */
@@ -174,6 +208,8 @@ int  llama_generate_c(
     uint32_t seed,
     const char* grammar,
     const char* grammar_root,
+    const int32_t* banned_tokens,
+    int n_banned_tokens,
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs);
@@ -194,6 +230,8 @@ int  llama_generate_streaming_c(
     uint32_t seed,
     const char* grammar,
     const char* grammar_root,
+    const int32_t* banned_tokens,
+    int n_banned_tokens,
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs,
@@ -216,6 +254,8 @@ int  llama_generate_from_current_logits_c(
     uint32_t seed,
     const char* grammar,
     const char* grammar_root,
+    const int32_t* banned_tokens,
+    int n_banned_tokens,
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs,

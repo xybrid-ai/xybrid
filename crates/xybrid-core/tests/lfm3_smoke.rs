@@ -6,9 +6,10 @@
 
 use std::path::Path;
 use xybrid_core::{
+    conversation::ConversationContext,
     execution::{ExecutionTemplate, ModelMetadata, TemplateExecutor},
     gateway::{Tool, ToolCall},
-    ir::{Envelope, EnvelopeKind, ToolCallResult},
+    ir::{Envelope, EnvelopeKind, MessageRole, ToolCallResult},
     runtime_adapter::{GenerationConfig, PartialToken},
     testing::model_fixtures,
 };
@@ -53,6 +54,69 @@ fn weather_tool() -> Tool {
             "required": ["city"]
         }),
     )
+}
+
+/// A conversation with a system prompt and, with `earlier_turns`, one
+/// exchange in which the user says where they live.
+fn conversation(earlier_turns: bool) -> ConversationContext {
+    let turn =
+        |text: &str, role| Envelope::new(EnvelopeKind::Text(text.to_string())).with_role(role);
+    let mut context = ConversationContext::new()
+        .with_system(turn("You are a helpful assistant.", MessageRole::System));
+    if earlier_turns {
+        context.push(turn(
+            "My name is Sam and I live in Lyon.",
+            MessageRole::User,
+        ));
+        context.push(turn("Nice to meet you, Sam.", MessageRole::Assistant));
+    }
+    context
+}
+
+/// Streams one turn inside `context`. Returns what the callback saw and the
+/// final envelope.
+fn stream_in_conversation(
+    executor: &mut TemplateExecutor,
+    metadata: &ModelMetadata,
+    input: &Envelope,
+    context: &ConversationContext,
+    config: &GenerationConfig,
+) -> (String, Envelope) {
+    let mut tokens: Vec<PartialToken> = Vec::new();
+    let output = executor
+        .execute_streaming_with_context(
+            metadata,
+            input,
+            context,
+            Box::new(|token| {
+                tokens.push(token);
+                Ok(())
+            }),
+            Some(config),
+        )
+        .expect("streamed LFM3 turn succeeds");
+    let streamed = tokens.iter().map(|token| token.token.as_str()).collect();
+    (streamed, output)
+}
+
+/// A thinking-off turn is one answer: no think tag reached the stream, the
+/// stream spells the final text, and nothing was filed as reasoning.
+fn assert_one_answer_with_thinking_off(streamed: &str, output: &Envelope) {
+    let reasoning = output.metadata.get("reasoning_content");
+    eprintln!(
+        "streamed: {streamed:?}\nanswer: {:?}\nreasoning: {reasoning:?}",
+        text(output)
+    );
+    assert!(!streamed.contains("think>"), "{streamed:?}");
+    assert_eq!(
+        streamed.trim(),
+        text(output).trim(),
+        "the stream spells the answer"
+    );
+    assert!(
+        reasoning.is_none_or(|reasoning| reasoning.trim().is_empty()),
+        "thinking is off, yet the turn has reasoning: {reasoning:?}"
+    );
 }
 
 #[test]
@@ -120,6 +184,40 @@ fn lfm3_answers_directly_with_thinking_off() {
     assert!(
         tokens < 48,
         "a direct answer, not a reasoning run: {tokens} tokens"
+    );
+}
+
+/// With thinking off the template closes the think channel for the model.
+/// Once a system prompt was in play, LFM3 still wrote a first answer, a
+/// second `</think>` and the answer again. A batch run filed the first
+/// answer under reasoning, but a stream had already shown all three. The
+/// sampler can no longer pick a think tag after a closed channel, so the
+/// turn is the one answer.
+#[test]
+fn lfm3_streams_one_answer_with_thinking_off_and_a_system_prompt() {
+    let Some(model_dir) = model_fixtures::model_or_skip(TEXT_MODEL_ID) else {
+        return;
+    };
+    let metadata = load_metadata(&model_dir);
+    let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
+    let input = Envelope::new(EnvelopeKind::Text(
+        "What is the capital of France? Answer in one sentence.".to_string(),
+    ));
+    let config = GenerationConfig::greedy().with_max_tokens(128);
+
+    let (streamed, output) = stream_in_conversation(
+        &mut executor,
+        &metadata,
+        &input,
+        &conversation(false),
+        &config,
+    );
+
+    assert_one_answer_with_thinking_off(&streamed, &output);
+    assert!(text(&output).contains("Paris"), "{:?}", text(&output));
+    assert_eq!(
+        output.metadata.get("finish_reason").map(String::as_str),
+        Some("stop")
     );
 }
 
@@ -204,6 +302,60 @@ fn lfm3_calls_a_tool_and_answers_from_its_result() {
 
     assert!(tool_calls(&answer).is_empty(), "{:?}", text(&answer));
     assert!(text(&answer).contains("21"), "{:?}", text(&answer));
+    assert_eq!(
+        answer.metadata.get("finish_reason").map(String::as_str),
+        Some("stop")
+    );
+}
+
+/// The thinking-off stray `</think>` on a tool continuation: after a tool
+/// result, in a conversation with earlier turns, LFM3 wrote the answer, a
+/// `</think>` and the answer again, and the stream showed all of it. See
+/// `lfm3_streams_one_answer_with_thinking_off_and_a_system_prompt`.
+#[test]
+fn lfm3_streams_a_tool_continuation_in_a_conversation_with_thinking_off() {
+    let Some(model_dir) = model_fixtures::model_or_skip(TEXT_MODEL_ID) else {
+        return;
+    };
+    let metadata = load_metadata(&model_dir);
+    let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
+    let context = conversation(true);
+    let question = "What's the weather in the city I live in?";
+    let config = GenerationConfig::greedy()
+        .with_max_tokens(256)
+        .with_tools([weather_tool()]);
+
+    let first = executor
+        .execute_with_context(
+            &metadata,
+            &Envelope::new(EnvelopeKind::Text(question.to_string())),
+            &context,
+            Some(&config),
+        )
+        .expect("tool-bearing LFM3 turn succeeds");
+    let calls = tool_calls(&first);
+    assert_eq!(calls.len(), 1, "{:?}", text(&first));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&calls[0].function.arguments).unwrap(),
+        serde_json::json!({"city": "Lyon"}),
+        "the city comes from the earlier turn"
+    );
+
+    let continuation = Envelope::tool_results(
+        question,
+        text(&first),
+        &[ToolCallResult {
+            call_id: calls[0].id.clone(),
+            name: calls[0].function.name.clone(),
+            content: serde_json::json!({"temperature_c": 14, "condition": "cloudy"}),
+        }],
+    );
+    let (streamed, answer) =
+        stream_in_conversation(&mut executor, &metadata, &continuation, &context, &config);
+
+    assert_one_answer_with_thinking_off(&streamed, &answer);
+    assert!(tool_calls(&answer).is_empty(), "{:?}", text(&answer));
+    assert!(text(&answer).contains("14"), "{:?}", text(&answer));
     assert_eq!(
         answer.metadata.get("finish_reason").map(String::as_str),
         Some("stop")

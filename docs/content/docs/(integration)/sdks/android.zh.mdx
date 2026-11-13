@@ -11,7 +11,7 @@ Android SDK 通过 BoltFFI 为 Xybrid 运行时提供原生 Kotlin 绑定，支�
 
 ```kotlin title="build.gradle.kts"
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.17.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.18.0")
 }
 ```
 
@@ -46,6 +46,8 @@ if (result.success) {
 Xybrid.init(this, apiKey = BuildConfig.XYBRID_API_KEY)
 ```
 
+密钥前缀与作用域、导出内容以及临时工作区，参见 [API 密钥](/zh/docs/concepts/api-keys)。
+
 ## 可观测性
 
 在你完成配置之前，轨迹导出处于关闭状态——仅提供 API 密钥不会启用导出。在 `Xybrid.init` 之后，用两种预设之一启动一次即可：
@@ -54,7 +56,7 @@ Xybrid.init(this, apiKey = BuildConfig.XYBRID_API_KEY)
 import ai.xybrid.service
 import ai.xybrid.start
 
-// 将轨迹发送到 Xybrid 控制台
+// 将轨迹发送到 Xybrid
 Xybrid.Observability.xybrid(BuildConfig.XYBRID_API_KEY)
     .service("MyApp", version = BuildConfig.VERSION_NAME)
     .start()
@@ -63,7 +65,7 @@ Xybrid.Observability.xybrid(BuildConfig.XYBRID_API_KEY)
 Xybrid.Observability.otlp("http://collector:4318").start()
 ```
 
-默认会采集提示词与输出；添加 `.metadataOnly()` 则只导出元数据。`.tracesEndpoint(url)` 可将控制台预设指向自托管端点。在配置导出之前，首次推理会打印一条一次性提示（可通过 `XYBRID_QUIET=1` 关闭）。在 [dashboard.xybrid.dev](https://dashboard.xybrid.dev) 免费获取密钥。
+默认会采集提示词与输出；添加 `.metadataOnly()` 则只导出元数据。`.tracesEndpoint(url)` 可将 Xybrid 预设指向自托管端点。在配置导出之前，首次推理会打印一条一次性提示（可通过 `XYBRID_QUIET=1` 关闭）。在 [console.xybrid.dev](https://console.xybrid.dev) 获取密钥。
 
 运行选项可携带单次运行的轨迹上下文，每个结果的 `observation` 标识其所属轨迹：
 
@@ -78,7 +80,7 @@ result.observation?.let {
 Xybrid.Observability.flushAsync()
 ```
 
-反馈与评估（`recordEvaluation(target, name, ...)`）需要日志信号，因此在仅发送轨迹的控制台预设下会返回 `false`。
+反馈与评估（`recordEvaluation(target, name, ...)`）需要日志信号，因此在仅发送轨迹的 Xybrid 预设下会返回 `false`。
 
 ---
 

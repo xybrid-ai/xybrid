@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "score-null-levels",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Null level descriptions print as null, and the legend keeps null",
+  "covers": [
+    "score-null-level"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"score\", \"instructions\": \"How urgent is this?\", \"criteria\": [null, \"Today\", null]}}}",
+  "artifact": "d1-2b-hf"
+}

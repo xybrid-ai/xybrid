@@ -139,7 +139,7 @@ xybrid run --model kokoro-82m --input-text "国破山河在，城春草木深" -
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.17.0
+  xybrid_flutter: ^0.18.0
 ```
 
 **运行模型：**
@@ -156,7 +156,7 @@ final result = await model.run(XybridEnvelope.text('国破山河在，城春草�
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.17.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.18.0")
 }
 ```
 
@@ -178,7 +178,7 @@ val result = model.runAsync(Envelope.text("国破山河在，城春草木深"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.17.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.18.0")
 ]
 ```
 
@@ -227,7 +227,7 @@ var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 
 ```toml
 [dependencies]
-xybrid = "0.17.0"
+xybrid = "0.18.0"
 ```
 
 **运行模型：**
@@ -350,7 +350,7 @@ Xybrid 支持**任意** ONNX、GGUF 或 SafeTensors 模型，只需提供一个 
 
 ```sh
 # 将 xybrid skills 安装到你的项目中
-curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | sh
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | bash
 
 # 从 HuggingFace 模型生成 model_metadata.json
 claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX

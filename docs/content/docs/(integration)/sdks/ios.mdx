@@ -15,7 +15,7 @@ Add the Xybrid package via Swift Package Manager:
 
 ```swift title="Package.swift"
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.17.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.18.0")
 ]
 ```
 
@@ -59,12 +59,14 @@ Xybrid.initialize(
 )
 ```
 
+Key prefixes and scopes, what gets exported, and provisional workspaces: see [API keys](/docs/concepts/api-keys).
+
 ## Observability
 
 Trace export is off until you configure it — an API key alone does not enable it. Start it once, after `initialize()`, with one of two presets:
 
 ```swift
-// Traces to the Xybrid dashboard
+// Traces to Xybrid
 try Xybrid.Observability.xybrid(apiKey: key)
     .service("MyApp", version: "1.4.0")
     .start()
@@ -74,7 +76,7 @@ try Xybrid.Observability.otlp(endpoint: "http://collector:4318")
     .start()
 ```
 
-Prompts and outputs are captured by default; add `.metadataOnly()` to export metadata only. `.tracesEndpoint(_:)` points the dashboard preset at a self-hosted endpoint. Until export is configured, the first inference logs a one-shot hint (suppress with `XYBRID_QUIET=1`). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+Prompts and outputs are captured by default; add `.metadataOnly()` to export metadata only. `.tracesEndpoint(_:)` points the Xybrid preset at a self-hosted endpoint. Until export is configured, the first inference logs a one-shot hint (suppress with `XYBRID_QUIET=1`). Get a key at [console.xybrid.dev](https://console.xybrid.dev).
 
 Run options carry per-run trace context, and each result's `observation` identifies its trace:
 
@@ -89,7 +91,7 @@ if let observation = result.observation {
 try await Xybrid.Observability.flushAsync()
 ```
 
-Feedback and evaluations (`recordEvaluation(for:name:...)`) need a logs signal, so they return `false` with the dashboard preset, which sends traces only.
+Feedback and evaluations (`recordEvaluation(for:name:...)`) need a logs signal, so they return `false` with the Xybrid preset, which sends traces only.
 
 ---
 

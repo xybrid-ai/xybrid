@@ -46,12 +46,14 @@ print(result.text)
 Pass an API key to configure cloud authentication:
 
 ```python
-xybrid.init(api_key="xyb_...")
+xybrid.init(api_key="sk_live_...")
 ```
 
 Initialization is optional for local inference. An API key alone does not enable
 observability export or replace an existing exporter. The first successful
 `init()` applies its arguments; subsequent calls are no-ops.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
 
 Opt in to observability separately, using an export key independent of cloud
 authentication:
@@ -71,7 +73,9 @@ capture content by default; call `set_metadata_only(True)` to exclude it.
 `observability_flush(5000)` flushes without stopping export.
 
 `observability_stats()` reports `accepted`, `exported`, `dropped`, `failed` and
-`pending` counts per signal (`traces`, `logs`, `metrics`). When a flush or
+`pending` counts per signal (`traces`, `logs`, `metrics`); after
+`observability_shutdown` they are the session's final counters (what the
+shutdown failed or dropped included) until the next `init()`. When a flush or
 shutdown cannot deliver everything it raises `xybrid.TelemetryDelivery`: the
 inference already succeeded, so do not rerun it.
 
@@ -158,6 +162,7 @@ options = xybrid.XybridRunOptions(
     tracestate=None,
     conversation_id=None,
     suppress_trace=False,
+    frame_session_id=None,  # one id per camera or microphone loop
 )
 
 result = model.run(xybrid.XybridEnvelope.text("Write a haiku"), options)
@@ -206,6 +211,29 @@ Note that `xybrid.XybridError` is the *exception*. BoltFFI also generates a
 same-named data class for the error union, which stays reachable as
 `xybrid._bolt.XybridError`; its variants (`XybridErrorModelNotFound`, …) are
 re-exported under their own names.
+
+## Threads and Cancellation
+
+`model.run` releases the GIL while the native call runs, so other Python
+threads keep running. Pass a token to stop a run from one of them:
+
+```python
+import threading
+import xybrid
+
+token = xybrid.XybridCancellationToken()
+threading.Timer(2.0, token.cancel).start()
+result = model.run(envelope, cancel=token)
+```
+
+- Calls on one model run one at a time: a call from a second thread waits for
+  the first. `token.cancel()` never waits.
+- Different models run at the same time, including models that share one
+  token.
+- `model.close()` waits for that model's active run, and a token is released
+  only after the runs that use it have returned.
+- A decision model ends a cancelled run with `xybrid.Cancelled`. Other models
+  keep their batch behavior: see `docs/sdk/decisions.md`.
 
 ## How the Bindings Are Built
 

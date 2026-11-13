@@ -91,6 +91,134 @@ pub struct FfiResult {
     pub tool_calls: Vec<FfiToolCall>,
 }
 
+/// Versioned run carrier; the legacy result record remains unchanged.
+///
+/// The Rust library and generated Dart bridge must ship together. FRB checks
+/// their content hashes before a call can decode this carrier.
+#[derive(Clone)]
+pub enum FfiRunResult {
+    Legacy(FfiResult),
+    Decision(FfiDecisionResult),
+}
+
+/// Ordered decision answers and execution metadata for a completed request.
+#[derive(Clone)]
+pub struct FfiDecisionResult {
+    pub answers: Vec<FfiDecisionAnswer>,
+    pub passes: u32,
+    pub input_tokens: u64,
+    pub latency_ms: u32,
+    pub execution_target: FfiExecutionTarget,
+    pub metrics: FfiInferenceMetrics,
+    /// The run's observation, for feedback and evaluations; `None` when
+    /// observability is not enabled.
+    pub observation: Option<FfiObservationRef>,
+}
+
+/// An answer in original question order.
+#[derive(Clone)]
+pub struct FfiDecisionAnswer {
+    pub question_id: String,
+    pub distribution: Vec<FfiDecisionScore>,
+    pub value: FfiDecisionValue,
+    pub confidence: Option<f64>,
+}
+
+/// One distribution entry; probabilities retain their full f64 precision.
+#[derive(Clone)]
+pub struct FfiDecisionScore {
+    pub key: String,
+    pub raw_score: f32,
+    pub probability: f64,
+    pub origin: FfiDecisionOrigin,
+}
+
+/// Source of a distribution entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FfiDecisionOrigin {
+    Caller,
+    Fixed,
+}
+
+/// Statistic used by a score answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FfiScoreStatistic {
+    Median,
+    Expected,
+}
+
+/// Canonical typed answer from the decision protocol.
+#[derive(Clone)]
+pub enum FfiDecisionValue {
+    Choice {
+        key: String,
+    },
+    YesNo {
+        p_yes: f64,
+    },
+    Score {
+        value: f64,
+        statistic: FfiScoreStatistic,
+    },
+}
+
+impl From<facade::DecisionAnswer> for FfiDecisionAnswer {
+    fn from(answer: facade::DecisionAnswer) -> Self {
+        let value = match answer.value {
+            facade::DecisionValue::Choice { key } => FfiDecisionValue::Choice { key },
+            facade::DecisionValue::YesNo { p_yes } => FfiDecisionValue::YesNo { p_yes },
+            facade::DecisionValue::Score { value, statistic } => FfiDecisionValue::Score {
+                value,
+                statistic: match statistic {
+                    facade::ScoreStatistic::Median => FfiScoreStatistic::Median,
+                    facade::ScoreStatistic::Expected => FfiScoreStatistic::Expected,
+                },
+            },
+        };
+        Self {
+            question_id: answer.question_id,
+            distribution: answer
+                .distribution
+                .into_iter()
+                .map(|entry| FfiDecisionScore {
+                    key: entry.key,
+                    raw_score: entry.raw_score,
+                    probability: entry.probability,
+                    origin: match entry.origin {
+                        facade::DecisionOrigin::Caller => FfiDecisionOrigin::Caller,
+                        facade::DecisionOrigin::Fixed => FfiDecisionOrigin::Fixed,
+                    },
+                })
+                .collect(),
+            value,
+            confidence: answer.confidence,
+        }
+    }
+}
+
+impl FfiRunResult {
+    pub(crate) fn try_from_inference_result(result: &InferenceResult) -> Result<Self, String> {
+        if let EnvelopeKind::Decisions(decisions) = &result.envelope().kind {
+            let decisions =
+                facade::Decisions::try_from_sdk(decisions).map_err(|error| error.to_string())?;
+            return Ok(Self::Decision(FfiDecisionResult {
+                answers: decisions
+                    .answers
+                    .into_iter()
+                    .map(FfiDecisionAnswer::from)
+                    .collect(),
+                passes: decisions.passes,
+                input_tokens: decisions.input_tokens,
+                latency_ms: result.latency_ms(),
+                execution_target: FfiExecutionTarget::from_sdk(result.provenance()),
+                metrics: FfiInferenceMetrics::from_core(result.metrics()),
+                observation: result.observation_ref().map(FfiObservationRef::from_sdk),
+            }));
+        }
+        FfiResult::try_from_inference_result(result).map(Self::Legacy)
+    }
+}
+
 /// Check that `FfiResult` has a field for an output of this kind.
 ///
 /// `FfiResult` carries text, audio or an embedding. Any other output would
@@ -103,9 +231,10 @@ pub(crate) fn ensure_ffi_payload(kind: &EnvelopeKind) -> Result<(), String> {
         }
         EnvelopeKind::Image { .. } => "an image",
         EnvelopeKind::MultiPart(_) => "a multi-part message",
-        EnvelopeKind::TokenIds(_) => "token IDs",
         EnvelopeKind::ChoiceRequest(_) => "a choice request",
         EnvelopeKind::ChoiceScores(_) => "choice scores",
+        EnvelopeKind::DecisionRequest(_) => "a decision request",
+        EnvelopeKind::Decisions(_) => "decisions on this unsupported IO surface",
     };
     Err(facade::Error::UnsupportedModelCapability {
         message: format!("{payload} cannot be returned through the Flutter bindings yet"),
@@ -219,7 +348,6 @@ mod tests {
                 result_of(EnvelopeKind::MultiPart(vec![])),
             ),
             ("an image", InferenceResult::new(raw_pixel_image(), "m", 0)),
-            ("token IDs", result_of(EnvelopeKind::TokenIds(vec![1, 2]))),
             (
                 "a choice request",
                 InferenceResult::new(
@@ -245,5 +373,45 @@ mod tests {
                 "{error}"
             );
         }
+    }
+
+    #[test]
+    fn decision_carrier_preserves_order_precision_and_negative_infinity() {
+        use xybrid_sdk::ir::{
+            DecisionAnswer, DecisionOrigin, DecisionScore, DecisionUsage, DecisionValue, Decisions,
+        };
+        let probability = 0.5000000000000001;
+        let answer = DecisionAnswer::new(
+            "q",
+            vec![
+                DecisionScore::new("first", 1.0, probability, DecisionOrigin::Caller),
+                DecisionScore::new("second", 0.0, 1.0 - probability, DecisionOrigin::Caller),
+                DecisionScore::new("last", f32::NEG_INFINITY, 0.0, DecisionOrigin::Caller),
+            ],
+            DecisionValue::choice("first"),
+            Some(probability),
+        )
+        .unwrap();
+        let result = result_of(EnvelopeKind::Decisions(Decisions::new(
+            vec![answer],
+            DecisionUsage::new(1, 4096),
+        )));
+        let Ok(FfiRunResult::Decision(converted)) =
+            FfiRunResult::try_from_inference_result(&result)
+        else {
+            panic!("decisions require the decision carrier");
+        };
+        assert_eq!(converted.input_tokens, 4096);
+        assert_eq!(converted.passes, 1);
+        assert_eq!(converted.execution_target, FfiExecutionTarget::Local);
+        let answer = &converted.answers[0];
+        assert_eq!(answer.distribution[0].key, "first");
+        assert_eq!(answer.distribution[1].key, "second");
+        assert_eq!(
+            answer.distribution[0].probability.to_bits(),
+            probability.to_bits()
+        );
+        assert_eq!(answer.distribution[2].raw_score, f32::NEG_INFINITY);
+        assert!(FfiResult::try_from_inference_result(&result).is_err());
     }
 }

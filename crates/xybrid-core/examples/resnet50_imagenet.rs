@@ -102,6 +102,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parse output
     match &output_envelope.kind {
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            return Err("Unexpected decision output".into());
+        }
         EnvelopeKind::Embedding(output_data) => {
             println!("📊 Top-5 Predictions:");
             println!("   Output format: [class_idx, score, ...]");
@@ -135,12 +138,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
             println!("🖼️  Vision output (unexpected for ResNet-50)");
-        }
-        EnvelopeKind::TokenIds(ids) => {
-            println!(
-                "🔢 Token ID output (unexpected for ResNet-50): {} ids",
-                ids.len()
-            );
         }
         EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
             println!("Choice output (unexpected for ResNet-50)");

@@ -139,7 +139,7 @@ xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.17.0
+  xybrid_flutter: ^0.18.0
 ```
 
 **モデルを実行:**
@@ -156,7 +156,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.17.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.18.0")
 }
 ```
 
@@ -178,7 +178,7 @@ val result = model.runAsync(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.17.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.18.0")
 ]
 ```
 
@@ -227,7 +227,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.17.0"
+xybrid = "0.18.0"
 ```
 
 **モデルを実行:**
@@ -351,7 +351,7 @@ Xybridは**任意の**ONNX、GGUF、またはSafeTensorsモデルで動作しま
 
 ```sh
 # プロジェクトにxybridスキルをインストール
-curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | sh
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | bash
 
 # HuggingFaceモデルからmodel_metadata.jsonを生成
 claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX

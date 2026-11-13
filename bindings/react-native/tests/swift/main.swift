@@ -84,13 +84,6 @@ expectInvalidArgument("non-string metadata") {
   _ = try XybridCodec.decodeEnvelope(js(["kind": "text", "text": "x", "metadata": ["n": 1]]))
 }
 expectInvalidArgument("not an object") { _ = try XybridCodec.decodeEnvelope("text") }
-let tokenIds = XybridEnvelope(kind: .tokenIds(ids: [1, 2]), metadata: [])
-expectInvalidArgument("internal token IDs cannot be encoded") {
-  _ = try XybridCodec.encodeEnvelope(tokenIds)
-}
-expectInvalidArgument("nested internal token IDs cannot be encoded") {
-  _ = try XybridCodec.encodeEnvelope(XybridEnvelope(kind: .multiPart(parts: [tokenIds]), metadata: []))
-}
 
 // MARK: - Run options
 
@@ -108,6 +101,7 @@ do {
     "tracestate": "vendor=1",
     "conversationId": "conv-1",
     "suppressTrace": true,
+    "frameSessionId": "camera-7",
     "context": "context:1",
     "cancel": "cancel:1",
   ]))
@@ -126,7 +120,9 @@ do {
   check(options.suppressTrace, "suppress trace")
   check(request.context == "context:1" && request.cancel == "cancel:1", "handles")
   let untraced = try XybridCodec.decodeRunRequest(js([:]))
+  check(options.frameSessionId == "camera-7", "frame session")
   check(untraced.options?.suppressTrace == false, "suppressTrace defaults off")
+  check(untraced.options?.frameSessionId == nil, "no frame session by default")
 
   let empty = try XybridCodec.decodeRunRequest(nil)
   check(empty.options == nil && empty.context == nil, "null options")
@@ -165,13 +161,12 @@ let result = XybridResult(
   reasoningContent: "because",
   observation: XybridObservationRef(traceId: String(repeating: "a", count: 32), spanId: String(repeating: "b", count: 16))
 )
-let encodedResult = try XybridCodec.encodeResult(result)
+let encodedResult = XybridCodec.encodeResult(result)
 check((encodedResult["observation"] as? [String: Any])?["span_id"] as? String == String(repeating: "b", count: 16),
       "observation")
-let untracedResult = try XybridCodec.encodeResult(XybridResult(envelope: result.envelope, outputType: .text, modelId: "qwen",
-                                                               latencyMs: 1, executionTarget: .local, metrics: metrics,
-                                                               toolCalls: []))
-check(untracedResult["observation"] == nil, "untraced run has no observation")
+check(XybridCodec.encodeResult(XybridResult(envelope: result.envelope, outputType: .text, modelId: "qwen", latencyMs: 1,
+                                            executionTarget: .local, metrics: metrics, toolCalls: []))["observation"] == nil,
+      "untraced run has no observation")
 check(encodedResult["outputType"] as? String == "text", "output type")
 check(encodedResult["executionTarget"] as? String == "cloud", "execution target")
 check(encodedResult["reasoningContent"] as? String == "because", "reasoning")
@@ -257,6 +252,32 @@ do {
   check(false, "streaming config threw \(error)")
 }
 expectInvalidArgument("partial float") { _ = try XybridCodec.float32Samples(Data([1, 2, 3]).base64EncodedString()) }
+
+// MARK: - Decisions (no native model required)
+
+do {
+  let raw = #"{"z":18446744073709551615,"a":9007199254740993,"zero":-0.0}"#
+  let request = try XybridCodec.decodeDecisionRequest(js([
+    "state": ["kind": "json", "jsonText": raw],
+    "questions": [["id": "q", "instructions": ["kind": "text", "text": "choose"],
+      "kind": ["kind": "choice", "options": [["key": "a"]]]]],
+  ]))
+  if case .json(let text)? = request.state { check(text == raw, "decision JSON is verbatim") }
+  else { check(false, "decision JSON content") }
+  let requestAgain = try XybridCodec.decodeDecisionRequest(js(XybridCodec.encodeDecisionRequest(request)))
+  check(requestAgain == request, "ordered decision request round trip")
+  let probability = 0.5000000018693014
+  let decisions = XybridDecisions(answers: [XybridDecisionAnswer(questionId: "q", distribution: [
+    XybridDecisionScore(key: "0", rawScore: 0, probability: 1 - probability, origin: .caller),
+    XybridDecisionScore(key: "1", rawScore: 0, probability: probability, origin: .caller),
+    XybridDecisionScore(key: "2", rawScore: -.infinity, probability: 0, origin: .caller),
+  ], value: .score(value: 1, statistic: .median), confidence: probability)], passes: 1, inputTokens: 512)
+  let encoded = js(XybridCodec.encodeDecisions(decisions)) as! [String: Any]
+  let answers = encoded["answers"] as! [[String: Any]]
+  let distribution = answers[0]["distribution"] as! [[String: Any]]
+  check((distribution[1]["probability"] as! NSNumber).doubleValue == probability, "decision f64 preserved")
+  check(distribution[2]["rawScore"] as? String == "-Infinity", "decision infinity is a string")
+} catch { check(false, "decision codec threw an error") }
 
 // MARK: - Errors
 

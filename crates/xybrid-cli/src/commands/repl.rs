@@ -907,60 +907,55 @@ fn handle_special_command(
             println!("    {}       Run inference", ui::dim("<text>"));
             SpecialCommandResult::Continue
         }
-        "history" => {
-            if let Some(ctx) = conversation_context.as_ref() {
-                let history = ctx.history();
-                if history.is_empty() {
-                    ui::hint("No conversation history yet.");
-                } else {
-                    println!();
-                    ui::hint(&format!(
-                        "Conversation history ({} messages):",
-                        history.len()
-                    ));
-                    println!("  {}", "─".repeat(50).truecolor(60, 60, 70));
-                    for (i, envelope) in history.iter().enumerate() {
-                        let role = envelope.role().map(|r| r.as_str()).unwrap_or("unknown");
-                        let text = match &envelope.kind {
-                            EnvelopeKind::Text(t) => t.as_str(),
-                            // Core refuses a conversation that holds a choice
-                            // request, so label it rather than fold it into text.
-                            EnvelopeKind::ChoiceRequest(_) => "[choice request]",
-                            EnvelopeKind::ChoiceScores(_) => "[choice scores]",
-                            EnvelopeKind::Audio(_)
-                            | EnvelopeKind::Embedding(_)
-                            | EnvelopeKind::Image { .. }
-                            | EnvelopeKind::MultiPart(_)
-                            | EnvelopeKind::TokenIds(_) => "[non-text]",
-                        };
-                        let display_text = if verbose == 0 && text.len() > 100 {
-                            format!("{}...", &text[..100])
-                        } else {
-                            text.to_string()
-                        };
-                        let role_colored = match role {
-                            "user" => role.to_uppercase().truecolor(120, 180, 255),
-                            "assistant" => role.to_uppercase().truecolor(180, 140, 255),
-                            "system" => role.to_uppercase().truecolor(120, 120, 130),
-                            _ => role.to_uppercase().normal(),
-                        };
-                        println!("  [{}] {} {}", i + 1, role_colored, display_text);
-                    }
-                    println!("  {}", "─".repeat(50).truecolor(60, 60, 70));
+        "history" if conversation_context.is_some() => {
+            let ctx = conversation_context.as_ref().unwrap();
+            let history = ctx.history();
+            if history.is_empty() {
+                ui::hint("No conversation history yet.");
+            } else {
+                println!();
+                ui::hint(&format!(
+                    "Conversation history ({} messages):",
+                    history.len()
+                ));
+                println!("  {}", "─".repeat(50).truecolor(60, 60, 70));
+                for (i, envelope) in history.iter().enumerate() {
+                    let role = envelope.role().map(|r| r.as_str()).unwrap_or("unknown");
+                    let text = match &envelope.kind {
+                        EnvelopeKind::Text(t) => t.as_str(),
+                        // Core refuses a conversation that holds a choice
+                        // request, so label it rather than fold it into text.
+                        EnvelopeKind::ChoiceRequest(_) => "[choice request]",
+                        EnvelopeKind::ChoiceScores(_) => "[choice scores]",
+                        EnvelopeKind::DecisionRequest(_) => "[decision request]",
+                        EnvelopeKind::Decisions(_) => "[decisions]",
+                        EnvelopeKind::Audio(_)
+                        | EnvelopeKind::Embedding(_)
+                        | EnvelopeKind::Image { .. }
+                        | EnvelopeKind::MultiPart(_) => "[non-text]",
+                    };
+                    let display_text = if verbose == 0 && text.len() > 100 {
+                        format!("{}...", &text[..100])
+                    } else {
+                        text.to_string()
+                    };
+                    let role_colored = match role {
+                        "user" => role.to_uppercase().truecolor(120, 180, 255),
+                        "assistant" => role.to_uppercase().truecolor(180, 140, 255),
+                        "system" => role.to_uppercase().truecolor(120, 120, 130),
+                        _ => role.to_uppercase().normal(),
+                    };
+                    println!("  [{}] {} {}", i + 1, role_colored, display_text);
                 }
-                SpecialCommandResult::Continue
-            } else {
-                SpecialCommandResult::NotSpecial
+                println!("  {}", "─".repeat(50).truecolor(60, 60, 70));
             }
+            SpecialCommandResult::Continue
         }
-        "clear" => {
-            if let Some(ctx) = conversation_context.as_mut() {
-                ctx.clear();
-                ui::ok("Conversation history cleared");
-                SpecialCommandResult::Continue
-            } else {
-                SpecialCommandResult::NotSpecial
-            }
+        "clear" if conversation_context.is_some() => {
+            let ctx = conversation_context.as_mut().unwrap();
+            ctx.clear();
+            ui::ok("Conversation history cleared");
+            SpecialCommandResult::Continue
         }
         "" => SpecialCommandResult::Continue,
         _ => SpecialCommandResult::NotSpecial,
@@ -1405,11 +1400,11 @@ fn execute_batch(
                     EnvelopeKind::MultiPart(parts) => {
                         ui::ok(&format!("Multi-part output: {} parts", parts.len()));
                     }
-                    EnvelopeKind::TokenIds(ids) => {
-                        ui::ok(&format!("Token IDs: {} tokens", ids.len()));
-                    }
                     // Pipelines refuse choice kinds before and after every stage.
-                    EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                    EnvelopeKind::ChoiceRequest(_)
+                    | EnvelopeKind::ChoiceScores(_)
+                    | EnvelopeKind::DecisionRequest(_)
+                    | EnvelopeKind::Decisions(_) => {
                         ui::err("Pipeline stages do not return choice requests or scores");
                     }
                 }
@@ -1427,6 +1422,12 @@ fn execute_batch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn init_test_cache() {
+        static CACHE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| tempfile::tempdir().expect("create CLI test cache"));
+        xybrid_sdk::init_sdk_cache_dir(cache.path().join("models"));
+    }
 
     fn test_tools_state(available: bool) -> ToolsState {
         ToolsState {
@@ -1532,6 +1533,7 @@ mod tests {
 
     #[test]
     fn direct_model_network_target_skips_registry_cache_lookup() {
+        init_test_cache();
         for target in [ExecutionTarget::Cloud, ExecutionTarget::Server] {
             let client = RegistryClient::with_url("http://127.0.0.1:9").unwrap();
 
@@ -1552,6 +1554,7 @@ mod tests {
 
     #[test]
     fn invalid_yaml_target_is_ignored_without_hard_failure() {
+        init_test_cache();
         let config = PipelineConfig::from_yaml(
             r#"
 name: test

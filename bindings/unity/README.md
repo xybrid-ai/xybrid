@@ -42,7 +42,7 @@ Or edit `Packages/manifest.json` directly:
     }
   ],
   "dependencies": {
-    "ai.xybrid.sdk": "0.17.0"
+    "ai.xybrid.sdk": "0.18.0"
   }
 }
 ```
@@ -59,7 +59,7 @@ https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 Pin a version by appending a tag:
 
 ```
-https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity#v0.17.0
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity#v0.18.0
 ```
 
 (**Window → Package Manager → + → Add package from git URL**, or add it under
@@ -441,11 +441,13 @@ See the [full API documentation](https://docs.xybrid.dev/en/docs/sdks/unity) for
 Model loads, runs, and pipelines can be exported as OpenTelemetry (OTLP/HTTP)
 traces. Export is off until you configure it; an API key passed to
 `XybridClient.Initialize` does not enable it.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
 
 ```csharp
-// Traces to the Xybrid dashboard...
+// Traces to Xybrid (get a key at console.xybrid.dev)...
 XybridClient.InitializeObservability(
-    ObservabilityConfig.Xybrid("xy_live_...")
+    ObservabilityConfig.Xybrid("sk_live_...")
         .WithService(Application.productName, Application.version));
 
 // ...or traces, metrics, and logs to an OpenTelemetry Collector.
@@ -475,6 +477,11 @@ Prompts and outputs are captured once export is enabled. Other setters:
 `AllowProviderContext`, `WithDeviceId`, `WithLiteralRedaction`,
 `WithoutContentAttribute`.
 
+For a camera or microphone loop, set `ObservationOptions.FrameSessionId` to
+the same id on every run of the loop: each frame is counted in metrics, and
+detailed traces are kept for roughly one frame per `WithLiveTraceInterval` per
+session.
+
 The same `ObservationOptions` go to `Pipeline.Run(envelope, observation)`
 (`PipelineResult.Observation` and each `StageResult.Observation` hold the
 references), `ModelLoader.Load(observation)` (`Model.LoadObservation`),
@@ -502,7 +509,9 @@ using (var workflow = WorkflowObservation.Start("answer-question"))
 ```
 
 `XybridClient.ObservabilityStats()` reports delivery counters per signal
-(`Traces`, `Logs`, `Metrics`). See
+(`Traces`, `Logs`, `Metrics`); after `ShutdownObservability` they are the
+session's final counters (what the shutdown failed or dropped included) until
+the next `InitializeObservability`. See
 [examples/unity/Observability](../../examples/unity/Observability/README.md)
 for the mobile lifecycle wiring.
 

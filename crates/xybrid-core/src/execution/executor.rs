@@ -51,6 +51,7 @@ use std::sync::Arc;
 
 use super::choice::onnx::OnnxChoiceScorer;
 use super::choice::{ensure_no_choice_kinds, validate_choice_request, EntryPoint};
+use super::decision::{ensure_no_decision_kinds, validate_decision_request};
 use super::listener::ExecutionGuard;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 use super::llm_telemetry::{
@@ -70,7 +71,7 @@ use super::tool_continuation::{
 use crate::ir::ChoiceRequest;
 
 fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
-    if error.cloud_fallback_abort_reason().is_some() {
+    if error.cloud_fallback_abort_reason().is_some() || matches!(error, AdapterError::Cancelled) {
         guard.set_controlled_abort();
     } else {
         guard.set_failed(error.to_string());
@@ -389,6 +390,8 @@ pub struct TemplateExecutor {
     /// [`ChoiceScorerCache`]). Lives for the executor's lifetime, like the
     /// session above.
     choice_scorer_cache: Option<ChoiceScorerCache>,
+    #[cfg(feature = "llm-llamacpp")]
+    decision_cache: Option<super::decision::runtime::DecisionRuntime>,
     /// Parsed `tokenizer.json` files for the `Tokenize` and `WhisperDecode`
     /// steps (see [`TokenizerCache`]). Lives for the executor's lifetime, like
     /// the caches above, so each tokenizer is parsed once per loaded model.
@@ -474,6 +477,8 @@ impl TemplateExecutor {
             mlx_embedding_strategy: MlxEmbeddingStrategy::new(),
             onnx_session_cache: OnnxSessionCache::default(),
             choice_scorer_cache: None,
+            #[cfg(feature = "llm-llamacpp")]
+            decision_cache: None,
             tokenizer_cache: TokenizerCache::default(),
             vision_encoders: HashMap::new(),
         }
@@ -517,8 +522,9 @@ impl TemplateExecutor {
             EnvelopeKind::Audio(_)
             | EnvelopeKind::Text(_)
             | EnvelopeKind::Embedding(_)
-            | EnvelopeKind::TokenIds(_)
             | EnvelopeKind::ChoiceRequest(_)
+            | EnvelopeKind::DecisionRequest(_)
+            | EnvelopeKind::Decisions(_)
             | EnvelopeKind::ChoiceScores(_) => false,
         }
     }
@@ -664,6 +670,12 @@ impl TemplateExecutor {
     /// browser-only templates) — read it as "an execution would pay a load".
     pub fn is_model_loaded(&self, metadata: &ModelMetadata) -> bool {
         let (runtime_type, model_file) = match &metadata.execution_template {
+            #[cfg(feature = "llm-llamacpp")]
+            ExecutionTemplate::Decision(spec) => {
+                return self.decision_cache.as_ref().is_some_and(|runtime| {
+                    runtime.matches(&Path::new(&self.base_path).join(&spec.model_file), spec)
+                })
+            }
             #[cfg(feature = "candle")]
             ExecutionTemplate::SafeTensors { model_file, .. } => ("candle", model_file),
             ExecutionTemplate::Onnx { model_file } => ("onnx", model_file),
@@ -688,24 +700,108 @@ impl TemplateExecutor {
             .unwrap_or(false)
     }
 
+    /// Executes with cooperative cancellation across decision preparation and passes.
+    /// Other templates ignore `abort` and keep their batch execution behavior.
+    pub fn execute_controlled(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        config: Option<&GenerationConfig>,
+        abort: Option<&std::sync::atomic::AtomicBool>,
+    ) -> ExecutorResult<Envelope> {
+        let guard = ExecutionGuard::new_silent(&metadata.model_id, "execute");
+        let result = self.execute_controlled_impl(metadata, input, config, abort);
+        if let Err(error) = &result {
+            mark_execution_terminal(&guard, error);
+        }
+        result
+    }
+
+    fn execute_controlled_impl(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        config: Option<&GenerationConfig>,
+        abort: Option<&std::sync::atomic::AtomicBool>,
+    ) -> ExecutorResult<Envelope> {
+        let decision = matches!(metadata.execution_template, ExecutionTemplate::Decision(_));
+        if decision && abort.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire)) {
+            return Err(AdapterError::Cancelled);
+        }
+        validate_decision_request(metadata, input, EntryPoint::Batch)?;
+        if decision {
+            if config.is_some() {
+                return Err(super::decision::unsupported(
+                    &metadata.model_id,
+                    "decision generation options",
+                ));
+            }
+            self.load_decision(metadata)?;
+            #[cfg(feature = "llm-llamacpp")]
+            if let (Some(runtime), EnvelopeKind::DecisionRequest(request)) =
+                (&mut self.decision_cache, &input.kind)
+            {
+                return runtime.run(request, abort);
+            }
+            return Err(super::decision::unsupported(
+                &metadata.model_id,
+                "decision runtime unavailable",
+            ));
+        }
+        self.execute_impl(metadata, input, config)
+    }
+
+    /// Loads and validates a decision model eagerly; other templates are unchanged.
+    pub fn load_decision(&mut self, metadata: &ModelMetadata) -> ExecutorResult<()> {
+        let ExecutionTemplate::Decision(spec) = &metadata.execution_template else {
+            return Ok(());
+        };
+        if cfg!(target_arch = "wasm32") {
+            return Err(super::decision::unsupported(
+                &metadata.model_id,
+                "browser decision execution",
+            ));
+        }
+        spec.validate()?;
+        if !metadata.preprocessing.is_empty() || !metadata.postprocessing.is_empty() {
+            return Err(super::decision::unsupported(
+                &metadata.model_id,
+                "decision preprocessing or postprocessing",
+            ));
+        }
+        #[cfg(feature = "llm-llamacpp")]
+        {
+            let path = Path::new(&self.base_path).join(&spec.model_file);
+            if !self
+                .decision_cache
+                .as_ref()
+                .is_some_and(|runtime| runtime.matches(&path, spec))
+            {
+                self.decision_cache = None;
+                self.decision_cache = Some(super::decision::runtime::DecisionRuntime::load(
+                    &metadata.model_id,
+                    &path,
+                    spec,
+                )?);
+            }
+            Ok(())
+        }
+        #[cfg(not(feature = "llm-llamacpp"))]
+        Err(super::decision::unsupported(
+            &metadata.model_id,
+            "decision execution requires llm-llamacpp",
+        ))
+    }
+
     pub fn execute(
         &mut self,
         metadata: &ModelMetadata,
         input: &Envelope,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
-        // Silent guard: the SDK's `XybridModel::run` / `run_async` wrappers
-        // around this method emit `ModelComplete` with full attribution
-        // (model_id, backend, latency, etc.). Emitting an outer
-        // `Started` / `Completed` pair from here would surface as
-        // duplicate noise rows on the Traces dashboard. Failed-path
-        // emission via `mark_execution_terminal` is preserved.
-        let guard = ExecutionGuard::new_silent(&metadata.model_id, "execute");
-        let result = self.execute_impl(metadata, input, config);
-        if let Err(e) = &result {
-            mark_execution_terminal(&guard, e);
-        }
-        result
+        // The controlled wrapper retains the existing silent listener guard,
+        // including content-free failure events for both SDK execution paths.
+        self.execute_controlled(metadata, input, config, None)
     }
 
     /// Internal implementation of execute — no telemetry listener events.
@@ -1055,7 +1151,7 @@ impl TemplateExecutor {
                         .to_string(),
                 ));
             }
-            ExecutionTemplate::ChoiceScorer { .. } => {
+            ExecutionTemplate::ChoiceScorer { .. } | ExecutionTemplate::Decision(_) => {
                 return Err(AdapterError::RuntimeError(
                     "ChoiceScorer execution should dispatch before the single-model path"
                         .to_string(),
@@ -1357,7 +1453,15 @@ impl TemplateExecutor {
     ) -> ExecutorResult<Envelope> {
         // History is never scored, so a choice kind there is refused like one
         // in the input — for every model, scorers included.
+        validate_decision_request(metadata, input, EntryPoint::Conversation)?;
         validate_choice_request(metadata, input, EntryPoint::Conversation)?;
+        ensure_no_decision_kinds(
+            &metadata.model_id,
+            context
+                .system_envelope()
+                .into_iter()
+                .chain(context.history()),
+        )?;
         ensure_no_choice_kinds(
             &metadata.model_id,
             context
@@ -1628,6 +1732,7 @@ impl TemplateExecutor {
         #[allow(unused_variables)] on_token: StreamingCallback<'_>,
         #[allow(unused_variables)] config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        validate_decision_request(metadata, input, EntryPoint::Streaming)?;
         validate_choice_request(metadata, input, EntryPoint::Streaming)?;
 
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
@@ -1826,7 +1931,15 @@ impl TemplateExecutor {
         on_token: StreamingCallback<'_>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        validate_decision_request(metadata, input, EntryPoint::Streaming)?;
         validate_choice_request(metadata, input, EntryPoint::Streaming)?;
+        ensure_no_decision_kinds(
+            &metadata.model_id,
+            context
+                .system_envelope()
+                .into_iter()
+                .chain(context.history()),
+        )?;
         ensure_no_choice_kinds(
             &metadata.model_id,
             context
@@ -3960,6 +4073,7 @@ impl TemplateExecutor {
         };
         use crate::ir::EnvelopeKind;
 
+        validate_decision_request(metadata, input, EntryPoint::Streaming)?;
         validate_choice_request(metadata, input, EntryPoint::Streaming)?;
 
         const DEFAULT_MAX_TTS_CHARS: usize = 350;

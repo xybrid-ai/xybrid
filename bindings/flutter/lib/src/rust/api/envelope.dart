@@ -13,7 +13,7 @@ import 'model.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `clone_envelope`, `into_envelope`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiEnvelope>>
 abstract class FfiEnvelope implements RustOpaqueInterface {
@@ -24,6 +24,14 @@ abstract class FfiEnvelope implements RustOpaqueInterface {
           required int channels}) =>
       XybridRustLib.instance.api.crateApiEnvelopeFfiEnvelopeAudio(
           bytes: bytes, sampleRate: sampleRate, channels: channels);
+
+  /// Decode a bounded Liquid SystemOne request without a Dart JSON round trip.
+  ///
+  /// The loaded model stays authoritative; an optional wire `model` field
+  /// cannot select a model or change local-only execution policy.
+  static FfiEnvelope decisionRequestJson({required String json}) =>
+      XybridRustLib.instance.api
+          .crateApiEnvelopeFfiEnvelopeDecisionRequestJson(json: json);
 
   /// Create embedding envelope from float vector.
   static FfiEnvelope embedding({required List<double> data}) =>

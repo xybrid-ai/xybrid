@@ -23,7 +23,7 @@ Flutter SDK（`xybrid_flutter`）通过 FFI 提供到 Xybrid Rust 核心的 Dart
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.17.0
+  xybrid_flutter: ^0.18.0
 ```
 
 ## 初始化
@@ -40,7 +40,7 @@ void main() async {
 }
 ```
 
-本地推理无需鉴权。`apiKey` 配置云端访问；若要向[控制台](https://dashboard.xybrid.dev)
+本地推理无需鉴权。`apiKey` 配置云端访问；若要向 [Xybrid 控制台](https://console.xybrid.dev)
 发送执行轨迹，还需显式配置可观测性：
 
 ```dart
@@ -57,6 +57,8 @@ await Xybrid.init(
 使用 `ObservabilityConfig.otlp(endpoint: 'http://collector:4318')` 可向 Collector
 导出，无需 Xybrid 密钥。CPU/内存采样通过 `resourceTelemetry` 单独配置。
 `ingestUrl` 保留为旧版显式 OTLP 轨迹导出入口；新集成请使用 `observability`。
+
+密钥前缀与作用域、导出内容以及临时工作区，参见 [API 密钥](/zh/docs/concepts/api-keys)。
 
 ## 核心模式：加载 → 运行
 

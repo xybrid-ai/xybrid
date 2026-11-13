@@ -159,7 +159,9 @@ impl From<facade::SignalStats> for FfiSignalStats {
     }
 }
 
-/// Delivery counters (zero when no packaged exporter is active).
+/// Delivery counters: live while a packaged exporter runs; after a shutdown,
+/// that session's final counters (what it failed or dropped included) until
+/// the next init; zero before any.
 pub struct FfiObservabilityStats {
     pub enabled: bool,
     pub traces: FfiSignalStats,

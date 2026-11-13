@@ -16,6 +16,7 @@ use super::{
 use crate::context::{DeviceMetrics, StageDescriptor};
 use crate::device::capabilities::HardwareCapabilities;
 use crate::execution::choice::ensure_no_choice_kinds;
+use crate::execution::decision::ensure_no_decision_kinds;
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::orchestrator::routing_engine::LocalAvailability;
 use crate::orchestrator::{Orchestrator, OrchestratorError};
@@ -258,6 +259,8 @@ impl PipelineRunner {
         // pipeline's own input; each stage's input and output are checked
         // again as the stage runs.
         if let Some(first) = pipeline.stages.first() {
+            ensure_no_decision_kinds(&first.model, std::iter::once(&input))
+                .map_err(|e| PipelineRunnerError::InputConversionFailed(e.to_string()))?;
             ensure_no_choice_kinds(&first.model, std::iter::once(&input))
                 .map_err(|e| PipelineRunnerError::InputConversionFailed(e.to_string()))?;
         }
@@ -390,6 +393,8 @@ impl PipelineRunner {
         // value, where it could only travel as text.
         ensure_no_choice_kinds(&stage_config.model, std::iter::once(&exec_result.output))
             .map_err(|e| PipelineRunnerError::OutputConversionFailed(e.to_string()))?;
+        ensure_no_decision_kinds(&stage_config.model, std::iter::once(&exec_result.output))
+            .map_err(|e| PipelineRunnerError::OutputConversionFailed(e.to_string()))?;
 
         // Convert output to Value for context tracking
         let output_value = self.envelope_to_value(&exec_result.output);
@@ -478,13 +483,6 @@ impl PipelineRunner {
                     "parts": parts.iter().map(|part| self.envelope_to_value(part)).collect::<Vec<_>>()
                 })
             }
-            EnvelopeKind::TokenIds(ids) => {
-                serde_json::json!({
-                    "type": "tokens",
-                    "length": ids.len(),
-                    "output": ids
-                })
-            }
             // Refused before and after every stage, so these never reach a
             // condition. Counts only: ids, texts and contexts are caller
             // content.
@@ -499,6 +497,10 @@ impl PipelineRunner {
                     "type": "choice_scores",
                     "count": scores.entries.len()
                 })
+            }
+            EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+                // Refused at every pipeline boundary. Never stringify content.
+                serde_json::json!({"type": "unsupported_decision"})
             }
         }
     }
@@ -564,13 +566,11 @@ impl PipelineRunner {
             ),
             EnvelopeKind::MultiPart(_)
             | EnvelopeKind::ChoiceRequest(_)
-            | EnvelopeKind::ChoiceScores(_) => (
+            | EnvelopeKind::ChoiceScores(_)
+            | EnvelopeKind::DecisionRequest(_)
+            | EnvelopeKind::Decisions(_) => (
                 OutputResultType::Json,
                 OutputResult::Json(self.envelope_to_value(envelope)),
-            ),
-            EnvelopeKind::TokenIds(ids) => (
-                OutputResultType::Json,
-                OutputResult::Json(serde_json::json!({ "tokens": ids })),
             ),
         }
     }

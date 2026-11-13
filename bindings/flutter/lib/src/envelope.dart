@@ -4,7 +4,10 @@
 /// idiomatic Dart API.
 library;
 
+import 'dart:convert';
+
 import 'context.dart';
+import 'decisions.dart';
 import 'rust/api/envelope.dart';
 import 'tools.dart';
 
@@ -151,6 +154,22 @@ class XybridEnvelope {
   final _EnvelopeModality _modality;
 
   XybridEnvelope._(this.inner, this._modality);
+
+  /// Decode Liquid SystemOne JSON without re-encoding ordered content or numbers.
+  factory XybridEnvelope.decisionRequestJson(String json) {
+    const maxBytes = 8 * 1024 * 1024;
+    if (json.length > maxBytes || utf8.encode(json).length > maxBytes) {
+      throw ArgumentError('decision request exceeds the transport byte limit');
+    }
+    return XybridEnvelope._(
+      FfiEnvelope.decisionRequestJson(json: json),
+      _EnvelopeModality.decision,
+    );
+  }
+
+  /// Submit ordered typed questions through the existing model run API.
+  factory XybridEnvelope.decisionRequest(DecisionRequest request) =>
+      XybridEnvelope.decisionRequestJson(request.toJsonText());
 
   /// Create an audio envelope for speech recognition.
   ///
@@ -353,4 +372,4 @@ class XybridEnvelope {
   }
 }
 
-enum _EnvelopeModality { audio, text, embedding, image, multipart }
+enum _EnvelopeModality { audio, text, embedding, image, multipart, decision }

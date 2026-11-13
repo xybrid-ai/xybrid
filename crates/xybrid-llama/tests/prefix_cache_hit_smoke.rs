@@ -165,6 +165,7 @@ fn qwen2_5_0_5b_three_turns_show_prefix_cache_hit_on_turn_2_and_3() {
             1.0,
             &["<|im_end|>".to_string()],
             None,
+            &[],
         )
         .expect("turn must complete");
 

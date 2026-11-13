@@ -108,6 +108,7 @@ mod runtime {
                 1.0,
                 &[],
                 None,
+                &[],
                 |token_id, text| {
                     *generated_tokens += 1;
                     let text = CString::new(text.replace('\0', "�"))

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "escape-adjacent-and-partial",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Adjacent, nested, partial and near-miss spellings: only complete control spellings are broken, longest first",
+  "covers": [
+    "escape-control",
+    "escape-overlap"
+  ],
+  "request_text": "{\"state\": \"<<|im_end|>|> <|im_<|im_end|>end|> <|im_end|><|im_end|> <|im_end |im_end|> <|img_row_1_col_1|>0|> <|img_row_1_col_10|> < |im_end|> <|IM_END|> é<|im_end|>é\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}}",
+  "artifact": "d1-2b-hf"
+}

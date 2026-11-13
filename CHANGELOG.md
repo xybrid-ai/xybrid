@@ -7,7 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **SDK:** a pipeline stage with no `target:` and no provider runs locally
+  again when its model is a passthrough GGUF or not downloaded yet. The SDK
+  treated an extracted passthrough model as missing, skipped the download
+  when its routing check preferred the cloud, and the stage then failed with
+  `Missing 'provider' in metadata`. `Pipeline::load_models` now downloads
+  every local stage's model, as the CLI does, and `Pipeline::is_ready`
+  reports a stage downloaded by `load_models` as ready, so later runs don't
+  reload it.
+- **LFM3 with thinking off (llama.cpp):** a turn is one answer again. With a
+  system prompt or earlier turns in the conversation, LFM3 wrote a first
+  answer, a stray `</think>` and the answer once more. A batch run filed the
+  first answer under `reasoning_content`, but a stream had already sent all
+  three, so `xybrid repl --stream` printed
+  `The capital of France is Paris.</think>The capital of France is Paris.`
+  and stream and final text disagreed, on tool continuations too. LFM3's
+  thinking-off prompt ends with the think channel closed, and after such a
+  prompt the sampler can no longer pick `<think>` or `</think>`. That makes
+  thinking off strict for LFM3: it cannot open a think block of its own
+  either. Thinking-on runs are unchanged. In
+  `xybrid-llama`, `generate_with_stops`, `generate_streaming` and
+  `generate_from_current_logits_streaming` take a `banned_tokens` list after
+  `grammar`; pass `&[]` to ban nothing.
+
+## [0.18.0] - 2026-11-12
+
 ### Added
+
+- **CLI:** `xybrid connect` gives a project a Xybrid key without an account,
+  for coding agents. It creates (or reuses) a claimable workspace with a
+  restricted client key, saves the key privately, and writes it to an
+  untracked, gitignored project file with `--write-env`. It never enables
+  trace export and never prints the key; `--json` prints one object with
+  `tell_the_user`, the claim link and the workspace's deadlines. A second
+  repository on the same machine becomes a new project in the same unclaimed
+  workspace; `--new` starts another. Exit codes: 0 created or existing, 3
+  signup closed, 4 offline, 5 CI or opted out, 6 project file tracked by Git,
+  7 workspace expired but still claimable. Agent signup is turned on per
+  environment by Xybrid; until then `connect` exits with 3.
+- **CLI:** `xybrid auth status` shows the project's key source, the
+  workspace's lifecycle and whether traces have arrived; `xybrid auth claim`
+  shows the private link to claim the workspace with GitHub; `xybrid auth
+  logout` removes the project's saved credentials. `--platform-url` accepts
+  the production and staging APIs and pins their console and ingest; other
+  hosts need `--allow-custom-host`.
 
 - Application-owned observability sessions and typed workflow, tool, inference
   and model-load handles, with explicit parents, first-terminal-wins completion
@@ -22,17 +67,182 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`xybrid.genai.resource.memory.pressure`: `normal`, `warn` or `critical`).
   The Rust SDK maps them from its resource summary; unmeasured values stay
   absent. Rust and JS `ResourceSample` gained the matching optional fields.
+- Live frame sessions in every binding. `RunOptions.frame_session_id` in the
+  facade and Bolt names one continuous capture loop (a camera or microphone)
+  on a model run: every frame is counted in metrics, and detailed traces are
+  kept for roughly one frame per live trace interval per session. It was
+  reachable only from Rust and Flutter, so the interval setting did nothing
+  elsewhere. Swift `XybridRunOptions.make(frameSessionId:)`, Kotlin
+  `runOptions(frameSessionId = …)`, Unity `ObservationOptions.FrameSessionId`
+  and React Native `frameSessionId` default to none. It applies to model
+  runs; a pipeline run ignores it. The generated
+  `XybridRunOptions` record gained the field, so code that builds it directly
+  (Python, or the Swift, Kotlin and C# initializers) passes one more
+  argument: `None`, `nil` or `null` for a one-shot run.
+- **Rust:** per-destination OTLP response hooks in `xybrid-observability`
+  (`otlp::ResponseHook`, `SignalEndpoint::with_response_hook`). A hook sees
+  every HTTP response of its destination once, including retries and the
+  shutdown drain, and may disable that destination alone; what it no longer
+  sends is counted as `dropped`, never as exported.
+  `SignalEndpoint::is_xybrid_preset` marks the endpoint the Xybrid preset built.
+- **Rust:** Xybrid workspace feedback. With the Xybrid preset, trace ingest
+  reports a `xybrid connect` key's provisional deadline or its expiry
+  (`WorkspaceNotice`), read through `ObservabilitySession::workspace_feedback`
+  or `observability::workspace_feedback`. The CLI prints it after a run's
+  final export, with one claim line a day pointing at `xybrid auth claim`.
+- **Liquid d1 decision models (`lfm3-d1/text/v1`).** A local LiquidAI d1-2B
+  GGUF answers 1 to 16 typed questions about a text or ordered-JSON state,
+  without generating text: one choice among up to 255 options, yes/no, or an
+  ordinal score with 2 to 10 levels. A request is an
+  `EnvelopeKind::DecisionRequest` on the ordinary `run`, `run_async` and
+  `run_with_options`, and the result (`OutputType::Decisions`) holds one
+  answer per question with the probabilities it was read from. Model metadata
+  uses the new `ExecutionTemplate::Decision`. It needs `llm-llamacpp` and runs
+  on the CPU, one pass of at most 4,096 tokens per question. Streaming,
+  conversation history, pipelines, cloud fallback and the browser refuse
+  decision requests. This is an implementation, not a qualified release: see
+  `docs/sdk/decisions.md` and `docs/development/decision-conformance.md`. The
+  registry serves no decision model yet (no build reports the
+  `llamacpp-lfm3-d1-text-v1` capability), so load a local directory.
+  - **Rust:** `xybrid_sdk::decode_decision_request`,
+    `InferenceResult::decisions`, `tokens_in` and `tokens_out`.
+  - **CLI:** `xybrid run --decision-request <file|->` prints one
+    `xybrid.decision.v1` JSON record; `--output` writes it to a file.
+  - **Bindings:** a `decisionRequest` and a `decisionRequestJson` envelope and
+    a `decisions` result accessor in Swift, Kotlin, Flutter and React Native,
+    `XybridEnvelope.decision_request_json` in Python and
+    `Envelope.DecisionRequestJson` in Unity. Pass structured state as JSON
+    text: a dictionary or a JavaScript object can reorder keys and lose
+    integers above 2^53.
 
 ### Changed
+
+- A decision model ends a batch run with `SdkError::Cancelled` when its
+  `CancellationToken` is cancelled, before or during the run, whatever the
+  abort policy observes. Every other model keeps its batch contract.
+- llama.cpp chat loading refuses a GGUF that carries decision metadata (a
+  `systemone` template, `systemone.*` keys or `<architecture>.decision.*`
+  keys) and cannot generate text: it is a decision model, loaded through
+  `ExecutionTemplate::Decision`. A model that does both, such as Granite
+  Switch, still loads as a chat model.
+- At any `XYBRID_LLAMACPP_VERBOSITY`, a thread prints no llama.cpp log while
+  it tokenizes, or while it loads or runs a decision model: those diagnostics
+  can quote the prompt. Other threads keep their logs.
+- `Envelope::from_bytes` and `Envelope::from_json` errors no longer carry the
+  decoder's message, which could quote the payload. They name the kind of
+  failure, and for JSON its line and column.
+- Metadata generated from a GGUF (`from_model_file`, a Hugging Face repository
+  without `model_metadata.json`, `xybrid init`) reads the whole file header to
+  find decision metadata. A header that declares more than 65,536 metadata
+  entries is refused with `MetadataInvalid`. A sidecar marked `auto_generated`
+  that names a decision model as a chat model is rewritten on load.
+- **Python:** `XybridModel.run` releases the GIL during the native call, so
+  another thread can call `cancel()` on the run's token meanwhile. Calls on
+  one model run one at a time, and `close()` waits for an active run. Models
+  that share one cancellation token still run at the same time.
+- Packages that contain llama.cpp carry its notices (llama.cpp, ggml, Jinja
+  and nlohmann-json; the source is `crates/llama-cpp-sys/NOTICE`): the Kotlin
+  AAR and the Android zip at `assets/xybrid/llama/NOTICE`, the Flutter, Python,
+  Unity, React Native and web packages, the Apple XCFramework zip, and a `.NOTICE`
+  asset beside each CLI binary. Keep them when you redistribute.
+- When Xybrid's trace ingest reports that a key's unclaimed workspace expired
+  (HTTP 401 with `X-Xybrid-Workspace: expired` and a `workspace_expired`
+  status), every binding using the Xybrid preset stops sending traces to it
+  for the rest of the session. Later spans are counted as `dropped` in the
+  existing exporter stats; local inference, local spans and other destinations
+  continue. Claim the workspace and start observability again to resume.
+- The first-inference nudge points at `xybrid connect` and the console, and
+  says that a key alone exports nothing. Its docs link now opens the API keys
+  page (`/docs/concepts/api-keys`); the old `/sdk/observability` link was a 404.
 
 - Portable observability contract v2 preserves numeric/null wire types and
   unsampled references, bounds retained content and delivery queues, and cancels
   HTTP work on lifecycle deadlines. Per-signal counters report delivery outcomes.
+- Observability content budgets are clamped so that a span's content fits the
+  export request bound (480 KiB by default) with 64 KiB left for the span's
+  other data: a raised budget truncates or omits (and lists) content instead
+  of dropping the span. The clamp follows how the exporter writes content.
+  OTLP/protobuf, the default protocol, sends it as retained, so the default
+  retained-operation budget is 416 KiB; OTLP/JSON can double it, so the same
+  request carries 208 KiB. A packaged pipeline fits content as protobuf only
+  when its traces signal, and its logs signal if it has one (content sent as
+  events rides it within the same budget), both use protobuf. Providers the
+  application owns are fitted as JSON until the policy names protobuf (Rust
+  `ContentPolicy::with_span_content_encoding`, JS
+  `content.spanContentEncoding`). A request bound under 128 KiB reserves half
+  of itself instead of 64 KiB, so a small bound still carries content.
+  That allowance is reserved, not enforced, so a span whose other data
+  outgrows it (large application attributes or resource, many or very long
+  omitted prompt-variable names) can still be dropped as an oversized item.
+  Content for spans that are not recording is no longer processed, a Rust
+  redaction hook that panics fails closed, a span processor that panics (Rust)
+  or throws (JS) while a span ends is contained (that span is lost; a failure
+  while a span starts still propagates), and Rust and JS per-signal stats
+  report `buffered_bytes` / `bufferedBytes`.
+- After `shutdown_observability` (and the bindings' observability shutdown),
+  `stats()` keeps the shut-down session's final per-signal counters, including
+  what the shutdown failed in flight or dropped from the queue, until the next
+  initialization; it used to read zero. Export still reports disabled.
+- A per-run observability session or observer (`ObservationOptions::session`,
+  `::observer`) can only lower content capture: its policy is capped by the
+  session the run would otherwise use (the enclosing operation's, else the
+  default; a disabled one caps nothing, so the next one out caps), so a
+  per-run setting that would capture more is ignored.
+  `ContentPolicy::capped_by` and `Observer::content_capped_by` (Rust) build
+  such capped policies and observers.
+- The live-frame sampler remembers at most 1,024 frame sessions (least
+  recently used evicted) besides forgetting sessions 300 s after their last
+  frame, and no longer scans every session per frame.
+- `XybridModel::run_async` and `run_stream` (and the facade's async run) take
+  their caller's parent only from the ambient OpenTelemetry context; this is
+  now documented, with `FutureExt::with_context` for spawned futures.
+- Dropping a Rust `XybridModel::run_stream` stream before its terminal event
+  now stops the run at its next token and releases the model write lock; the
+  run used to generate to the end. Unsubscribing a Flutter token stream
+  started without a `CancellationToken` now does the same, as it already did
+  with one, and closing a facade streaming session or a Bolt stream
+  (`stream_close`) early already stopped its run. Observability records these
+  runs as `cancelled`.
+- A token callback that returns an error stops a model stream as the
+  caller's cancellation whatever the error's type (a typed
+  `CloudFallbackAbort` aside, which hands over to the cloud leg):
+  observability records the run as `cancelled`, as a streaming pipeline
+  already did. An untyped
+  callback error used to be recorded as `inference_error`, although the model
+  had not failed. The error returned to the caller is unchanged.
 - JavaScript exporter support covers aligned OpenTelemetry 3.0/0.300 and
   3.1/0.301 families. The core entry point stays independent of SDK packages.
 - CLI traces are scoped to each operation; `--trace-export PATH` explicitly
   writes an artifact. See `docs/sdk/observability-coverage.md` for migration and
   execution coverage.
+
+### Fixed
+
+- Cloud calls no longer sleep for whatever `Retry-After` a server sends. A 429
+  whose error code or type is `insufficient_quota` (a spent quota, such as an
+  unclaimed agent workspace's) fails at once with the server's message instead
+  of being retried, and repeats of it no longer open the gateway circuit
+  breaker, so a long-lived `Cloud` keeps returning that message rather than
+  "try again later". Other waits are honored up to
+  `xybrid_core::http::MAX_RETRY_AFTER` (60 s per call, in total); a longer
+  `Retry-After` returns the rate-limit error at once. `Retry-After` is read as
+  seconds or as an HTTP-date (`xybrid_core::http::parse_retry_after`), so a
+  far-off date gives up at once instead of waiting a 60 s default. Registry
+  calls (across every registry URL they try) and model downloads follow the
+  same bound.
+- An opened circuit breaker recovers after its open duration instead of
+  refusing every later call until reset. The gateway client and registry calls
+  took a half-open circuit's only test request twice (once to fail fast, once
+  for the attempt), so the probe was never sent. Nor is that request kept any
+  longer by a retried call that gives up on a long `Retry-After`, or by a
+  registry probe that ends offline (it is given back) or with a compatibility
+  refusal (it closes the circuit). `CircuitBreaker::is_refusing` checks without
+  taking a request, and `CircuitBreaker::release` gives one back.
+- A registry call whose failures open a URL's circuit (three 5xx, or one 429)
+  now moves on to the next registry URL instead of failing with "circuit
+  open", and without first sleeping out a `Retry-After` for a retry the open
+  circuit would refuse. When no URL answers, the call reports the registry's
+  own error, so a 429 surfaces as `RateLimited` with its `Retry-After`.
 
 ### Migration
 
@@ -66,6 +276,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Delivery failures from flush/shutdown use `TelemetryDelivery` in native
   bindings. Inspect delivery stats or retry export; do not rerun inference to
   recover a missing acknowledgement.
+- **Rust:** `xybrid_observability::otlp::SignalEndpoint` gained a private
+  field, so it can no longer be built with a struct literal. Use
+  `SignalEndpoint::new` and its `with_*` methods.
 
 ## [0.17.0] - 2026-11-05
 

@@ -7,7 +7,7 @@
 //  `xybrid_bolt.swift` alongside this file; both compile into the same
 //  Swift module so consumers `import Xybrid` and see one surface.
 //
-//  For full API documentation, see https://docs.xybrid.dev/sdk/swift
+//  For full API documentation, see https://docs.xybrid.dev/docs/sdks/ios
 //
 
 import Foundation
@@ -39,8 +39,8 @@ private let boltSetProviderApiKey = setProviderApiKey
 ///
 /// Inference runs on-device whether or not you authenticate. The `apiKey`
 /// authenticates the cloud gateway; it does not export anything. Trace export
-/// is off until you start it with ``Xybrid/Observability`` — get a free key at
-/// https://dashboard.xybrid.dev.
+/// is off until you start it with ``Xybrid/Observability`` — get a key at
+/// https://console.xybrid.dev.
 ///
 /// ```swift
 /// // Anonymous — local inference only
@@ -73,8 +73,8 @@ public enum Xybrid {
     /// All parameters are optional. Without an `apiKey`, the SDK runs fully
     /// on-device. `apiKey` authenticates the cloud gateway and `gatewayUrl`
     /// overrides it. Neither starts trace export: build a config with
-    /// ``Xybrid/Observability`` and call `start()` for that. Get a free key at
-    /// https://dashboard.xybrid.dev.
+    /// ``Xybrid/Observability`` and call `start()` for that. Get a key at
+    /// https://console.xybrid.dev.
     ///
     /// Configuration is applied on the first call; because `initialize()` is
     /// idempotent, a later call with different arguments is a no-op.
@@ -549,7 +549,9 @@ public extension Xybrid {
             XybridObservabilityConfig(otlp: endpoint)
         }
 
-        /// Current delivery counters; all zero while export is off.
+        /// Delivery counters: live while export runs; after `shutdown`, the
+        /// final ones (what the shutdown failed or dropped included) until the
+        /// next `start()`; all zero before any.
         public static var stats: XybridObservabilityStats {
             observabilityStats()
         }
@@ -1163,11 +1165,9 @@ public extension XybridModel {
     /// whatever the backend reports for a cancelled run — it does not surface
     /// `CancellationError`.
     ///
-    /// Cancellation is checked at token boundaries **while streaming**. A batch
-    /// run is only cancellable before generation starts: once the backend is
-    /// producing, `run_with_options` has no token-aware path to stop it, so the
-    /// call finishes normally. Use the streaming surface when a mid-flight stop
-    /// button matters.
+    /// Decision runs check cancellation before preparation, between passes and
+    /// during native decoding. Other batch runs check it before generation;
+    /// streaming generation checks it at token boundaries.
     func runAsync(
         envelope: XybridEnvelope,
         options: XybridRunOptions? = nil
@@ -1387,6 +1387,10 @@ public extension XybridRunOptions {
     ///   - conversationId: your conversation id, recorded on the run's trace.
     ///   - suppressTrace: skip the detailed trace for this run; metrics are
     ///     still recorded.
+    ///   - frameSessionId: your id for one continuous live-capture session (a
+    ///     camera or microphone loop). Every run of the session is counted in
+    ///     metrics, and detailed traces are kept for roughly one run per live
+    ///     trace interval per session (`setLiveTraceIntervalMs`).
     static func make(
         generationConfig: XybridGenerationConfig? = nil,
         abortOn: [XybridAbortSignal] = [],
@@ -1396,7 +1400,8 @@ public extension XybridRunOptions {
         traceparent: String? = nil,
         tracestate: String? = nil,
         conversationId: String? = nil,
-        suppressTrace: Bool = false
+        suppressTrace: Bool = false,
+        frameSessionId: String? = nil
     ) -> XybridRunOptions {
         XybridRunOptions(
             generationConfig: generationConfig,
@@ -1407,7 +1412,8 @@ public extension XybridRunOptions {
             traceparent: traceparent,
             tracestate: tracestate,
             conversationId: conversationId,
-            suppressTrace: suppressTrace
+            suppressTrace: suppressTrace,
+            frameSessionId: frameSessionId
         )
     }
 }
@@ -1452,6 +1458,22 @@ public extension XybridEnvelope {
 // fields, so we mirror them as computed properties on the bolt type.
 
 public extension XybridResult {
+    /// Typed decision answers in request order, retaining Double probabilities.
+    var decisions: XybridDecisions? {
+        if case .decisions(let decisions) = envelope.kind { return decisions }
+        return nil
+    }
+
+    /// Tokens evaluated across all decision passes (zero tokens are generated).
+    var tokensIn: UInt64? {
+        envelope.metadata.first { $0.key == "tokens_in" }.flatMap { UInt64($0.value) }
+    }
+
+    /// Generated output tokens, always zero for decisions.
+    var tokensOut: UInt64? {
+        envelope.metadata.first { $0.key == "tokens_out" }.flatMap { UInt64($0.value) }
+    }
+
     /// `true` for any result returned from `XybridModel.run`. Bolt
     /// surfaces failures as `throws` rather than a `success` flag; this
     /// flag stays at `true` for shape compatibility with the previous
@@ -1508,6 +1530,16 @@ public extension XybridStreamToken {
 // helpers fold the well-known TTS / ASR metadata keys into entries.
 
 public extension XybridEnvelope {
+    /// Ordered typed decision input, validated by the shared Rust contract.
+    static func decisionRequest(_ request: XybridDecisionRequest) throws -> XybridEnvelope {
+        try decisionRequestEnvelope(request: request)
+    }
+
+    /// Raw Liquid SystemOne JSON. Keep structured content as text to preserve number identity.
+    static func decisionRequestJson(_ json: String) throws -> XybridEnvelope {
+        try decisionRequestJsonEnvelope(json: json)
+    }
+
     /// Creates an audio envelope with format metadata.
     /// - Parameters:
     ///   - pcmData: Raw PCM / WAV bytes.

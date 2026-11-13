@@ -20,6 +20,15 @@
 //! (rustls); caller threads never do network I/O and the caller's runtime is
 //! never used. Nothing is installed globally and nothing is spooled to disk.
 //!
+//! # Response hooks
+//!
+//! Each destination may carry a [`ResponseHook`]
+//! ([`SignalEndpoint::with_response_hook`]) that sees every HTTP response of
+//! its exports once (batches, flushes, retries, the shutdown drain) and may
+//! disable that destination alone ([`ResponseAction::Disable`]). The package
+//! interprets no vendor response itself; adapters decide which destinations
+//! they trust ([`SignalEndpoint::is_xybrid_preset`]).
+//!
 //! # The null carrier
 //!
 //! The OpenTelemetry Rust logs API has no null value. Records of scope
@@ -49,6 +58,7 @@ mod batch;
 mod config;
 mod encode;
 mod export;
+mod hook;
 mod pipeline;
 mod runtime;
 mod stats;
@@ -59,6 +69,7 @@ pub use config::{
     RetryLimits, SignalEndpoint, XYBRID_TRACES_ENDPOINT,
 };
 pub use export::{exporters, OtlpExporters, OtlpLogExporter, OtlpMetricExporter, OtlpSpanExporter};
+pub use hook::{ExportResponse, ResponseAction, ResponseHook, RpcStatus};
 pub use pipeline::ObservabilityPipeline;
 pub use stats::{PipelineStats, SignalStats};
 
@@ -83,7 +94,7 @@ pub mod defaults {
     /// `retry.retryable_status`.
     pub const RETRYABLE_STATUS: [u16; 4] = [429, 502, 503, 504];
     /// `max_request_body_bytes` (480 KiB).
-    pub const MAX_REQUEST_BODY_BYTES: usize = 491_520;
+    pub const MAX_REQUEST_BODY_BYTES: usize = crate::semconv::DEFAULT_MAX_REQUEST_BODY_BYTES;
     /// `max_buffered_bytes_per_signal` (32 MiB).
     pub const MAX_BUFFERED_BYTES_PER_SIGNAL: usize = 33_554_432;
     /// `max_response_body_bytes` (64 KiB).

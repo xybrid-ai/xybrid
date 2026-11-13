@@ -121,7 +121,7 @@ Each badge links to its platform setup. See the full
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.17.0
+  xybrid_flutter: ^0.18.0
 ```
 
 The plugin needs iOS 16.0, macOS 14.0 and Android 9 (API 28) or later; the [Flutter guide](https://docs.xybrid.dev/en/docs/sdks/flutter#requirements) shows how to raise your app's minimums.
@@ -140,7 +140,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.17.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.18.0")
 }
 ```
 
@@ -162,7 +162,7 @@ val result = model.runAsync(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.17.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.18.0")
 ]
 ```
 
@@ -179,7 +179,7 @@ let result = try await model.runAsync(envelope: Envelope.text("Hello world"))
 **Install** in a React Native 0.76+ app with the New Architecture (or an Expo SDK 52+ development build):
 
 ```sh
-npm install @xybrid/react-native@0.17.0
+npm install @xybrid/react-native@0.18.0
 ```
 
 For bare React Native, run `cd ios && pod install`. For Expo, run `npx expo prebuild`; Expo Go cannot load the native module.
@@ -238,7 +238,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.17.0"
+xybrid = "0.18.0"
 ```
 
 **Run a model:**
@@ -386,7 +386,7 @@ Xybrid works with **any** ONNX, GGUF, or SafeTensors model. You just need a `mod
 
 ```sh
 # Install xybrid skills into your project
-curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | sh
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | bash
 
 # Generate model_metadata.json from a HuggingFace model
 claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX

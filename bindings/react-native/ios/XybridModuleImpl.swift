@@ -572,7 +572,7 @@ public final class XybridModuleImpl: NSObject {
                                   reject: @escaping RCTPromiseRejectBlock) {
     now(resolve, reject) {
       let decoded = try (results as? [Any] ?? []).map(XybridCodec.decodeToolResult)
-      return try XybridCodec.encodeEnvelope(ffiToolResultsEnvelope(userText, priorAssistantText, decoded))
+      return XybridCodec.encodeEnvelope(try ffiToolResultsEnvelope(userText, priorAssistantText, decoded))
     }
   }
 
@@ -757,7 +757,7 @@ public final class XybridModuleImpl: NSObject {
         } else {
           result = try run.model.run(envelope: input, options: run.request.options, cancel: run.cancel)
         }
-        return try XybridCodec.encodeResult(result)
+        return XybridCodec.encodeResult(result)
       } catch {
         throw Self.cancellationAware(error, run.cancel)
       }
@@ -804,7 +804,7 @@ public final class XybridModuleImpl: NSObject {
           // `streamResult` closes the bolt session; drop our entry with it.
           let result = try entry.model.streamResult(streamId: entry.streamId)
           handles.dispose(stream)
-          return ["kind": "complete", "result": try XybridCodec.encodeResult(result)] as JSObject
+          return ["kind": "complete", "result": XybridCodec.encodeResult(result)] as JSObject
         case .audio:
           guard let packet = event.audio else {
             throw XybridError.inferenceError(message: "stream returned an audio event without audio")
@@ -1000,7 +1000,7 @@ public final class XybridModuleImpl: NSObject {
       let p = try handles.get(pipeline, as: XybridPipeline.self)
       let result = try p.run(envelope: try XybridCodec.decodeEnvelope(envelope),
                              options: try XybridCodec.decodeRunRequest(options).options)
-      return try XybridCodec.encodePipelineResult(result)
+      return XybridCodec.encodePipelineResult(result)
     }
   }
 

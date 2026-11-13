@@ -32,6 +32,7 @@
 //! ```
 
 use super::choice::{Choice, ChoiceRequest, ChoiceScores};
+use super::decision::{DecisionRequest, Decisions};
 use std::sync::Arc;
 use std::{collections::HashMap, fmt};
 use thiserror::Error;
@@ -1062,8 +1063,10 @@ pub enum EnvelopeKind {
     ChoiceRequest(ChoiceRequest),
     /// The scores a choice scorer returned, one per candidate.
     ChoiceScores(ChoiceScores),
-    /// Token IDs produced by tokenizer preprocessing for LLM prefill.
-    TokenIds(Vec<i64>),
+    /// Ordered questions for a local versioned decision model.
+    DecisionRequest(DecisionRequest),
+    /// Ordered typed answers returned without text generation.
+    Decisions(Decisions),
 }
 
 impl fmt::Debug for EnvelopeKind {
@@ -1106,11 +1109,15 @@ impl fmt::Debug for EnvelopeKind {
                 }
             },
             EnvelopeKind::MultiPart(parts) => f.debug_tuple("MultiPart").field(parts).finish(),
-            EnvelopeKind::TokenIds(data) => f.debug_tuple("TokenIds").field(data).finish(),
             // Both print counts and sizes only: ids, texts and the context
             // are caller content.
             EnvelopeKind::ChoiceRequest(request) => request.fmt(f),
             EnvelopeKind::ChoiceScores(scores) => scores.fmt(f),
+            EnvelopeKind::DecisionRequest(request) => request.fmt(f),
+            EnvelopeKind::Decisions(decisions) => f
+                .debug_struct("Decisions")
+                .field("answers", &decisions.answers().len())
+                .finish(),
         }
     }
 }
@@ -1128,9 +1135,10 @@ impl EnvelopeKind {
             EnvelopeKind::Embedding(_) => "Embedding",
             EnvelopeKind::Image { .. } => "Image",
             EnvelopeKind::MultiPart(_) => "MultiPart",
-            EnvelopeKind::TokenIds(_) => "TokenIds",
             EnvelopeKind::ChoiceRequest(_) => "ChoiceRequest",
             EnvelopeKind::ChoiceScores(_) => "ChoiceScores",
+            EnvelopeKind::DecisionRequest(_) => "DecisionRequest",
+            EnvelopeKind::Decisions(_) => "Decisions",
         }
     }
 
@@ -1143,12 +1151,15 @@ impl EnvelopeKind {
     /// choice scores, every id plus its logit and score.
     pub fn payload_size(&self) -> usize {
         match self {
+            EnvelopeKind::DecisionRequest(value) => {
+                bincode::serialized_size(value).unwrap_or(0) as usize
+            }
+            EnvelopeKind::Decisions(value) => bincode::serialized_size(value).unwrap_or(0) as usize,
             EnvelopeKind::Audio(data) => data.len(),
             EnvelopeKind::Text(data) => data.len(),
             EnvelopeKind::Embedding(data) => data.len() * std::mem::size_of::<f32>(),
             EnvelopeKind::Image { source } => source.byte_len(),
             EnvelopeKind::MultiPart(parts) => parts.iter().map(Envelope::payload_size).sum(),
-            EnvelopeKind::TokenIds(data) => data.len() * std::mem::size_of::<i64>(),
             EnvelopeKind::ChoiceRequest(request) => {
                 request.context().payload_size()
                     + request
@@ -1162,6 +1173,16 @@ impl EnvelopeKind {
                 .iter()
                 .map(|entry| entry.id.len() + 2 * std::mem::size_of::<f32>())
                 .sum(),
+        }
+    }
+
+    /// Whether a decision kind appears in this tree, including legacy contexts.
+    pub fn contains_decision_kind(&self) -> bool {
+        match self {
+            Self::DecisionRequest(_) | Self::Decisions(_) => true,
+            Self::MultiPart(parts) => parts.iter().any(|part| part.kind.contains_decision_kind()),
+            Self::ChoiceRequest(request) => request.context().kind.contains_decision_kind(),
+            _ => false,
         }
     }
 
@@ -1180,7 +1201,8 @@ impl EnvelopeKind {
             | EnvelopeKind::Text(_)
             | EnvelopeKind::Embedding(_)
             | EnvelopeKind::Image { .. }
-            | EnvelopeKind::TokenIds(_) => false,
+            | EnvelopeKind::DecisionRequest(_)
+            | EnvelopeKind::Decisions(_) => false,
         }
     }
 }
@@ -1721,8 +1743,9 @@ impl Envelope {
             EnvelopeKind::Audio(_)
             | EnvelopeKind::Text(_)
             | EnvelopeKind::Embedding(_)
-            | EnvelopeKind::TokenIds(_)
-            | EnvelopeKind::ChoiceScores(_) => {}
+            | EnvelopeKind::ChoiceScores(_)
+            | EnvelopeKind::DecisionRequest(_)
+            | EnvelopeKind::Decisions(_) => {}
         }
     }
 
@@ -1763,8 +1786,9 @@ impl Envelope {
             EnvelopeKind::Audio(_)
             | EnvelopeKind::Text(_)
             | EnvelopeKind::Embedding(_)
-            | EnvelopeKind::TokenIds(_)
-            | EnvelopeKind::ChoiceScores(_) => Ok(()),
+            | EnvelopeKind::ChoiceScores(_)
+            | EnvelopeKind::DecisionRequest(_)
+            | EnvelopeKind::Decisions(_) => Ok(()),
         }
     }
 
@@ -1774,6 +1798,46 @@ impl Envelope {
             EnvelopeKind::MultiPart(parts) => Some(parts),
             _ => None,
         }
+    }
+
+    /// Wraps an ordered decision request for the existing run API.
+    pub fn decision_request(request: DecisionRequest) -> Self {
+        Self::new(EnvelopeKind::DecisionRequest(request))
+    }
+
+    /// Wraps typed decision results.
+    pub fn decisions(decisions: Decisions) -> Self {
+        Self::new(EnvelopeKind::Decisions(decisions))
+    }
+
+    /// Returns a typed decision request.
+    pub fn as_decision_request(&self) -> Option<&DecisionRequest> {
+        match &self.kind {
+            EnvelopeKind::DecisionRequest(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    /// Returns typed decision answers.
+    pub fn as_decisions(&self) -> Option<&Decisions> {
+        match &self.kind {
+            EnvelopeKind::Decisions(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    /// Returns evaluated input tokens recorded by the runtime.
+    pub fn tokens_in(&self) -> Option<u64> {
+        self.metadata
+            .get("tokens_in")
+            .and_then(|value| value.parse().ok())
+    }
+
+    /// Returns generated output tokens (zero for decisions).
+    pub fn tokens_out(&self) -> Option<u64> {
+        self.metadata
+            .get("tokens_out")
+            .and_then(|value| value.parse().ok())
     }
 
     /// Returns the request if this is a choice-scoring request.
@@ -1813,8 +1877,21 @@ impl Envelope {
     ///
     /// A `Result` containing the deserialized envelope or an error
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, EnvelopeError> {
-        bincode::deserialize(bytes).map_err(|e| {
-            EnvelopeError::DeserializationError(format!("Failed to deserialize envelope: {}", e))
+        // The decoder's own message can quote the payload. Name the kind of
+        // failure only.
+        bincode::deserialize(bytes).map_err(|error| {
+            let cause = match *error {
+                bincode::ErrorKind::Io(_) => "truncated or unreadable input",
+                bincode::ErrorKind::InvalidUtf8Encoding(_) => "invalid UTF-8",
+                bincode::ErrorKind::InvalidBoolEncoding(_) => "invalid boolean",
+                bincode::ErrorKind::InvalidCharEncoding => "invalid character",
+                bincode::ErrorKind::InvalidTagEncoding(_) => "unknown variant",
+                bincode::ErrorKind::SizeLimit => "size limit exceeded",
+                bincode::ErrorKind::DeserializeAnyNotSupported
+                | bincode::ErrorKind::SequenceMustHaveLength
+                | bincode::ErrorKind::Custom(_) => "invalid data",
+            };
+            EnvelopeError::DeserializationError(format!("Failed to deserialize envelope: {cause}"))
         })
     }
 
@@ -1842,10 +1919,20 @@ impl Envelope {
     ///
     /// A `Result` containing the deserialized envelope or an error
     pub fn from_json(json: &str) -> Result<Self, EnvelopeError> {
-        serde_json::from_str(json).map_err(|e| {
+        // Deserializer errors can quote caller text (unknown keys/variants).
+        // Envelopes are a public boundary: keep the class of failure and
+        // where it is, which is enough to find it, and drop the message.
+        serde_json::from_str(json).map_err(|error| {
+            let class = match error.classify() {
+                serde_json::error::Category::Io => "unreadable input",
+                serde_json::error::Category::Syntax => "invalid JSON",
+                serde_json::error::Category::Data => "unexpected value",
+                serde_json::error::Category::Eof => "truncated JSON",
+            };
             EnvelopeError::DeserializationError(format!(
-                "Failed to deserialize envelope from JSON: {}",
-                e
+                "Failed to deserialize envelope JSON: {class} at line {} column {}",
+                error.line(),
+                error.column()
             ))
         })
     }
@@ -2417,7 +2504,49 @@ mod tests {
         assert_eq!(bincode_ordinal(&EnvelopeKind::MultiPart(vec![])), 4);
         assert_eq!(bincode_ordinal(&choice_request_envelope().kind), 5);
         assert_eq!(bincode_ordinal(&choice_scores_kind()), 6);
-        assert_eq!(bincode_ordinal(&EnvelopeKind::TokenIds(vec![1, 2])), 7);
+    }
+
+    fn decision_request_envelope() -> Envelope {
+        use crate::ir::{DecisionContent, DecisionQuestion, DecisionQuestionKind, DecisionState};
+        Envelope::decision_request(DecisionRequest::new(
+            DecisionState::text("private-state"),
+            vec![DecisionQuestion::new(
+                "private-id",
+                Some(DecisionContent::text("choose").into()),
+                DecisionQuestionKind::yes_no(None, None),
+            )],
+        ))
+    }
+
+    #[test]
+    fn decision_envelopes_append_ordinals_and_preserve_wire_data() {
+        let request = decision_request_envelope();
+        let result =
+            Envelope::decisions(Decisions::new(vec![], crate::ir::DecisionUsage::new(0, 0)));
+        assert_eq!(bincode_ordinal(&request.kind), 7);
+        assert_eq!(bincode_ordinal(&result.kind), 8);
+        for envelope in [request, result] {
+            assert_eq!(
+                Envelope::from_bytes(&envelope.to_bytes().unwrap()).unwrap(),
+                envelope
+            );
+            assert_eq!(
+                Envelope::from_json(&envelope.to_json().unwrap()).unwrap(),
+                envelope
+            );
+            assert!(!format!("{envelope:?}").contains("private-"));
+        }
+    }
+
+    #[test]
+    fn decisions_are_found_inside_legacy_contexts_and_multipart() {
+        let nested = Envelope::choice_request(
+            Envelope::new(EnvelopeKind::MultiPart(vec![decision_request_envelope()])),
+            vec![],
+        );
+        assert!(nested.kind.contains_decision_kind());
+        assert!(nested.as_decision_request().is_none());
+        assert!(decision_request_envelope().as_decision_request().is_some());
     }
 
     #[test]

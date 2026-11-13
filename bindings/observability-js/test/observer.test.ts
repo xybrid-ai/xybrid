@@ -1,7 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { context, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
-import { ObservationContext, Observer, resolveContentCapture } from "../src/index.ts";
+import type { SpanProcessor } from "@opentelemetry/sdk-trace";
+import {
+  type JsonValue,
+  type LoggerProviderLike,
+  ObservationContext,
+  Observer,
+  resolveContentCapture,
+} from "../src/index.ts";
 import { createHarness, normalizeMetrics } from "./support/harness.ts";
 
 const request = {
@@ -72,6 +79,71 @@ describe("parenting", () => {
     expect(inference?.spanContext().traceId).toBe("4bf92f3577b34da6a3ce929d0e0e4736");
     expect(inference?.parentSpanContext?.spanId).toBe("00f067aa0ba902b7");
     expect(inference?.spanContext().traceState?.get("vendor")).toBe("abc");
+  });
+
+  test("interleaved async flows each keep their own ambient parent", async () => {
+    const { observer, spans, tracerProvider, collectMetrics } = createHarness();
+    const flows = 10;
+    const parents = Array.from({ length: flows }, (_, flow) =>
+      tracerProvider.getTracer("app").startSpan(`request ${flow}`),
+    );
+    // The test resumes each flow at each step, in an order it chooses; nothing is timed.
+    const deferred = () => {
+      let resolve = (): void => undefined;
+      const promise = new Promise<void>((settle) => {
+        resolve = settle;
+      });
+      return { promise, resolve };
+    };
+    const steps = parents.map(() => ({
+      start: deferred(),
+      started: deferred(),
+      end: deferred(),
+      ended: deferred(),
+    }));
+    const running = parents.map((parent, flow) =>
+      context.with(trace.setSpan(context.active(), parent), async () => {
+        const step = steps[flow];
+        if (step === undefined) throw new Error("no step for the flow");
+        await step.start.promise;
+        const op = observer.startInference(request);
+        op.setAttribute("flow", flow);
+        step.started.resolve();
+        await step.end.promise;
+        op.end();
+        step.ended.resolve();
+      }),
+    );
+    const resume = async (order: readonly number[], phase: "start" | "end"): Promise<void> => {
+      for (const flow of order) {
+        const step = steps[flow];
+        if (step === undefined) throw new Error("no step for the flow");
+        step[phase].resolve();
+        // A flow that throws instead of reaching its step fails the test here.
+        await Promise.race([step[phase === "start" ? "started" : "ended"].promise, running[flow]]);
+        // The flow's context never leaks into the code that resumed it.
+        expect(trace.getSpan(context.active())).toBeUndefined();
+      }
+    };
+    const reverse = [...parents.keys()].reverse();
+    const evensThenOdds = [...parents.keys()].sort((a, b) => (a % 2) - (b % 2) || a - b);
+    // Every inference starts in reverse order and is open before any of them ends.
+    await resume(reverse, "start");
+    await resume(evensThenOdds, "end");
+    await Promise.all(running);
+    for (const parent of parents) parent.end();
+
+    const inferences = spans.getFinishedSpans().filter((span) => span.name === "chat tiny");
+    expect(inferences.map((span) => span.attributes["flow"])).toEqual(evensThenOdds);
+    for (const span of inferences) {
+      const parent = parents[Number(span.attributes["flow"])]?.spanContext();
+      expect(span.parentSpanContext?.spanId).toBe(parent?.spanId ?? "");
+      expect(span.spanContext().traceId).toBe(parent?.traceId ?? "");
+    }
+    const duration = normalizeMetrics(await collectMetrics()).find(
+      (metric) => metric.name === "gen_ai.client.inference.duration",
+    );
+    expect(duration?.points.map((point) => ("count" in point ? point.count : 0))).toEqual([flows]);
   });
 
   test("operation contexts parent children explicitly", () => {
@@ -177,6 +249,42 @@ describe("events", () => {
     expect(observer.recordFeedback(target, { score: 1 })).toBe(false);
   });
 
+  test("without an enabled logger the feedback comment is not processed", () => {
+    const calls: string[] = [];
+    const content = {
+      capture: "span_and_event",
+      redact: (kind: string, value: JsonValue): JsonValue => {
+        calls.push(kind);
+        return value;
+      },
+    } as const;
+    const { observer } = createHarness({ logs: false, content });
+    const op = observer.startInference(request);
+    op.end();
+    const target = op.observationRef();
+    if (target === undefined) throw new Error("expected a recorded span");
+    expect(observer.recordFeedback(target, { score: 1, comment: "secret" })).toBe(false);
+    const emitted: unknown[] = [];
+    const disabled: LoggerProviderLike = {
+      getLogger: () => ({ emit: (record) => emitted.push(record), enabled: () => false }),
+    };
+    const quiet = new Observer({
+      tracerProvider: null,
+      meterProvider: null,
+      loggerProvider: disabled,
+      content,
+    });
+    expect(quiet.recordFeedback(target, { score: 1, comment: "secret" })).toBe(false);
+    expect(calls).toEqual([]);
+    expect(emitted).toEqual([]);
+    // With an enabled logger the comment goes through the pipeline once.
+    const { observer: enabled, logs } = createHarness({ content });
+    expect(enabled.recordFeedback(target, { score: 1, comment: "secret" })).toBe(true);
+    expect(calls).toEqual(["xybrid.genai.feedback.comment"]);
+    const [record] = logs.getFinishedLogRecords();
+    expect(record?.attributes["xybrid.genai.feedback.comment"]).toBe("secret");
+  });
+
   test("no_content drops the feedback comment", () => {
     const { observer, logs } = createHarness({ content: { capture: "no_content" } });
     const op = observer.startInference(request);
@@ -268,5 +376,41 @@ describe("generic spans", () => {
     expect(stage.observationRef()?.span_id).toBe(span?.spanContext().spanId ?? "");
     const names = normalizeMetrics(await collectMetrics()).map((metric) => metric.name);
     expect(names).toEqual(["gen_ai.client.inference.duration"]);
+  });
+});
+
+describe("a span processor that throws in onEnd", () => {
+  test("is contained: the operation ends, metrics are recorded, later spans export", async () => {
+    // Mirror of the Rust an_application_span_processor_panic_in_on_end_is_contained. The throwing
+    // processor comes first, so the in-memory exporter after it never sees that span.
+    const seen: string[] = [];
+    const throwing: SpanProcessor = {
+      onStart: () => undefined,
+      onEnd: (span) => {
+        seen.push(span.name);
+        if (span.name === "chat boom") throw new Error("application processor threw");
+      },
+      forceFlush: async () => undefined,
+      shutdown: async () => undefined,
+    };
+    const { observer, spans, collectMetrics } = createHarness({ spanProcessors: [throwing] });
+    const named = (model: string) => ({ ...request, model });
+    observer.startInference(named("before")).end();
+    const boom = observer.startInference(named("boom"));
+    expect(() => boom.end()).not.toThrow();
+    expect(boom.ended).toBe(true);
+    observer.startInference(named("after")).end();
+    expect(seen).toEqual(["chat before", "chat boom", "chat after"]);
+    expect(spans.getFinishedSpans().map((span) => span.name)).toEqual([
+      "chat before",
+      "chat after",
+    ]);
+    const durations = normalizeMetrics(await collectMetrics()).filter(
+      (metric) => metric.name === "gen_ai.client.inference.duration",
+    );
+    const counts = durations.flatMap((metric) =>
+      metric.points.map((point) => ("count" in point ? point.count : 0)),
+    );
+    expect(counts.reduce((a, b) => a + b, 0)).toBe(3);
   });
 });

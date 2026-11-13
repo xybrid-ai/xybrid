@@ -11,9 +11,142 @@ import '../frb_generated.dart';
 import 'model.dart';
 import 'observability.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
+part 'result.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `ensure_ffi_payload`, `from_core`, `from_core`, `from_sdk`, `try_from_inference_result`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `ensure_ffi_payload`, `from_core`, `from_core`, `from_sdk`, `try_from_inference_result`, `try_from_inference_result`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `from`
+
+/// An answer in original question order.
+class FfiDecisionAnswer {
+  final String questionId;
+  final List<FfiDecisionScore> distribution;
+  final FfiDecisionValue value;
+  final double? confidence;
+
+  const FfiDecisionAnswer({
+    required this.questionId,
+    required this.distribution,
+    required this.value,
+    this.confidence,
+  });
+
+  @override
+  int get hashCode =>
+      questionId.hashCode ^
+      distribution.hashCode ^
+      value.hashCode ^
+      confidence.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiDecisionAnswer &&
+          runtimeType == other.runtimeType &&
+          questionId == other.questionId &&
+          distribution == other.distribution &&
+          value == other.value &&
+          confidence == other.confidence;
+}
+
+/// Source of a distribution entry.
+enum FfiDecisionOrigin {
+  caller,
+  fixed,
+  ;
+}
+
+/// Ordered decision answers and execution metadata for a completed request.
+class FfiDecisionResult {
+  final List<FfiDecisionAnswer> answers;
+  final int passes;
+  final BigInt inputTokens;
+  final int latencyMs;
+  final FfiExecutionTarget executionTarget;
+  final FfiInferenceMetrics metrics;
+
+  /// The run's observation, for feedback and evaluations; `None` when
+  /// observability is not enabled.
+  final FfiObservationRef? observation;
+
+  const FfiDecisionResult({
+    required this.answers,
+    required this.passes,
+    required this.inputTokens,
+    required this.latencyMs,
+    required this.executionTarget,
+    required this.metrics,
+    this.observation,
+  });
+
+  @override
+  int get hashCode =>
+      answers.hashCode ^
+      passes.hashCode ^
+      inputTokens.hashCode ^
+      latencyMs.hashCode ^
+      executionTarget.hashCode ^
+      metrics.hashCode ^
+      observation.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiDecisionResult &&
+          runtimeType == other.runtimeType &&
+          answers == other.answers &&
+          passes == other.passes &&
+          inputTokens == other.inputTokens &&
+          latencyMs == other.latencyMs &&
+          executionTarget == other.executionTarget &&
+          metrics == other.metrics &&
+          observation == other.observation;
+}
+
+/// One distribution entry; probabilities retain their full f64 precision.
+class FfiDecisionScore {
+  final String key;
+  final double rawScore;
+  final double probability;
+  final FfiDecisionOrigin origin;
+
+  const FfiDecisionScore({
+    required this.key,
+    required this.rawScore,
+    required this.probability,
+    required this.origin,
+  });
+
+  @override
+  int get hashCode =>
+      key.hashCode ^ rawScore.hashCode ^ probability.hashCode ^ origin.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiDecisionScore &&
+          runtimeType == other.runtimeType &&
+          key == other.key &&
+          rawScore == other.rawScore &&
+          probability == other.probability &&
+          origin == other.origin;
+}
+
+@freezed
+sealed class FfiDecisionValue with _$FfiDecisionValue {
+  const FfiDecisionValue._();
+
+  const factory FfiDecisionValue.choice({
+    required String key,
+  }) = FfiDecisionValue_Choice;
+  const factory FfiDecisionValue.yesNo({
+    required double pYes,
+  }) = FfiDecisionValue_YesNo;
+  const factory FfiDecisionValue.score({
+    required double value,
+    required FfiScoreStatistic statistic,
+  }) = FfiDecisionValue_Score;
+}
 
 /// Where a result was produced — the observed fact, not a routing preference.
 ///
@@ -146,6 +279,25 @@ class FfiResult {
           executionTarget == other.executionTarget &&
           metrics == other.metrics &&
           toolCalls == other.toolCalls;
+}
+
+@freezed
+sealed class FfiRunResult with _$FfiRunResult {
+  const FfiRunResult._();
+
+  const factory FfiRunResult.legacy(
+    FfiResult field0,
+  ) = FfiRunResult_Legacy;
+  const factory FfiRunResult.decision(
+    FfiDecisionResult field0,
+  ) = FfiRunResult_Decision;
+}
+
+/// Statistic used by a score answer.
+enum FfiScoreStatistic {
+  median,
+  expected,
+  ;
 }
 
 /// Per-stage latency entry for pipeline runs.

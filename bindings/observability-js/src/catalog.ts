@@ -187,6 +187,7 @@ export const ENUMS = {
   modality: ["text", "image", "audio", "video"],
   finish_reason: ["stop", "length", "content_filter", "tool_call", "compaction", "error"],
   content_capture: ["no_content", "span_only", "event_only", "span_and_event"],
+  span_content_encoding: ["json", "protobuf"],
   "xybrid.genai.resource.thermal.state": ["nominal", "fair", "serious", "critical"],
   "xybrid.genai.resource.memory.pressure": ["normal", "warn", "critical"],
   trace_mode: ["default", "suppress"],
@@ -291,6 +292,9 @@ export const METRIC_DIMENSIONS = {
 
 export type ContentCapture = (typeof ENUMS.content_capture)[number];
 
+/** How an exporter writes span content, which the content budgets are fitted to. */
+export type SpanContentEncoding = (typeof ENUMS.span_content_encoding)[number];
+
 /** `xybrid.genai.resource.memory.pressure` levels, least to most severe. */
 export type MemoryPressure = (typeof ENUMS)["xybrid.genai.resource.memory.pressure"][number];
 
@@ -301,8 +305,11 @@ export const DEFAULTS = {
   truncation_marker: "…[truncated]",
   truncation_min_string_bytes: 32,
   redaction_replacement: "[REDACTED]",
-  max_retained_operation_bytes: 491520,
+  max_retained_operation_bytes: 425984,
   max_traversal_bytes: 491520,
+  span_envelope_allowance_bytes: 65536,
+  span_content_encoding: "json" as SpanContentEncoding,
+  span_content_encoding_growth: { json: 2, protobuf: 1 },
   max_json_depth: 128,
   preflight_node_bytes: 16,
   batch: {

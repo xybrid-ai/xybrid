@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "noul-partial-false",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Only false described: Yes: None, No line",
+  "covers": [
+    "noul-partial-criteria"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\", \"criteria\": {\"false\": \"Anything else\"}}}}",
+  "artifact": "d1-2b-hf"
+}

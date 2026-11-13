@@ -296,8 +296,10 @@ mode it throttles or stops the local loop rather than spilling to cloud.
 A naive live loop would emit one telemetry row per fired frame and flood the
 traces backend. Instead, live-mode inferences are **tagged** (a `live_mode` flag
 plus a `frame_session_id` that groups one camera session) and **rate-limited** by
-a per-session sampler (roughly one row per second per session, TTL-bounded), so a
-live session produces a sampled rollup rather than per-frame spam.
+a per-session sampler (roughly one row per second per session), so a live
+session produces a sampled rollup rather than per-frame spam. The sampler is
+bounded: it remembers at most 1,024 sessions, evicting the least recently used,
+and forgets a session 300 s after its last frame.
 
 ## Troubleshooting
 

@@ -5,7 +5,7 @@
  * bindings in `XybridBolt.kt`. Both files live in the same `ai.xybrid`
  * package so consumers `import ai.xybrid.…` and see a single surface.
  *
- * For full API documentation, see https://docs.xybrid.dev/sdk/kotlin
+ * For full API documentation, see https://docs.xybrid.dev/docs/sdks/kotlin
  */
 @file:Suppress("unused")
 
@@ -37,8 +37,8 @@ import kotlinx.coroutines.withContext
  * Call [Xybrid.init] once before using any other Xybrid functionality.
  * Inference runs on-device whether or not you authenticate. The `apiKey`
  * authenticates the cloud gateway; it does not export anything. Trace export
- * is off until you start it with [Xybrid.Observability]. Get a free key at
- * https://dashboard.xybrid.dev.
+ * is off until you start it with [Xybrid.Observability]. Get a key at
+ * https://console.xybrid.dev.
  *
  * ```kotlin
  * class MyApplication : Application() {
@@ -354,7 +354,11 @@ object Xybrid {
         @JvmStatic
         fun otlp(endpoint: String): XybridObservabilityConfig = XybridObservabilityConfig.otlp(endpoint)
 
-        /** Current delivery counters; all zero while export is off. */
+        /**
+         * Delivery counters: live while export runs; after [shutdown], the final
+         * ones (what the shutdown failed or dropped included) until the next
+         * `start()`; all zero before any.
+         */
         @JvmStatic
         val stats: XybridObservabilityStats get() = ai.xybrid.observabilityStats()
 
@@ -528,6 +532,10 @@ fun XybridObservabilityConfig.start() {
  * @param conversationId your conversation id, recorded on the run's trace.
  * @param suppressTrace skip the detailed trace for this run; metrics are still
  *   recorded.
+ * @param frameSessionId your id for one continuous live-capture session (a
+ *   camera or microphone loop). Every run of the session is counted in
+ *   metrics, and detailed traces are kept for roughly one run per live trace
+ *   interval per session (`setLiveTraceIntervalMs`).
  */
 fun runOptions(
     generationConfig: XybridGenerationConfig? = null,
@@ -539,6 +547,7 @@ fun runOptions(
     tracestate: String? = null,
     conversationId: String? = null,
     suppressTrace: Boolean = false,
+    frameSessionId: String? = null,
 ): XybridRunOptions = XybridRunOptions(
     generationConfig = generationConfig,
     abortOn = abortOn,
@@ -549,6 +558,7 @@ fun runOptions(
     tracestate = tracestate,
     conversationId = conversationId,
     suppressTrace = suppressTrace,
+    frameSessionId = frameSessionId,
 )
 
 // -- Model loading --
@@ -985,10 +995,9 @@ suspend fun XybridModel.Companion.fromHuggingfaceAsync(repo: String): XybridMode
  * alone cannot do that — the run is a blocking native call, so cancellation has
  * to be forwarded, which is what the `await()` catch below does.
  *
- * Cancellation is checked at token boundaries **while streaming**. A batch run
- * is only cancellable before generation starts: once the backend is producing,
- * there is no token-aware batch path to stop it, so the call finishes normally.
- * Use [streamTokens] when a mid-flight stop button matters.
+ * Decision runs check cancellation before preparation, between passes and
+ * during native decoding. Other batch runs check it before generation;
+ * streaming generation checks it at token boundaries.
  */
 suspend fun XybridModel.runAsync(
     envelope: XybridEnvelope,
@@ -1148,6 +1157,18 @@ val XybridResult.success: Boolean get() = true
 /** `true` if the result carries no output (`OutputType.UNKNOWN`). */
 val XybridResult.isFailure: Boolean get() = outputType == XybridOutputType.UNKNOWN
 
+/** Ordered decisions, with Double probabilities and zero generated tokens. */
+val XybridResult.decisions: XybridDecisions?
+    get() = (envelope.kind as? XybridEnvelopeKind.Decisions)?.decisions
+
+/** Total tokens evaluated across decision passes. */
+val XybridResult.tokensIn: ULong?
+    get() = envelope.metadata.firstOrNull { it.key == "tokens_in" }?.value?.toULongOrNull()
+
+/** Generated output tokens, always zero for decisions. */
+val XybridResult.tokensOut: ULong?
+    get() = envelope.metadata.firstOrNull { it.key == "tokens_out" }?.value?.toULongOrNull()
+
 /** Text payload, if the result is `.Text`. `null` otherwise. */
 val XybridResult.text: String?
     get() = (envelope.kind as? XybridEnvelopeKind.Text)?.text
@@ -1185,6 +1206,14 @@ val XybridStreamToken.hasToolCalls: Boolean get() = toolCalls.isNotEmpty()
 
 /** Factory methods for creating [XybridEnvelope] instances. */
 object Envelope {
+    /** Ordered typed decision input, validated by the shared Rust contract. */
+    @JvmStatic
+    fun decisionRequest(request: XybridDecisionRequest): XybridEnvelope = decisionRequestEnvelope(request)
+
+    /** Raw Liquid SystemOne JSON; do not round-trip structured content through a map. */
+    @JvmStatic
+    fun decisionRequestJson(json: String): XybridEnvelope = decisionRequestJsonEnvelope(json)
+
     /**
      * Creates an audio envelope from raw PCM data.
      * @param bytes Raw PCM audio bytes.

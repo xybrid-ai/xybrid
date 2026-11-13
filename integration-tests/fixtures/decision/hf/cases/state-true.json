@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "state-true",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A true state prints as true",
+  "covers": [
+    "state-scalar",
+    "json-literals"
+  ],
+  "request_text": "{\"state\": true, \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}}",
+  "artifact": "d1-2b-hf"
+}

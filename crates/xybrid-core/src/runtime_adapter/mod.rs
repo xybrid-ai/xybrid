@@ -213,6 +213,9 @@ pub enum AdapterError {
     RuntimeError(String),
     #[error("Aborted for cloud fallback: {reason}")]
     AbortedForCloudFallback { reason: crate::abort::AbortReason },
+    /// Cooperative cancellation; no partial result is returned.
+    #[error("Execution cancelled")]
+    Cancelled,
 }
 
 impl AdapterError {
@@ -251,6 +254,7 @@ impl From<xybrid_llama::LlamaError> for AdapterError {
     fn from(err: xybrid_llama::LlamaError) -> Self {
         use xybrid_llama::LlamaError;
         match err {
+            LlamaError::DecisionCancelled => Self::Cancelled,
             LlamaError::InvalidInput(msg) => Self::InvalidInput(msg),
             LlamaError::LoadFailed(path) => {
                 Self::RuntimeError(format!("Failed to load model from {path}"))

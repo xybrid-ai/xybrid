@@ -12,7 +12,7 @@ Get Xybrid running in your app with a few lines of code. Choose your SDK below.
 ```yaml
 # pubspec.yaml
 dependencies:
-  xybrid_flutter: ^0.17.0
+  xybrid_flutter: ^0.18.0
 ```
 
 ```bash
@@ -26,8 +26,8 @@ The plugin needs iOS 16.0, macOS 14.0 and Android 9 (API 28) or later; the [Flut
 ```dart
 import 'package:xybrid_flutter/xybrid_flutter.dart';
 
-// Runs locally as-is. Add a free key from dashboard.xybrid.dev to see
-// your inference traces: Xybrid.init(apiKey: '...')
+// Runs locally as-is, no account needed. A key from console.xybrid.dev
+// adds cloud features (Xybrid.init(apiKey: '...')); trace export is a separate opt-in.
 await Xybrid.init();
 
 // Load a model and run text-to-speech
@@ -56,7 +56,7 @@ Or add to `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.17.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.18.0")
 ]
 ```
 
@@ -65,8 +65,8 @@ dependencies: [
 ```swift
 import Xybrid
 
-// Runs locally as-is. Add a free key from dashboard.xybrid.dev to see
-// your inference traces: Xybrid.initialize(apiKey: "...")
+// Runs locally as-is, no account needed. A key from console.xybrid.dev
+// adds cloud features (Xybrid.initialize(apiKey: "...")); trace export is a separate opt-in.
 Xybrid.initialize()
 
 // Describe, then explicitly load a model from the registry
@@ -87,7 +87,7 @@ let result = try await model.runAsync(envelope: envelope)
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.17.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.18.0")
 }
 ```
 
@@ -100,8 +100,8 @@ Downloading models from the registry needs network access, and the SDK declares 
 ```kotlin
 import ai.xybrid.*
 
-// Runs locally as-is. Add a free key from dashboard.xybrid.dev to see
-// your inference traces: Xybrid.init(context, apiKey = "...")
+// Runs locally as-is, no account needed. A key from console.xybrid.dev
+// adds cloud features (Xybrid.init(context, apiKey = "...")); trace export is a separate opt-in.
 Xybrid.init(context)
 
 // Describe, then explicitly load a model from the registry
@@ -120,7 +120,7 @@ val result = model.runAsync(envelope)
 **Install** in a React Native 0.76+ app with the New Architecture, or an Expo SDK 52+ development build:
 
 ```bash
-npm install @xybrid/react-native@0.17.0
+npm install @xybrid/react-native@0.18.0
 ```
 
 For bare React Native, run `cd ios && pod install`. For Expo, run `npx expo prebuild`; Expo Go cannot load the native module.
@@ -153,7 +153,7 @@ In Unity, go to **Window > Package Manager > + > Add package from git URL** and 
 https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
-Or via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/): `openupm add ai.xybrid.sdk`. Native libraries download automatically on first import (SHA-256 verified); pin a version by appending `#v0.17.0` to the git URL.
+Or via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/): `openupm add ai.xybrid.sdk`. Native libraries download automatically on first import (SHA-256 verified); pin a version by appending `#v0.18.0` to the git URL.
 
 **Run inference**
 
@@ -161,8 +161,8 @@ Or via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/): `openupm add ai.x
 using Xybrid;
 using UnityEngine;
 
-// Runs locally as-is. Add a free key from dashboard.xybrid.dev to see
-// your inference traces: XybridClient.Initialize(apiKey: "...")
+// Runs locally as-is, no account needed. A key from console.xybrid.dev
+// adds cloud features (XybridClient.Initialize(apiKey: "...")); trace export is a separate opt-in.
 XybridClient.Initialize();
 
 // Load a TTS model and generate NPC dialogue
@@ -227,7 +227,7 @@ See the [Web SDK guide](/docs/sdks/web) for GGUF loading, cancellation, measurem
 ```toml
 # Cargo.toml
 [dependencies]
-xybrid = "0.17.0"
+xybrid = "0.18.0"
 ```
 
 **Run inference**
@@ -296,4 +296,5 @@ Transcription: "Hello, how can I help you?"
   <Card title="Models" href="/docs/concepts/models" description="Browse the on-device model catalog" />
   <Card title="Pipelines" href="/docs/concepts/pipelines" description="Chain models with a few lines of YAML" />
   <Card title="CLI" href="/docs/cli" description="Run and debug models from the terminal" />
+  <Card title="API Keys" href="/docs/concepts/api-keys" description="Cloud authentication, trace export and key scopes" />
 </Cards>

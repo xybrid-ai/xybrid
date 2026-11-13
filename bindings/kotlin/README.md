@@ -12,7 +12,7 @@ Add to your `build.gradle.kts`:
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.17.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.18.0")
 }
 ```
 
@@ -204,6 +204,8 @@ result.reasoningContent?.let { println("Reasoning: $it") }
 Export is off until you start it; an API key passed to `Xybrid.init` does not
 enable it. Once started, each run is exported as an OpenTelemetry trace, with
 prompts and outputs included unless you call `.metadataOnly()`.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
 
 ```kotlin
 import ai.xybrid.metadataOnly
@@ -211,7 +213,7 @@ import ai.xybrid.runOptions
 import ai.xybrid.service
 import ai.xybrid.start
 
-// Traces to the Xybrid dashboard (free key at dashboard.xybrid.dev)
+// Traces to Xybrid (get a key at console.xybrid.dev)
 Xybrid.Observability.xybrid(apiKey)
     .service("MyApp", version = BuildConfig.VERSION_NAME)
     .start()
@@ -237,10 +239,15 @@ Xybrid.Observability.flushAsync()
 ```
 
 `Xybrid.Observability.stats` reports accepted, exported, dropped, failed, and
-pending counts per signal (`traces`, `logs`, `metrics`). A flush or shutdown that
+pending counts per signal (`traces`, `logs`, `metrics`); after `shutdown` they are
+the session's final counters (what the shutdown failed or dropped included)
+until the next `start()`. A flush or shutdown that
 cannot deliver everything throws `XybridError.TelemetryDelivery`; the inference
 already succeeded, so do not rerun it. `suppressTrace = true` in `runOptions`
-skips the detailed trace for one run. Pipelines take the same trace fields and
+skips the detailed trace for one run. For a camera or microphone loop, pass
+the same `frameSessionId` on every run of the loop: each frame is counted in
+metrics, and detailed traces are kept for roughly one frame per
+`setLiveTraceIntervalMs` per session. Pipelines take the same trace fields and
 return `observation` references for the workflow and each stage; ASR sessions
 take them through `streamingConfigWithVad(..., observation = ...)` or the
 config's `observation`.

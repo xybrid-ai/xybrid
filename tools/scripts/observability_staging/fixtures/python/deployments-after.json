@@ -1,0 +1,9 @@
+{
+  "Cloudflare - Workers CI/CD / deploy-gateway-worker-staging": "8e3f3210bc8e391ab956d7b0000e888c22193143",
+  "Cloudflare - Workers CI/CD / deploy-ingest-worker-staging": "a42679b0f8a17cf6234a83389830a4b693e167c6",
+  "Cloudflare - Workers CI/CD / deploy-registry-staging": "50f2f8d111eeb30fba4e1154d1038c73ee38de0f",
+  "Cloudflare - Workers CI/CD / deploy-staging": "50f2f8d111eeb30fba4e1154d1038c73ee38de0f",
+  "GCP - CD (auth, API) / deploy (api)": "f1b8cbb4a92cc11557cb83510c2ca53d943b71d4",
+  "GCP - CD (auth, API) / deploy (auth)": "f1b8cbb4a92cc11557cb83510c2ca53d943b71d4",
+  "Tinybird - CD / deploy-staging": "f1b8cbb4a92cc11557cb83510c2ca53d943b71d4"
+}

@@ -5,6 +5,7 @@
     "models",
     "pipelines",
     "hybrid-execution",
+    "api-keys",
     "streaming",
     "caching"
   ]

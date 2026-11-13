@@ -23,7 +23,7 @@ Add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.17.0
+  xybrid_flutter: ^0.18.0
 ```
 
 ## Initialization
@@ -41,7 +41,7 @@ void main() async {
 ```
 
 Local inference is available without authentication. An `apiKey` configures
-cloud access. To send execution traces to the [dashboard](https://dashboard.xybrid.dev),
+cloud access. To send execution traces to the [Xybrid console](https://console.xybrid.dev),
 also configure observability explicitly:
 
 ```dart
@@ -60,6 +60,8 @@ Use `ObservabilityConfig.otlp(endpoint: 'http://collector:4318')` for a Collecto
 without Xybrid authentication. CPU/memory sampling is separately configured
 with `resourceTelemetry`. `ingestUrl` remains a legacy explicit opt-in to OTLP
 trace export; new integrations should use `observability`.
+
+Key prefixes and scopes, what gets exported, and provisional workspaces: see [API keys](/docs/concepts/api-keys).
 
 `Xybrid.init()` also subscribes to OS battery state on iOS and Android via `battery_plus` and forwards each reading to the routing engine.
 

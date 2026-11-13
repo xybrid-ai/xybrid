@@ -1,0 +1,30 @@
+{
+ "items": [
+  {
+   "comment": null,
+   "explanation": "answers the question",
+   "id": "00000000-0000-4000-8000-000000000000",
+   "name": "relevance",
+   "score_label": "relevant",
+   "score_value": 1.0,
+   "source": "evaluation",
+   "span_id": "e495596a7e3814ed",
+   "timestamp": "2026-11-09T16:46:20.000000000Z",
+   "trace_id": "78793a707974686f6e00000000000000"
+  },
+  {
+   "comment": "helpful, and my token [scenario-redacted] stayed private",
+   "explanation": null,
+   "id": "00000000-0000-4000-8000-000000000001",
+   "name": "user_feedback",
+   "score_label": "thumbs_up",
+   "score_value": 1.0,
+   "source": "feedback",
+   "span_id": "e495596a7e3814ed",
+   "timestamp": "2026-11-09T16:46:20.000000000Z",
+   "trace_id": "78793a707974686f6e00000000000000"
+  }
+ ],
+ "trace_id": "78793a707974686f6e00000000000000",
+ "truncated": false
+}

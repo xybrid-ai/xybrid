@@ -35,6 +35,7 @@ import {
   type MemoryPressure,
   type MetricName,
   OPERATIONS,
+  type SpanContentEncoding,
 } from "./catalog.ts";
 import {
   boundCodePoints,
@@ -100,16 +101,47 @@ export type ContentOptions = {
    * `OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT`; any other value throws `RangeError`.
    */
   readonly capture?: ContentCaptureInput | undefined;
-  /** UTF-8 byte budget per content attribute (default 16384, integer >= 1). */
+  /**
+   * UTF-8 byte budget per content attribute (default 16384, integer >= 1); clamped to the
+   * effective `maxRetainedOperationBytes`.
+   */
   readonly maxAttributeBytes?: number | undefined;
-  /** Content retained by one operation until it ends (default 491520 = 480 KiB). */
+  /**
+   * Content retained by one operation until it ends (default 425984 = 416 KiB, integer >= 1);
+   * clamped to the span content ceiling of `maxRequestBodyBytes` for `spanContentEncoding` (see
+   * {@link spanContentCeiling}) so that one span's content cannot push its export request past
+   * `maxRequestBodyBytes` (CONTRACT.md "Content pipeline"). At the default bound that is 416 KiB
+   * as protobuf and 208 KiB as JSON.
+   */
   readonly maxRetainedOperationBytes?: number | undefined;
+  /**
+   * `maxRequestBodyBytes` of the exporter that sends this observer's spans (default 491520 =
+   * 480 KiB, integer >= 1), which the content budgets are clamped to fit. `OtlpPipeline.observer`
+   * applies its own bound (the smaller one wins); set it for providers the application owns.
+   */
+  readonly maxRequestBodyBytes?: number | undefined;
+  /**
+   * How the exporter that sends this observer's spans writes content: `"json"` (default; also
+   * right for an exporter the application cannot vouch for) or `"protobuf"`, which does not
+   * escape content and so carries twice as much in the same request. `OtlpPipeline.observer`
+   * applies its own traces protocol; set it for providers the application owns. Any other value
+   * throws `RangeError`.
+   */
+  readonly spanContentEncoding?: SpanContentEncoding | undefined;
   /** Preflight cost bound of one content value (default 491520 = 480 KiB). */
   readonly maxTraversalBytes?: number | undefined;
   /** Callback redactor; runs on a canonical copy before the declarative rules. */
   readonly redact?: Redactor | undefined;
   /** Declarative rules applied after `redact` (validated; invalid rules throw `TypeError`). */
   readonly rules?: readonly RedactionRule[] | undefined;
+};
+
+/** Effective content budgets of an observer (CONTRACT.md "Content pipeline", budgets). */
+export type ContentBudgets = {
+  readonly maxAttributeBytes: number;
+  readonly maxRetainedOperationBytes: number;
+  readonly maxRequestBodyBytes: number;
+  readonly spanContentEncoding: SpanContentEncoding;
 };
 
 export type ObserverOptions = {
@@ -444,6 +476,40 @@ const positiveInteger = (value: unknown, fallback: number, name: string): number
   return value;
 };
 
+/**
+ * The part of `maxRequestBodyBytes` reserved for a span's non-content data:
+ * `span_envelope_allowance_bytes`, or half the bound when that is less, so that a small bound still
+ * leaves room for content.
+ */
+export const spanEnvelopeAllowance = (maxRequestBodyBytes: number): number =>
+  Math.min(DEFAULTS.span_envelope_allowance_bytes, Math.floor(maxRequestBodyBytes / 2));
+
+/**
+ * The largest retained-operation (and so attribute) budget that keeps one span's content within
+ * `maxRequestBodyBytes` less {@link spanEnvelopeAllowance} when it is written as `encoding`
+ * (default `"json"`): `(request - allowance) / growth`, at least 1.
+ */
+export const spanContentCeiling = (
+  maxRequestBodyBytes: number,
+  encoding: SpanContentEncoding = DEFAULTS.span_content_encoding,
+): number =>
+  Math.max(
+    1,
+    Math.floor(
+      (maxRequestBodyBytes - spanEnvelopeAllowance(maxRequestBodyBytes)) /
+        DEFAULTS.span_content_encoding_growth[encoding],
+    ),
+  );
+
+/** Validates `content.spanContentEncoding` (`RangeError` otherwise); absent means the default. */
+export const spanContentEncodingOf = (value: unknown): SpanContentEncoding => {
+  if (value === undefined) return DEFAULTS.span_content_encoding;
+  if (value !== "json" && value !== "protobuf") {
+    throw new RangeError('content.spanContentEncoding must be "json" or "protobuf".');
+  }
+  return value;
+};
+
 type Instrument = Histogram | Counter;
 
 /** Shared, immutable state behind an {@link Observer} and its operations. */
@@ -451,6 +517,8 @@ class ObserverCore {
   readonly capture: ContentCapture;
   readonly budget: number;
   readonly maxRetained: number;
+  readonly maxRequestBodyBytes: number;
+  readonly spanContentEncoding: SpanContentEncoding;
   readonly content: ContentProcessor;
   readonly tracer: otel.Tracer | undefined;
   readonly #clock: (() => number) | undefined;
@@ -469,11 +537,24 @@ class ObserverCore {
       DEFAULTS.max_content_attribute_bytes,
       "content.maxAttributeBytes",
     );
-    this.maxRetained = positiveInteger(
-      content.maxRetainedOperationBytes,
-      DEFAULTS.max_retained_operation_bytes,
-      "content.maxRetainedOperationBytes",
+    const maxRequestBodyBytes = positiveInteger(
+      content.maxRequestBodyBytes,
+      DEFAULTS.max_request_body_bytes,
+      "content.maxRequestBodyBytes",
     );
+    this.maxRequestBodyBytes = maxRequestBodyBytes;
+    this.spanContentEncoding = spanContentEncodingOf(content.spanContentEncoding);
+    // Budgets are clamped, never rejected: the attribute budget fits the retained budget, which
+    // fits the span content ceiling of the request bound for the exporter's encoding.
+    this.maxRetained = Math.min(
+      positiveInteger(
+        content.maxRetainedOperationBytes,
+        DEFAULTS.max_retained_operation_bytes,
+        "content.maxRetainedOperationBytes",
+      ),
+      spanContentCeiling(maxRequestBodyBytes, this.spanContentEncoding),
+    );
+    this.budget = Math.min(this.budget, this.maxRetained);
     const maxTraversalBytes = positiveInteger(
       content.maxTraversalBytes,
       DEFAULTS.max_traversal_bytes,
@@ -505,8 +586,26 @@ class ObserverCore {
     return this.capture === "span_only" || this.capture === "span_and_event";
   }
 
+  /** The effective content budgets, after clamping. */
+  get budgets(): ContentBudgets {
+    return Object.freeze({
+      maxAttributeBytes: this.budget,
+      maxRetainedOperationBytes: this.maxRetained,
+      maxRequestBodyBytes: this.maxRequestBodyBytes,
+      spanContentEncoding: this.spanContentEncoding,
+    });
+  }
+
   get eventContent(): boolean {
     return this.capture === "event_only" || this.capture === "span_and_event";
+  }
+
+  /**
+   * Whether events have a destination: `false` only for an explicit `loggerProvider: null`. The
+   * global loggers (no provider given) stay open, since a provider may be registered later.
+   */
+  get eventDestination(): boolean {
+    return this.#logger !== null;
   }
 
   /** Wall-clock epoch milliseconds for calls without an operation. */
@@ -604,11 +703,15 @@ class ObserverCore {
     else instrument.add(value, attributes);
   }
 
-  /** Emits one event; `true` only when an enabled logger received it. Never throws. */
+  /**
+   * Emits one event; `true` only when an enabled logger received it. Never throws. `attributes`
+   * may be a builder, called only once an enabled logger is found, so content that no logger
+   * receives is never processed.
+   */
   emit(
     eventName: keyof typeof EVENTS,
     atMs: number,
-    attributes: Record<string, AnyValue>,
+    attributes: Record<string, AnyValue> | (() => Record<string, AnyValue>),
     ctx: Context,
   ): boolean {
     const event = EVENTS[eventName];
@@ -621,7 +724,7 @@ class ObserverCore {
         observedTimestamp: msToHrTime(atMs),
         severityNumber: event.severity_number,
         severityText: event.severity_text,
-        attributes,
+        attributes: typeof attributes === "function" ? attributes() : attributes,
         context: ctx,
       });
       return true;
@@ -802,8 +905,10 @@ abstract class Operation {
    */
   protected recordContent(key: string, raw: unknown, shape: ContentShape, governed: boolean): void {
     if (this.#ended) return;
-    const toSpan = !governed || this.core.spanContent;
-    const toEvent = this.hasDetailsEvent && this.core.eventContent;
+    // Content for a span that does not record (unsampled, suppressed, no tracer) is never
+    // processed; the event destination does not depend on the span, only on a logger.
+    const toSpan = (!governed || this.core.spanContent) && this.span?.isRecording() === true;
+    const toEvent = this.hasDetailsEvent && this.core.eventContent && this.core.eventDestination;
     if (!toSpan && !toEvent) return;
     const outcome = this.core.content.process(key, raw, shape);
     if (outcome.kind === "dropped") {
@@ -836,8 +941,12 @@ abstract class Operation {
       eventValue = toEvent ? bounded.value : undefined;
     }
     const keyBytes = DEFAULTS.preflight_node_bytes + utf8Length(key);
+    // Plain text is charged as OTLP/JSON writes it (escapes counted), so no span value grows more
+    // than twofold when encoded.
+    const spanBytes = (value: string): number =>
+      shape === "string" ? utf8Length(JSON.stringify(value)) - 2 : utf8Length(value);
     const bytes =
-      (spanValue === undefined ? 0 : keyBytes + utf8Length(spanValue)) +
+      (spanValue === undefined ? 0 : keyBytes + spanBytes(spanValue)) +
       (eventValue === undefined ? 0 : keyBytes + jsonCost(eventValue));
     this.#release(key);
     if (this.#retained + bytes > this.core.maxRetained) {
@@ -910,7 +1019,13 @@ abstract class Operation {
     this.#ended = true;
     this.recordMetrics(endMs);
     this.emitEvents(endMs, error, message);
-    this.span?.end(msToHrTime(endMs));
+    try {
+      this.span?.end(msToHrTime(endMs));
+    } catch {
+      // A span processor threw in onEnd: contained, like a Rust processor's panic. The operation
+      // has ended; processors after the throwing one never see this span.
+      diag.debug("xybrid-observability: a span processor threw while a span ended");
+    }
   }
 
   protected durationSeconds(endMs: number): number {
@@ -1544,6 +1659,15 @@ export class Observer {
   }
 
   /**
+   * The effective content budgets: `maxRetainedOperationBytes` at most the span content ceiling
+   * of `maxRequestBodyBytes` for `spanContentEncoding`, `maxAttributeBytes` at most
+   * `maxRetainedOperationBytes`.
+   */
+  get contentBudgets(): ContentBudgets {
+    return this.#core.budgets;
+  }
+
+  /**
    * Captures the active application context for a later callback invocation.
    * This binds the callback itself; it does not propagate context into native Promise continuations.
    */
@@ -1607,22 +1731,26 @@ export class Observer {
   /**
    * User feedback as `gen_ai.evaluation.result` named `user_feedback`. The comment is governed
    * content (capture mode, redaction, rules, `K = B` truncation). Returns as `recordEvaluation`.
+   * Without an enabled logger the comment is not processed (the redactor is not called).
    */
   recordFeedback(target: ObservationRef, feedback: Feedback): boolean {
     const ref = toObservationRef(target);
     if (ref === undefined || typeof feedback !== "object" || feedback === null) return false;
     const core = this.#core;
-    const attributes: Record<string, AnyValue> = { [ATTR.EVALUATION_NAME]: "user_feedback" };
-    const score = finite(feedback.score, ATTR.EVALUATION_SCORE_VALUE);
-    if (score !== undefined) attributes[ATTR.EVALUATION_SCORE_VALUE] = score;
-    const label = text(feedback.label);
-    if (label !== undefined) attributes[ATTR.EVALUATION_SCORE_LABEL] = label;
-    if (feedback.comment !== undefined && core.capture !== "no_content") {
-      const outcome = core.content.process(ATTR.FEEDBACK_COMMENT, feedback.comment, "string");
-      if (outcome.kind === "value" && typeof outcome.value === "string") {
-        attributes[ATTR.FEEDBACK_COMMENT] = truncateString(outcome.value, core.budget);
+    const attributes = (): Record<string, AnyValue> => {
+      const built: Record<string, AnyValue> = { [ATTR.EVALUATION_NAME]: "user_feedback" };
+      const score = finite(feedback.score, ATTR.EVALUATION_SCORE_VALUE);
+      if (score !== undefined) built[ATTR.EVALUATION_SCORE_VALUE] = score;
+      const label = text(feedback.label);
+      if (label !== undefined) built[ATTR.EVALUATION_SCORE_LABEL] = label;
+      if (feedback.comment !== undefined && core.capture !== "no_content") {
+        const outcome = core.content.process(ATTR.FEEDBACK_COMMENT, feedback.comment, "string");
+        if (outcome.kind === "value" && typeof outcome.value === "string") {
+          built[ATTR.FEEDBACK_COMMENT] = truncateString(outcome.value, core.budget);
+        }
       }
-    }
+      return built;
+    };
     return core.emit("gen_ai.evaluation.result", core.wallNow(), attributes, refContext(ref));
   }
 }

@@ -316,13 +316,7 @@ let tools = [XybridToolDefinition(
 )]
 let config = XybridGenerationConfig.greedy(tools: tools)
 
-let options = XybridRunOptions(
-    generationConfig: config,
-    abortOn: [],
-    fallbackToCloud: false,
-    maxGraceTokens: 0,
-    correlationId: nil
-)
+let options = XybridRunOptions.make(generationConfig: config)
 let first = try model.run(envelope: .text("Weather in Paris?"), options: options)
 
 if !first.toolCalls.isEmpty {

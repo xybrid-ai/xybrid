@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use xybrid_core::gateway::ToolCall;
-use xybrid_core::ir::{ChoiceScores, Envelope, EnvelopeKind, PhonemeTiming};
+use xybrid_core::ir::{ChoiceScores, Decisions, Envelope, EnvelopeKind, PhonemeTiming};
 
 /// Per-stage latency entry for pipeline runs.
 ///
@@ -98,6 +98,8 @@ pub enum OutputType {
     /// Scores from a choice scorer, one per candidate (see
     /// [`InferenceResult::choice_scores`]).
     ChoiceScores,
+    /// Typed decisions from a versioned decision protocol.
+    Decisions,
 }
 
 impl std::fmt::Display for OutputType {
@@ -108,6 +110,7 @@ impl std::fmt::Display for OutputType {
             OutputType::Embedding => write!(f, "embedding"),
             OutputType::Unknown => write!(f, "unknown"),
             OutputType::ChoiceScores => write!(f, "choice_scores"),
+            OutputType::Decisions => write!(f, "decisions"),
         }
     }
 }
@@ -132,6 +135,7 @@ impl std::fmt::Display for OutputType {
 ///     OutputType::Audio => println!("Audio: {} bytes", result.unwrap_audio().len()),
 ///     OutputType::Embedding => println!("Embedding: {} dims", result.unwrap_embedding().len()),
 ///     OutputType::ChoiceScores => println!("{} candidates", result.choice_scores().unwrap().entries.len()),
+///     OutputType::Decisions => println!("{} answers", result.decisions().unwrap().answers().len()),
 ///     OutputType::Unknown => println!("Unknown output"),
 /// }
 ///
@@ -405,6 +409,24 @@ impl InferenceResult {
         self.envelope.as_choice_scores()
     }
 
+    /// Typed answers in the request's question order.
+    pub fn decisions(&self) -> Option<&Decisions> {
+        match &self.envelope.kind {
+            EnvelopeKind::Decisions(decisions) => Some(decisions),
+            _ => None,
+        }
+    }
+
+    /// Total evaluated input tokens, including repeated state across decision questions.
+    pub fn tokens_in(&self) -> Option<u64> {
+        self.metadata("tokens_in")?.parse().ok()
+    }
+
+    /// Generated token count; decision protocols report zero.
+    pub fn tokens_out(&self) -> Option<u64> {
+        self.metadata("tokens_out")?.parse().ok()
+    }
+
     // ========================================================================
     // Unwrap Accessors (panic on wrong type)
     // ========================================================================
@@ -474,16 +496,49 @@ pub(crate) fn output_type_for_envelope(envelope: &Envelope) -> OutputType {
         EnvelopeKind::Audio(_) => OutputType::Audio,
         EnvelopeKind::Embedding(_) => OutputType::Embedding,
         EnvelopeKind::ChoiceScores(_) => OutputType::ChoiceScores,
+        EnvelopeKind::Decisions(_) => OutputType::Decisions,
         EnvelopeKind::Image { .. }
         | EnvelopeKind::MultiPart(_)
-        | EnvelopeKind::TokenIds(_)
-        | EnvelopeKind::ChoiceRequest(_) => OutputType::Unknown,
+        | EnvelopeKind::ChoiceRequest(_)
+        | EnvelopeKind::DecisionRequest(_) => OutputType::Unknown,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decisions_preserve_f64_answers_and_report_usage_without_generated_text() {
+        use xybrid_core::ir::{
+            DecisionAnswer, DecisionOrigin, DecisionScore, DecisionUsage, DecisionValue,
+        };
+        let probability = 0.5000000000000001;
+        let answer = DecisionAnswer::new(
+            "opaque-id",
+            vec![
+                DecisionScore::new("a", 1.0, probability, DecisionOrigin::Caller),
+                DecisionScore::new("b", 0.0, 1.0 - probability, DecisionOrigin::Caller),
+            ],
+            DecisionValue::choice("a"),
+            Some(probability),
+        )
+        .unwrap();
+        let decisions = Decisions::new(vec![answer], DecisionUsage::new(1, 17));
+        let mut envelope = Envelope::new(EnvelopeKind::Decisions(decisions.clone()));
+        envelope.metadata.insert("tokens_in".into(), "17".into());
+        envelope.metadata.insert("tokens_out".into(), "0".into());
+        let result = InferenceResult::new(envelope, "d1", 3);
+        assert_eq!(result.output_type(), OutputType::Decisions);
+        assert_eq!(result.decisions(), Some(&decisions));
+        assert_eq!(result.tokens_in(), Some(17));
+        assert_eq!(result.tokens_out(), Some(0));
+        assert!(result.text().is_none());
+        assert_eq!(
+            serde_json::to_string(&OutputType::Decisions).unwrap(),
+            "\"Decisions\""
+        );
+    }
 
     #[test]
     fn test_text_result() {

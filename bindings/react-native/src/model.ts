@@ -51,14 +51,23 @@ export interface RunOptions {
   /** Skip the detailed trace for this run; metrics are still recorded. */
   suppressTrace?: boolean;
   /**
+   * Your id for one continuous live-capture session (a camera or microphone
+   * loop). Every run of the session is counted in metrics, and detailed
+   * traces are kept for roughly one run per live trace interval per session
+   * (`liveTraceIntervalMs` in the observability config).
+   */
+  frameSessionId?: string;
+  /**
    * Seed the run with this conversation's history (multi-turn chat). The
    * context is not modified: push the turns you want to keep yourself.
    */
   context?: ConversationContext;
   /**
    * Stop button. Aborting stops generation at the next token boundary. A
-   * batch `run` is only cancellable before generation starts; use
-   * `runStreaming` when a mid-flight stop matters.
+   * generative batch `run` is only cancellable before generation starts; use
+   * `runStreaming` when a mid-flight stop matters. Decision runs additionally
+   * observe cancellation between passes and through the native abort callback,
+   * returning an error rather than partial answers.
    */
   signal?: AbortSignalLike;
 }

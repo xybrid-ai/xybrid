@@ -113,11 +113,29 @@ typedef uint32_t ___XybridEnvelopeKind;
 #define XYBRID_ENVELOPE_KIND_EMBEDDING ((___XybridEnvelopeKind)2)
 #define XYBRID_ENVELOPE_KIND_IMAGE ((___XybridEnvelopeKind)3)
 #define XYBRID_ENVELOPE_KIND_MULTI_PART ((___XybridEnvelopeKind)4)
-#define XYBRID_ENVELOPE_KIND_TOKEN_IDS ((___XybridEnvelopeKind)5)
+#define XYBRID_ENVELOPE_KIND_DECISION_REQUEST ((___XybridEnvelopeKind)5)
+#define XYBRID_ENVELOPE_KIND_DECISIONS ((___XybridEnvelopeKind)6)
 typedef int32_t ___XybridMessageRole;
 #define XYBRID_MESSAGE_ROLE_SYSTEM ((___XybridMessageRole)0)
 #define XYBRID_MESSAGE_ROLE_USER ((___XybridMessageRole)1)
 #define XYBRID_MESSAGE_ROLE_ASSISTANT ((___XybridMessageRole)2)
+typedef uint32_t ___XybridDecisionContent;
+#define XYBRID_DECISION_CONTENT_TEXT ((___XybridDecisionContent)0)
+#define XYBRID_DECISION_CONTENT_JSON ((___XybridDecisionContent)1)
+typedef uint32_t ___XybridDecisionQuestionKind;
+#define XYBRID_DECISION_QUESTION_KIND_CHOICE ((___XybridDecisionQuestionKind)0)
+#define XYBRID_DECISION_QUESTION_KIND_YES_NO ((___XybridDecisionQuestionKind)1)
+#define XYBRID_DECISION_QUESTION_KIND_SCORE ((___XybridDecisionQuestionKind)2)
+typedef int32_t ___XybridDecisionOrigin;
+#define XYBRID_DECISION_ORIGIN_CALLER ((___XybridDecisionOrigin)0)
+#define XYBRID_DECISION_ORIGIN_FIXED ((___XybridDecisionOrigin)1)
+typedef int32_t ___XybridScoreStatistic;
+#define XYBRID_SCORE_STATISTIC_MEDIAN ((___XybridScoreStatistic)0)
+#define XYBRID_SCORE_STATISTIC_EXPECTED ((___XybridScoreStatistic)1)
+typedef uint32_t ___XybridDecisionValue;
+#define XYBRID_DECISION_VALUE_CHOICE ((___XybridDecisionValue)0)
+#define XYBRID_DECISION_VALUE_YES_NO ((___XybridDecisionValue)1)
+#define XYBRID_DECISION_VALUE_SCORE ((___XybridDecisionValue)2)
 typedef int32_t ___XybridAbortSignal;
 #define XYBRID_ABORT_SIGNAL_MEMORY_PRESSURE_WARN ((___XybridAbortSignal)0)
 #define XYBRID_ABORT_SIGNAL_MEMORY_PRESSURE_CRITICAL ((___XybridAbortSignal)1)
@@ -128,6 +146,7 @@ typedef int32_t ___XybridOutputType;
 #define XYBRID_OUTPUT_TYPE_AUDIO ((___XybridOutputType)1)
 #define XYBRID_OUTPUT_TYPE_EMBEDDING ((___XybridOutputType)2)
 #define XYBRID_OUTPUT_TYPE_UNKNOWN ((___XybridOutputType)3)
+#define XYBRID_OUTPUT_TYPE_DECISIONS ((___XybridOutputType)4)
 typedef int32_t ___XybridExecutionTarget;
 #define XYBRID_EXECUTION_TARGET_LOCAL ((___XybridExecutionTarget)0)
 #define XYBRID_EXECUTION_TARGET_CLOUD ((___XybridExecutionTarget)1)
@@ -305,6 +324,8 @@ FfiStatus boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_fail(ui
 FfiStatus boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_cancel(uint64_t receiver);
 bool boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_is_finished(uint64_t receiver);
 FfiStatus boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_record_cache_hit(uint64_t receiver, bool hit);
+FfiBuf_u8 boltffi_function_xybrid_bolt_decision_request_envelope(const uint8_t *request_ptr, uintptr_t request_len, FfiBuf_u8 *return_out);
+FfiBuf_u8 boltffi_function_xybrid_bolt_decision_request_json_envelope(const uint8_t *json_ptr, uintptr_t json_len, FfiBuf_u8 *return_out);
 FfiBuf_u8 boltffi_function_xybrid_bolt_tool_results_envelope(const uint8_t *user_text_ptr, uintptr_t user_text_len, const uint8_t *prior_assistant_text_ptr, uintptr_t prior_assistant_text_len, const uint8_t *results_ptr, uintptr_t results_len, FfiBuf_u8 *return_out);
 FfiBuf_u8 boltffi_function_xybrid_bolt_json_schema_to_gbnf(const uint8_t *schema_json_ptr, uintptr_t schema_json_len, FfiBuf_u8 *return_out);
 FfiStatus boltffi_function_xybrid_bolt_set_thermal_state(___XybridThermalState state);

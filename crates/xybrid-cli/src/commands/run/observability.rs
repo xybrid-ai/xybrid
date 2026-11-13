@@ -217,8 +217,9 @@ fn request(metadata: &ModelMetadata, input: &Envelope) -> InferenceRequest {
 
 fn modalities(envelope: &Envelope) -> Vec<Modality> {
     match &envelope.kind {
-        // Token IDs are pre-tokenized text.
-        EnvelopeKind::Text(_) | EnvelopeKind::TokenIds(_) | EnvelopeKind::ChoiceRequest(_) => {
+        EnvelopeKind::Text(_)
+        | EnvelopeKind::ChoiceRequest(_)
+        | EnvelopeKind::DecisionRequest(_) => {
             vec![Modality::Text]
         }
         EnvelopeKind::Audio(_) => vec![Modality::Audio],
@@ -232,7 +233,9 @@ fn modalities(envelope: &Envelope) -> Vec<Modality> {
             }
             result
         }
-        EnvelopeKind::Embedding(_) | EnvelopeKind::ChoiceScores(_) => Vec::new(),
+        EnvelopeKind::Embedding(_) | EnvelopeKind::ChoiceScores(_) | EnvelopeKind::Decisions(_) => {
+            Vec::new()
+        }
     }
 }
 
@@ -270,8 +273,9 @@ fn parts(envelope: &Envelope) -> Vec<Part> {
             .map(Part::text)
             .into_iter()
             .collect(),
-        // Token IDs are an internal tokenizer payload, not content to export.
-        EnvelopeKind::Embedding(_) | EnvelopeKind::TokenIds(_) => Vec::new(),
+        EnvelopeKind::Embedding(_) => Vec::new(),
+        // Decision state, questions and answers are never captured content.
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => Vec::new(),
     }
 }
 
@@ -320,6 +324,9 @@ mod tests {
                     Err(error) => panic!("collector accept: {error}"),
                 }
             };
+            // Accepted sockets inherit O_NONBLOCK on macOS/BSD (not on Linux), which
+            // would make the read timeout below a busy WouldBlock instead of a wait.
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();

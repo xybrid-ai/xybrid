@@ -29,7 +29,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
-use xybrid_llama::{backend_init, generate_with_stops, LlamaContext, LlamaError, LlamaModel};
+use xybrid_llama::{
+    backend_init, generate_streaming, generate_with_stops, LlamaContext, LlamaError, LlamaModel,
+};
 
 const MODEL_ID: &str = "qwen3.5-0.8b-f16-cf";
 const MODEL_FILE: &str = "Qwen3.5-0.8B-F16.gguf";
@@ -114,8 +116,9 @@ fn argmax(logits: &[f32]) -> (i32, f32) {
 /// The first token greedy generation picks, continuing from the context's
 /// current memory.
 fn first_greedy_token(ctx: &LlamaContext, model: &LlamaModel, prompt: &[i32]) -> i32 {
-    let generated = generate_with_stops(ctx, model, prompt, 1, 0.0, 1.0, 0.0, 0, 1.0, &[], None)
-        .expect("generate one token");
+    let generated =
+        generate_with_stops(ctx, model, prompt, 1, 0.0, 1.0, 0.0, 0, 1.0, &[], None, &[])
+            .expect("generate one token");
     generated[0]
 }
 
@@ -154,6 +157,108 @@ fn the_final_row_is_the_next_token_distribution() {
         assert!(
             f64::from(row.logsumexp - max) <= (vocabulary.len() as f64).ln(),
             "log-sum-exp exceeds the maximum by at most ln(vocabulary)"
+        );
+    }
+}
+
+/// A banned token is never the one generation picks. With the row's best
+/// token banned the runner-up is picked, and with both banned the third.
+/// The ban sits ahead of every other sampler, so top-k 1 keeps the best token
+/// that is still allowed rather than a banned one.
+#[test]
+fn a_banned_token_is_never_picked() {
+    let Some(model) = model() else { return };
+    let prompt = tokens(model, QUESTION);
+    let vocabulary = vocabulary(model);
+    let ctx = context(model, 2048, 512);
+    let row = ctx
+        .score_final_position(&prompt, &vocabulary)
+        .expect("score the whole vocabulary");
+    let logit = |token: i32| row.label_logits[usize::try_from(token).expect("a token id")];
+    let mut ranked = vocabulary.clone();
+    ranked.sort_by(|&a, &b| logit(b).total_cmp(&logit(a)));
+    let (first, second, third) = (ranked[0], ranked[1], ranked[2]);
+    assert!(
+        logit(first) > logit(second) && logit(second) > logit(third),
+        "the three largest logits are distinct"
+    );
+
+    // Greedy, then sampled through top-k 1: each picks the best allowed token.
+    for (temperature, top_k) in [(0.0, 0), (1.0, 1)] {
+        let pick = |banned: &[i32]| {
+            ctx.kv_cache_clear();
+            let generated = generate_with_stops(
+                &ctx,
+                model,
+                &prompt,
+                1,
+                temperature,
+                1.0,
+                0.0,
+                top_k,
+                1.0,
+                &[],
+                None,
+                banned,
+            )
+            .expect("generate one token");
+            generated[0]
+        };
+        assert_eq!(pick(&[]), first, "temperature {temperature}");
+        assert_eq!(pick(&[first]), second, "temperature {temperature}");
+        assert_eq!(
+            pick(&[second, first]),
+            third,
+            "temperature {temperature}: the order of the list does not matter"
+        );
+        assert_eq!(
+            pick(&[third]),
+            first,
+            "temperature {temperature}: banning a token that was not going to be picked"
+        );
+    }
+
+    // The streaming entry point takes the same list.
+    ctx.kv_cache_clear();
+    let (streamed, _) = generate_streaming(
+        &ctx,
+        model,
+        &prompt,
+        1,
+        0.0,
+        1.0,
+        0.0,
+        0,
+        1.0,
+        &[],
+        None,
+        &[first],
+        |_, _| Ok(()),
+        0,
+    )
+    .expect("stream one token");
+    assert_eq!(streamed, [second]);
+
+    // An id outside the vocabulary is refused, not skipped.
+    let n_vocab = i32::try_from(model.n_vocab()).expect("the vocabulary fits i32");
+    for outside in [-1, n_vocab] {
+        let refused = generate_with_stops(
+            &ctx,
+            model,
+            &prompt,
+            1,
+            0.0,
+            1.0,
+            0.0,
+            0,
+            1.0,
+            &[],
+            None,
+            &[outside],
+        );
+        assert!(
+            matches!(refused, Err(LlamaError::InvalidInput(_))),
+            "token id {outside}: {refused:?}"
         );
     }
 }

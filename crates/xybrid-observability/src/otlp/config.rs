@@ -13,6 +13,8 @@ use reqwest::Url;
 
 use super::defaults;
 use super::encode::Signal;
+use super::hook::ResponseHook;
+use crate::content::SpanContentEncoding;
 use crate::error::{Error, Result};
 
 /// Default Xybrid trace ingest endpoint.
@@ -54,6 +56,16 @@ impl Protocol {
         match self {
             Self::HttpProtobuf => "application/x-protobuf",
             Self::HttpJson => "application/json",
+        }
+    }
+
+    /// How this protocol writes span content, which the content budgets of
+    /// an observer are fitted to.
+    #[must_use]
+    pub fn span_content_encoding(self) -> SpanContentEncoding {
+        match self {
+            Self::HttpProtobuf => SpanContentEncoding::Protobuf,
+            Self::HttpJson => SpanContentEncoding::Json,
         }
     }
 }
@@ -151,11 +163,16 @@ pub struct SignalEndpoint {
     pub timeout: Duration,
     /// Whether environment headers are merged under the programmatic ones.
     pub header_policy: HeaderPolicy,
+    /// Called once for every HTTP response of this destination; it may
+    /// disable the destination (see [`super::ResponseHook`]).
+    pub response_hook: Option<ResponseHook>,
+    /// Built by the Xybrid preset ([`OtlpConfig::xybrid_traces_to`]).
+    xybrid_preset: bool,
 }
 
 impl SignalEndpoint {
-    /// An endpoint with the default protocol, a 10 s attempt timeout and
-    /// `merge_environment` headers.
+    /// An endpoint with the default protocol, a 10 s attempt timeout,
+    /// `merge_environment` headers and no response hook.
     pub fn new(endpoint: impl Into<String>) -> Self {
         Self {
             endpoint: endpoint.into(),
@@ -163,7 +180,26 @@ impl SignalEndpoint {
             protocol: Protocol::default(),
             timeout: defaults::SIGNAL_TIMEOUT,
             header_policy: HeaderPolicy::default(),
+            response_hook: None,
+            xybrid_preset: false,
         }
+    }
+
+    /// Whether this destination was configured through the Xybrid preset
+    /// ([`OtlpConfig::xybrid_traces`] / [`OtlpConfig::xybrid_traces_to`]),
+    /// as opposed to a generic endpoint or one read from the environment.
+    /// Adapters use it to decide which destinations' vendor responses to
+    /// trust; the transport itself treats every destination alike.
+    #[must_use]
+    pub fn is_xybrid_preset(&self) -> bool {
+        self.xybrid_preset
+    }
+
+    /// Sets the response hook, replacing any previous one.
+    #[must_use]
+    pub fn with_response_hook(mut self, hook: ResponseHook) -> Self {
+        self.response_hook = Some(hook);
+        self
     }
 
     /// Adds a programmatic header.
@@ -211,6 +247,8 @@ impl fmt::Debug for SignalEndpoint {
             .field("protocol", &self.protocol)
             .field("timeout", &self.timeout)
             .field("header_policy", &self.header_policy)
+            .field("response_hook", &self.response_hook.is_some())
+            .field("xybrid_preset", &self.xybrid_preset)
             .finish()
     }
 }
@@ -342,14 +380,16 @@ impl OtlpConfig {
     }
 
     /// Xybrid trace export to a custom endpoint (staging, self-hosted).
+    ///
+    /// The traces endpoint reports [`SignalEndpoint::is_xybrid_preset`].
     pub fn xybrid_traces_to(endpoint: &str, api_key: &str) -> Self {
+        let mut traces = SignalEndpoint::new(endpoint)
+            .with_protocol(Protocol::HttpProtobuf)
+            .with_header_policy(HeaderPolicy::Isolated)
+            .with_header("Authorization", format!("Bearer {api_key}"));
+        traces.xybrid_preset = true;
         Self {
-            traces: Some(
-                SignalEndpoint::new(endpoint)
-                    .with_protocol(Protocol::HttpProtobuf)
-                    .with_header_policy(HeaderPolicy::Isolated)
-                    .with_header("Authorization", format!("Bearer {api_key}")),
-            ),
+            traces: Some(traces),
             ..Self::default()
         }
     }
@@ -569,6 +609,7 @@ pub(crate) struct ResolvedSignal {
     pub headers: HeaderMap,
     pub protocol: Protocol,
     pub timeout: Duration,
+    pub hook: Option<ResponseHook>,
 }
 
 /// Effective delivery limits after validation.
@@ -714,6 +755,7 @@ fn resolve_endpoint(
         headers,
         protocol: endpoint.protocol,
         timeout: endpoint.timeout,
+        hook: endpoint.response_hook.clone(),
     })
 }
 
@@ -1064,6 +1106,33 @@ mod tests {
             value(&r, "service.name").as_deref(),
             Some("unknown_service")
         );
+    }
+
+    #[test]
+    fn only_the_xybrid_preset_is_marked_and_hooks_resolve_per_destination() {
+        assert!(OtlpConfig::xybrid_traces("sk")
+            .traces
+            .unwrap()
+            .is_xybrid_preset());
+        assert!(OtlpConfig::xybrid_traces_to("http://h/v1/traces", "sk")
+            .traces
+            .unwrap()
+            .is_xybrid_preset());
+        let collector = OtlpConfig::collector("http://h");
+        for endpoint in [&collector.traces, &collector.metrics, &collector.logs] {
+            assert!(!endpoint.as_ref().unwrap().is_xybrid_preset());
+        }
+        let env = OtlpConfig::from_environment(env(&[("OTEL_EXPORTER_OTLP_ENDPOINT", "http://x")]))
+            .unwrap();
+        assert!(!env.traces.unwrap().is_xybrid_preset());
+
+        let hook = ResponseHook::new(|_| super::super::ResponseAction::Continue);
+        let config = collector.with_traces(Some(
+            SignalEndpoint::new("http://h/v1/traces").with_response_hook(hook.clone()),
+        ));
+        let resolved = resolve(&config).unwrap();
+        assert_eq!(resolved.traces.unwrap().hook, Some(hook));
+        assert!(resolved.logs.unwrap().hook.is_none());
     }
 
     #[test]

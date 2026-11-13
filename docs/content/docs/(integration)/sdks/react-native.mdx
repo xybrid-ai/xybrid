@@ -14,7 +14,7 @@ The React Native package (`@xybrid/react-native`) wraps the same Rust core as th
 ## Installation
 
 ```bash
-npm install @xybrid/react-native@0.17.0
+npm install @xybrid/react-native@0.18.0
 ```
 
 For bare React Native, run `cd ios && pod install`. With Expo, run `npx expo prebuild` and use a development build; Expo Go cannot load the native module. The package itself needs no config plugin.
@@ -42,7 +42,7 @@ On the iOS Simulator, llama.cpp runs on the CPU to avoid invalid special-token o
 ## Initialization
 
 Local inference needs no setup. Pass an API key for cloud fallback and
-speculative cloud serving, then opt into [dashboard](https://dashboard.xybrid.dev)
+speculative cloud serving, then opt into [Xybrid console](https://console.xybrid.dev)
 trace export separately:
 
 ```ts
@@ -60,6 +60,8 @@ captures governed text by default. `ObservabilityConfig.otlp('http://collector:4
 configures traces, metrics and logs without a Xybrid key. Observation references
 use `{trace_id, span_id}`. Flush/shutdown delivery failures use
 `xybrid_telemetry_delivery`; retrying an inference does not recover its export.
+
+Key prefixes and scopes, what gets exported, and provisional workspaces: see [API keys](/docs/concepts/api-keys).
 
 ## Run a model
 

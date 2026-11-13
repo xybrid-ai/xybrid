@@ -1108,6 +1108,13 @@ stage's latency.
 
 Universal input/output container.
 
+`Envelope.decisionRequestJson(json)` accepts a bounded Liquid SystemOne JSON string;
+`Envelope.decisionRequest(request)` accepts ordered typed builders. Both use the
+existing model `run` surface. JSON content remains text at foreign boundaries to
+preserve order, signed zero and large integers. Decisions are local-only: streaming,
+history, generation options, cloud fallback and pipelines are refused in text/v1.
+See [native decision examples](../guides/decision-bindings.md) for all SDKs.
+
 **Design Note**: Envelope is task-agnostic. Optional metadata parameters (like `voiceId` and `speed`)
 are passed through to pipeline stages that understand them. Stages that don't need these params
 simply ignore them. This allows a single envelope type to flow through multi-stage pipelines
@@ -1376,6 +1383,14 @@ stages:
 ---
 
 ## 7. Result Types
+
+Decision results expose `decisions` (`Decisions` in C#), containing ordered typed
+answers, `passes` and total `inputTokens`. Distribution probabilities remain f64;
+JSON bridges encode a negative-infinite raw score as `"-Infinity"`. `tokensIn`
+and `tokensOut` read envelope usage metadata (`tokensOut` is zero for decisions). These accessors add no fields to frozen result wire
+records. Swift/Kotlin/Python/Unity use an appended decision envelope variant;
+Flutter ships its new internal result carrier and regenerated Rust/Dart bridge
+together. Actual model/package/device qualification remains a release gate.
 
 > **Audio format**: TTS models produce raw PCM audio bytes (16-bit signed, little-endian).
 > Typical sample rate is 24kHz mono (e.g., Kokoro TTS). The audio is returned as raw bytes,
@@ -1871,10 +1886,18 @@ the optional `cancellationToken` parameter. Cancellation is **cooperative**:
 the token's cancelled state is checked before every emitted token, so it takes
 effect at the next token boundary, not mid-token, and surfaces as the
 `AbortSignal::UserCancelled` policy signal. When the token is cancelled — or
-the Dart stream is unsubscribed mid-run (sink-close-as-cancel) — Rust halts
-generation at the next token and **releases the model write lock promptly**, so
-a follow-up run can start. The Dart cancel handle exposes `cancel()` and an
-`isCancelled` getter.
+the Dart stream is unsubscribed mid-run (sink-close-as-cancel, with or without
+a token) — Rust halts generation at the next token and **releases the model
+write lock promptly**, so a follow-up run can start. The Dart cancel handle
+exposes `cancel()` and an `isCancelled` getter.
+
+**Abandoning a stream cancels its run.** Dropping the Rust `run_stream` stream,
+dropping a facade streaming session, closing a Bolt stream (`stream_close`) or
+unsubscribing the Dart stream before its terminal event stops the run at its
+next token, as a cancelled token would. A Rust token callback does the same by
+returning `AbortReason::UserCancelled`. Observability records the run as
+cancelled (`error.type` `cancelled`), not as an error; see
+[run outcomes](observability-coverage.md#run-outcomes).
 
 ```dart
 final cancel = CancellationToken();
@@ -1883,7 +1906,8 @@ final stream = model.runStreaming(
   cancellationToken: cancel,
 );
 final sub = stream.listen((token) { /* ... */ });
-// Later, to stop Rust generation (not just unsubscribe):
+// Later, stop Rust generation at its next token. Either call does it on its
+// own; the token suits code that does not hold the subscription.
 cancel.cancel();
 await sub.cancel();
 ```
@@ -1908,7 +1932,9 @@ cancellation primitive to it.
 > that is already cancelled when it starts (`check_before_run`), but once the
 > backend is generating, `run_with_options` has no token-aware path to stop it
 > and the call finishes normally. Reach for the streaming surface when a
-> mid-flight stop button matters.
+> mid-flight stop button matters. Decision models are the exception: their
+> batch run polls the token between passes and inside each pass, and ends with
+> `Cancelled` (see [decisions](decisions.md)).
 
 ```swift
 // Swift — structured concurrency drives the native stop button
@@ -1955,27 +1981,30 @@ final stream = model.runStreaming(
 );
 ```
 
-**Live mode / frame session (implemented in Rust + Dart, issue 14).** For
+**Live mode / frame session (Rust, Dart, and the Bolt bindings: Swift, Kotlin,
+Python, Unity and React Native through `RunOptions.frame_session_id`).** For
 continuous live-capture loops (e.g. the Flutter vision-live loop), `RunOptions`
-carries an optional `frameSessionId` — a caller-supplied UUID identifying one
-continuous live-capture session — plus a `liveMode` flag. The **caller**
-generates the id (the SDK treats it as an opaque tag);
-`with_frame_session(frameSessionId)` is a convenience that sets the id and
-`liveMode = true`. This is surfaced on the streaming run-options path. On the
-wire, live-mode inferences carry `frame_session_id` and `live_mode` and are
-**rate-limited at the telemetry dispatch funnel to roughly one wire row per
-second per `frame_session_id`** (the intervening per-frame rows are dropped),
-keeping telemetry low-cardinality across a live stream. A true summary/rollup
-row needs a session-end signal the SDK never receives, so the per-session
-rate-limit is the v1 contract (epic Open Decision #5). Defaults are
-`frameSessionId = null` and `liveMode = false` (per-run telemetry, byte-for-byte
-unchanged). In Dart there is no standalone `RunOptions` builder yet; the
-capability is reachable via the optional `frameSessionId` parameter on the
-streaming run methods (`runStreaming` / `runStreamingWithContext`), which wires
-`FfiRunOptions.frame_session_id` → `with_frame_session` under the hood.
+carries an optional `frameSessionId`: a caller-supplied id for one continuous
+live-capture session, opaque to the SDK. `with_frame_session(frameSessionId)`
+sets the id and `liveMode = true`; the facade and Bolt field does the same,
+and ignores a blank id. It applies to batch and streaming model runs alike.
+Pipelines take no frame session.
+
+Every frame of a live session is counted in metrics. Detailed traces are
+sampled per session: a frame is traced when at least the live trace interval
+(`ObservabilityConfig::live_trace_interval`, 1 s by default) has passed since
+the session's last traced frame, and the frames in between record metrics
+only. The SDK remembers at most 1,024 sessions and forgets one 300 s after its
+last frame. A traced live run carries `xybrid.live.session_id`. In-process
+telemetry events for live runs carry `frame_session_id` and `live_mode`.
+Defaults are `frameSessionId = null` and `liveMode = false`, which leaves
+one-shot runs unchanged. In Dart there is no standalone `RunOptions` builder
+yet; the capability is reachable through the optional `frameSessionId`
+parameter of the streaming run methods (`runStreaming` /
+`runStreamingWithContext`).
 
 ```rust
-// Rust — live-capture session tagging on the streaming run-options path.
+// Rust — tag every run of one live-capture session.
 let session_id = uuid::Uuid::new_v4().to_string(); // caller-generated
 let options = RunOptions::new()
     .with_cancellation_token(token.clone())
@@ -2037,7 +2066,7 @@ stream stays low-cardinality.
 | `ImagePlane` | ✅ | 📋 | 📋 | 📋 |
 | `YuvColorInfo` | ✅ | 📋 | 📋 | 📋 |
 | `RunOptions` | ✅ | planned | planned | planned |
-| `RunOptions.frameSessionId` / `liveMode` | ✅ | 📋 | 📋 | 📋 |
+| `RunOptions.frameSessionId` (sets live mode) | ✅ | ✅ | ✅ | ✅ |
 | `AbortPolicy` | ✅ | planned | planned | planned |
 | `AbortSignal` | ✅ | planned | planned | planned |
 | `AbortSignal.userCancelled` (Dart surface via CancellationToken) | ✅ | 📋 | 📋 | 📋 |

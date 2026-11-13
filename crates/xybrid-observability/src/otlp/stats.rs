@@ -10,7 +10,8 @@ pub struct SignalStats {
     pub exported: u64,
     /// Items discarded by local policy without a deciding delivery attempt:
     /// admission refused (item or byte budget), offered after shutdown began,
-    /// oversized single item, still queued when shutdown cancelled.
+    /// oversized single item, still queued when shutdown cancelled, pending
+    /// or offered after the destination's response hook disabled it.
     pub dropped: u64,
     /// Items whose export ended without acknowledgement: rejection, retries
     /// exhausted, deadline or cancellation in flight, transport error, lost
@@ -19,6 +20,13 @@ pub struct SignalStats {
     pub failed: u64,
     /// Accepted items not yet terminal (queued, in flight, or in backoff).
     pub pending: u64,
+    /// Library-owned bytes held for delivery now: the conservative per-item
+    /// estimate computed at admission, summed over the pending items (queued
+    /// and in flight; for metrics, the collection in flight). It is the
+    /// running total that `max_buffered_bytes` (32 MiB) admits against, not
+    /// process memory, and it is zero once nothing is pending (always after
+    /// shutdown).
+    pub buffered_bytes: u64,
 }
 
 impl SignalStats {

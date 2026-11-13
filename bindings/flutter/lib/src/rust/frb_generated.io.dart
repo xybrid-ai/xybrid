@@ -315,6 +315,9 @@ abstract class XybridRustLibApiImplPlatform
       dynamic raw);
 
   @protected
+  FfiDecisionResult dco_decode_box_autoadd_ffi_decision_result(dynamic raw);
+
+  @protected
   FfiDownloadStatus dco_decode_box_autoadd_ffi_download_status(dynamic raw);
 
   @protected
@@ -405,6 +408,21 @@ abstract class XybridRustLibApiImplPlatform
   FfiCloudFallbackReason dco_decode_ffi_cloud_fallback_reason(dynamic raw);
 
   @protected
+  FfiDecisionAnswer dco_decode_ffi_decision_answer(dynamic raw);
+
+  @protected
+  FfiDecisionOrigin dco_decode_ffi_decision_origin(dynamic raw);
+
+  @protected
+  FfiDecisionResult dco_decode_ffi_decision_result(dynamic raw);
+
+  @protected
+  FfiDecisionScore dco_decode_ffi_decision_score(dynamic raw);
+
+  @protected
+  FfiDecisionValue dco_decode_ffi_decision_value(dynamic raw);
+
+  @protected
   FfiDownloadState dco_decode_ffi_download_state(dynamic raw);
 
   @protected
@@ -472,6 +490,12 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   FfiRunOptions dco_decode_ffi_run_options(dynamic raw);
+
+  @protected
+  FfiRunResult dco_decode_ffi_run_result(dynamic raw);
+
+  @protected
+  FfiScoreStatistic dco_decode_ffi_score_statistic(dynamic raw);
 
   @protected
   FfiSignalStats dco_decode_ffi_signal_stats(dynamic raw);
@@ -546,6 +570,12 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   List<FfiCacheEntry> dco_decode_list_ffi_cache_entry(dynamic raw);
+
+  @protected
+  List<FfiDecisionAnswer> dco_decode_list_ffi_decision_answer(dynamic raw);
+
+  @protected
+  List<FfiDecisionScore> dco_decode_list_ffi_decision_score(dynamic raw);
 
   @protected
   List<FfiImagePlane> dco_decode_list_ffi_image_plane(dynamic raw);
@@ -900,6 +930,10 @@ abstract class XybridRustLibApiImplPlatform
       SseDeserializer deserializer);
 
   @protected
+  FfiDecisionResult sse_decode_box_autoadd_ffi_decision_result(
+      SseDeserializer deserializer);
+
+  @protected
   FfiDownloadStatus sse_decode_box_autoadd_ffi_download_status(
       SseDeserializer deserializer);
 
@@ -1005,6 +1039,24 @@ abstract class XybridRustLibApiImplPlatform
       SseDeserializer deserializer);
 
   @protected
+  FfiDecisionAnswer sse_decode_ffi_decision_answer(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionOrigin sse_decode_ffi_decision_origin(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionResult sse_decode_ffi_decision_result(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionScore sse_decode_ffi_decision_score(SseDeserializer deserializer);
+
+  @protected
+  FfiDecisionValue sse_decode_ffi_decision_value(SseDeserializer deserializer);
+
+  @protected
   FfiDownloadState sse_decode_ffi_download_state(SseDeserializer deserializer);
 
   @protected
@@ -1087,6 +1139,13 @@ abstract class XybridRustLibApiImplPlatform
   FfiRunOptions sse_decode_ffi_run_options(SseDeserializer deserializer);
 
   @protected
+  FfiRunResult sse_decode_ffi_run_result(SseDeserializer deserializer);
+
+  @protected
+  FfiScoreStatistic sse_decode_ffi_score_statistic(
+      SseDeserializer deserializer);
+
+  @protected
   FfiSignalStats sse_decode_ffi_signal_stats(SseDeserializer deserializer);
 
   @protected
@@ -1165,6 +1224,14 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   List<FfiCacheEntry> sse_decode_list_ffi_cache_entry(
+      SseDeserializer deserializer);
+
+  @protected
+  List<FfiDecisionAnswer> sse_decode_list_ffi_decision_answer(
+      SseDeserializer deserializer);
+
+  @protected
+  List<FfiDecisionScore> sse_decode_list_ffi_decision_score(
       SseDeserializer deserializer);
 
   @protected
@@ -1534,6 +1601,10 @@ abstract class XybridRustLibApiImplPlatform
       FfiCloudFallbackAbort self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_ffi_decision_result(
+      FfiDecisionResult self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_ffi_download_status(
       FfiDownloadStatus self, SseSerializer serializer);
 
@@ -1643,6 +1714,26 @@ abstract class XybridRustLibApiImplPlatform
       FfiCloudFallbackReason self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_decision_answer(
+      FfiDecisionAnswer self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_decision_origin(
+      FfiDecisionOrigin self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_decision_result(
+      FfiDecisionResult self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_decision_score(
+      FfiDecisionScore self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_decision_value(
+      FfiDecisionValue self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_download_state(
       FfiDownloadState self, SseSerializer serializer);
 
@@ -1729,6 +1820,13 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void sse_encode_ffi_run_options(FfiRunOptions self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_run_result(FfiRunResult self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_score_statistic(
+      FfiScoreStatistic self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_signal_stats(
@@ -1818,6 +1916,14 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_list_ffi_cache_entry(
       List<FfiCacheEntry> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_decision_answer(
+      List<FfiDecisionAnswer> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_decision_score(
+      List<FfiDecisionScore> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_ffi_image_plane(

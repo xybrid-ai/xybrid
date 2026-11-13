@@ -35,6 +35,9 @@ SIGNAL_KEYS = ("traces", "logs", "metrics")
 COUNTER_KEYS = ("accepted", "exported", "dropped", "failed", "pending")
 MANUAL_REFERENCES = ("workflow", "tool", "inference", "inference_failed", "inference_released")
 METRIC_KINDS = ("sum", "gauge", "histogram", "exponentialHistogram", "summary")
+INFERENCE_DURATION = "gen_ai.client.inference.duration"
+# OTLP AggregationTemporality DELTA, as a number or, in proto3 JSON, its enum name.
+DELTA_TEMPORALITY = (1, "1", "AGGREGATION_TEMPORALITY_DELTA")
 
 
 # ---------------------------------------------------------------------------
@@ -154,11 +157,51 @@ class LogRecord:
 
 
 @dataclass
+class MetricPoint:
+    """One OTLP/JSON metric data point: its attributes and, for histograms, its count."""
+
+    seq: int
+    name: str
+    kind: str
+    attributes: Dict[str, Any]
+    count: Optional[int]
+    delta: bool = False
+
+
+def point_count(point: Dict[str, Any]) -> Optional[int]:
+    """A histogram point's ``count`` (a uint64, so OTLP/JSON may quote it)."""
+    try:
+        return int(point["count"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def measurements(points: Iterable[MetricPoint]) -> int:
+    """How many measurements histogram ``points`` hold across every export.
+
+    A cumulative point (the Rust exporter's temporality) repeats every earlier
+    measurement of its series, so only the series' latest export counts. Every
+    delta point counts.
+    """
+    latest: Dict[Tuple[str, str], MetricPoint] = {}
+    total = 0
+    for point in points:
+        if point.delta:
+            total += point.count or 0
+            continue
+        series = (point.name, json.dumps(point.attributes, sort_keys=True, default=str))
+        if series not in latest or point.seq >= latest[series].seq:
+            latest[series] = point
+    return total + sum(point.count or 0 for point in latest.values())
+
+
+@dataclass
 class Capture:
     entries: List[Dict[str, Any]] = field(default_factory=list)
     spans: List[Span] = field(default_factory=list)
     logs: List[LogRecord] = field(default_factory=list)
     metric_points: int = 0
+    metric_data: List[MetricPoint] = field(default_factory=list)
     metric_names: List[str] = field(default_factory=list)
     resources: List[Tuple[str, int, Dict[str, Any]]] = field(default_factory=list)
     text: str = ""
@@ -222,10 +265,19 @@ class Capture:
                 capture.resources.append(("metrics", seq, resource))
                 for scope in resource_metrics.get("scopeMetrics", []) or []:
                     for metric in scope.get("metrics", []) or []:
-                        capture.metric_names.append(metric.get("name", ""))
+                        name = metric.get("name", "")
+                        capture.metric_names.append(name)
                         for kind in METRIC_KINDS:
                             if kind in metric:
-                                capture.metric_points += len((metric[kind] or {}).get("dataPoints", []) or [])
+                                data = metric[kind] or {}
+                                points = data.get("dataPoints", []) or []
+                                delta = data.get("aggregationTemporality") in DELTA_TEMPORALITY
+                                capture.metric_points += len(points)
+                                capture.metric_data.extend(
+                                    MetricPoint(seq=seq, name=name, kind=kind,
+                                                attributes=attributes(point.get("attributes")),
+                                                count=point_count(point), delta=delta)
+                                    for point in points if isinstance(point, dict))
         capture.text = "\n".join(texts)
         return capture
 
@@ -560,6 +612,14 @@ class Checker:
             failures.append(f"status code is {span.status_code}, expected ERROR ({STATUS_ERROR}) for a cancellation")
         if any(record.span_id == span.span_id for record in self.capture.logs):
             failures.append("a cancellation emitted an exception log; CONTRACT.md: a cancellation is not an exception")
+        # Metric points name no span, so this relies on the release being the scenario's only cancellation.
+        cancelled = measurements(point for point in self.capture.metric_data
+                                 if point.name == INFERENCE_DURATION
+                                 and point.attributes.get("error.type") == "cancelled")
+        if cancelled != 1:
+            failures.append(f"{INFERENCE_DURATION} holds {cancelled} measurement(s) with error.type 'cancelled', "
+                            f"expected 1: the release must record the operation's duration once, with the "
+                            f"cancelled outcome as on the span, and nothing else in the scenario cancels")
         before = self.stats("before_release").get("traces", {}).get("accepted")
         after = self.stats("after_release").get("traces", {}).get("accepted")
         if before is None or after is None:
@@ -675,13 +735,18 @@ class Checker:
         asserted = self.asserted_span_count()
         if traces.get("exported", 0) < asserted:
             failures.append(f"traces.exported {traces.get('exported')} < the {asserted} spans this scenario asserts")
-        if len(self.index) < traces.get("exported", 0):
-            failures.append(f"traces.exported {traces.get('exported')} but the receiver holds {len(self.index)} spans")
-        if len(self.capture.logs) < logs.get("exported", 0):
-            failures.append(f"logs.exported {logs.get('exported')} but the receiver holds {len(self.capture.logs)} records")
-        if self.capture.metric_points < metrics.get("exported", 0):
-            failures.append(f"metrics.exported {metrics.get('exported')} but the receiver holds "
-                            f"{self.capture.metric_points} data points")
+        # The final counters (after shutdown) too: the receiver holds at least
+        # what each snapshot reports exported.
+        for snapshot in ("after_flush", "after_shutdown"):
+            stats = self.stats(snapshot)
+            held = (("traces", len(self.index), "spans"), ("logs", len(self.capture.logs), "records"),
+                    ("metrics", self.capture.metric_points, "data points"))
+            for signal, count, what in held:
+                counters = stats.get(signal)
+                exported = counters.get("exported", 0) if isinstance(counters, dict) else 0
+                if count < exported:
+                    prefix = "" if snapshot == "after_flush" else "after shutdown, "
+                    failures.append(f"{prefix}{signal}.exported {exported} but the receiver holds {count} {what}")
         if metrics.get("exported", 0) == 0:
             failures.append("no metric data point was exported; flush collects metrics")
         return failures
@@ -698,17 +763,41 @@ class Checker:
             failures.append(f"a workflow started after shutdown has a reference/context: {after}")
         if after.get("flush") != "ok":
             failures.append(f"flush after shutdown returned {after.get('flush')!r}; it must be a no-op")
+        failures.extend(self.final_counter_failures())
+        return failures
+
+    def final_counter_failures(self) -> List[str]:
+        """Stats after shutdown: export off, and the shut-down session's final
+        counters, not a reset. Every item is settled in
+        one terminal bucket, the healthy receiver lost nothing, and the
+        counters only grew since the flush (`stats.consistent` holds them
+        against what the receiver got)."""
+        failures = []
         stats = self.stats("after_shutdown")
+        flushed = self.stats("after_flush")
         if stats.get("enabled") is not False:
             failures.append(f"stats after shutdown report enabled={stats.get('enabled')!r}")
         for signal in SIGNAL_KEYS:
             counters = stats.get(signal)
             if not isinstance(counters, dict) or any(key not in counters for key in COUNTER_KEYS):
                 failures.append(f"stats.after_shutdown.{signal} lacks {list(COUNTER_KEYS)}")
-        nonzero = [f"{signal}.{key}" for signal in SIGNAL_KEYS if isinstance(stats.get(signal), dict)
-                   for key, value in stats[signal].items() if value]
-        if nonzero:
-            failures.append(f"stats after shutdown are not all zero: {nonzero}")
+                continue
+            settled = counters["exported"] + counters["dropped"] + counters["failed"]
+            if counters["pending"] != 0:
+                failures.append(f"after shutdown, {signal}.pending is {counters['pending']}; shutdown settles "
+                                "every item")
+            if counters["accepted"] != settled:
+                failures.append(f"stats.after_shutdown.{signal}: accepted {counters['accepted']} != exported + "
+                                f"dropped + failed ({settled})")
+            for key in ("dropped", "failed"):
+                if counters[key] != 0:
+                    failures.append(f"after shutdown, {signal}.{key} is {counters[key]}; the receiver accepted "
+                                    "everything")
+            before = flushed.get(signal) if isinstance(flushed.get(signal), dict) else {}
+            for key in ("accepted", "exported"):
+                if counters[key] < before.get(key, 0):
+                    failures.append(f"stats.after_shutdown.{signal}.{key} {counters[key]} < {before.get(key)} after "
+                                    "the flush; they must be the shut-down session's final counters, not a reset")
         return failures
 
     def check_nothing_after_shutdown(self) -> List[str]:

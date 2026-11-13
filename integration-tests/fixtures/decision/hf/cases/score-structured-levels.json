@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "score-structured-levels",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Object, array, number and boolean level descriptions",
+  "covers": [
+    "description-structured",
+    "score-null-level"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"score\", \"instructions\": \"How urgent is this?\", \"criteria\": [{\"label\": \"low\", \"hours\": 72}, [\"mid\"], 3, true, \"\", 0.5]}}}",
+  "artifact": "d1-2b-hf"
+}
