@@ -120,12 +120,12 @@ try {
           .then(() => true, () => false));
       await check.close();
       if (found) workspace = candidate;
-      // A loaded trace with other spans is another project's copy, and a 404 is a
-      // project without the trace: never retry either, since every probe costs
-      // staging analytics reads (its Tinybird workspace answers 429 when spent).
-      else if (loaded || response?.status() === 404) {
+      // Probe each project at most once. A missing trace can render an HTTP 200
+      // document without a Requests summary, so the document status alone cannot
+      // identify it. Retrying any failed probe would spend more analytics reads.
+      else {
         rejected.add(candidate);
-        console.log(`${candidate} does not hold the launch's spans; open the launch project.`);
+        console.log(`${candidate} did not show the launch's spans; open the launch project.`);
       }
     }
   }
