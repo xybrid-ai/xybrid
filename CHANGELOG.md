@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **SDK:** a pipeline stage with no `target:` and no provider runs locally
+  again when its model is a passthrough GGUF or not downloaded yet. The SDK
+  treated an extracted passthrough model as missing, skipped the download
+  when its routing check preferred the cloud, and the stage then failed with
+  `Missing 'provider' in metadata`. `Pipeline::load_models` now downloads
+  every local stage's model, as the CLI does, and `Pipeline::is_ready`
+  reports a stage downloaded by `load_models` as ready, so later runs don't
+  reload it.
+
 ## [0.18.0] - 2026-11-12
 
 ### Added

@@ -414,7 +414,7 @@ fn case_pipeline(
     record: &mut Map<String, Value>,
 ) -> Outcome<()> {
     let yaml = format!(
-        "name: staging-pipeline\nstages:\n  - model: {}\n    target: device\n",
+        "name: staging-pipeline\nstages:\n  - model: {}\n",
         config.str("/model_id")?
     );
     let mut accepted = 0usize;
