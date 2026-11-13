@@ -30,13 +30,13 @@ jobs:
       CARGO_BUILD_JOBS: 4
       JOBS: 4
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           submodules: true
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # stable
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           key: decision-cpu
       - name: Install native build and fixture tools
@@ -47,7 +47,7 @@ jobs:
           python3 -m unittest discover -s tools/conformance/decision/tests -v
       - name: Cache pinned Q4_K_M weights
         if: github.event_name != 'schedule'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: integration-tests/fixtures/models/d1-2b-q4km/d1-2B-Q4_K_M.gguf
           key: decision-q4km-${{ hashFiles('integration-tests/fixtures/decision/artifacts.json') }}
@@ -96,7 +96,7 @@ jobs:
           cargo test --locked -p xybrid-cli --features llm-llamacpp --test decision_cli_test -- --nocapture --test-threads=1
       - name: Upload the upstream source, settings and numerical observations
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: decision-cpu-reference
           path: |
