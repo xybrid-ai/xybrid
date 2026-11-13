@@ -197,6 +197,20 @@ jobs:
             fi
           done
 
+          # MLX and mlx-c are MIT-licensed, and MLX compiles in third-party
+          # code its ACKNOWLEDGMENTS lists: the notices ship in the artifact.
+          mkdir -p dist/mlx.xcframework/Licenses
+          for COMPONENT in mlx mlx-c; do
+            for NOTICE in LICENSE ACKNOWLEDGMENTS.md; do
+              SRC="build/upstream/${COMPONENT}/${NOTICE}"
+              if [ ! -f "$SRC" ]; then
+                echo "::error::${COMPONENT} has no ${NOTICE} at its pinned commit; cannot stage its notices"
+                exit 1
+              fi
+              cp "$SRC" "dist/mlx.xcframework/Licenses/${COMPONENT}-${NOTICE}"
+            done
+          done
+
           echo "XCFramework layout:"
           find dist/mlx.xcframework -maxdepth 3 -print
 

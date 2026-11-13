@@ -18,7 +18,7 @@ make_vendor() {
     mkdir -p "$dir"
     cat > "$dir/UPSTREAM_VERSIONS.txt" <<EOF
 mlx=ce45c52505c8158ea48d2a54e8caae05efd86bfe
-mlx-c=a0b5179b2a34f6441eb78efe39f3b36be757f5a6
+mlx-c=0726ca922fc902c4c61ef9c27d94132be418e945
 release=${release}
 sha256=${sha256}
 EOF
@@ -30,7 +30,7 @@ make_vendor_missing_release() {
     mkdir -p "$dir"
     cat > "$dir/UPSTREAM_VERSIONS.txt" <<EOF
 mlx=ce45c52505c8158ea48d2a54e8caae05efd86bfe
-mlx-c=a0b5179b2a34f6441eb78efe39f3b36be757f5a6
+mlx-c=0726ca922fc902c4c61ef9c27d94132be418e945
 sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 EOF
     printf '%s\n' "$dir"

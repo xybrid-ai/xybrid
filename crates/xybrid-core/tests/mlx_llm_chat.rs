@@ -31,8 +31,9 @@
 //! ```
 //!
 //! When the harness runs without the env var set the tests SKIP (`return`)
-//! rather than fail — this keeps the macOS CI runner happy when the bundle
-//! hasn't been staged yet.
+//! rather than fail, so a run without staged bundles stays green. A lane that
+//! does stage bundles (test-mlx.yml) lists their variables in
+//! `XYBRID_MLX_REQUIRE`, which turns a missing one into a failure.
 
 #![cfg(all(
     feature = "llm-mlx-runtime",
@@ -57,8 +58,18 @@ use xybrid_core::runtime_adapter::mlx::{
 use xybrid_core::runtime_adapter::types::{PartialToken, StreamingCallback};
 use xybrid_core::runtime_adapter::AdapterError;
 
+/// The bundle staged through `env_var`, or `None` for the test to skip.
+///
+/// A lane that stages bundles names their variables in `XYBRID_MLX_REQUIRE`
+/// (comma-separated). A mistyped variable or a dropped step then fails there
+/// instead of passing with every real-weight test skipped.
 fn bundle_dir(env_var: &str) -> Option<PathBuf> {
-    std::env::var_os(env_var).map(PathBuf::from)
+    let dir = std::env::var_os(env_var).map(PathBuf::from);
+    let required = std::env::var("XYBRID_MLX_REQUIRE").unwrap_or_default();
+    if dir.is_none() && required.split(',').any(|name| name.trim() == env_var) {
+        panic!("{env_var} is listed in XYBRID_MLX_REQUIRE but is not set");
+    }
+    dir
 }
 
 fn qwen_bundle_dir() -> Option<PathBuf> {

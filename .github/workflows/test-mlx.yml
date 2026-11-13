@@ -1,0 +1,132 @@
+# Purpose: Run the MLX backend on real weights (Qwen 3 0.6B, MLX 4-bit) on Apple Silicon: chat, streaming, cancellation, two models at once, and the CLI end to end.
+name: "CI: MLX backend"
+
+# ci.yml's MLX runtime job runs the backend on small bundles with random
+# weights. Those prove the plumbing; they cannot show that a real model loads,
+# that a quantized checkpoint decodes to language, or that a chat template
+# renders. This lane stages one small real bundle, pinned by revision and
+# checksum, and runs the tests that otherwise skip.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'crates/mlx-c-sys/**'
+      - 'crates/xybrid-mlx/**'
+      - 'crates/xybrid-core/src/runtime_adapter/**'
+      - 'crates/xybrid-core/src/execution/**'
+      - 'crates/xybrid-core/tests/mlx_*.rs'
+      - 'crates/xybrid-core/Cargo.toml'
+      - 'crates/xybrid-sdk/src/model.rs'
+      - 'crates/xybrid-cli/src/commands/run.rs'
+      - 'vendor/mlx-apple/UPSTREAM_VERSIONS.txt'
+      - 'tools/scripts/build-mlx-slice.sh'
+      - 'tools/scripts/build-local-mlx-xcframework.sh'
+      - 'integration-tests/download.sh'
+      - 'integration-tests/fixtures/models/models.json'
+      - '.github/actions/mlx-xcframework/**'
+      - 'Cargo.lock'
+      - '.github/workflows/test-mlx.yml'
+      # Markdown inside any path above cannot affect this build.
+      - "!**.md"
+  pull_request:
+    branches: [master]
+    paths:
+      - 'crates/mlx-c-sys/**'
+      - 'crates/xybrid-mlx/**'
+      - 'crates/xybrid-core/src/runtime_adapter/**'
+      - 'crates/xybrid-core/src/execution/**'
+      - 'crates/xybrid-core/tests/mlx_*.rs'
+      - 'crates/xybrid-core/Cargo.toml'
+      - 'crates/xybrid-sdk/src/model.rs'
+      - 'crates/xybrid-cli/src/commands/run.rs'
+      - 'vendor/mlx-apple/UPSTREAM_VERSIONS.txt'
+      - 'tools/scripts/build-mlx-slice.sh'
+      - 'tools/scripts/build-local-mlx-xcframework.sh'
+      - 'integration-tests/download.sh'
+      - 'integration-tests/fixtures/models/models.json'
+      - '.github/actions/mlx-xcframework/**'
+      - 'Cargo.lock'
+      - '.github/workflows/test-mlx.yml'
+      # Markdown inside any path above cannot affect this build.
+      - "!**.md"
+  workflow_dispatch:
+
+concurrency:
+  group: test-mlx-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test-mlx-integration:
+    name: Test MLX (integration, real model)
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      MLX_FIXTURE: integration-tests/fixtures/models/qwen3-0.6b-4bit-mlx
+      # model.safetensors of mlx-community/Qwen3-0.6B-4bit at the revision
+      # models.json pins. The cache key and the check below both use it.
+      MLX_FIXTURE_SHA256: 392e8d466d56100ada00eb82031fb854297fc9e389b7d303eba3af114e87bce2
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: mlx-integration
+          # Per-image cache: build-script output records this image's Xcode
+          # clang-runtime path, which other images may lack.
+          env-vars: ImageOS
+
+      - name: Materialize the MLX xcframework
+        uses: ./.github/actions/mlx-xcframework
+
+      - name: Ensure download tooling (jq)
+        run: command -v jq >/dev/null || brew install jq
+
+      - name: Cache qwen3-0.6b-4bit-mlx
+        id: cache-fixture
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.MLX_FIXTURE }}
+          key: qwen3-0.6b-4bit-mlx-${{ env.MLX_FIXTURE_SHA256 }}-${{ hashFiles('integration-tests/fixtures/models/models.json') }}
+
+      - name: Download qwen3-0.6b-4bit-mlx
+        if: steps.cache-fixture.outputs.cache-hit != 'true'
+        run: ./integration-tests/download.sh qwen3-0.6b-4bit-mlx
+
+      # download.sh verifies every file it fetches; this also covers a
+      # restored cache, so a mutable artifact cannot redefine the test.
+      - name: Verify the pinned weights
+        run: echo "${MLX_FIXTURE_SHA256}  ${MLX_FIXTURE}/model.safetensors" | shasum -a 256 -c -
+
+      # The same bundle serves the full-precision and the quantized tests:
+      # it is a chat model, and it is 4-bit. XYBRID_MLX_REQUIRE makes a test
+      # that cannot find it fail instead of skip. The name filters select the
+      # tests that need a Qwen bundle; the other families stay unstaged.
+      - name: Test MLX on real weights
+        env:
+          XYBRID_MLX_REQUIRE: XYBRID_MLX_QWEN_DIR,XYBRID_MLX_QWEN_4BIT_DIR
+        run: |
+          export XYBRID_MLX_QWEN_DIR="${GITHUB_WORKSPACE}/${MLX_FIXTURE}"
+          export XYBRID_MLX_QWEN_4BIT_DIR="${GITHUB_WORKSPACE}/${MLX_FIXTURE}"
+          cargo test -p xybrid-core --no-default-features --features llm-mlx-runtime \
+            --test mlx_llm_chat -- --nocapture \
+            real_qwen four_turn_chat streaming_matches_non_streaming qwen35_quantized
+
+      # The bundle through the whole stack: metadata routing, the SDK loader,
+      # the Metal library placed beside the binary, generation, CLI output.
+      - name: Run the bundle through the CLI
+        run: |
+          set -euo pipefail
+          cargo build -p xybrid-cli --no-default-features --features llm-mlx-runtime
+          ./target/debug/xybrid run --directory "${MLX_FIXTURE}" --backend mlx \
+            --input-text "What is the capital of France? Answer in one short sentence." \
+            --max-tokens 48 | tee "${RUNNER_TEMP}/mlx-cli.out"
+          grep -q "Inference completed successfully" "${RUNNER_TEMP}/mlx-cli.out"
+          grep -qi "paris" "${RUNNER_TEMP}/mlx-cli.out"

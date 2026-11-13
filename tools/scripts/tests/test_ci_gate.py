@@ -284,7 +284,7 @@ class RequiredGateTests(unittest.TestCase):
             "crates/xybrid-cli/src/commands/run.rs", "crates/xybrid-llama/src/generation.rs",
             "macros/src/lib.rs", "vendor/mlx-apple/UPSTREAM_VERSIONS.txt", "vendor/llama-cpp",
             "tools/scripts/build-mlx-slice.sh", "tools/scripts/test-fetch-mlx-xcframework.sh",
-            "Cargo.lock", ".github/workflows/ci.yml",
+            "Cargo.lock", ".github/workflows/ci.yml", ".github/actions/mlx-xcframework/action.yml",
         ):
             with self.subTest(path=path):
                 self.assertEqual(classify("pull_request", pr_files(path))["mlx_runtime"], "true")

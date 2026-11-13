@@ -20,6 +20,8 @@ printf '%s\n' "$*" >> "$XYBRID_TEST_GIT_LOG"
 if [ "$1" = "clone" ]; then
     dest="${@: -1}"
     mkdir -p "$dest"
+    printf 'license of %s\n' "$(basename "$dest")" > "$dest/LICENSE"
+    printf 'acknowledgments of %s\n' "$(basename "$dest")" > "$dest/ACKNOWLEDGMENTS.md"
     exit 0
 fi
 if [ "$1" = "-C" ] && [ "$3" = "checkout" ]; then
@@ -70,7 +72,7 @@ VENDOR_DIR="$TMP_ROOT/vendor/mlx-apple"
 mkdir -p "$VENDOR_DIR"
 cat > "$VENDOR_DIR/UPSTREAM_VERSIONS.txt" <<'EOF'
 mlx=ce45c52505c8158ea48d2a54e8caae05efd86bfe
-mlx-c=a0b5179b2a34f6441eb78efe39f3b36be757f5a6
+mlx-c=0726ca922fc902c4c61ef9c27d94132be418e945
 release=unpublished
 sha256=unpublished
 EOF
@@ -92,6 +94,11 @@ grep -q -- 'https://github.com/ml-explore/mlx.git' "$git_log"
 grep -q -- 'https://github.com/ml-explore/mlx-c.git' "$git_log"
 grep -q -- '--slice macos-arm64' "$slice_log"
 test -f "$VENDOR_DIR/mlx.xcframework/macos-arm64/Resources/mlx.metallib"
+# The upstream notices travel with the binary.
+grep -q 'license of mlx$' "$VENDOR_DIR/mlx.xcframework/Licenses/mlx-LICENSE"
+grep -q 'license of mlx-c$' "$VENDOR_DIR/mlx.xcframework/Licenses/mlx-c-LICENSE"
+grep -q 'acknowledgments of mlx$' "$VENDOR_DIR/mlx.xcframework/Licenses/mlx-ACKNOWLEDGMENTS.md"
+grep -q 'acknowledgments of mlx-c$' "$VENDOR_DIR/mlx.xcframework/Licenses/mlx-c-ACKNOWLEDGMENTS.md"
 test -f "$VENDOR_DIR/.installed-source-pin"
 test ! -f "$VENDOR_DIR/.installed-sha256"
 test ! -d "$WORK_DIR"

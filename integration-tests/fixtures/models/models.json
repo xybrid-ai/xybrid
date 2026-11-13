@@ -922,6 +922,7 @@
     "qwen3-4b-gguf": {
       "description": "Qwen 3 4B - quantized llama.cpp reference for the MLX SafeTensors fixture (GGUF Q4_K_M, 2.50GB)",
       "source": "url",
+      "on_request": true,
       "size_mb": 2498,
       "task": "text-generation",
       "feature_gate": "llm-llamacpp",
@@ -961,6 +962,7 @@
     "qwen3-4b-bf16-gguf": {
       "description": "Qwen 3 4B - BF16 llama.cpp benchmark counterpart for the MLX SafeTensors fixture (GGUF BF16, 8.05GB)",
       "source": "url",
+      "on_request": true,
       "size_mb": 7678,
       "task": "text-generation",
       "feature_gate": "llm-llamacpp",
@@ -1001,6 +1003,7 @@
     "lfm2.5-1.2b-instruct-bf16-gguf": {
       "description": "Liquid LFM2.5 1.2B Instruct - BF16 llama.cpp benchmark counterpart for the MLX SafeTensors fixture (GGUF BF16, 2.24GB)",
       "source": "url",
+      "on_request": true,
       "size_mb": 2235,
       "task": "text-generation",
       "feature_gate": "llm-llamacpp",
@@ -1040,6 +1043,7 @@
     "gemma4-2b-bf16-gguf": {
       "description": "Gemma 4 E2B Instruct - BF16 llama.cpp benchmark counterpart for the MLX SafeTensors fixture (GGUF BF16, 8.67GB)",
       "source": "url",
+      "on_request": true,
       "size_mb": 8880,
       "task": "text-generation",
       "feature_gate": "llm-llamacpp",
@@ -1129,6 +1133,62 @@
           "license": "Apache-2.0",
           "source": "https://github.com/KittenML/KittenTTS",
           "notes": "Requires espeak-ng for phonemization. Install: brew install espeak-ng (macOS) or apt install espeak-ng (Linux)"
+        }
+      }
+    },
+    "qwen3-0.6b-4bit-mlx": {
+      "description": "Qwen 3 0.6B, MLX 4-bit SafeTensors - the real-weight fixture of the MLX CI lane (test-mlx.yml); Apple Silicon macOS only (335MB)",
+      "source": "url",
+      "on_request": true,
+      "size_mb": 335,
+      "task": "text-generation",
+      "feature_gate": "llm-mlx-runtime",
+      "platforms": ["macos"],
+      "test_env_var": "XYBRID_MLX_QWEN_DIR",
+      "files": [
+        {
+          "url": "https://huggingface.co/mlx-community/Qwen3-0.6B-4bit/resolve/73e3e38d981303bc594367cd910ea6eb48349da8/model.safetensors",
+          "output": "model.safetensors",
+          "sha256": "392e8d466d56100ada00eb82031fb854297fc9e389b7d303eba3af114e87bce2"
+        },
+        {
+          "url": "https://huggingface.co/mlx-community/Qwen3-0.6B-4bit/resolve/73e3e38d981303bc594367cd910ea6eb48349da8/config.json",
+          "output": "config.json",
+          "sha256": "15d3ac26c043ae477273ed5802ee0f0b33bb14f18c9d3dd70910c02d906e3f1f"
+        },
+        {
+          "url": "https://huggingface.co/mlx-community/Qwen3-0.6B-4bit/resolve/73e3e38d981303bc594367cd910ea6eb48349da8/tokenizer.json",
+          "output": "tokenizer.json",
+          "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+        },
+        {
+          "url": "https://huggingface.co/mlx-community/Qwen3-0.6B-4bit/resolve/73e3e38d981303bc594367cd910ea6eb48349da8/tokenizer_config.json",
+          "output": "tokenizer_config.json",
+          "sha256": "253153d0738ceb4c668d2eff957714dd2bea0b56de772a9fdccd96cbf517e6a0"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "qwen3-0.6b-4bit-mlx",
+        "version": "1.0",
+        "description": "Qwen 3 0.6B, MLX 4-bit SafeTensors",
+        "execution_template": {
+          "type": "SafeTensors",
+          "model_file": "model.safetensors",
+          "architecture": "qwen3"
+        },
+        "preprocessing": [],
+        "postprocessing": [],
+        "files": ["model.safetensors", "config.json", "tokenizer.json", "tokenizer_config.json"],
+        "metadata": {
+          "architecture": "qwen3",
+          "context_length": 4096,
+          "family": "qwen",
+          "instruction_tuned": true,
+          "license": "Apache-2.0",
+          "parameters": 600000000,
+          "quantization": "4bit",
+          "sha256": "392e8d466d56100ada00eb82031fb854297fc9e389b7d303eba3af114e87bce2",
+          "task": "text-generation"
         }
       }
     },

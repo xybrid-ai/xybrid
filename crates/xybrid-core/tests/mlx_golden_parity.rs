@@ -13,9 +13,11 @@
 //!   topologies are expected); run explicitly via `--ignored`.
 //!
 //! Golden files live at `<bundle>/.golden/` next to the (gitignored) model
-//! fixtures; they are local artifacts, never committed. Capture them with
-//! `tools/scripts/capture-golden-tokens.sh`. All tests skip cleanly when
-//! bundles or goldens are absent, so fixture-less CI is unaffected.
+//! fixtures; they are local artifacts, never committed. Capture Tier A with
+//! `tools/scripts/capture-golden-tokens.sh --self`. Tier B files are written
+//! by hand from a Python `mlx-lm` run, in the same JSON shape ([`GoldenFile`])
+//! with `tier: "upstream"`. All tests skip cleanly when bundles or goldens
+//! are absent, so fixture-less CI is unaffected.
 
 #![cfg(all(
     feature = "llm-mlx-runtime",
@@ -114,9 +116,8 @@ struct Provenance {
     prefill_mode: String,
 }
 
-/// FNV-1a 64-bit, hex-encoded; first 8 chars tag the golden file name.
-/// Mirrored by the Python upstream capture in
-/// `tools/scripts/capture-golden-tokens.sh` — keep in sync.
+/// FNV-1a 64-bit, hex-encoded; first 8 chars tag the golden file name. An
+/// upstream (Tier B) capture names its files with the same tag.
 fn prompt_tag(prompt: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in prompt.as_bytes() {
@@ -678,8 +679,8 @@ fn empty_prompt_ids_rejected_before_prefill() {
 
 #[test]
 fn prompt_tag_is_stable_fnv1a() {
-    // Locked value: the Python capture in capture-golden-tokens.sh
-    // implements the same FNV-1a 64 and must produce identical tags.
+    // Locked value: an upstream (Tier B) capture implements the same
+    // FNV-1a 64 and must produce identical tags.
     assert_eq!(prompt_tag("hello"), "a430d846");
     assert_ne!(prompt_tag(BENCH_PROMPT), prompt_tag(BYTE_FALLBACK_PROMPT));
 }

@@ -1,0 +1,51 @@
+name: Materialize the MLX xcframework
+description: >-
+  Put vendor/mlx-apple/mlx.xcframework in place for a build with the
+  llm-mlx-runtime feature: the published artifact when UPSTREAM_VERSIONS.txt
+  pins one, else a source build of the pinned commits. Apple Silicon macOS
+  runners only.
+
+# While no release is pinned (`release=unpublished`) the xcframework is built
+# from source, about twenty minutes on a hosted runner. Its contents depend
+# only on the pins and the build scripts, so the build is cached on those. A
+# cache hit proves nothing about the pins being buildable today;
+# build-mlx-xcframework.yml covers that whenever they change.
+runs:
+  using: composite
+  steps:
+    - name: Check MLX xcframework pin status
+      id: pin
+      shell: bash
+      run: ./tools/scripts/fetch-mlx-xcframework.sh --check-published
+
+    - name: Cache the source-built MLX xcframework
+      if: steps.pin.outputs.published != 'true'
+      id: cache
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          vendor/mlx-apple/mlx.xcframework
+          vendor/mlx-apple/.installed-source-pin
+        key: mlx-xcframework-source-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vendor/mlx-apple/UPSTREAM_VERSIONS.txt', 'tools/scripts/build-mlx-slice.sh', 'tools/scripts/build-local-mlx-xcframework.sh', '.github/actions/mlx-xcframework/action.yml') }}
+
+    - name: Install MLX source-build tools
+      if: steps.pin.outputs.published != 'true' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        if ! command -v ninja >/dev/null 2>&1; then
+          brew install ninja
+        fi
+        ninja --version
+
+    - name: Build the macOS MLX xcframework from the pinned sources
+      if: steps.pin.outputs.published != 'true' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "::notice::No MLX xcframework release is pinned; building the macOS slice from the pinned upstream commits."
+        ./tools/scripts/build-local-mlx-xcframework.sh
+
+    - name: Fetch the pinned MLX xcframework release
+      if: steps.pin.outputs.published == 'true'
+      shell: bash
+      run: ./tools/scripts/fetch-mlx-xcframework.sh

@@ -42,7 +42,10 @@ list_models() {
     jq -r '.models | to_entries[] | select(.value.source == "registry") | "  \(.key) (\(.value.size_mb)MB) - \(.value.description)"' "$MANIFEST"
     echo ""
     echo -e "${BLUE}Direct URL models:${NC}"
-    jq -r '.models | to_entries[] | select(.value.source == "url") | "  \(.key) (\(.value.size_mb)MB) - \(.value.description)"' "$MANIFEST"
+    jq -r '.models | to_entries[] | select(.value.source == "url" and (.value.on_request // false | not)) | "  \(.key) (\(.value.size_mb)MB) - \(.value.description)"' "$MANIFEST"
+    echo ""
+    echo -e "${BLUE}On-request models (direct URL, not downloaded by --all):${NC}"
+    jq -r '.models | to_entries[] | select(.value.on_request // false) | "  \(.key) (\(.value.size_mb)MB) - \(.value.description)"' "$MANIFEST"
     echo ""
     echo -e "${BLUE}Staged models (not downloaded by --all):${NC}"
     jq -r '
@@ -197,6 +200,10 @@ check_models() {
         if $staged; then
             echo -e "  ${GREEN}✓${NC} $model [$source]"
             present=$((present + 1))
+        elif [ "$(jq -r ".models[\"$model\"].on_request // false" "$MANIFEST")" = "true" ]; then
+            # Large or platform-specific: fetched by name, so its absence is
+            # not something --all would fix.
+            echo -e "  ${YELLOW}•${NC} $model [$source] (on request: '$0 $model')"
         else
             echo -e "  ${RED}✗${NC} $model [$source] (missing)"
             missing=$((missing + 1))
@@ -687,6 +694,13 @@ download_all() {
             echo ""
             continue
         fi
+        # `on_request` fixtures are large benchmark counterparts or serve one
+        # platform's lane: tens of gigabytes nobody running --all asked for.
+        if [ "$(jq -r ".models[\"$model\"].on_request // false" "$MANIFEST")" = "true" ]; then
+            echo -e "${YELLOW}Skipping on-request model $model; run '$0 $model' to download it${NC}"
+            echo ""
+            continue
+        fi
         if download_model "$model"; then
             succeeded=$((succeeded + 1))
         else
@@ -725,12 +739,12 @@ case "${1:-}" in
         echo "Options:"
         echo "  --list, -l     List available models"
         echo "  --check, -c    Check which models are present"
-        echo "  --all, -a      Download all models (derived models are skipped)"
+        echo "  --all, -a      Download all models (derived and on-request models are skipped)"
         echo "  --help, -h     Show this help"
         echo ""
         echo "Download sources:"
         echo "  registry  - Downloads from xybrid registry (registry.xybrid.dev)"
-        echo "  url       - Downloads directly from URLs"
+        echo "  url       - Downloads directly from URLs (\"on_request\": true: only when named)"
         echo "  staged    - Local/manual fixture; skipped by --all and surfaced through its test env var"
         echo "  derived   - Regenerated from pinned inputs (tools/conformance/prepare.sh)"
         echo ""

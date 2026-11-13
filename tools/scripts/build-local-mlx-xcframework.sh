@@ -142,6 +142,21 @@ else
     exit 1
 fi
 
+# MLX and mlx-c are MIT-licensed, and MLX compiles in third-party code its
+# ACKNOWLEDGMENTS lists: the notices travel with the binary built from them.
+LICENSES_DIR="$XCFRAMEWORK_DIR/Licenses"
+mkdir -p "$LICENSES_DIR"
+for component in mlx mlx-c; do
+    for notice in LICENSE ACKNOWLEDGMENTS.md; do
+        src="$WORK_DIR/upstream/$component/$notice"
+        if [ ! -f "$src" ]; then
+            echo "error: $component has no $notice at its pinned commit; cannot stage its notices" >&2
+            exit 1
+        fi
+        cp "$src" "$LICENSES_DIR/$component-$notice"
+    done
+done
+
 rm -f "$SHA_MARKER"
 {
     printf 'mlx=%s\n' "$MLX_SHA"

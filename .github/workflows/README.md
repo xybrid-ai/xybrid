@@ -61,6 +61,7 @@ Workspace validation, pull-request gates and backend test suites.
 | [`clean-scripts.yml`](clean-scripts.yml) | CI: Clean scripts | push to `master`, pull_request to `master` | none | Test the root and per-folder clean.sh scripts and clean-lib.sh; every path they list must be one git ignores. |
 | [`test-decision-conformance.yml`](test-decision-conformance.yml) | CI: Decision conformance | push to `master`, pull_request to `master`, schedule (`41 5 * * *`), workflow_dispatch | none | Verify the decision corpus and run isolated preparation, finalization, matched CPU inference and SDK lifecycle checks against pinned d1 weights. |
 | [`llamacpp-validate.yml`](llamacpp-validate.yml) | CI: llama.cpp backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Check the llama.cpp pins and generated bindings, then run real text and vision models on a source build. |
+| [`test-mlx.yml`](test-mlx.yml) | CI: MLX backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Run the MLX backend on real weights (Qwen 3 0.6B, MLX 4-bit) on Apple Silicon: chat, streaming, cancellation, two models at once, and the CLI end to end. |
 | [`test-policy-routing.yml`](test-policy-routing.yml) | CI: Policy routing | push to `master`, pull_request to `master`, workflow_dispatch | none | Drive the xybrid binary through a policy-routed hybrid stage: local GGUF leg, fake DeepSeek cloud leg. |
 | [`test-whispercpp.yml`](test-whispercpp.yml) | CI: whisper.cpp backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Exercise whisper.cpp with real multilingual weights: translation, per-request language, long windows, non-speech suppression. |
 | [`ci.yml`](ci.yml) | CI: Workspace | push to `master`, pull_request to `master` | none | Rust format, lint, tests and feature matrix, plus binding drift, API contract, observability, Python SDK, Web SDK and agent skills checks. Gates merges. |
@@ -270,16 +271,23 @@ published; when it is, the fetch script verifies that artifact's SHA256.
 6. Zip the framework as `mlx-{version}.xcframework.zip` and write a sibling
    `.sha256` file.
 7. Upload both files as a workflow artifact (`mlx-xcframework`).
-8. On a `mlx-v*` tag, attach both files to the matching GitHub Release.
+8. On a `mlx-v*` tag, a separate `publish` job attaches both files to the
+   matching GitHub Release. It is the only job with `contents: write`; the
+   build, including every pull-request run, has a read-only token.
 
-The main CI workflow also has a macOS `llm-mlx-runtime` job. It first runs
+The main CI workflow also has a macOS `llm-mlx-runtime` job
+(`check (llm-mlx-runtime, macos)`), the only job that links MLX and runs it.
+It runs when a change reaches the MLX runtime (the `mlx_runtime` path filter
+in `tools/scripts/ci_gate.py`: the MLX crates, core, SDK, CLI, the pins and
+build scripts, the lockfile); the Linux non-linking job covers every other
+code change. It first runs
 `tools/scripts/fetch-mlx-xcframework.sh --check-published`. When
 `vendor/mlx-apple/UPSTREAM_VERSIONS.txt` contains a download pin, CI fetches
 and verifies that artifact. When the pin still says
 `release=unpublished` or `sha256=unpublished`, CI builds a local macOS-only
-`mlx.xcframework` from the pinned upstream SHAs instead, then runs the same
-linked runtime checks. This keeps runtime CI independent of artifact publication
-state. The job checks that iOS still accepts only the non-linking `llm-mlx`
+`mlx.xcframework` from the pinned upstream SHAs instead (cached on the pins
+and the two build scripts), then runs the same linked runtime checks. This
+keeps runtime CI independent of artifact publication state. The job checks that iOS still accepts only the non-linking `llm-mlx`
 tier and that `llm-mlx-runtime` fails with the Apple Silicon macOS-only
 compile error. The iOS non-linking build writes to `RUNNER_TEMP`, and the gate
 script uses its own temporary Cargo target, so those transient artifacts are
