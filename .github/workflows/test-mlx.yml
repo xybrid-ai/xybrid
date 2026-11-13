@@ -110,11 +110,14 @@ jobs:
       # The same bundle serves the full-precision and the quantized tests:
       # it is a chat model, and it is 4-bit. XYBRID_MLX_REQUIRE makes a test
       # that cannot find it fail instead of skip. The script runs each test in
-      # its own process: MLX aborts the process on some failures, and one
-      # abort must not hide the other tests or its own name.
+      # its own process (MLX aborts the process on some failures, and one
+      # abort must not hide the other tests or its own name), then all of
+      # them in one process. That pass repeats: what it catches, an abort
+      # between one model's work and the next, depends on timing.
       - name: Test MLX on real weights
         env:
           XYBRID_MLX_REQUIRE: XYBRID_MLX_QWEN_DIR,XYBRID_MLX_QWEN_4BIT_DIR
+          XYBRID_MLX_TOGETHER_RUNS: 3
         run: |
           export XYBRID_MLX_QWEN_DIR="${GITHUB_WORKSPACE}/${MLX_FIXTURE}"
           export XYBRID_MLX_QWEN_4BIT_DIR="${GITHUB_WORKSPACE}/${MLX_FIXTURE}"

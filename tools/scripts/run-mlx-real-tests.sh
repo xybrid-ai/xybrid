@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
-# run-mlx-real-tests.sh — run the real-weight MLX tests, one process per test.
+# run-mlx-real-tests.sh — run the real-weight MLX tests so a crash is explained.
 #
 # MLX reports some failures by throwing where no caller can catch (a Metal
 # command buffer that fails throws from its completion handler), and the
-# process aborts. Run in one process, the first such test takes the others
-# down with it and the log names none of them. Here every test gets its own
-# process: a crash is attributed to its test, the remaining tests still run,
-# and the backtrace from the macOS crash report is printed so the log shows
-# where MLX threw.
+# process aborts. Run only in one process, the first such test takes the
+# others down with it and the log names none of them. So the tests run twice:
+#
+#   1. One process per test. A crash is attributed to its test and the
+#      remaining tests still run.
+#   2. All together in one process, the way an application holds its models:
+#      loads, generations and drops follow one another on different threads.
+#      This is the pass that catches what only shows between tests.
+#
+# When a process dies, the backtrace from its macOS crash report is printed,
+# so the log shows where MLX threw.
 #
 # Usage:
 #   XYBRID_MLX_QWEN_DIR=... XYBRID_MLX_QWEN_4BIT_DIR=... \
@@ -20,6 +26,7 @@
 # failure instead of a skip.
 #
 # XYBRID_MLX_TEST_BIN runs an already-built test binary instead of building.
+# XYBRID_MLX_TOGETHER_RUNS repeats the one-process pass (default 1).
 
 set -uo pipefail
 
@@ -37,6 +44,9 @@ REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 # Cargo runs a package's tests from the package directory.
 TEST_CWD="$REPO_ROOT/crates/xybrid-core"
 CRASH_REPORTS="${XYBRID_MLX_CRASH_REPORTS:-$HOME/Library/Logs/DiagnosticReports}"
+TOGETHER_RUNS="${XYBRID_MLX_TOGETHER_RUNS:-1}"
+# Seconds to wait for the system to write a crash report after a process dies.
+CRASH_REPORT_WAIT="${XYBRID_MLX_CRASH_REPORT_WAIT:-20}"
 
 if ! command -v jq >/dev/null 2>&1; then
     echo "error: jq is required" >&2
@@ -92,15 +102,16 @@ done
 # `$1` was created: what it died of, and the crashed thread's backtrace. For
 # an uncaught C++ exception that thread still holds the frames that threw.
 print_crash_report() {
-    local marker="$1" report="" _
+    local marker="$1" report="" waited=0
     # The report is written a moment after the process dies.
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
+    while :; do
         report=$(find "$CRASH_REPORTS" -maxdepth 1 -name "$(basename "$BIN")*.ips" \
             -newer "$marker" 2>/dev/null | sort | tail -1)
-        if [ -n "$report" ]; then
+        if [ -n "$report" ] || [ "$waited" -ge "$CRASH_REPORT_WAIT" ]; then
             break
         fi
         sleep 2
+        waited=$((waited + 2))
     done
     if [ -z "$report" ]; then
         echo "   (no crash report appeared in $CRASH_REPORTS)"
@@ -125,30 +136,45 @@ print_crash_report() {
 }
 
 failed=()
-for test in "${TESTS[@]}"; do
-    echo "== $test"
-    marker="$SCRATCH/marker"
+
+# Run the test binary with the given libtest arguments and record a failure
+# under the label `$1`. A process that died gets its crash report printed.
+run_pass() {
+    local label="$1" marker="$SCRATCH/marker" status
+    shift
     : > "$marker"
-    (cd "$TEST_CWD" && "$BIN" --exact "$test" --nocapture --test-threads=1)
+    (cd "$TEST_CWD" && "$BIN" "$@")
     status=$?
     if [ "$status" -eq 0 ]; then
-        continue
+        return
     fi
     # 128 + signal: the process died instead of failing an assertion.
     if [ "$status" -gt 128 ]; then
-        failed+=("$test (signal $((status - 128)))")
-        echo "-- $test died with signal $((status - 128))"
+        failed+=("$label (signal $((status - 128)))")
+        echo "-- $label died with signal $((status - 128))"
         print_crash_report "$marker"
     else
-        failed+=("$test (exit $status)")
+        failed+=("$label (exit $status)")
     fi
+}
+
+for test in "${TESTS[@]}"; do
+    echo "== $test"
+    run_pass "$test" --exact "$test" --nocapture --test-threads=1
+done
+
+run=1
+while [ "$run" -le "$TOGETHER_RUNS" ]; do
+    echo "== all ${#TESTS[@]} in one process (run $run of $TOGETHER_RUNS)"
+    run_pass "all in one process, run $run" --exact "${TESTS[@]}" --nocapture
+    run=$((run + 1))
 done
 
 echo "== summary"
 if [ "${#failed[@]}" -eq 0 ]; then
-    echo "all ${#TESTS[@]} real-weight tests passed"
+    echo "all ${#TESTS[@]} real-weight tests passed, alone and in one process"
     exit 0
 fi
-echo "${#failed[@]} of ${#TESTS[@]} real-weight tests failed:"
+echo "${#failed[@]} failure(s):"
 printf '  %s\n' "${failed[@]}"
 exit 1

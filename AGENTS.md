@@ -302,6 +302,24 @@ User-facing behavior is in `docs/backends/mlx.md`.
   inside MLX. Every path that evaluates MLX arrays (a load, a generation, an
   embedding run) takes `xybrid_mlx::exclusive()` first, before any adapter
   lock. `tests/mlx_llm_chat.rs` runs two models at once to hold this.
+  `MlxArray::eval` and `async_eval` take the lock themselves (it is
+  reentrant), so the safe API cannot be raced; the operation-wide guard is
+  still needed, because a run keeps lazy graphs in flight between evaluations.
+- **A dropped model gives its memory back.** MLX frees arrays into a pool it
+  keeps, so the struct that owns a model's weights ends with a
+  `xybrid_mlx::ReleasePooledMemory` field (last, so the weights drop first),
+  and a load declares one before it materializes anything. It never waits for
+  the lock: an operation in flight clears the pool as it finishes. Tests
+  assert MLX's active and pooled bytes return to where they started.
+- **Every first MLX call goes through `ensure_metallib_resource`.** It installs
+  xybrid's error handler too; mlx-c's default one prints and exits the
+  process. A new `xybrid-mlx` entry point that can be a process's first MLX
+  call (an allocator query, say) calls it before touching the FFI.
+- **Real-weight tests run through `tools/scripts/run-mlx-real-tests.sh`**: one
+  process per test, then all in one process, with the crash report's backtrace
+  printed when a process dies. MLX and the Metal stack abort on failures no
+  caller can catch, and a bare `cargo test` names neither the test nor the
+  frame.
 - **Automatic registry selection must not change other builds.** Only a build
   that can run MLX asks the registry for a `safetensors` variant
   (`registry_format_for_auto_local_backend`). Every other build resolves the

@@ -116,6 +116,7 @@ A request for something on this list fails with an error; it is never answered w
 Other differences from llama.cpp:
 
 - **One MLX operation at a time.** MLX does not tolerate two threads evaluating at once, so loads, generations and embedding runs are serialized across the whole process. Two MLX models never run in parallel; the second waits. A streaming generation holds its turn until it ends, so a token callback must not block on another thread's MLX call (an embedding of the text so far, say): that call is waiting for the stream to finish. Do such work on the callback's own thread, or after the stream.
+- **Unloading frees memory when MLX is idle.** A dropped or unloaded model's memory goes back to the system at once, or, if another MLX model is mid-run, when that run finishes.
 - **No prompt reuse across turns.** Every call evaluates its whole prompt again. A long conversation costs more per turn than on llama.cpp, which keeps the shared prefix.
 - **Gemma reasoning.** A reasoning model's thinking is split off the answer and returned as `reasoning_content`, as on llama.cpp. Gemma 4 always answers directly, on both backends.
 
@@ -126,7 +127,7 @@ Other differences from llama.cpp:
 CI runs the MLX runtime on Apple Silicon in two lanes, both only when something that reaches the runtime changed. The non-linking tier is checked on Linux for every code change.
 
 - `check (llm-mlx-runtime, macos)` in `ci.yml` uses synthetic, randomly initialized bundles written by the tests themselves, through the adapters, the executor, the SDK and the CLI.
-- `Test MLX (integration, real model)` in `test-mlx.yml` downloads one small real bundle, the `qwen3-0.6b-4bit-mlx` fixture (335 MB, pinned by revision and checksum), and runs the chat, streaming, cancellation and two-models-at-once tests on it, then the bundle through the CLI.
+- `Test MLX (integration, real model)` in `test-mlx.yml` downloads one small real bundle, the `qwen3-0.6b-4bit-mlx` fixture (335 MB, pinned by revision and checksum), and runs the chat, streaming, cancellation, two-models-at-once and memory-release tests on it, then the bundle through the CLI. `tools/scripts/run-mlx-real-tests.sh` runs each test in its own process and then all of them in one, and prints the crash report's backtrace if a process dies.
 
 The other real-weight tests are for bundles too large to download in CI. They run only when an environment variable points at a bundle staged on disk, and skip otherwise:
 
