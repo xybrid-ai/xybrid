@@ -3,6 +3,7 @@
 //! This module contains the core types that define how models are executed.
 
 use super::choice::ChoiceScorerSpec;
+use super::decision::DecisionTemplate;
 use super::steps::{ImageNormalizePreset, ImageResizeMode, ImageTensorLayout, InterpolationMethod};
 use super::steps::{PostprocessingStep, PreprocessingStep};
 use super::voice::{VoiceConfig, VoiceInfo};
@@ -261,6 +262,9 @@ pub enum ExecutionTemplate {
         /// candidate logits.
         scorer: ChoiceScorerSpec,
     },
+
+    /// Local typed decisions without generated text.
+    Decision(DecisionTemplate),
 }
 
 /// Sampling parameters for GGUF generation. All fields optional so metadata
@@ -442,6 +446,12 @@ pub struct VisionEncoderConfig {
     /// Optional patch size for patch-count/capability planning.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patch_size: Option<usize>,
+    /// Optional cap on how many tokens one image may become. The encoder
+    /// scales larger images down to fit; without a cap its own limit
+    /// applies, and native-resolution encoders (LFM3-VL) turn one photo into
+    /// thousands of tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_image_tokens: Option<usize>,
 }
 
 impl VisionEncoderConfig {
@@ -678,6 +688,10 @@ impl ModelMetadata {
             if vision_encoder.image_size == 0 {
                 return Err("vision_encoder image_size must be greater than 0".to_string());
             }
+
+            if vision_encoder.max_image_tokens == Some(0) {
+                return Err("vision_encoder max_image_tokens must be greater than 0".to_string());
+            }
         }
 
         Ok(())
@@ -769,6 +783,7 @@ pub fn backend_label_from_template(
     hint: Option<&str>,
 ) -> Option<&'static str> {
     match template {
+        ExecutionTemplate::Decision(_) => Some("llamacpp"),
         ExecutionTemplate::Onnx { .. } => Some("ort"),
         // SafeTensors is Candle's native format. Unknown or deferred
         // backend hints fall back to Candle so telemetry reflects the
@@ -863,6 +878,7 @@ pub fn quantization_label_from_metadata(metadata: &ModelMetadata) -> Option<Stri
         return Some(normalize_quantization_label(declared));
     }
     let model_file = match &metadata.execution_template {
+        ExecutionTemplate::Decision(spec) => Some(&spec.model_file),
         ExecutionTemplate::Gguf { model_file, .. } => Some(model_file),
         ExecutionTemplate::VisionLanguage { model_file, .. } => Some(model_file),
         ExecutionTemplate::LiteRtLm { model_file, .. } => Some(model_file),
@@ -965,7 +981,7 @@ pub fn span_kind_from_template(template: &ExecutionTemplate) -> &'static str {
             "cpu"
         }
         // ONNX Runtime on its CPU provider, like the plain ONNX arm.
-        ExecutionTemplate::ChoiceScorer { .. } => "cpu",
+        ExecutionTemplate::ChoiceScorer { .. } | ExecutionTemplate::Decision(_) => "cpu",
         ExecutionTemplate::Onnx { .. }
         | ExecutionTemplate::TfLite { .. }
         | ExecutionTemplate::LiteRtLm { .. }

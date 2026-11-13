@@ -1,12 +1,14 @@
 //! Cloud client implementation.
 
 use super::completion::{CompletionRequest, CompletionResponse, Role};
-use super::config::{same_origin, CloudBackend, CloudConfig};
-use super::error::CloudError;
-use crate::http::{with_retry, CircuitBreaker, CircuitConfig, RetryPolicy, RetryResult};
+use super::config::{platform_gateway_url, same_origin, CloudBackend, CloudConfig};
+use super::error::{is_insufficient_quota, CloudError, INSUFFICIENT_QUOTA};
+use crate::http::{
+    parse_retry_after, with_retry, CircuitBreaker, CircuitConfig, RetryPolicy, RetryResult,
+};
 use serde_json::json;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 /// Default timeout for HTTP connections (10 seconds).
 const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 10_000;
@@ -24,7 +26,11 @@ const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 10_000;
 ///
 /// The client includes production-hardening features:
 /// - **Circuit breaker**: Prevents hammering failing gateway endpoints
-/// - **Automatic retry**: Exponential backoff with jitter for transient failures
+/// - **Automatic retry**: Exponential backoff with jitter for transient failures,
+///   honoring a server `Retry-After` only within
+///   [`MAX_RETRY_AFTER`](crate::http::MAX_RETRY_AFTER) (longer gives up at once)
+/// - **Spent quota fails fast**: a 429 `insufficient_quota` is never retried;
+///   the error carries the server's message
 /// - **Connection timeouts**: Fail fast on unresponsive endpoints
 ///
 /// # Example
@@ -118,8 +124,10 @@ impl Cloud {
         &self,
         request: CompletionRequest,
     ) -> Result<CompletionResponse, CloudError> {
-        // Check circuit breaker before attempting
-        if !self.gateway_circuit.can_execute() {
+        // Fail fast while the circuit is open. `is_refusing` takes no request:
+        // `with_retry` takes one per attempt, and one taken here would be a
+        // half-open circuit's only test request, which no attempt then gets.
+        if self.gateway_circuit.is_refusing() {
             return Err(CloudError::CircuitOpen(
                 "Gateway circuit breaker is open due to recent failures. Try again later.".into(),
             ));
@@ -128,9 +136,20 @@ impl Cloud {
         // Clone request data needed for retry closure
         let request_clone = request.clone();
 
+        // Each retry is an execution attempt of its own: report it (with the
+        // failed try's error class and when it failed) before re-sending, so
+        // the recorder can give the re-sent request a new parent context.
+        let mut failed_try: Option<(&'static str, Instant)> = None;
         let result: RetryResult<CompletionResponse, CloudError> =
             with_retry(&self.retry_policy, Some(&self.gateway_circuit), || {
-                self.call_gateway(request_clone.clone())
+                if let Some((error_type, failed_at)) = failed_try.take() {
+                    crate::tracing::record_request_retry(error_type, failed_at);
+                }
+                let outcome = self.call_gateway(request_clone.clone());
+                if let Err(error) = &outcome {
+                    failed_try = Some((error.error_type(), Instant::now()));
+                }
+                outcome
             });
 
         result.into_result()
@@ -177,10 +196,12 @@ impl Cloud {
             );
         }
 
-        let mut req = self
-            .agent
-            .post(&url)
-            .set("Content-Type", "application/json");
+        let mut req = inject_transport_trace_headers(
+            &self.config.gateway_url,
+            self.agent
+                .post(&url)
+                .set("Content-Type", "application/json"),
+        );
 
         if let Some(ref key) = api_key {
             req = req.set("Authorization", &format!("Bearer {}", key));
@@ -225,19 +246,34 @@ impl Cloud {
                 })
             }
             Err(ureq::Error::Status(status, resp)) => {
-                // Parse Retry-After header for rate limiting (before consuming response)
+                // Parse Retry-After header for rate limiting (before consuming
+                // response). Either RFC form; a date or a delay past the
+                // retry budget then ends the retry at once.
                 let retry_after_secs = resp
                     .header("Retry-After")
-                    .and_then(|v| v.parse::<u64>().ok())
-                    .unwrap_or(60); // Default to 60 seconds if not specified
+                    .and_then(|v| parse_retry_after(v, SystemTime::now()))
+                    .map_or(60, |wait| wait.as_secs()); // Default to 60 seconds if not specified
 
-                let error_body: Result<serde_json::Value, _> = resp.into_json();
-                let message = error_body
-                    .ok()
-                    .and_then(|v| v["error"]["message"].as_str().map(|s| s.to_string()))
-                    .unwrap_or_else(|| "Unknown error".into());
+                let error_body = resp.into_json::<serde_json::Value>().ok();
+                let error = error_body.as_ref().map(|v| &v["error"]);
+                let spent_quota = error
+                    .is_some_and(|e| is_insufficient_quota(e["code"].as_str(), e["type"].as_str()));
+                let message = error
+                    .and_then(|e| e["message"].as_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| {
+                        if spent_quota {
+                            INSUFFICIENT_QUOTA.to_string()
+                        } else {
+                            "Unknown error".into()
+                        }
+                    });
 
                 match status {
+                    // A spent quota is not a rate limit: waiting (even the
+                    // server's `Retry-After`) does not restore it, and the
+                    // message says what does. Not retryable.
+                    429 if spent_quota => Err(CloudError::ApiError { status, message }),
                     429 => Err(CloudError::RateLimited { retry_after_secs }),
                     502..=504 => Err(CloudError::GatewayError(format!(
                         "Gateway returned {}: {}",
@@ -400,6 +436,26 @@ fn resolve_direct_api_key(
         destination,
         provider.api_key_env_var()
     )))
+}
+
+/// Adds W3C trace context to a request on the OpenAI-compatible transport
+/// bound for `destination`.
+///
+/// Context leaves the process automatically only for the configured Xybrid
+/// platform gateway — the same single origin that may receive the platform
+/// API key automatically (see [`CloudConfig::resolve_api_key`]). Any other
+/// origin, such as a `backend: direct` provider's base URL or a stage's custom
+/// `gateway_url`, is a third party: it receives context only when the
+/// session's provider allowlist names that exact origin.
+pub(crate) fn inject_transport_trace_headers(
+    destination: &str,
+    request: ureq::Request,
+) -> ureq::Request {
+    if same_origin(destination, &platform_gateway_url()) {
+        crate::tracing::inject_trace_headers(request)
+    } else {
+        crate::tracing::inject_provider_trace_headers(request)
+    }
 }
 
 /// Extract `choices[0].message.content` from an OpenAI-shaped 200 response.
@@ -1076,8 +1132,387 @@ mod tests {
         assert!(limited.is_retryable());
         assert_eq!(limited.retry_after(), Some(Duration::from_secs(7)));
 
+        // A 429 left as `ApiError` is a spent quota: waiting does not help.
+        let spent_quota = CloudError::ApiError {
+            status: 429,
+            message: "claim this workspace".to_string(),
+        };
+        assert!(!spent_quota.is_retryable());
+        assert_eq!(spent_quota.retry_after(), None);
+
+        for status in [502, 503, 504] {
+            let upstream = CloudError::ApiError {
+                status,
+                message: "upstream".to_string(),
+            };
+            assert!(upstream.is_retryable(), "{status}");
+        }
+
         let empty_answer = CloudError::ParseError("empty".to_string());
         assert!(!empty_answer.is_retryable());
+    }
+
+    /// What the platform gateway says to an unclaimed agent workspace over its
+    /// quota (abridged); the claim guidance is the part callers must see.
+    const QUOTA_MESSAGE: &str = "This agent workspace has used its free quota. \
+        Claim it at https://xybrid.dev/claim to keep going.";
+
+    /// Gateway client aimed at a loopback httpmock server.
+    fn loopback_gateway(server: &httpmock::MockServer) -> Cloud {
+        let mut config = CloudConfig::gateway().with_default_model("test-model");
+        config.gateway_url = server.base_url();
+        Cloud::with_config(config).expect("client construction")
+    }
+
+    fn openai_error_body(message: &str, error_type: Option<&str>, code: Option<&str>) -> String {
+        json!({ "error": { "message": message, "type": error_type, "code": code } }).to_string()
+    }
+
+    fn rate_limited_body() -> String {
+        openai_error_body(
+            "Rate limit reached",
+            Some("rate_limit_error"),
+            Some("rate_limit_exceeded"),
+        )
+    }
+
+    /// Below the shortest policy backoff (conservative: 2 s, -50% jitter), so
+    /// any wait at all fails the bound.
+    const PROMPT: Duration = Duration::from_secs(1);
+
+    #[test]
+    fn insufficient_quota_429_fails_fast_with_the_server_message() {
+        use crate::http::RetryableError;
+        use httpmock::prelude::*;
+
+        // The platform gateway's shape (both fields, no Retry-After, its own
+        // reset header): read as a rate limit, that would wait the default
+        // 60 s, so only detection keeps it inside `PROMPT`. Then either field
+        // alone, with the day-long Retry-After earlier gateways sent.
+        for (error_type, code, retry_after) in [
+            (Some("insufficient_quota"), Some("insufficient_quota"), None),
+            (
+                Some("insufficient_quota"),
+                Some("insufficient_quota"),
+                Some("86400"),
+            ),
+            (
+                Some("invalid_request_error"),
+                Some("insufficient_quota"),
+                Some("86400"),
+            ),
+            (Some("insufficient_quota"), None, Some("86400")),
+        ] {
+            let server = MockServer::start();
+            let gateway = server.mock(|when, then| {
+                when.method(POST).path("/chat/completions");
+                let then = then
+                    .status(429)
+                    .header("X-Xybrid-Quota-Reset", "2026-11-10T00:00:00Z")
+                    .header("content-type", "application/json")
+                    .body(openai_error_body(QUOTA_MESSAGE, error_type, code));
+                if let Some(retry_after) = retry_after {
+                    then.header("Retry-After", retry_after);
+                }
+            });
+
+            let started = Instant::now();
+            let err = loopback_gateway(&server)
+                .complete(CompletionRequest::new("hello"))
+                .expect_err("over quota");
+            let elapsed = started.elapsed();
+
+            gateway.assert_hits(1);
+            assert!(
+                elapsed < PROMPT,
+                "{error_type:?}/{code:?}: took {elapsed:?}"
+            );
+            match &err {
+                CloudError::ApiError { status, message } => {
+                    assert_eq!(*status, 429);
+                    assert_eq!(message, QUOTA_MESSAGE);
+                }
+                other => panic!("{error_type:?}/{code:?}: expected ApiError, got {other:?}"),
+            }
+            assert!(!err.is_retryable());
+            assert!(err.to_string().contains(QUOTA_MESSAGE), "{err}");
+        }
+    }
+
+    #[test]
+    fn rate_limit_longer_than_the_retry_budget_gives_up_promptly() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let gateway = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(429)
+                .header("Retry-After", "86400")
+                .header("content-type", "application/json")
+                .body(rate_limited_body());
+        });
+
+        let started = Instant::now();
+        let err = loopback_gateway(&server)
+            .complete(CompletionRequest::new("hello"))
+            .expect_err("rate limited");
+        let elapsed = started.elapsed();
+
+        gateway.assert_hits(1);
+        assert!(elapsed < PROMPT, "took {elapsed:?}");
+        // The server's real value is reported, not a clamped one.
+        assert!(
+            matches!(
+                err,
+                CloudError::RateLimited {
+                    retry_after_secs: 86_400
+                }
+            ),
+            "{err:?}"
+        );
+    }
+
+    /// The other ways a server says "much later" are read as such, rather
+    /// than as the 60 s default that would fit the budget and be slept.
+    #[test]
+    fn retry_after_date_or_huge_delay_past_the_budget_gives_up_promptly() {
+        use httpmock::prelude::*;
+
+        for (retry_after, at_least) in [
+            // RFC 9110's other form
+            ("Wed, 21 Oct 2099 07:28:00 GMT", 86_400),
+            // Too large for u64
+            ("99999999999999999999999", u64::MAX),
+        ] {
+            let server = MockServer::start();
+            let gateway = server.mock(|when, then| {
+                when.method(POST).path("/chat/completions");
+                then.status(429)
+                    .header("Retry-After", retry_after)
+                    .header("content-type", "application/json")
+                    .body(rate_limited_body());
+            });
+
+            let started = Instant::now();
+            let err = loopback_gateway(&server)
+                .complete(CompletionRequest::new("hello"))
+                .expect_err("rate limited");
+            let elapsed = started.elapsed();
+
+            gateway.assert_hits(1);
+            assert!(elapsed < PROMPT, "{retry_after}: took {elapsed:?}");
+            match err {
+                CloudError::RateLimited { retry_after_secs } => {
+                    assert!(
+                        retry_after_secs >= at_least,
+                        "{retry_after}: {retry_after_secs}"
+                    )
+                }
+                other => panic!("{retry_after}: expected RateLimited, got {other:?}"),
+            }
+        }
+    }
+
+    /// A long-lived client keeps reporting a spent quota in the server's own
+    /// words: the refusals do not add up to an open circuit breaker, whose
+    /// "try again later" would be wrong (waiting does not restore a quota).
+    #[test]
+    fn reused_client_keeps_reporting_the_spent_quota() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let gateway = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(429)
+                .header("content-type", "application/json")
+                .body(openai_error_body(
+                    QUOTA_MESSAGE,
+                    Some("insufficient_quota"),
+                    Some("insufficient_quota"),
+                ));
+        });
+        let cloud = loopback_gateway(&server);
+
+        // Past the breaker's failure threshold
+        let calls = CircuitConfig::default().failure_threshold + 2;
+        for call in 0..calls {
+            match cloud.complete(CompletionRequest::new("hello")) {
+                Err(CloudError::ApiError {
+                    status: 429,
+                    message,
+                }) => {
+                    assert_eq!(message, QUOTA_MESSAGE, "call {call}")
+                }
+                other => panic!("call {call}: expected the quota refusal, got {other:?}"),
+            }
+        }
+        gateway.assert_hits(calls as usize);
+        assert!(!cloud.is_circuit_open());
+    }
+
+    #[test]
+    fn short_retry_after_is_still_honored_and_retried() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let mut limited = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(429)
+                .header("Retry-After", "1")
+                .header("content-type", "application/json")
+                .body(rate_limited_body());
+        });
+        let cloud = loopback_gateway(&server);
+
+        let started = Instant::now();
+        let (response, limited_hits, answered) = std::thread::scope(|scope| {
+            // Lift the rate limit once the first request has been refused, well
+            // inside the one-second wait the server asked for.
+            let lift = scope.spawn(|| {
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while limited.hits() == 0 && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                let hits = limited.hits();
+                limited.delete();
+                let answered = server.mock(|when, then| {
+                    when.method(POST).path("/chat/completions");
+                    then.status(200)
+                        .header("content-type", "application/json")
+                        .body(
+                            json!({
+                                "id": "chatcmpl-1",
+                                "model": "test-model",
+                                "choices": [{
+                                    "message": { "role": "assistant", "content": "after the wait" },
+                                    "finish_reason": "stop",
+                                }],
+                            })
+                            .to_string(),
+                        );
+                });
+                (hits, answered)
+            });
+            let response = cloud.complete(CompletionRequest::new("hello"));
+            let (hits, answered) = lift.join().expect("lift thread");
+            (response, hits, answered)
+        });
+        let elapsed = started.elapsed();
+
+        let response = response.expect("retried after the server's wait");
+        assert_eq!(response.text, "after the wait");
+        assert_eq!(limited_hits, 1);
+        answered.assert_hits(1);
+        assert!(
+            elapsed >= Duration::from_secs(1),
+            "retried before the server's Retry-After: {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn server_errors_still_retry_with_policy_backoff() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let gateway = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(503)
+                .header("content-type", "application/json")
+                .body(openai_error_body("upstream unavailable", None, None));
+        });
+        let mut cloud = loopback_gateway(&server);
+        cloud.retry_policy = RetryPolicy {
+            max_attempts: 3,
+            initial_delay_ms: 1,
+            max_delay_ms: 5,
+            jitter_factor: 0.0,
+        };
+
+        let err = cloud
+            .complete(CompletionRequest::new("hello"))
+            .expect_err("gateway down");
+
+        gateway.assert_hits(3);
+        match err {
+            CloudError::GatewayError(message) => {
+                assert!(message.contains("503"), "{message}");
+                assert!(message.contains("upstream unavailable"), "{message}");
+            }
+            other => panic!("expected GatewayError, got {other:?}"),
+        }
+    }
+
+    /// Once the open duration is over, the next call is the half-open probe
+    /// and reaches the gateway. The fail-fast check ahead of the retry loop
+    /// must not take that request itself: the loop takes one for each
+    /// attempt, and with only one to give, a second ask is refused every
+    /// time, so no request would ever be sent and the circuit would never
+    /// close.
+    #[test]
+    fn half_open_circuit_lets_the_probe_reach_the_gateway() {
+        use crate::http::CircuitState;
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let gateway = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(
+                    json!({
+                        "id": "chatcmpl-1",
+                        "model": "test-model",
+                        "choices": [{
+                            "message": { "role": "assistant", "content": "back" },
+                            "finish_reason": "stop",
+                        }],
+                    })
+                    .to_string(),
+                );
+        });
+        let mut cloud = loopback_gateway(&server);
+        cloud.gateway_circuit = Arc::new(CircuitBreaker::new(CircuitConfig {
+            failure_threshold: 1,
+            open_duration_ms: 0,
+            half_open_max: 1,
+        }));
+        cloud.gateway_circuit.record_failure();
+        assert!(cloud.is_circuit_open());
+
+        let response = cloud
+            .complete(CompletionRequest::new("hello"))
+            .expect("the half-open probe is sent");
+
+        assert_eq!(response.text, "back");
+        gateway.assert_hits(1);
+        assert_eq!(cloud.gateway_circuit.state(), CircuitState::Closed);
+    }
+
+    /// A circuit still inside its open duration fails fast, without a request
+    /// and without waiting through the retry loop.
+    #[test]
+    fn open_circuit_fails_fast_without_a_request() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let gateway = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200);
+        });
+        let cloud = loopback_gateway(&server);
+        for _ in 0..CircuitConfig::default().failure_threshold {
+            cloud.gateway_circuit.record_failure();
+        }
+
+        let started = Instant::now();
+        let err = cloud
+            .complete(CompletionRequest::new("hello"))
+            .expect_err("circuit open");
+
+        assert!(matches!(err, CloudError::CircuitOpen(_)), "{err:?}");
+        assert!(started.elapsed() < Duration::from_millis(100));
+        gateway.assert_hits(0);
+        assert!(cloud.is_circuit_open());
     }
 
     #[test]

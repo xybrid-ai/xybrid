@@ -26,8 +26,22 @@ REAL_RUN = update.run
 class ReleaseTests(unittest.TestCase):
     def setUp(self) -> None:
         self.directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
+        # All real Git calls, including update.run and submodules, use the
+        # controlled environment rather than host credentials or launchers.
+        environment = {"PATH": os.defpath, "LC_ALL": "C", "GIT_CONFIG_NOSYSTEM": "1",
+                       "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
+                       # Runtime config propagates to nested clone/fetch Git
+                       # processes, before their repository config exists.
+                       "GIT_CONFIG_COUNT": "2",
+                       "GIT_CONFIG_KEY_0": "maintenance.auto", "GIT_CONFIG_VALUE_0": "false",
+                       "GIT_CONFIG_KEY_1": "gc.auto", "GIT_CONFIG_VALUE_1": "0"}
+        environment_patch = patch.dict(os.environ, environment, clear=True)
+        environment_patch.start()
+        self.addCleanup(environment_patch.stop)
+        # Clean the owned directory strictly while that environment is active;
+        # unittest restores the original environment even if cleanup raises.
+        self.addCleanup(self.directory.cleanup)
         self.write("Cargo.toml", '[workspace]\nmembers = ["crates/example"]\n\n'
                    '[workspace.package]\nversion = "0.10.1"\n')
         self.write("crates/example/Cargo.toml", '[package]\nname = "example"\n'
@@ -41,6 +55,11 @@ class ReleaseTests(unittest.TestCase):
         self.track(None)
         self.manifest()
         self.git("init", "--quiet", "--initial-branch=master")
+        # Keep hooks and detached housekeeping out of this temporary fixture;
+        # cleanup must remain strict and cannot race background Git writers.
+        self.git("config", "core.hooksPath", os.devnull)
+        self.git("config", "gc.auto", "0")
+        self.git("config", "maintenance.auto", "false")
         self.git("config", "user.email", "test@example.invalid")
         self.git("config", "user.name", "Test")
         self.git("add", ".")
@@ -299,6 +318,10 @@ class ReleaseTests(unittest.TestCase):
                 return REAL_RUN(["git", *args], upstream, stderr=subprocess.DEVNULL)
 
             git("init", "--quiet", "--initial-branch=master")
+            # This upstream is also disposable; no hooks or background writers.
+            git("config", "core.hooksPath", os.devnull)
+            git("config", "gc.auto", "0")
+            git("config", "maintenance.auto", "false")
             git("config", "user.email", "test@example.invalid")
             git("config", "user.name", "Test")
             source = upstream / "source.cpp"

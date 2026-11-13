@@ -17,10 +17,14 @@ rust_binary(
     visibility = ["//visibility:public"],
 )
 
-# Inline `#[cfg(test)] mod tests` (9) in the binary crate. `crate = ` recompiles
+# Inline `#[cfg(test)] mod tests` (16) in the binary crate. `crate = ` recompiles
 # the binary above with `--test`; it inherits srcs, edition and deps. No dev-deps.
 rust_test(
     name = "xtask_test",
     version = XYBRID_VERSION,
     crate = ":xtask",
+    # `bolt_package_name_matches_its_manifest` reads the bolt manifest relative
+    # to CARGO_MANIFEST_DIR, which rules_rust points at this package. Cargo
+    # reads it from the worktree; Bazel sandboxes the action, so it is declared.
+    data = ["//crates/xybrid-bolt:Cargo.toml"],
 )

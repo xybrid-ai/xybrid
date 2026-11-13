@@ -171,6 +171,10 @@ class Repository:
                             "GIT_COMMITTER_EMAIL": "policy@example.invalid"}
         self.git("init", "--quiet")
         self.git("config", "core.hooksPath", os.devnull)
+        # Detached Git housekeeping can outlive a commit and race teardown of
+        # this test-owned repository. No automatic maintenance is needed here.
+        self.git("config", "gc.auto", "0")
+        self.git("config", "maintenance.auto", "false")
         self.write(files)
         # An unchanged gitlink need not exist in the superproject object store.
         self.gitlink = "1" * 40
@@ -200,6 +204,40 @@ class Repository:
                    "context": context(self.base), "checksum": CHECKSUM}
         options.update(kwargs)
         return POLICY.source_binding(**options)
+
+
+class RepositoryFixtureTests(unittest.TestCase):
+    def test_fixture_commits_cannot_launch_background_housekeeping(self):
+        original_commit = Repository.commit
+        original_git = Repository.git
+
+        def checked_commit(repo):
+            self.assertEqual(repo.git("config", "--local", "--get", "gc.auto"), "0")
+            self.assertEqual(repo.git("config", "--local", "--get", "maintenance.auto"), "false")
+            return original_commit(repo)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "repo"
+            path.mkdir()
+            trace = root / "git-trace.jsonl"
+
+            def traced_git(repo, *arguments):
+                repo.environment["GIT_TRACE2_EVENT"] = str(trace)
+                return original_git(repo, *arguments)
+
+            with patch.object(Repository, "git", new=traced_git), \
+                    patch.object(Repository, "commit", autospec=True, side_effect=checked_commit):
+                repo = Repository(path, synthetic_files())
+                repo.write({"src/frozen.rs": "// another fixture commit\n"})
+                repo.commit()
+            events = [json.loads(line) for line in trace.read_text().splitlines()]
+            commits = [event for event in events
+                       if event.get("event") == "start" and "commit" in event.get("argv", [])]
+            self.assertEqual(len(commits), 2)
+            housekeeping = [event for event in events if event.get("event") == "child_start"
+                            and {"maintenance", "gc"}.intersection(event.get("argv", []))]
+            self.assertEqual(housekeeping, [])
 
 
 class JsonParsingTests(unittest.TestCase):

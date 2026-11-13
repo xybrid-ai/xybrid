@@ -46,7 +46,7 @@ coreml = ["bindings"]
 # "exactly one ggml" invariant enforceable: `links = "llama"` metadata tells
 # us where that ggml's headers and archives are, so whisper.cpp compiles and
 # links against them instead of configuring its own bundled copy.
-xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.13.1" }
+xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.18.0" }
 
 [build-dependencies]
 # whisper.cpp's library is ONE translation unit (`src/whisper.cpp`) whose only
@@ -55,4 +55,6 @@ xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.13.1" }
 # whisper's CMake would configure its bundled ggml, which is exactly what this
 # crate must not do.
 cc = "1.0"
-bindgen = "0.70"
+# 0.72.1 resolves forward-declared structs to their definitions with Clang 22+.
+# Older bindgen emits whisper_full_params as an opaque `_address` placeholder.
+bindgen = "0.72.1"

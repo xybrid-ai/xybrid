@@ -1,0 +1,24 @@
+{
+  "avg_latency_ms_24h": 79,
+  "daily_executions": [
+    {
+      "count": 4,
+      "date": "2026-11-11",
+      "error_count": 2,
+      "success_count": 2
+    }
+  ],
+  "executions_on_cloud": 0,
+  "executions_on_device": 4,
+  "success_rate_24h": 50.0,
+  "top_models": [
+    {
+      "count": 4,
+      "model_id": "lfm2.5-230m",
+      "target": "local"
+    }
+  ],
+  "total_executions_24h": 4,
+  "total_executions_30d": 4,
+  "total_executions_7d": 4
+}

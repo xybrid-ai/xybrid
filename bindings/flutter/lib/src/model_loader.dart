@@ -11,10 +11,91 @@ import 'context.dart';
 import 'envelope.dart';
 import 'generation_config.dart';
 import 'llm.dart';
+import 'observability.dart';
 import 'result.dart';
 import 'rust/api/model.dart';
 import 'run_options.dart';
 import 'tools.dart';
+
+// Native completion supplies metrics and correlation after the terminal token.
+// Hold that terminal token so successful turns still finalize exactly once.
+Stream<StreamToken> _tokensWithCompletion(
+    Stream<FfiStreamEvent> stream) async* {
+  StreamToken? pendingFinal;
+  var emittedToolCalls = false;
+  try {
+    await for (final event in stream) {
+      switch (event) {
+        case FfiStreamEvent_Token(:final field0):
+          final token = StreamToken(
+            token: field0.token,
+            index: field0.index,
+            cumulativeText: field0.cumulativeText,
+            isFinal: field0.finishReason != null,
+            finishReason: field0.finishReason,
+            toolCalls:
+                field0.toolCalls.map(ToolCall.fromFfi).toList(growable: false),
+            rawText: field0.rawText,
+          );
+          if (token.isFinal) {
+            pendingFinal = token;
+          } else {
+            if (token.toolCalls.isNotEmpty) emittedToolCalls = true;
+            yield token;
+          }
+        case FfiStreamEvent_Complete(:final field0):
+          final terminal = pendingFinal;
+          pendingFinal = null;
+          final calls = emittedToolCalls
+              ? const <ToolCall>[]
+              : terminal != null && terminal.toolCalls.isNotEmpty
+                  ? terminal.toolCalls
+                  : field0.toolCalls
+                      .map(ToolCall.fromFfi)
+                      .toList(growable: false);
+          if (calls.isNotEmpty) emittedToolCalls = true;
+          yield StreamToken(
+            token: terminal?.token ?? '',
+            index: terminal?.index ?? 0,
+            cumulativeText: terminal?.cumulativeText ?? field0.text ?? '',
+            isFinal: true,
+            finishReason: terminal?.finishReason ??
+                (calls.isEmpty ? 'stop' : 'tool_calls'),
+            metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
+            observation: field0.observation,
+            toolCalls: calls,
+            rawText: terminal?.rawText ?? (calls.isEmpty ? null : field0.text),
+          );
+        case FfiStreamEvent_Error(:final field0):
+          // Keep the existing terminal-then-error behavior when native result
+          // conversion fails after generation, so the error is never hidden.
+          if (pendingFinal != null) {
+            yield pendingFinal;
+            pendingFinal = null;
+          }
+          yield StreamToken(
+            token: '',
+            index: 0,
+            cumulativeText: '',
+            isFinal: true,
+            finishReason: 'error: $field0',
+          );
+      }
+    }
+  } catch (error) {
+    if (pendingFinal != null) yield pendingFinal;
+    pendingFinal = null;
+    yield StreamToken(
+      token: '',
+      index: 0,
+      cumulativeText: '',
+      isFinal: true,
+      finishReason: 'error: $error',
+    );
+  }
+  // Some native streams can close without a Complete event.
+  if (pendingFinal != null) yield pendingFinal;
+}
 
 /// Exception thrown when Xybrid operations fail.
 class XybridException implements Exception {
@@ -28,9 +109,9 @@ class XybridException implements Exception {
   String toString() => 'XybridException: $message';
 }
 
-/// Cooperative cancel handle for an in-flight streaming run.
+/// Cooperative cancel handle for an in-flight batch or streaming run.
 ///
-/// Construct one, pass it into [XybridModel.runStreaming],
+/// Construct one, pass it into [XybridModel.run], [XybridModel.runStreaming],
 /// [XybridModel.runStreamingWithContext], or
 /// [XybridModel.runStreamingWithFallback], and call [cancel] to halt Rust
 /// generation. Cancellation is cooperative: it takes effect at the next token
@@ -152,6 +233,10 @@ class XybridModelLoader {
 
   XybridModelLoader._(this._inner);
 
+  /// Return a loader with explicit parent, suppression and correlation controls.
+  XybridModelLoader withObservation(ObservationOptions options) =>
+      XybridModelLoader._(_inner.withObservation(options: options.toFfi()));
+
   /// Create a loader for a model from the Xybrid registry.
   ///
   /// The [modelId] should match a model ID in the registry (e.g., "kokoro-82m").
@@ -216,9 +301,17 @@ class XybridModelLoader {
   ///
   /// Downloads the model if loading from registry and not cached.
   /// Returns a ready-to-use [XybridModel] instance.
+  ///
+  /// Throws [XybridException] if loading fails, retaining the native diagnostic.
   Future<XybridModel> load() async {
-    final ffiModel = await _inner.load();
-    return XybridModel._(ffiModel);
+    try {
+      final ffiModel = await _inner.load();
+      return XybridModel._(ffiModel);
+    } on XybridException {
+      rethrow;
+    } catch (e) {
+      throw XybridException(e.toString());
+    }
   }
 
   /// Load the model with download progress updates.
@@ -250,10 +343,10 @@ class XybridModelLoader {
     return _inner.loadWithProgress().map((ffiEvent) {
       return switch (ffiEvent) {
         FfiLoadEvent_Progress(:final field0) => LoadProgress(
-          field0.progress,
-          downloadedBytes: field0.downloadedBytes.toInt(),
-          totalBytes: field0.totalBytes?.toInt(),
-        ),
+            field0.progress,
+            downloadedBytes: field0.downloadedBytes.toInt(),
+            totalBytes: field0.totalBytes?.toInt(),
+          ),
         FfiLoadEvent_Complete() => const LoadComplete(),
         FfiLoadEvent_Error(:final field0) => LoadError(field0),
       };
@@ -277,6 +370,9 @@ class XybridModel {
   final FfiModel inner;
 
   XybridModel._(this.inner);
+
+  /// Immutable reference for the load that created this model.
+  ObservationRef? get loadObservationRef => inner.loadObservationRef();
 
   /// Whether runs are currently answered by the cloud because the local
   /// weights are not ready yet. `false` for ordinary local models.
@@ -322,10 +418,10 @@ class XybridModel {
     return inner.downloadProgress().map((ffiEvent) {
       return switch (ffiEvent) {
         FfiLoadEvent_Progress(:final field0) => LoadProgress(
-          field0.progress,
-          downloadedBytes: field0.downloadedBytes.toInt(),
-          totalBytes: field0.totalBytes?.toInt(),
-        ),
+            field0.progress,
+            downloadedBytes: field0.downloadedBytes.toInt(),
+            totalBytes: field0.totalBytes?.toInt(),
+          ),
         FfiLoadEvent_Complete() => const LoadComplete(),
         FfiLoadEvent_Error(:final field0) => LoadError(field0),
       };
@@ -339,20 +435,29 @@ class XybridModel {
   ///
   /// Pass an optional [config] to control generation parameters (temperature,
   /// top-p, etc.). When `null`, the model's default parameters are used.
+  /// Decision requests reject explicit generation settings and observe
+  /// [cancellationToken] before preparation, between passes and at native abort
+  /// boundaries. They return all answers together or an error.
   ///
   /// Throws [XybridException] if inference fails.
   Future<XybridResult> run(
     XybridEnvelope envelope, {
     GenerationConfig? config,
+    CancellationToken? cancellationToken,
+    RunOptions? options,
   }) async {
     try {
       final ffiResult = await inner.run(
         envelope: envelope.inner,
         config: config?.toFfi(),
+        cancellationToken: cancellationToken?.inner.fork(),
+        options: options?.toFfi(),
       );
       return XybridResult.fromFfi(ffiResult);
+    } on XybridException {
+      rethrow;
     } catch (e) {
-      throw XybridException('Inference failed: $e');
+      throw XybridException(e.toString());
     }
   }
 
@@ -382,16 +487,20 @@ class XybridModel {
     XybridEnvelope envelope,
     ConversationContext context, {
     GenerationConfig? config,
+    RunOptions? options,
   }) async {
     try {
       final ffiResult = await inner.runWithContext(
         envelope: envelope.inner,
         context: context.inner,
         config: config?.toFfi(),
+        options: options?.toFfi(),
       );
       return XybridResult.fromFfi(ffiResult);
+    } on XybridException {
+      rethrow;
     } catch (e) {
-      throw XybridException('Inference with context failed: $e');
+      throw XybridException(e.toString());
     }
   }
 
@@ -445,64 +554,20 @@ class XybridModel {
     CancellationToken? cancellationToken,
     bool preempt = false,
     String? frameSessionId,
+    RunOptions? options,
   }) async* {
     try {
       // Use native streaming from FFI
       final stream = inner.runStream(
         envelope: envelope.inner,
         config: config?.toFfi(),
-        cancellationToken: cancellationToken?.inner,
+        cancellationToken: cancellationToken?.inner.fork(),
         preempt: preempt,
         frameSessionId: frameSessionId,
+        options: options?.toFfi(),
       );
 
-      var emittedFinal = false;
-
-      await for (final event in stream) {
-        switch (event) {
-          case FfiStreamEvent_Token(:final field0):
-            final isFinal = field0.finishReason != null;
-            if (isFinal) emittedFinal = true;
-            yield StreamToken(
-              token: field0.token,
-              index: field0.index,
-              cumulativeText: field0.cumulativeText,
-              isFinal: isFinal,
-              finishReason: field0.finishReason,
-              toolCalls: field0.toolCalls
-                  .map(ToolCall.fromFfi)
-                  .toList(growable: false),
-              rawText: field0.rawText,
-            );
-          case FfiStreamEvent_Complete(:final field0):
-            // Only emit if we haven't already emitted a final token
-            if (!emittedFinal) {
-              final calls = field0.toolCalls
-                  .map(ToolCall.fromFfi)
-                  .toList(growable: false);
-              yield StreamToken(
-                token: '',
-                index: 0,
-                cumulativeText: field0.text ?? '',
-                isFinal: true,
-                finishReason: calls.isEmpty ? 'stop' : 'tool_calls',
-                metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
-                toolCalls: calls,
-                rawText: calls.isEmpty ? null : field0.text,
-              );
-            }
-          case FfiStreamEvent_Error(:final field0):
-            // Even after a final token: the run can still fail once
-            // generation stops, e.g. on an output XybridResult cannot carry.
-            yield StreamToken(
-              token: '',
-              index: 0,
-              cumulativeText: '',
-              isFinal: true,
-              finishReason: 'error: $field0',
-            );
-        }
-      }
+      yield* _tokensWithCompletion(stream);
     } catch (e) {
       // Emit error token
       yield StreamToken(
@@ -523,17 +588,24 @@ class XybridModel {
   Stream<TtsAudioChunk> runTtsStreaming(
     XybridEnvelope envelope, {
     CancellationToken? cancellationToken,
+    RunOptions? options,
+    void Function(FfiTtsStreamResult result)? onComplete,
   }) async* {
     final stream = inner.runTtsStream(
       envelope: envelope.inner,
       config: null,
-      cancellationToken: cancellationToken?.inner,
+      cancellationToken: cancellationToken?.inner.fork(),
+      options: options?.toFfi(),
     );
     await for (final event in stream) {
       switch (event) {
         case FfiTtsStreamEvent_AudioChunk(:final pcm, :final sampleRate):
           yield TtsAudioChunk(pcm: pcm, sampleRate: sampleRate);
-        case FfiTtsStreamEvent_Complete():
+        case FfiTtsStreamEvent_Complete(:final field0):
+          onComplete?.call(field0);
+          if (field0.status == FfiTtsStatus.limited) {
+            throw StateError('TTS output limited; partial audio delivered');
+          }
           return;
         case FfiTtsStreamEvent_Error(:final field0):
           throw StateError('TTS streaming failed: $field0');
@@ -562,55 +634,10 @@ class XybridModel {
         envelope: envelope.inner,
         options: options.toFfi(),
         config: config?.toFfi(),
-        cancellationToken: cancellationToken?.inner,
+        cancellationToken: cancellationToken?.inner.fork(),
       );
 
-      var emittedFinal = false;
-
-      await for (final event in stream) {
-        switch (event) {
-          case FfiStreamEvent_Token(:final field0):
-            final isFinal = field0.finishReason != null;
-            if (isFinal) emittedFinal = true;
-            yield StreamToken(
-              token: field0.token,
-              index: field0.index,
-              cumulativeText: field0.cumulativeText,
-              isFinal: isFinal,
-              finishReason: field0.finishReason,
-              toolCalls: field0.toolCalls
-                  .map(ToolCall.fromFfi)
-                  .toList(growable: false),
-              rawText: field0.rawText,
-            );
-          case FfiStreamEvent_Complete(:final field0):
-            if (!emittedFinal) {
-              final calls = field0.toolCalls
-                  .map(ToolCall.fromFfi)
-                  .toList(growable: false);
-              yield StreamToken(
-                token: '',
-                index: 0,
-                cumulativeText: field0.text ?? '',
-                isFinal: true,
-                finishReason: calls.isEmpty ? 'stop' : 'tool_calls',
-                metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
-                toolCalls: calls,
-                rawText: calls.isEmpty ? null : field0.text,
-              );
-            }
-          case FfiStreamEvent_Error(:final field0):
-            // Even after a final token: the run can still fail once
-            // generation stops, e.g. on an output XybridResult cannot carry.
-            yield StreamToken(
-              token: '',
-              index: 0,
-              cumulativeText: '',
-              isFinal: true,
-              finishReason: 'error: $field0',
-            );
-        }
-      }
+      yield* _tokensWithCompletion(stream);
     } catch (e) {
       yield StreamToken(
         token: '',
@@ -668,15 +695,17 @@ class XybridModel {
     CancellationToken? cancellationToken,
     bool preempt = false,
     String? frameSessionId,
+    RunOptions? options,
   }) async* {
     try {
       final stream = inner.runStreamWithContext(
         envelope: envelope.inner,
         context: context.inner,
         config: config?.toFfi(),
-        cancellationToken: cancellationToken?.inner,
+        cancellationToken: cancellationToken?.inner.fork(),
         preempt: preempt,
         frameSessionId: frameSessionId,
+        options: options?.toFfi(),
       );
 
       // This method emits the native terminal token AND a completion token
@@ -713,6 +742,7 @@ class XybridModel {
               isFinal: true,
               finishReason: calls.isEmpty ? 'stop' : 'tool_calls',
               metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
+              observation: field0.observation,
               toolCalls: calls,
               rawText: calls.isEmpty ? null : field0.text,
             );

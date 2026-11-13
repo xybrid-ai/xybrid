@@ -42,7 +42,7 @@ use crate::platform::current_platform;
 use crate::source::detect_platform;
 use crate::telemetry_optout::is_telemetry_opted_out;
 use crate::{get_binding, DEFAULT_BINDING, SDK_VERSION};
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Utc};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -54,7 +54,10 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use xybrid_core::execution::{ExecutionTemplate, ModelMetadata};
-use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy};
+use xybrid_core::http::{
+    parse_retry_after, CircuitBreaker, CircuitConfig, RetryAfterBudget, RetryPolicy,
+    MAX_RETRY_AFTER,
+};
 
 /// How often a retry backoff wakes to check for cancellation.
 const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -116,14 +119,30 @@ fn build_client_header_with_optout(binding: &str, opted_out: bool) -> Option<Str
 /// Backends that pick which file the registry serves (`requires_backends`).
 /// Sent as `?backends=` because telemetry opt-out drops the header; only
 /// artifact-selecting names go here, never the full feature list.
-const ARTIFACT_BACKENDS: &[&str] = &["asr-whispercpp-coreml", "zzz-phonon-31m"];
+///
+/// `llamacpp-lfm3-d1-text-v1` (Liquid d1 decisions) is deliberately absent,
+/// as it is from `xybrid_core::features`: no build asks the registry for a
+/// decision artifact until the open reference comparison closes (P02 in
+/// docs/development/decision-conformance.md).
+const ARTIFACT_BACKENDS: &[&str] = &[
+    "asr-whispercpp-coreml",
+    "llamacpp-lfm3",
+    "llamacpp-lfm3vl",
+    "zzz-phonon-31m",
+];
 
 /// URL for `GET /v1/models/{mask}/resolve`.
 ///
 /// Takes the feature list as a parameter (the caller passes
 /// [`xybrid_core::features::enabled`]) so unit tests can cover both branches;
 /// only names in [`ARTIFACT_BACKENDS`] reach the query.
-fn resolve_url(api_url: &str, mask: &str, platform: &str, features: &[&str]) -> String {
+fn resolve_url(
+    api_url: &str,
+    mask: &str,
+    platform: &str,
+    features: &[&str],
+    os: Option<&str>,
+) -> String {
     let mut url = format!("{api_url}/v1/models/{mask}/resolve?platform={platform}");
     let backends: Vec<&str> = features
         .iter()
@@ -134,7 +153,108 @@ fn resolve_url(api_url: &str, mask: &str, platform: &str, features: &[&str]) -> 
         url.push_str("&backends=");
         url.push_str(&backends.join(","));
     }
+    if let Some(os) = os {
+        url.push_str("&os=");
+        url.push_str(os);
+    }
     url
+}
+
+/// A cross-platform lookup must not inherit the caller's runtime OS version.
+fn resolve_os_version(platform: &str, host_platform: &str, os: Option<String>) -> Option<String> {
+    if platform == host_platform {
+        os
+    } else {
+        None
+    }
+}
+
+/// Decode only known, well-formed compatibility refusals. Old registries and
+/// unrelated/malformed 404 bodies keep the historical `ModelNotFound` result.
+/// Bound the body before parsing: an error page is never a model artifact.
+/// The refusal's platform is authoritative: the registry gives a platform in
+/// the client header precedence over the legacy query platform.
+fn resolve_not_found(response: ureq::Response, mask: &str, platform: &str) -> SdkError {
+    const MAX_ERROR_BODY_BYTES: u64 = 16 * 1024;
+
+    #[derive(Deserialize)]
+    struct ErrorResponse {
+        error: Refusal,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(tag = "code")]
+    enum Refusal {
+        #[serde(rename = "BACKEND_REQUIRED")]
+        BackendRequired {
+            message: String,
+            platform: String,
+            requires_backends: Vec<String>,
+        },
+        #[serde(rename = "OS_VERSION_UNSUPPORTED")]
+        OsVersionUnsupported {
+            message: String,
+            platform: String,
+            os: String,
+            min_os: Vec<String>,
+        },
+    }
+
+    let mut body = Vec::new();
+    let parsed = response
+        .into_reader()
+        .take(MAX_ERROR_BODY_BYTES + 1)
+        .read_to_end(&mut body)
+        .ok()
+        .filter(|_| body.len() <= MAX_ERROR_BODY_BYTES as usize)
+        .and_then(|_| serde_json::from_slice::<ErrorResponse>(&body).ok());
+    match parsed.map(|response| response.error) {
+        Some(Refusal::BackendRequired {
+            message,
+            platform: refused_platform,
+            requires_backends,
+        }) if !refused_platform.trim().is_empty()
+            && !message.trim().is_empty()
+            && !requires_backends.is_empty()
+            && requires_backends
+                .iter()
+                .all(|backend| !backend.trim().is_empty()) =>
+        {
+            let enabled = xybrid_core::features::enabled();
+            SdkError::UnsupportedBackendCapability {
+                model_id: mask.to_owned(),
+                backend: if enabled.is_empty() {
+                    "none".to_owned()
+                } else {
+                    enabled.join(", ")
+                },
+                capability: requires_backends.join(", "),
+                hint: format!("BACKEND_REQUIRED: {message} (platform '{refused_platform}')"),
+            }
+        }
+        Some(Refusal::OsVersionUnsupported {
+            message,
+            platform: refused_platform,
+            os,
+            min_os,
+        }) if !refused_platform.trim().is_empty()
+            && !message.trim().is_empty()
+            && !os.trim().is_empty()
+            && !min_os.is_empty()
+            && min_os.iter().all(|floor| !floor.trim().is_empty()) =>
+        {
+            SdkError::OsVersionUnsupported {
+                model_id: mask.to_owned(),
+                platform: refused_platform,
+                os,
+                min_os,
+                message,
+            }
+        }
+        _ => SdkError::ModelNotFound(format!(
+            "Model '{mask}' not found or no compatible variant for platform '{platform}'"
+        )),
+    }
 }
 
 /// Header identifying which version of a file a partial download holds, so a
@@ -254,7 +374,7 @@ fn partial_len(path: &Path) -> u64 {
 /// known before the first request, so finishing file 1 of 2 reads 50% instead
 /// of restarting the bar. Entries with no declared size contribute `0`, and a
 /// total of `0` is treated as "unknown" by [`ProgressReporter`].
-fn total_declared_bytes(resolved: &ResolvedVariant) -> u64 {
+pub(crate) fn total_declared_bytes(resolved: &ResolvedVariant) -> u64 {
     // One undeclared size poisons the whole aggregate: the missing artifact's
     // bytes would push the running count past the "total", pin progress at the
     // in-flight ceiling for the rest of the download, and let the terminal
@@ -350,36 +470,33 @@ const DOWNLOAD_OFFLINE_RETRY_CAP: Duration = Duration::from_secs(10);
 /// Default retry delay when a 429 response omits or mangles Retry-After.
 const DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS: u64 = 60;
 
-/// Cap Retry-After to avoid a registry hint sleeping the client indefinitely.
+/// Largest Retry-After reported in [`SdkError::RateLimited`], for callers that
+/// wait on it themselves. The retry loops here never wait longer than
+/// [`xybrid_core::http::MAX_RETRY_AFTER`]: a hint above that ends them at once.
 const MAX_RATE_LIMIT_RETRY_AFTER_SECS: u64 = 5 * 60;
 
 fn rate_limit_retry_after_secs(retry_after: Option<&str>) -> u64 {
     rate_limit_retry_after_secs_at(retry_after, Utc::now())
 }
 
+/// The seconds a 429's `Retry-After` asks for, read the way the core cloud
+/// client reads it ([`parse_retry_after`]), capped at
+/// [`MAX_RATE_LIMIT_RETRY_AFTER_SECS`].
 fn rate_limit_retry_after_secs_at(retry_after: Option<&str>, now: DateTime<Utc>) -> u64 {
-    let Some(value) = retry_after.map(str::trim).filter(|value| !value.is_empty()) else {
-        return DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS;
-    };
-
-    if let Ok(seconds) = value.parse::<u64>() {
-        return seconds.min(MAX_RATE_LIMIT_RETRY_AFTER_SECS);
-    }
-
-    parse_retry_after_http_date(value, now).unwrap_or(DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS)
+    retry_after
+        .and_then(|value| parse_retry_after(value, now.into()))
+        .map_or(DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS, |wait| {
+            wait.as_secs().min(MAX_RATE_LIMIT_RETRY_AFTER_SECS)
+        })
 }
 
-fn parse_retry_after_http_date(value: &str, now: DateTime<Utc>) -> Option<u64> {
-    let parsed = DateTime::parse_from_rfc2822(value)
-        .map(|date| date.with_timezone(&Utc))
-        .or_else(|_| {
-            NaiveDateTime::parse_from_str(value, "%a, %d %b %Y %H:%M:%S GMT")
-                .map(|date| DateTime::<Utc>::from_naive_utc_and_offset(date, Utc))
-        })
-        .ok()?;
-
-    let seconds = parsed.signed_duration_since(now).num_seconds().max(0) as u64;
-    Some(seconds.min(MAX_RATE_LIMIT_RETRY_AFTER_SECS))
+/// Why [`RegistryClient::execute_with_retry_for_url`] gave up on a URL.
+#[derive(Debug)]
+enum UrlFailure {
+    /// The URL's circuit refused the first attempt, so nothing reached it.
+    Refused,
+    /// The URL's last attempt failed with this error.
+    Failed(SdkError),
 }
 
 /// Registry client for model resolution and download.
@@ -401,6 +518,10 @@ pub struct RegistryClient {
     download_stall_timeout: Duration,
     /// See [`DOWNLOAD_OFFLINE_PATIENCE`].
     download_offline_patience: Duration,
+    /// Server-directed (`Retry-After`) waiting one call may do, across every
+    /// registry URL it tries or every attempt of one download:
+    /// [`MAX_RETRY_AFTER`], which tests shorten.
+    retry_after_limit: Duration,
     /// Binding identifier reported via the `X-Xybrid-Client` header.
     binding: &'static str,
 }
@@ -448,6 +569,7 @@ impl RegistryClient {
             download_retry_policy: RetryPolicy::conservative(),
             download_stall_timeout: DOWNLOAD_STALL_TIMEOUT,
             download_offline_patience: DOWNLOAD_OFFLINE_PATIENCE,
+            retry_after_limit: MAX_RETRY_AFTER,
             binding: get_binding(),
         })
     }
@@ -481,6 +603,7 @@ impl RegistryClient {
     /// When [`is_telemetry_opted_out`] is true, returns the request unchanged so
     /// no header is set on the wire.
     fn apply_client_header(&self, req: ureq::Request) -> ureq::Request {
+        let req = xybrid_core::tracing::inject_trace_headers(req);
         self.apply_client_header_with_optout(req, is_telemetry_opted_out())
     }
 
@@ -568,7 +691,7 @@ impl RegistryClient {
             let url = format!("{}/v1/models/{}", api_url, mask);
             let req = self.apply_client_header(self.agent.get(&url));
             let response = req.call();
-            self.handle_response_with_404(response, "get model", || {
+            self.handle_response_with_404(response, "get model", |_| {
                 SdkError::ModelNotFound(format!("Model '{}' not found", mask))
             })
         })
@@ -582,20 +705,34 @@ impl RegistryClient {
     /// Resolve a model mask to the best variant for the given platform.
     ///
     /// If platform is None, auto-detects the current platform.
+    /// Sends the runtime OS version when known and resolving the current
+    /// platform. Compatibility refusals retain the registry's reason and
+    /// required backend or OS floor instead of becoming `ModelNotFound`.
     /// Tries primary URL first, falls back to secondary on failure.
     /// Automatically retries on transient failures and respects circuit breaker.
     pub fn resolve(&self, mask: &str, platform: Option<&str>) -> Result<ResolvedVariant, SdkError> {
         let platform = platform.map(String::from).unwrap_or_else(detect_platform);
+        // OS version is a functional input to artifact selection, independent
+        // of the optional client telemetry header. Never send the host's
+        // version when a caller explicitly resolves a different platform.
+        let os = resolve_os_version(
+            &platform,
+            current_platform(),
+            xybrid_core::device::runtime_os_version(),
+        );
 
         self.execute_with_fallback(|api_url| {
-            let url = resolve_url(api_url, mask, &platform, xybrid_core::features::enabled());
+            let url = resolve_url(
+                api_url,
+                mask,
+                &platform,
+                xybrid_core::features::enabled(),
+                os.as_deref(),
+            );
             let req = self.apply_client_header(self.agent.get(&url));
             let response = req.call();
-            self.handle_response_with_404(response, "resolve model", || {
-                SdkError::ModelNotFound(format!(
-                    "Model '{}' not found or no compatible variant for platform '{}'",
-                    mask, platform
-                ))
+            self.handle_response_with_404(response, "resolve model", |response| {
+                resolve_not_found(response, mask, &platform)
             })
         })
         .and_then(|response| {
@@ -608,30 +745,37 @@ impl RegistryClient {
 
     /// Execute an operation with fallback to secondary URLs.
     ///
-    /// Tries each URL in order until one succeeds or all fail.
+    /// Tries each URL in order until one succeeds or all fail. Every URL
+    /// draws on one [`RetryAfterBudget`], so a call waits on `Retry-After` at
+    /// most [`MAX_RETRY_AFTER`] in total, however many URLs it tries.
     fn execute_with_fallback<T, F>(&self, mut operation: F) -> Result<T, SdkError>
     where
         F: FnMut(&str) -> Result<T, SdkError>,
     {
         let mut last_error: Option<SdkError> = None;
+        let mut retry_after_budget = RetryAfterBudget::with_limit(self.retry_after_limit);
 
         for (idx, api_url) in self.api_urls.iter().enumerate() {
-            let circuit = &self.circuits[idx];
-
-            // Skip if circuit is open
-            if !circuit.can_execute() {
-                debug!("Skipping {} (circuit open)", api_url);
-                continue;
-            }
-
-            match self.execute_with_retry_for_url(api_url, circuit, &mut operation) {
+            // The retry loop asks the circuit before each attempt, and a URL
+            // whose circuit refuses the first comes back `Refused`: skipped.
+            // There is no separate check here, which another call could pass
+            // between (taking a half-open circuit's only test request).
+            match self.execute_with_retry_for_url(
+                api_url,
+                &self.circuits[idx],
+                &mut retry_after_budget,
+                &mut operation,
+            ) {
                 Ok(result) => {
                     if idx > 0 {
                         info!("Request succeeded using fallback URL: {}", api_url);
                     }
                     return Ok(result);
                 }
-                Err(err) => {
+                Err(UrlFailure::Refused) => {
+                    debug!("Skipping {} (circuit open)", api_url);
+                }
+                Err(UrlFailure::Failed(err)) => {
                     // Don't try fallback for non-retryable errors (like 404)
                     if !err.is_retryable() {
                         return Err(err);
@@ -651,36 +795,62 @@ impl RegistryClient {
     }
 
     /// Execute an operation with retry for a specific URL.
+    ///
+    /// `retry_after_budget` is the whole call's (see
+    /// [`Self::execute_with_fallback`]), not this URL's.
+    ///
+    /// A circuit that refuses a retry ends the loop with the URL's last
+    /// failure, which is retryable, so the caller moves on to the next URL.
+    /// Reporting the refusal itself (`SdkError::CircuitOpen`, not retryable)
+    /// would end the whole call on the failures that opened the circuit.
     fn execute_with_retry_for_url<T, F>(
         &self,
         api_url: &str,
         circuit: &Arc<CircuitBreaker>,
+        retry_after_budget: &mut RetryAfterBudget,
         operation: &mut F,
-    ) -> Result<T, SdkError>
+    ) -> Result<T, UrlFailure>
     where
         F: FnMut(&str) -> Result<T, SdkError>,
     {
         let mut last_error: Option<SdkError> = None;
 
         for attempt in 0..self.retry_policy.max_attempts {
-            // Calculate delay for this attempt
-            let delay = if let Some(ref err) = last_error {
-                err.retry_after()
-                    .unwrap_or_else(|| self.retry_policy.delay_for_attempt(attempt))
-            } else {
-                self.retry_policy.delay_for_attempt(attempt)
-            };
-
-            if !delay.is_zero() {
-                std::thread::sleep(delay);
+            // Before a retry, wait as long as the registry asked (charged to
+            // the call's budget), or else the policy backoff. The first
+            // attempt runs at once.
+            if let Some(err) = last_error.take() {
+                // The URL's circuit is open now (a 429 opens it at once, 5xx
+                // at the failure threshold), so the retry would be refused:
+                // report the failure now rather than wait for a retry that
+                // cannot run, or charge that wait to the budget.
+                if circuit.is_refusing() {
+                    return Err(UrlFailure::Failed(err));
+                }
+                let delay = match err.retry_after() {
+                    Some(wait) if retry_after_budget.spend(wait) => wait,
+                    // The registry wants longer than this call has left to
+                    // wait (`MAX_RETRY_AFTER` in total): report it now rather
+                    // than block the caller. Still retryable, so
+                    // `execute_with_fallback` moves on to the next URL, which
+                    // may still answer without a wait.
+                    Some(_) => return Err(UrlFailure::Failed(err)),
+                    None => self.retry_policy.delay_for_attempt(attempt),
+                };
+                if !delay.is_zero() {
+                    std::thread::sleep(delay);
+                }
+                last_error = Some(err);
             }
 
-            // Check circuit breaker again (might have opened)
+            // Take this attempt's request from the breaker. In a half-open
+            // circuit that is one of its few test requests, so every outcome
+            // below settles it: unsettled, the circuit would refuse every
+            // later call. Refusing the first attempt skips the URL; refusing
+            // a retry (another call reopened the circuit, or took its test
+            // request, during the wait) reports this URL's last failure.
             if !circuit.can_execute() {
-                return Err(SdkError::CircuitOpen(format!(
-                    "Circuit breaker open for {}",
-                    api_url
-                )));
+                return Err(last_error.map_or(UrlFailure::Refused, UrlFailure::Failed));
             }
 
             match operation(api_url) {
@@ -696,9 +866,25 @@ impl RegistryClient {
                     // user sees "circuit open" even after they come back
                     // online), and skip the retry loop within this URL since
                     // backoff won't help a DNS failure. Return immediately and
-                    // let `execute_with_fallback` try the next URL.
+                    // let `execute_with_fallback` try the next URL. The request
+                    // never reached the registry, so give it back: a half-open
+                    // circuit then tests the next call instead.
                     if matches!(&err, SdkError::Offline { .. }) {
-                        return Err(err);
+                        circuit.release();
+                        return Err(UrlFailure::Failed(err));
+                    }
+
+                    // A successful compatibility check refused this model on
+                    // this runtime; the registry is healthy. Repeated refusals
+                    // must not open its circuit for other, compatible models,
+                    // and as the registry's answer this closes a half-open one.
+                    if matches!(
+                        &err,
+                        SdkError::UnsupportedBackendCapability { .. }
+                            | SdkError::OsVersionUnsupported { .. }
+                    ) {
+                        circuit.record_success();
+                        return Err(UrlFailure::Failed(err));
                     }
 
                     circuit.record_failure();
@@ -710,7 +896,7 @@ impl RegistryClient {
 
                     // Don't retry non-retryable errors
                     if !err.is_retryable() {
-                        return Err(err);
+                        return Err(UrlFailure::Failed(err));
                     }
 
                     last_error = Some(err);
@@ -718,9 +904,9 @@ impl RegistryClient {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| {
+        Err(UrlFailure::Failed(last_error.unwrap_or_else(|| {
             SdkError::network(format!("All retry attempts exhausted for {}", api_url))
-        }))
+        })))
     }
 
     /// Handle HTTP response, converting errors appropriately.
@@ -749,19 +935,19 @@ impl RegistryClient {
         not_found_err: F,
     ) -> Result<ureq::Response, SdkError>
     where
-        F: FnOnce() -> SdkError,
+        F: FnOnce(ureq::Response) -> SdkError,
     {
         match response {
             Ok(resp) => {
                 if resp.status() == 200 {
                     Ok(resp)
                 } else if resp.status() == 404 {
-                    Err(not_found_err())
+                    Err(not_found_err(resp))
                 } else {
                     Err(self.response_status_to_error(&resp, operation))
                 }
             }
-            Err(ureq::Error::Status(404, _)) => Err(not_found_err()),
+            Err(ureq::Error::Status(404, response)) => Err(not_found_err(response)),
             Err(e) => Err(self.ureq_error_to_sdk_error(e, operation)),
         }
     }
@@ -953,6 +1139,7 @@ impl RegistryClient {
             );
             if hash == resolved.sha256 {
                 // Already cached and verified
+                crate::observability::record_load_cache_hit(true);
                 info!("Cache hit for '{}' at {}", mask, cache_path.display());
                 return Ok(cache_path);
             }
@@ -979,6 +1166,7 @@ impl RegistryClient {
         }
 
         // Download from HuggingFace
+        crate::observability::record_load_cache_hit(false);
         info!("Downloading '{}' from {}", mask, resolved.download_url);
         // Time only the wallclock spent inside the download itself so
         // the emitted `ModelDownload.duration_ms` reflects bytes-on-the-
@@ -1115,6 +1303,7 @@ impl RegistryClient {
         // immediately. This avoids hitting the network (and tripping the circuit
         // breaker) when the user is offline with a previously-downloaded model.
         if let Some(extract_dir) = self.resolve_offline(mask) {
+            crate::observability::record_load_cache_hit(true);
             debug!(
                 "Using locally extracted model '{}' at {} (skipping registry)",
                 mask,
@@ -1149,11 +1338,23 @@ impl RegistryClient {
     where
         F: Fn(DownloadStatus),
     {
+        let declared_bytes = total_declared_bytes(resolved);
+        if declared_bytes > 0 {
+            crate::observability::record_load_size(declared_bytes);
+        }
+        // Single-file responses can supply a previously unknown (or corrected)
+        // size in their headers. Preserve that fact even if fetching later fails.
+        let observed_progress = |status: DownloadStatus| {
+            if let Some(bytes) = status.total_bytes {
+                crate::observability::record_load_size(bytes);
+            }
+            progress_callback(status);
+        };
         let reporter = ProgressReporter::new(
-            Some(total_declared_bytes(resolved)),
+            Some(declared_bytes),
             1 + resolved.artifacts.len(),
             cancel,
-            &progress_callback,
+            &observed_progress,
         );
 
         let extract_dir = if resolved.passthrough {
@@ -1198,6 +1399,7 @@ impl RegistryClient {
             }
 
             if cache_valid {
+                crate::observability::record_load_cache_hit(true);
                 if resolved.sha256.is_empty()
                     || resolved
                         .artifacts
@@ -1228,6 +1430,7 @@ impl RegistryClient {
         std::fs::create_dir_all(&extract_dir)
             .map_err(|e| SdkError::cache_src("Failed to create extraction directory", e))?;
 
+        crate::observability::record_load_cache_hit(false);
         self.download_passthrough_file(
             mask,
             &resolved.file,
@@ -1439,6 +1642,7 @@ impl RegistryClient {
         let mut furthest: u64 = 0;
         let mut failed_attempts: u32 = 0;
         let mut offline = OfflineWindow::default();
+        let mut retry_after_budget = RetryAfterBudget::with_limit(self.retry_after_limit);
         let mut next_delay: Option<Duration> = None;
 
         loop {
@@ -1489,11 +1693,18 @@ impl RegistryClient {
                 }
                 policy.delay_for_attempt(failed_attempts)
             };
+            let delay = match err.retry_after() {
+                Some(wait) if retry_after_budget.spend(wait) => wait,
+                // The server wants longer than one download may wait
+                // (`MAX_RETRY_AFTER`): fail now rather than sit on it.
+                Some(_) => return Err(err),
+                None => delay,
+            };
             warn!(
                 "Download of {} interrupted at {} bytes, retrying: {}",
                 url, on_disk, err
             );
-            next_delay = Some(err.retry_after().unwrap_or(delay));
+            next_delay = Some(delay);
         }
     }
 
@@ -1869,6 +2080,10 @@ pub struct VariantInfo {
     pub hf_repo: String,
     /// Bundle filename
     pub file: String,
+    /// Minimum runtime versions as registry tokens (e.g. `ios-16.0` or
+    /// `glibc-2.28`). Empty when an older registry supplies no OS floor.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub min_os: Vec<String>,
 }
 
 /// Response from GET /v1/models/registry/{mask}/resolve
@@ -1898,6 +2113,10 @@ pub struct ResolvedVariant {
     pub size_bytes: u64,
     /// SHA256 hash for verification
     pub sha256: String,
+    /// Minimum runtime versions for the selected artifact. Empty means the
+    /// registry has not declared a floor, not that every OS can run it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub min_os: Vec<String>,
     /// Additional files required by this variant, such as VLM mmproj siblings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifacts: Vec<ResolvedArtifact>,
@@ -2642,6 +2861,15 @@ mod tests {
         )));
 
         let not_chat = [
+            (
+                "a decision model",
+                variant(
+                    true,
+                    with_template(serde_json::json!({
+                        "type": "Decision", "protocol": "lfm3-d1/text/v1", "model_file": "d1.gguf"
+                    })),
+                ),
+            ),
             ("a bundle", variant(false, gguf())),
             ("missing metadata", variant(true, None)),
             (
@@ -3522,8 +3750,24 @@ mod tests {
             "vision",
         ];
         assert_eq!(
-            resolve_url("http://r", "whisper", "ios-arm64", &features),
+            resolve_url("http://r", "whisper", "ios-arm64", &features, None),
             "http://r/v1/models/whisper/resolve?platform=ios-arm64&backends=asr-whispercpp-coreml"
+        );
+    }
+
+    #[test]
+    fn the_d1_decision_backend_is_never_sent_before_qualification() {
+        // Even a feature list that names it cannot ask for a decision artifact.
+        let url = resolve_url(
+            "http://r",
+            "d1-2b",
+            "linux-x64",
+            &["llm-llamacpp", "llamacpp-lfm3", "llamacpp-lfm3-d1-text-v1"],
+            None,
+        );
+        assert_eq!(
+            url,
+            "http://r/v1/models/d1-2b/resolve?platform=linux-x64&backends=llamacpp-lfm3"
         );
     }
 
@@ -3531,7 +3775,7 @@ mod tests {
     fn resolve_url_omits_backends_without_an_artifact_backend() {
         let features = ["asr-whispercpp", "ort-coreml", "vision"];
         assert_eq!(
-            resolve_url("http://r", "whisper", "macos-arm64", &features),
+            resolve_url("http://r", "whisper", "macos-arm64", &features, None),
             "http://r/v1/models/whisper/resolve?platform=macos-arm64"
         );
     }
@@ -3540,8 +3784,23 @@ mod tests {
     fn resolve_url_sends_the_phonon_31m_backend_but_not_tts_zzz() {
         let features = ["asr-whispercpp", "tts-zzz", "vision", "zzz-phonon-31m"];
         assert_eq!(
-            resolve_url("http://r", "phonon-31m-en", "android-arm64", &features),
+            resolve_url("http://r", "phonon-31m-en", "android-arm64", &features, None),
             "http://r/v1/models/phonon-31m-en/resolve?platform=android-arm64&backends=zzz-phonon-31m"
+        );
+    }
+
+    #[test]
+    fn resolve_url_sends_the_lfm3_backends_but_not_llm_llamacpp() {
+        let features = [
+            "llamacpp-lfm3",
+            "llamacpp-lfm3vl",
+            "llm-llamacpp",
+            "llm-llamacpp-vision",
+            "vision",
+        ];
+        assert_eq!(
+            resolve_url("http://r", "lfm3-vl-2b", "android-arm64", &features, None),
+            "http://r/v1/models/lfm3-vl-2b/resolve?platform=android-arm64&backends=llamacpp-lfm3,llamacpp-lfm3vl"
         );
     }
 
@@ -3555,8 +3814,224 @@ mod tests {
             "zzz-phonon-31m",
         ];
         assert_eq!(
-            resolve_url("http://r", "m", "p", &features),
+            resolve_url("http://r", "m", "p", &features, None),
             "http://r/v1/models/m/resolve?platform=p&backends=asr-whispercpp-coreml,zzz-phonon-31m"
+        );
+    }
+
+    #[test]
+    fn resolve_compatibility_query_survives_telemetry_opt_out() {
+        let client = RegistryClient::with_url("http://r").unwrap();
+        for (platform, os) in [
+            ("android-arm64", "android-api-29"),
+            ("ios-arm64", "ios-16.0"),
+            ("macos-arm64", "macos-13.0"),
+            ("linux-x86_64", "glibc-2.28"),
+        ] {
+            let url = resolve_url(
+                "http://r",
+                "phonon-31m-en",
+                platform,
+                &["tts-zzz", "zzz-phonon-31m"],
+                Some(os),
+            );
+            let request = client.apply_client_header_with_optout(client.agent.get(&url), true);
+            assert_eq!(request.header(CLIENT_HEADER_NAME), None);
+            assert_eq!(
+                request.url(),
+                format!("http://r/v1/models/phonon-31m-en/resolve?platform={platform}&backends=zzz-phonon-31m&os={os}"),
+            );
+        }
+    }
+
+    #[test]
+    fn resolves_for_other_platforms_and_unknown_versions_omit_os() {
+        assert_eq!(
+            resolve_os_version("linux-x86_64", "linux-x86_64", Some("glibc-2.34".into())),
+            Some("glibc-2.34".into()),
+        );
+        assert_eq!(resolve_os_version("ios-arm64", "ios-arm64", None), None);
+        // Even two platforms with the same OS can run different versions.
+        assert_eq!(
+            resolve_os_version("macos-arm64", "macos-x86_64", Some("macos-15.0".into())),
+            None,
+        );
+        assert_eq!(
+            resolve_os_version("ios-arm64", "macos-arm64", Some("macos-15.0".into())),
+            None,
+        );
+    }
+
+    #[test]
+    fn resolve_sends_the_runtime_os_and_reads_the_selected_floor() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let resolve = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/models/phonon-31m-en/resolve")
+                .query_param("platform", current_platform())
+                .matches(|request| {
+                    let sent = request.query_params.as_ref().and_then(|params| {
+                        params
+                            .iter()
+                            .find(|(name, _)| name == "os")
+                            .map(|(_, value)| value)
+                    });
+                    sent == xybrid_core::device::runtime_os_version().as_ref()
+                });
+            then.status(200).json_body(serde_json::json!({
+                "mask": "phonon-31m-en",
+                "platform": current_platform(),
+                "resolved": {
+                    "hf_repo": "xybrid-ai/phonon",
+                    "file": "model.gguf",
+                    "download_url": "https://example.com/model.gguf",
+                    "format": "gguf",
+                    "quantization": "q8_0",
+                    "size_bytes": 1,
+                    "sha256": "",
+                    "min_os": ["glibc-2.28"]
+                }
+            }));
+        });
+        let client = RegistryClient::with_url(server.base_url()).unwrap();
+        let resolved = client.resolve("phonon-31m-en", None).unwrap();
+        assert_eq!(resolved.min_os, ["glibc-2.28"]);
+        resolve.assert_hits(1);
+    }
+
+    #[test]
+    fn resolve_reports_effective_platform_backend_refusal_without_retry_or_fallback() {
+        use httpmock::prelude::*;
+
+        let primary = MockServer::start();
+        let fallback = MockServer::start();
+        let refusal = primary.mock(|when, then| {
+            when.method(GET).path("/v1/models/phonon-31m-en/resolve");
+            then.status(404).json_body(serde_json::json!({
+                "error": {
+                    "code": "BACKEND_REQUIRED",
+                    "message": "This build needs the speech backend",
+                    // The deployed registry gives the header's platform
+                    // precedence over an explicit cross-platform query.
+                    "platform": current_platform(),
+                    "requires_backends": ["zzz-phonon-31m"],
+                    "status": 404
+                }
+            }));
+        });
+        let fallback_request = fallback.mock(|_, then| {
+            then.status(500);
+        });
+        let client = RegistryClient::new(vec![primary.base_url(), fallback.base_url()]).unwrap();
+        let error = client
+            .resolve("phonon-31m-en", Some("ios-arm64"))
+            .unwrap_err();
+        assert!(!error.is_retryable());
+        assert_eq!(error.retry_after(), None);
+        assert!(matches!(
+            &error,
+            SdkError::UnsupportedBackendCapability { model_id, capability, hint, .. }
+                if model_id == "phonon-31m-en" && capability == "zzz-phonon-31m"
+                    && hint.contains("BACKEND_REQUIRED")
+                    && hint.contains("This build needs the speech backend")
+                    && hint.contains(current_platform())
+        ));
+        refusal.assert_hits(1);
+        fallback_request.assert_hits(0);
+        assert_eq!(client.circuits[0].failure_count(), 0);
+    }
+
+    #[test]
+    fn resolve_reports_os_refusal_without_retry_or_fallback() {
+        use httpmock::prelude::*;
+
+        let primary = MockServer::start();
+        let fallback = MockServer::start();
+        let refusal = primary.mock(|when, then| {
+            when.method(GET).path("/v1/models/phonon-31m-en/resolve");
+            then.status(404).json_body(serde_json::json!({
+                "error": {
+                    "code": "OS_VERSION_UNSUPPORTED",
+                    "message": "This model needs iOS 16 or later",
+                    "platform": "ios-arm64",
+                    "os": "ios-15.7",
+                    "min_os": ["ios-16.0"],
+                    "status": 404
+                }
+            }));
+        });
+        let fallback_request = fallback.mock(|_, then| {
+            then.status(500);
+        });
+        let client = RegistryClient::new(vec![primary.base_url(), fallback.base_url()]).unwrap();
+        let error = client
+            .resolve("phonon-31m-en", Some("ios-arm64"))
+            .unwrap_err();
+        assert!(!error.is_retryable());
+        assert!(matches!(
+            &error,
+            SdkError::OsVersionUnsupported { model_id, platform, os, min_os, message }
+                if model_id == "phonon-31m-en" && platform == "ios-arm64"
+                    && os == "ios-15.7" && min_os == &["ios-16.0"]
+                    && message == "This model needs iOS 16 or later"
+        ));
+        for detail in ["OS_VERSION_UNSUPPORTED", "ios-15.7", "ios-16.0"] {
+            assert!(error.to_string().contains(detail));
+        }
+        refusal.assert_hits(1);
+        fallback_request.assert_hits(0);
+        assert_eq!(client.circuits[0].failure_count(), 0);
+    }
+
+    #[test]
+    fn unknown_or_malformed_404_bodies_keep_model_not_found() {
+        for body in [
+            "not found".to_owned(),
+            serde_json::json!({"error": {"code": "NOT_FOUND", "message": "missing"}}).to_string(),
+            serde_json::json!({"error": {"code": "FUTURE_REASON", "message": "future"}}).to_string(),
+            serde_json::json!({"error": {"code": "BACKEND_REQUIRED"}}).to_string(),
+            serde_json::json!({"error": {
+                "code": "OS_VERSION_UNSUPPORTED", "message": "old OS", "platform": "ios-arm64",
+                "os": "ios-15.0", "min_os": "ios-16.0"
+            }}).to_string(),
+            serde_json::json!({"error": {
+                "code": "BACKEND_REQUIRED", "message": "missing platform", "platform": "",
+                "requires_backends": ["zzz-phonon-31m"]
+            }}).to_string(),
+            serde_json::json!({"error": {
+                "code": "BACKEND_REQUIRED", "message": "oversized".repeat(4096), "platform": "ios-arm64",
+                "requires_backends": ["zzz-phonon-31m"]
+            }}).to_string(),
+        ] {
+            let response = ureq::Response::new(404, "Not Found", &body).unwrap();
+            let error = resolve_not_found(response, "phonon-31m-en", "ios-arm64");
+            assert!(matches!(error, SdkError::ModelNotFound(_)), "{error:?}");
+            assert!(!error.is_retryable());
+        }
+    }
+
+    #[test]
+    fn model_detail_and_resolve_floors_are_optional_and_preserved() {
+        let mut resolved_json = serde_json::to_value(variant_with_sizes(10, &[])).unwrap();
+        assert!(resolved_json.get("min_os").is_none());
+        resolved_json["min_os"] = serde_json::json!(["ios-16.0"]);
+        let resolved: ResolvedVariant = serde_json::from_value(resolved_json).unwrap();
+        assert_eq!(resolved.min_os, ["ios-16.0"]);
+
+        let mut variant_json = serde_json::json!({
+            "platform": "ios-arm64", "format": "gguf", "quantization": "q8_0",
+            "size_bytes": 10, "hf_repo": "xybrid-ai/phonon", "file": "model.gguf"
+        });
+        let old: VariantInfo = serde_json::from_value(variant_json.clone()).unwrap();
+        assert!(old.min_os.is_empty());
+        variant_json["min_os"] = serde_json::json!(["ios-16.0"]);
+        let current: VariantInfo = serde_json::from_value(variant_json).unwrap();
+        assert_eq!(current.min_os, ["ios-16.0"]);
+        assert_eq!(
+            serde_json::to_value(current).unwrap()["min_os"],
+            serde_json::json!(["ios-16.0"])
         );
     }
 
@@ -3668,6 +4143,433 @@ mod tests {
         );
     }
 
+    /// A registry `Retry-After` longer than one call may wait ends the retry
+    /// loop at once instead of blocking the caller for it.
+    #[test]
+    fn registry_retry_after_beyond_the_budget_returns_at_once() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let rate_limited = server.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(429).header("Retry-After", "86400");
+        });
+        let client = RegistryClient::with_url(server.base_url()).unwrap();
+
+        let started = Instant::now();
+        let result = client.list_models();
+        let elapsed = started.elapsed();
+
+        assert!(
+            matches!(result, Err(SdkError::RateLimited { .. })),
+            "{result:?}"
+        );
+        rate_limited.assert_hits(1);
+        assert!(elapsed < Duration::from_secs(1), "waited {elapsed:?}");
+    }
+
+    /// One call's `Retry-After` waiting is bounded across every registry URL
+    /// it tries, not per URL: once the primary has used the budget, the
+    /// fallback gets its one attempt but no wait.
+    #[test]
+    fn registry_retry_after_budget_is_shared_across_fallback_urls() {
+        use httpmock::prelude::*;
+
+        let primary = MockServer::start();
+        let fallback = MockServer::start();
+        fn limited(server: &MockServer) -> httpmock::Mock<'_> {
+            server.mock(|when, then| {
+                when.method(GET).path("/v1/models");
+                then.status(429).header("Retry-After", "1");
+            })
+        }
+        let (primary_limited, fallback_limited) = (limited(&primary), limited(&fallback));
+        let mut client =
+            RegistryClient::new(vec![primary.base_url(), fallback.base_url()]).unwrap();
+        // A one-second budget stands in for `MAX_RETRY_AFTER`.
+        client.retry_after_limit = Duration::from_secs(1);
+        // A 429 opens a URL's circuit at once; let it half-open straight away
+        // so the retry after the wait reaches the server.
+        client.circuits = (0..2)
+            .map(|_| {
+                Arc::new(CircuitBreaker::new(CircuitConfig {
+                    open_duration_ms: 0,
+                    ..CircuitConfig::default()
+                }))
+            })
+            .collect();
+
+        let result = client.list_models();
+
+        assert!(
+            matches!(
+                result,
+                Err(SdkError::RateLimited {
+                    retry_after_secs: 1
+                })
+            ),
+            "{result:?}"
+        );
+        // The primary waits the whole budget once; the fallback is tried
+        // without waiting again (a per-URL budget would retry it too).
+        primary_limited.assert_hits(2);
+        fallback_limited.assert_hits(1);
+    }
+
+    /// Once a URL's open duration is over, the next call is its half-open
+    /// probe and reaches the registry. The fallback loop's circuit check and
+    /// the retry loop's must not each take a request: with only one to give,
+    /// the second is refused, nothing is sent, and the circuit never closes.
+    #[test]
+    fn half_open_circuit_lets_the_probe_reach_the_registry() {
+        use httpmock::prelude::*;
+        use xybrid_core::http::CircuitState;
+
+        let server = MockServer::start();
+        let models = server.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(200)
+                .json_body(serde_json::json!({ "models": [], "total": 0 }));
+        });
+        let mut client = RegistryClient::with_url(server.base_url()).unwrap();
+        client.circuits = vec![Arc::new(CircuitBreaker::new(CircuitConfig {
+            failure_threshold: 1,
+            open_duration_ms: 0,
+            half_open_max: 1,
+        }))];
+        client.circuits[0].record_failure();
+        assert!(client.circuits[0].is_open());
+
+        let listed = client.list_models();
+
+        assert!(
+            matches!(&listed, Ok(models) if models.is_empty()),
+            "{listed:?}"
+        );
+        models.assert_hits(1);
+        assert_eq!(client.circuits[0].state(), CircuitState::Closed);
+    }
+
+    /// A half-open probe that ends offline or with a compatibility refusal
+    /// records no failure, yet still settles its test request: offline gives
+    /// it back for the next call, and a refusal (the registry answering)
+    /// closes the circuit. Left taken, every later call would be refused.
+    #[test]
+    fn half_open_probe_that_records_no_failure_still_settles_its_request() {
+        use xybrid_core::http::CircuitState;
+
+        let mut client = RegistryClient::with_url("https://primary.example.invalid").unwrap();
+        let circuit = Arc::new(CircuitBreaker::new(CircuitConfig {
+            failure_threshold: 1,
+            open_duration_ms: 0,
+            half_open_max: 1,
+        }));
+        client.circuits = vec![circuit.clone()];
+
+        circuit.record_failure();
+        let offline = client.execute_with_fallback(|_| -> Result<(), SdkError> {
+            Err(SdkError::offline("simulated offline"))
+        });
+        assert!(
+            matches!(offline, Err(SdkError::Offline { .. })),
+            "{offline:?}"
+        );
+        assert_eq!(circuit.state(), CircuitState::HalfOpen);
+        assert!(!circuit.is_refusing(), "the test request was given back");
+        assert_eq!(client.execute_with_fallback(|_| Ok(())).ok(), Some(()));
+        assert!(circuit.is_closed());
+
+        circuit.record_failure();
+        let refused = client.execute_with_fallback(|_| -> Result<(), SdkError> {
+            Err(SdkError::OsVersionUnsupported {
+                model_id: "phonon-31m-en".into(),
+                platform: "ios-arm64".into(),
+                os: "ios-15.7".into(),
+                min_os: vec!["ios-16.0".into()],
+                message: "This model needs iOS 16 or later".into(),
+            })
+        });
+        assert!(
+            matches!(refused, Err(SdkError::OsVersionUnsupported { .. })),
+            "{refused:?}"
+        );
+        assert!(circuit.is_closed());
+    }
+
+    /// The failures that open the primary's circuit end its retries, and the
+    /// call moves on to the fallback: the circuit refusing the next retry is
+    /// no reason to fail a call another URL can still answer.
+    #[test]
+    fn failures_that_open_the_primary_circuit_fall_back_to_the_next_url() {
+        use httpmock::prelude::*;
+
+        let primary = MockServer::start();
+        let fallback = MockServer::start();
+        let failing = primary.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(502);
+        });
+        let models = fallback.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(200)
+                .json_body(serde_json::json!({ "models": [], "total": 0 }));
+        });
+        let mut client =
+            RegistryClient::new(vec![primary.base_url(), fallback.base_url()]).unwrap();
+        // More attempts than the default circuit's three-failure threshold.
+        client.retry_policy = RetryPolicy {
+            max_attempts: 5,
+            initial_delay_ms: 10,
+            max_delay_ms: 10,
+            jitter_factor: 0.0,
+        };
+
+        let listed = client.list_models();
+
+        assert!(
+            matches!(&listed, Ok(models) if models.is_empty()),
+            "{listed:?}"
+        );
+        failing.assert_hits(3);
+        models.assert_hits(1);
+        assert!(client.circuits[0].is_open());
+    }
+
+    /// A 429 opens the URL's circuit at once, so no retry of that URL could
+    /// follow the wait: the call moves straight on to the fallback, without
+    /// sleeping out the `Retry-After` or charging it to the call's budget.
+    #[test]
+    fn rate_limit_that_opens_the_circuit_falls_back_without_waiting() {
+        use httpmock::prelude::*;
+
+        let primary = MockServer::start();
+        let fallback = MockServer::start();
+        let limited = primary.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(429).header("Retry-After", "1");
+        });
+        let models = fallback.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(200)
+                .json_body(serde_json::json!({ "models": [], "total": 0 }));
+        });
+        let client = RegistryClient::new(vec![primary.base_url(), fallback.base_url()]).unwrap();
+
+        let started = Instant::now();
+        let listed = client.list_models();
+        let elapsed = started.elapsed();
+
+        assert!(
+            matches!(&listed, Ok(models) if models.is_empty()),
+            "{listed:?}"
+        );
+        limited.assert_hits(1);
+        models.assert_hits(1);
+        assert!(elapsed < Duration::from_secs(1), "waited {elapsed:?}");
+    }
+
+    /// With every URL's circuit opened by a 429, the caller gets the
+    /// registry's rate limit (and its `Retry-After`), not "circuit open".
+    #[test]
+    fn rate_limit_that_opens_the_last_circuit_is_reported_as_rate_limited() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let limited = server.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(429).header("Retry-After", "1");
+        });
+        let client = RegistryClient::with_url(server.base_url()).unwrap();
+
+        let started = Instant::now();
+        let result = client.list_models();
+        let elapsed = started.elapsed();
+
+        assert!(
+            matches!(
+                result,
+                Err(SdkError::RateLimited {
+                    retry_after_secs: 1
+                })
+            ),
+            "{result:?}"
+        );
+        limited.assert_hits(1);
+        assert!(elapsed < Duration::from_secs(1), "waited {elapsed:?}");
+    }
+
+    /// A URL whose circuit refuses the first attempt (here another call holds
+    /// a half-open circuit's only test request) is skipped, untouched, and
+    /// the call goes on to the next URL rather than failing as "circuit open".
+    #[test]
+    fn url_whose_circuit_refuses_the_first_attempt_is_skipped() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use xybrid_core::http::CircuitState;
+
+        let mut client = RegistryClient::new(vec![
+            "https://primary.example.invalid".to_string(),
+            "https://fallback.example.invalid".to_string(),
+        ])
+        .unwrap();
+        let circuit = Arc::new(CircuitBreaker::new(CircuitConfig {
+            failure_threshold: 1,
+            open_duration_ms: 0,
+            half_open_max: 1,
+        }));
+        client.circuits[0] = circuit.clone();
+        circuit.record_failure();
+        assert!(circuit.can_execute(), "another call takes the test request");
+
+        let primary_calls = AtomicU32::new(0);
+        let mut op = |url: &str| -> Result<(), SdkError> {
+            if url.contains("primary") {
+                primary_calls.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok(())
+        };
+        let refused = client.execute_with_retry_for_url(
+            "https://primary.example.invalid",
+            &circuit,
+            &mut RetryAfterBudget::new(),
+            &mut op,
+        );
+        assert!(matches!(refused, Err(UrlFailure::Refused)), "{refused:?}");
+
+        assert_eq!(client.execute_with_fallback(&mut op).ok(), Some(()));
+        assert_eq!(primary_calls.load(Ordering::SeqCst), 0);
+        // The other call's test request is still its own to settle.
+        assert_eq!(circuit.state(), CircuitState::HalfOpen);
+        assert!(circuit.is_refusing());
+    }
+
+    /// A retry the circuit refuses after its wait (another call reopened the
+    /// circuit meanwhile) ends with the URL's last failure, which lets the
+    /// call fall back, rather than with a non-retryable "circuit open".
+    #[test]
+    fn retry_refused_after_its_wait_reports_the_last_failure() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::mpsc;
+
+        let mut client = RegistryClient::with_url("https://primary.example.invalid").unwrap();
+        // Long enough for the other call to reopen the circuit mid-wait.
+        client.retry_policy = RetryPolicy {
+            max_attempts: 3,
+            initial_delay_ms: 500,
+            max_delay_ms: 500,
+            jitter_factor: 0.0,
+        };
+        let circuit = client.circuits[0].clone();
+        let (failed, other_call) = mpsc::channel::<()>();
+        let reopener = {
+            let circuit = circuit.clone();
+            std::thread::spawn(move || {
+                other_call.recv().expect("the first attempt runs");
+                std::thread::sleep(Duration::from_millis(50));
+                circuit.record_rate_limited();
+            })
+        };
+
+        let calls = AtomicU32::new(0);
+        let mut op = |_url: &str| -> Result<(), SdkError> {
+            if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                failed.send(()).expect("the other call is waiting");
+            }
+            Err(SdkError::network("simulated 502"))
+        };
+        let result = client.execute_with_retry_for_url(
+            "https://primary.example.invalid",
+            &circuit,
+            &mut RetryAfterBudget::new(),
+            &mut op,
+        );
+        reopener.join().expect("the other call finishes");
+
+        assert!(
+            matches!(&result, Err(UrlFailure::Failed(err @ SdkError::NetworkError { .. })) if err.is_retryable()),
+            "{result:?}"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn retry_after_out_of_spec_values_are_read_not_defaulted() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 21, 7, 27, 0).unwrap();
+
+        // Too large for u64: still "much later", not the 60 s default.
+        assert_eq!(
+            rate_limit_retry_after_secs_at(Some("99999999999999999999999"), now),
+            MAX_RATE_LIMIT_RETRY_AFTER_SECS
+        );
+        // Fractional: rounded up, not defaulted.
+        assert_eq!(rate_limit_retry_after_secs_at(Some("1.5"), now), 2);
+        assert_eq!(rate_limit_retry_after_secs_at(Some(" 7 "), now), 7);
+    }
+
+    #[test]
+    fn download_retry_after_beyond_the_budget_fails_at_once() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let rate_limited = server.mock(|when, then| {
+            when.method(GET).path("/model.gguf");
+            then.status(429).header("Retry-After", "86400");
+        });
+        let temp = tempfile::TempDir::new().unwrap();
+        let client = fast_retry_client(temp.path());
+        let dest = temp.path().join("model.gguf");
+        let sink = |_: DownloadStatus| {};
+        let reporter = ProgressReporter::new(None, 1, Arc::new(AtomicBool::new(false)), &sink);
+
+        let started = Instant::now();
+        let result = client.download_with_progress(&server.url("/model.gguf"), &dest, &reporter);
+        let elapsed = started.elapsed();
+
+        assert!(
+            matches!(result, Err(SdkError::RateLimited { .. })),
+            "{result:?}"
+        );
+        rate_limited.assert_hits(1);
+        assert!(elapsed < Duration::from_secs(1), "waited {elapsed:?}");
+    }
+
+    #[test]
+    fn download_short_retry_after_is_still_honored() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let rate_limited = server.mock(|when, then| {
+            when.method(GET).path("/model.gguf");
+            then.status(429).header("Retry-After", "1");
+        });
+        let temp = tempfile::TempDir::new().unwrap();
+        let mut client = fast_retry_client(temp.path());
+        client.download_retry_policy.max_attempts = 2;
+        let dest = temp.path().join("model.gguf");
+        let sink = |_: DownloadStatus| {};
+        let reporter = ProgressReporter::new(None, 1, Arc::new(AtomicBool::new(false)), &sink);
+
+        let started = Instant::now();
+        let result = client.download_with_progress(&server.url("/model.gguf"), &dest, &reporter);
+        let elapsed = started.elapsed();
+
+        assert!(
+            matches!(
+                result,
+                Err(SdkError::RateLimited {
+                    retry_after_secs: 1
+                })
+            ),
+            "{result:?}"
+        );
+        // Retried once, after the server's second rather than the policy's
+        // zero backoff.
+        rate_limited.assert_hits(2);
+        assert!(
+            elapsed >= Duration::from_secs(1),
+            "retried early: {elapsed:?}"
+        );
+    }
+
     #[test]
     fn test_cache_path() {
         let client = RegistryClient::default_client().unwrap();
@@ -3679,6 +4581,7 @@ mod tests {
             quantization: "fp16".to_string(),
             size_bytes: 100000,
             sha256: "abc123".to_string(),
+            min_os: Vec::new(),
             artifacts: Vec::new(),
             passthrough: false,
             model_metadata: None,
@@ -3756,9 +4659,16 @@ mod tests {
             Err(SdkError::offline("simulated offline"))
         };
 
-        let result =
-            client.execute_with_retry_for_url("https://primary.example.invalid", &circuit, &mut op);
-        assert!(matches!(result, Err(SdkError::Offline { .. })));
+        let result = client.execute_with_retry_for_url(
+            "https://primary.example.invalid",
+            &circuit,
+            &mut RetryAfterBudget::new(),
+            &mut op,
+        );
+        assert!(
+            matches!(result, Err(UrlFailure::Failed(SdkError::Offline { .. }))),
+            "{result:?}"
+        );
         assert_eq!(
             circuit.failure_count(),
             0,
@@ -3786,8 +4696,12 @@ mod tests {
             Err(SdkError::offline("simulated offline"))
         };
 
-        let result =
-            client.execute_with_retry_for_url("https://primary.example.invalid", &circuit, &mut op);
+        let result = client.execute_with_retry_for_url(
+            "https://primary.example.invalid",
+            &circuit,
+            &mut RetryAfterBudget::new(),
+            &mut op,
+        );
         assert!(result.is_err());
         assert_eq!(
             call_count.load(Ordering::SeqCst),

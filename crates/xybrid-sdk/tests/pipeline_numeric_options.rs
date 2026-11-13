@@ -16,6 +16,12 @@ use xybrid_sdk::Xybrid;
 
 const FAKE_REPLY: &str = "FAKE_NUMERIC_REPLY";
 
+fn init_test_cache() {
+    static CACHE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(|| tempfile::tempdir().expect("create SDK test cache"));
+    xybrid_sdk::init_sdk_cache_dir(cache.path().join("models"));
+}
+
 fn completion_body() -> serde_json::Value {
     serde_json::json!({
         "id": "chatcmpl-1",
@@ -106,6 +112,7 @@ fn float_max_tokens_guard(server: &MockServer) -> Mock<'_> {
 
 #[test]
 fn run_pipeline_sends_integer_max_tokens() {
+    init_test_cache();
     let server = MockServer::start();
     let _registry = registry_resolve_mock(&server);
     let integer_mock = integer_max_tokens_mock(&server, 16);
@@ -127,6 +134,7 @@ fn run_pipeline_sends_integer_max_tokens() {
 
 #[test]
 fn input_metadata_override_reaches_the_wire() {
+    init_test_cache();
     let server = MockServer::start();
     let _registry = registry_resolve_mock(&server);
     let yaml_mock = integer_max_tokens_mock(&server, 16);
@@ -151,6 +159,7 @@ fn input_metadata_override_reaches_the_wire() {
 
 #[test]
 fn invalid_options_fail_before_any_completion_request() {
+    init_test_cache();
     let cases = [
         ("    max_tokens: 0\n", "positive integer"),
         ("    max_tokens: 1.5\n", "positive integer"),
@@ -188,6 +197,7 @@ fn invalid_options_fail_before_any_completion_request() {
 
 #[test]
 fn async_run_uses_the_same_prepared_options() {
+    init_test_cache();
     let server = MockServer::start();
     let _registry = registry_resolve_mock(&server);
     let integer_mock = integer_max_tokens_mock(&server, 16);

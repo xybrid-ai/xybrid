@@ -95,6 +95,7 @@ impl ModelRuntime for ZzzPhononRuntime {
     }
 
     fn load(&mut self, model_path: &Path) -> AdapterResult<()> {
+        super::assert_engine_abi()?;
         let state = self.state.get_mut().unwrap_or_else(|e| e.into_inner());
         let defaults = state.pending.take().ok_or_else(|| {
             AdapterError::InvalidInput("Phonon load requires resolved bundle settings".into())
@@ -164,10 +165,13 @@ mod tests {
     #[test]
     fn zzz_phonon_requires_settings_and_text_without_touching_assets() {
         let mut runtime = ZzzPhononRuntime::new();
-        assert!(matches!(
-            runtime.load(Path::new("missing.gguf")),
-            Err(AdapterError::InvalidInput(_))
-        ));
+        let error = runtime.load(Path::new("missing.gguf")).unwrap_err();
+        if xybrid_zzz_sys::availability().is_ok() {
+            assert!(matches!(error, AdapterError::InvalidInput(_)), "{error:?}");
+        } else {
+            assert!(matches!(error, AdapterError::RuntimeError(_)), "{error:?}");
+            assert!(error.to_string().contains("zzz engine unavailable"));
+        }
         assert!(matches!(
             runtime.execute(&Envelope::new(EnvelopeKind::Embedding(vec![]))),
             Err(AdapterError::InvalidInput(_))

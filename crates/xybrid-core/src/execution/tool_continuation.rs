@@ -22,7 +22,9 @@ use crate::runtime_adapter::llm::GenerationOutput;
 // mistral-only builds, and the mistral backend rejects tool-bearing
 // requests outright, so a continuation can never execute there.
 #[cfg(feature = "llm-llamacpp")]
-use crate::runtime_adapter::streaming_postprocess::strip_and_capture_thinking_tags;
+use crate::runtime_adapter::streaming_postprocess::{
+    is_reasoning_primed, strip_and_capture_thinking_tags_primed,
+};
 use crate::runtime_adapter::tool_call::{
     compose_tool_continuation, truncate_at_turn_marker, TURN_MARKERS,
 };
@@ -44,11 +46,15 @@ use super::types::ExecutorResult;
 /// (its other callers feed non-chat prompts), so this function does it —
 /// a continuation is a chat turn, and reasoning models (e.g.
 /// LFM2.5-1.2B-Thinking) deliberate before the continuation answer just
-/// like any other turn. Known v1 limitation: the rendered base may end
-/// with a primed `<think>` channel that belongs to a fresh assistant turn
-/// rather than the replayed prior turn; the models tested self-open the
-/// tag anyway, and the dangling-close handling in
-/// `strip_and_capture_thinking_tags` covers the primed shape.
+/// like any other turn. LFM3 with thinking on reopens `<think>` on the
+/// continuation's fresh assistant turn, so its reasoning arrives without an
+/// opener and the split is primed: a thought the budget cut short is
+/// reasoning, not the answer. Known v1 limitation (ChatML): the rendered
+/// base may end with a primed `<think>` channel that belongs to a fresh
+/// assistant turn rather than the replayed prior turn, and the continuation
+/// opens its own turn unprimed; the models tested self-open the tag anyway,
+/// and the dangling-close handling in `strip_and_capture_thinking_tags`
+/// covers the primed shape.
 pub(crate) fn run_tool_continuation(
     backend: &dyn LlmBackend,
     messages: &[ChatMessage],
@@ -59,7 +65,7 @@ pub(crate) fn run_tool_continuation(
     let (prompt, raw_config) =
         compose_continuation_prompt(backend, messages, gen_config, input, responses_json)?;
     let out = backend.generate_raw(&prompt, &raw_config)?;
-    Ok(finish_continuation_output(out))
+    Ok(finish_continuation_output(out, Some(&prompt)))
 }
 
 /// Streaming sibling of [`run_tool_continuation`].
@@ -68,8 +74,9 @@ pub(crate) fn run_tool_continuation(
 /// `generate_raw_streaming`, so a continuation turn emits tokens as it
 /// generates instead of arriving as one block. The emitted stream is already
 /// filtered (reasoning and tool-protocol blocks suppressed) by the backend's
-/// streaming filter; the returned output gets the same final cleanup as the
-/// batch path so envelope and stream agree.
+/// streaming filter, primed when the prompt ends inside `<think>`; the
+/// returned output gets the same final cleanup as the batch path so envelope
+/// and stream agree.
 pub(crate) fn run_tool_continuation_streaming(
     backend: &dyn LlmBackend,
     messages: &[ChatMessage],
@@ -81,7 +88,8 @@ pub(crate) fn run_tool_continuation_streaming(
     let (prompt, raw_config) =
         compose_continuation_prompt(backend, messages, gen_config, input, responses_json)?;
     let out = backend.generate_raw_streaming(&prompt, &raw_config, on_token)?;
-    Ok(finish_continuation_output(out))
+    // The backend split the reasoning off its text with the same priming.
+    Ok(finish_continuation_output(out, None))
 }
 
 /// Render the chat prefix, append the replayed assistant turn plus the tool
@@ -122,16 +130,29 @@ fn compose_continuation_prompt(
 }
 
 /// Final cleanup shared by the batch and streaming continuation paths.
-fn finish_continuation_output(mut out: GenerationOutput) -> GenerationOutput {
+///
+/// `raw_prompt` is the prompt `out.text` was generated from while that text
+/// is still the model's output as generated (`generate_raw`), and `None` once
+/// the backend has split the reasoning off (`generate_raw_streaming` does).
+fn finish_continuation_output(
+    mut out: GenerationOutput,
+    raw_prompt: Option<&str>,
+) -> GenerationOutput {
     // The raw path keeps stop-marker text in the output (the chat path
     // truncates it). Cut it so the answer is clean and a further
     // continuation doesn't double the turn marker.
     truncate_at_turn_marker(&mut out.text);
     // Split the reasoning channel the way the chat paths do — a no-op for
     // non-reasoning models (no tags → text unchanged, reasoning `None`).
+    // After a prompt that ends inside `<think>`, a thought the budget cut
+    // short has no marker at all. Priming text that is already split would
+    // instead turn a truncated answer into reasoning.
     #[cfg(feature = "llm-llamacpp")]
     {
-        let (clean, reasoning) = strip_and_capture_thinking_tags(&out.text);
+        let primed = raw_prompt.is_some_and(is_reasoning_primed);
+        let truncated_by_budget = out.finish_reason == "length";
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags_primed(&out.text, primed, truncated_by_budget);
         out.text = clean;
         out.reasoning_content = reasoning.or(out.reasoning_content);
     }
@@ -243,4 +264,313 @@ fn carries_tool_continuation(input: &Envelope) -> bool {
         return parts.iter().any(carries_tool_continuation);
     }
     false
+}
+
+// The reasoning split under test is llama.cpp-only (see the import above).
+#[cfg(all(test, feature = "llm-llamacpp"))]
+mod tests {
+    use super::*;
+    use crate::ir::ToolCallResult;
+    use crate::runtime_adapter::{LlmConfig, LlmResult};
+    use std::sync::Mutex;
+
+    /// LFM3's template render of one weather question with a `get_weather`
+    /// tool, up to the thinking state.
+    const LFM3_PROMPT: &str = "<|startoftext|><|im_start|>system\n<tools>\n{\"name\": \"get_weather\", \"description\": \"Get the current weather for a city\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\"}}, \"required\": [\"city\"]}}\n</tools><|im_end|>\n<|im_start|>user\nWhat's the weather in Paris?<|im_end|>\n<|im_start|>assistant\n";
+    /// LFM3-1.7B's call for that question.
+    const LFM3_CALL: &str = "<tool_call>\n<function=get_weather>\n<parameter=city>\nParis\n</parameter>\n</function>\n</tool_call>";
+    /// A ChatML render primed for a reasoning model, as LFM2.5-Thinking's is.
+    const CHATML_PRIMED_PROMPT: &str =
+        "<|im_start|>user\nWhat's the weather in Paris?<|im_end|>\n<|im_start|>assistant\n<think>\n";
+    const LFM2_CALL: &str = "<|tool_call_start|>[get_weather(city=\"Paris\")]<|tool_call_end|>";
+
+    /// Backend with a fixed chat render and a fixed raw output, which records
+    /// the raw prompts it is handed.
+    struct RawOutputBackend {
+        rendered: String,
+        output: GenerationOutput,
+        raw_prompts: Mutex<Vec<String>>,
+    }
+
+    impl RawOutputBackend {
+        fn new(rendered: &str, text: &str, finish_reason: &str) -> Self {
+            Self::with_output(rendered, output(text, finish_reason, None))
+        }
+
+        fn with_output(rendered: &str, output: GenerationOutput) -> Self {
+            Self {
+                rendered: rendered.to_string(),
+                output,
+                raw_prompts: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn raw_prompt(&self) -> String {
+            self.raw_prompts
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .first()
+                .cloned()
+                .expect("the raw path ran")
+        }
+    }
+
+    impl LlmBackend for RawOutputBackend {
+        fn name(&self) -> &str {
+            "raw-output"
+        }
+
+        fn supported_formats(&self) -> Vec<&'static str> {
+            vec!["gguf"]
+        }
+
+        fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
+            Ok(())
+        }
+
+        fn is_loaded(&self) -> bool {
+            true
+        }
+
+        fn unload(&mut self) -> LlmResult<()> {
+            Ok(())
+        }
+
+        fn generate(
+            &self,
+            _messages: &[ChatMessage],
+            _config: &GenerationConfig,
+        ) -> LlmResult<GenerationOutput> {
+            panic!("a continuation must not run through the chat path")
+        }
+
+        fn render_chat_prompt(
+            &self,
+            _messages: &[ChatMessage],
+            _config: &GenerationConfig,
+        ) -> LlmResult<String> {
+            Ok(self.rendered.clone())
+        }
+
+        fn generate_raw(
+            &self,
+            prompt: &str,
+            _config: &GenerationConfig,
+        ) -> LlmResult<GenerationOutput> {
+            self.raw_prompts
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push(prompt.to_string());
+            Ok(self.output.clone())
+        }
+    }
+
+    fn output(text: &str, finish_reason: &str, reasoning: Option<&str>) -> GenerationOutput {
+        GenerationOutput {
+            text: text.to_string(),
+            tokens_generated: 16,
+            generation_time_ms: 100,
+            tokens_per_second: 160.0,
+            finish_reason: finish_reason.to_string(),
+            ttft_ms: None,
+            mean_itl_ms: None,
+            p95_itl_ms: None,
+            emitted_chunks: None,
+            inter_chunk_ms: Vec::new(),
+            decode_tps: None,
+            prefill_tps: None,
+            image_preprocess_ms: None,
+            reasoning_content: reasoning.map(str::to_string),
+        }
+    }
+
+    fn weather_results(prior_text: &str) -> Envelope {
+        Envelope::tool_results(
+            "What's the weather in Paris?",
+            prior_text,
+            &[ToolCallResult {
+                call_id: "call_0".to_string(),
+                name: "get_weather".to_string(),
+                content: serde_json::json!({"temperature_c": 21, "condition": "sunny"}),
+            }],
+        )
+    }
+
+    fn run_batch(backend: &RawOutputBackend, prior_text: &str) -> GenerationOutput {
+        let input = weather_results(prior_text);
+        let continuation = ToolContinuation::from_input(&input).expect("a continuation");
+        run_tool_continuation(
+            backend,
+            &[ChatMessage::user("What's the weather in Paris?")],
+            &GenerationConfig::default(),
+            continuation.input,
+            continuation.responses_json,
+        )
+        .expect("the continuation runs")
+    }
+
+    #[test]
+    fn lfm3_continuation_out_of_budget_mid_thought_has_no_answer() {
+        let backend = RawOutputBackend::new(
+            &format!("{LFM3_PROMPT}<think>"),
+            "The tool says it is sunny and",
+            "length",
+        );
+
+        let out = run_batch(&backend, LFM3_CALL);
+
+        assert!(
+            backend
+                .raw_prompt()
+                .ends_with("<|im_start|>assistant\n<think>"),
+            "the continuation reopens the thought: {}",
+            backend.raw_prompt()
+        );
+        assert_eq!(out.text, "");
+        assert_eq!(
+            out.reasoning_content.as_deref(),
+            Some("The tool says it is sunny and")
+        );
+    }
+
+    #[test]
+    fn lfm3_continuation_splits_a_closed_thought() {
+        let backend = RawOutputBackend::new(
+            &format!("{LFM3_PROMPT}<think>"),
+            "The tool says 21.</think>It is sunny and 21°C in Paris.<|im_end|>",
+            "stop",
+        );
+
+        let out = run_batch(&backend, LFM3_CALL);
+
+        assert_eq!(out.text, "It is sunny and 21°C in Paris.");
+        assert_eq!(out.reasoning_content.as_deref(), Some("The tool says 21."));
+    }
+
+    /// The chat paths' rule: a rare thought that ends without `</think>`
+    /// reads as the answer rather than vanishing.
+    #[test]
+    fn lfm3_continuation_ending_without_closing_its_thought_keeps_the_text() {
+        let backend = RawOutputBackend::new(
+            &format!("{LFM3_PROMPT}<think>"),
+            "It is sunny and 21°C in Paris.<|im_end|>",
+            "stop",
+        );
+
+        let out = run_batch(&backend, LFM3_CALL);
+
+        assert_eq!(out.text, "It is sunny and 21°C in Paris.");
+        assert_eq!(out.reasoning_content, None);
+    }
+
+    #[test]
+    fn lfm3_continuation_with_thinking_off_is_not_primed() {
+        let backend = RawOutputBackend::new(
+            &format!("{LFM3_PROMPT}<think></think>"),
+            "It is sunny and",
+            "length",
+        );
+
+        let out = run_batch(&backend, LFM3_CALL);
+
+        assert_eq!(out.text, "It is sunny and");
+        assert_eq!(out.reasoning_content, None);
+    }
+
+    /// ChatML continuations open a fresh, unprimed turn, even after a primed
+    /// base: unchanged.
+    #[test]
+    fn chatml_continuation_is_not_primed() {
+        let backend = RawOutputBackend::new(CHATML_PRIMED_PROMPT, "It is sunny and", "length");
+
+        let out = run_batch(&backend, LFM2_CALL);
+
+        assert!(backend.raw_prompt().ends_with("<|im_start|>assistant\n"));
+        assert_eq!(out.text, "It is sunny and");
+        assert_eq!(out.reasoning_content, None);
+    }
+
+    /// The streaming backend splits the reasoning itself; priming its split
+    /// text again would turn a truncated answer into reasoning.
+    #[test]
+    fn streamed_continuation_keeps_the_backend_split() {
+        struct SplitStreamBackend(RawOutputBackend);
+
+        impl LlmBackend for SplitStreamBackend {
+            fn name(&self) -> &str {
+                self.0.name()
+            }
+
+            fn supported_formats(&self) -> Vec<&'static str> {
+                self.0.supported_formats()
+            }
+
+            fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
+                Ok(())
+            }
+
+            fn is_loaded(&self) -> bool {
+                true
+            }
+
+            fn unload(&mut self) -> LlmResult<()> {
+                Ok(())
+            }
+
+            fn generate(
+                &self,
+                messages: &[ChatMessage],
+                config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                self.0.generate(messages, config)
+            }
+
+            fn render_chat_prompt(
+                &self,
+                messages: &[ChatMessage],
+                config: &GenerationConfig,
+            ) -> LlmResult<String> {
+                self.0.render_chat_prompt(messages, config)
+            }
+
+            fn generate_raw(
+                &self,
+                prompt: &str,
+                config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                self.0.generate_raw(prompt, config)
+            }
+
+            fn generate_raw_streaming(
+                &self,
+                prompt: &str,
+                config: &GenerationConfig,
+                _on_token: StreamingCallback<'_>,
+            ) -> LlmResult<GenerationOutput> {
+                self.0.generate_raw(prompt, config)
+            }
+        }
+
+        // What the llama.cpp backend returns for `The tool says 21.</think>It
+        // is sunny and` cut off by the budget.
+        let backend = SplitStreamBackend(RawOutputBackend::with_output(
+            &format!("{LFM3_PROMPT}<think>"),
+            output("It is sunny and", "length", Some("The tool says 21.")),
+        ));
+        let input = weather_results(LFM3_CALL);
+        let continuation = ToolContinuation::from_input(&input).expect("a continuation");
+
+        let out = run_tool_continuation_streaming(
+            &backend,
+            &[ChatMessage::user("What's the weather in Paris?")],
+            &GenerationConfig::default(),
+            continuation.input,
+            continuation.responses_json,
+            Box::new(|_token| Ok(())),
+        )
+        .expect("the continuation runs");
+
+        assert_eq!(out.text, "It is sunny and");
+        assert_eq!(out.reasoning_content.as_deref(), Some("The tool says 21."));
+    }
 }

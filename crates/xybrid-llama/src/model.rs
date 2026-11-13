@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use crate::error::{LlamaError, LlamaResult};
 use crate::ffi;
+use crate::utf8::Utf8Decoder;
 
 /// Opaque handle to a loaded llama.cpp model.
 ///
@@ -20,6 +21,7 @@ use crate::ffi;
 /// the native model stays loaded until the last of them is dropped.
 pub struct LlamaModel {
     handle: Arc<ModelHandle>,
+    pub(crate) decision_cpu: bool,
 }
 
 /// The native `llama_model*`, freed when its last owner drops.
@@ -50,11 +52,19 @@ impl Drop for ModelHandle {
 }
 
 impl LlamaModel {
+    pub(crate) fn from_decision_ptr(ptr: *mut c_void, decision_cpu: bool) -> Self {
+        Self {
+            handle: Arc::new(ModelHandle { ptr }),
+            decision_cpu,
+        }
+    }
+
     /// Load a model from a GGUF file.
     ///
     /// `n_gpu_layers` is forwarded verbatim to llama.cpp's loader (a
-    /// negative value means "all layers on the GPU"; zero forces CPU
-    /// inference).
+    /// negative value means "all layers on the GPU"; zero keeps model layers
+    /// on the CPU). For an explicit no-offload decision configuration, use
+    /// [`Self::load_decision_cpu`] instead.
     pub fn load(path: &str, n_gpu_layers: i32) -> LlamaResult<Self> {
         let c_path = ffi::cstring(path, "model path")?;
         // SAFETY: `c_path` outlives the call; `n_gpu_layers` is plain
@@ -63,9 +73,22 @@ impl LlamaModel {
         if ptr.is_null() {
             return Err(LlamaError::LoadFailed(path.to_string()));
         }
-        Ok(Self {
+        let model = Self {
             handle: Arc::new(ModelHandle { ptr }),
-        })
+            decision_cpu: false,
+        };
+        // A decision artifact must never silently enter causal generation,
+        // including when old explicit GGUF metadata bypasses SDK detection.
+        // The scan cannot fail: its limits belong to decision admission, and
+        // must not refuse a chat model that loaded before decisions existed.
+        // That includes a model that answers decisions and generates text,
+        // which upstream serves as a chat model too.
+        if model.is_decision_only() {
+            return Err(LlamaError::InvalidInput(
+                "decision artifact requires an explicit decision execution profile".into(),
+            ));
+        }
+        Ok(model)
     }
 
     /// Returns the raw pointer for the `xybrid-llama` internals.
@@ -91,6 +114,7 @@ impl LlamaModel {
             handle: Arc::new(ModelHandle {
                 ptr: std::ptr::null_mut(),
             }),
+            decision_cpu: false,
         }
     }
 
@@ -120,37 +144,37 @@ impl LlamaModel {
         add_special: bool,
         parse_special: bool,
     ) -> LlamaResult<Vec<i32>> {
-        let c_text = ffi::cstring(text, "tokenize text")?;
-        // SAFETY: `c_text` outlives both calls. Probe + real call follow
+        let text_len = i32::try_from(text.len()).map_err(|_| {
+            LlamaError::InvalidInput("tokenizer input exceeds native length limit".into())
+        })?;
+        // SAFETY: `text` is length-delimited and outlives both calls. Probe + real call follow
         // llama.cpp's documented two-pass tokenization protocol.
         let probe = unsafe {
-            ffi::tokenize_probe(
-                self.as_ptr(),
-                &c_text,
-                text.len(),
-                add_special,
-                parse_special,
-            )
+            ffi::tokenize_probe(self.as_ptr(), text, text_len, add_special, parse_special)
         };
-        let required = if probe < 0 { -probe } else { probe };
+        let required = probe.checked_abs().ok_or(LlamaError::TokenizationFailed)?;
         if required <= 0 {
             return Ok(Vec::new());
         }
-        let capacity = required as usize + 16; // padding for safety
-        let mut tokens = vec![0i32; capacity];
+        let capacity = required;
+        let mut tokens = Vec::new();
+        tokens
+            .try_reserve_exact(capacity as usize)
+            .map_err(|_| LlamaError::TokenizationFailed)?;
+        tokens.resize(capacity as usize, 0i32);
         // SAFETY: `tokens` is writable for `capacity` i32 elements.
         let result = unsafe {
             ffi::tokenize_into(
                 self.as_ptr(),
-                &c_text,
-                text.len(),
+                text,
+                text_len,
                 tokens.as_mut_ptr(),
                 capacity,
                 add_special,
                 parse_special,
             )
         };
-        if result < 0 {
+        if result < 0 || result > capacity {
             return Err(LlamaError::TokenizationFailed);
         }
         tokens.truncate(result as usize);
@@ -159,15 +183,47 @@ impl LlamaModel {
 
     /// Detokenize `tokens` to a UTF-8 string, rendering special tokens
     /// (e.g. `<|im_end|>`) verbatim in their text form.
+    ///
+    /// The pieces are joined as bytes and decoded once, so a character that a
+    /// byte-level vocabulary splits across tokens survives. Bytes that cannot
+    /// be UTF-8 become U+FFFD. A character the tokens leave unfinished at the
+    /// end (the budget ran out between its bytes) has no text and is dropped,
+    /// as the streaming callback never receives one either. In `generate_raw`,
+    /// which keeps the final EOG token, a character left unfinished directly
+    /// before it decodes as `�` followed by the EOG text instead, because the
+    /// EOG's bytes follow it in the same call.
     pub fn detokenize(&self, tokens: &[i32]) -> LlamaResult<String> {
-        let mut result = String::new();
+        let mut bytes = Vec::new();
         let mut buf = vec![0u8; 256];
         for &token in tokens {
-            // SAFETY: `buf` writable for `buf.len()` bytes. The C wrapper
-            // returns the number of bytes written (or required); we
-            // re-allocate and retry on overflow exactly once, matching
-            // the pre-refactor behavior.
-            let len = unsafe {
+            bytes.extend_from_slice(self.piece_bytes(token, &mut buf));
+        }
+        let mut decoder = Utf8Decoder::default();
+        let text = decoder.push(&bytes).into_owned();
+        decoder.discard_unfinished();
+        Ok(text)
+    }
+
+    /// Write `token`'s piece, special tokens rendered, into `buf`, growing it
+    /// when the piece does not fit, and return the bytes written.
+    fn piece_bytes<'b>(&self, token: i32, buf: &'b mut Vec<u8>) -> &'b [u8] {
+        // SAFETY: `buf` is writable for `buf.len()` bytes.
+        let mut len = unsafe {
+            ffi::token_to_piece(
+                self.as_ptr(),
+                token,
+                buf.as_mut_ptr() as *mut std::os::raw::c_char,
+                buf.len(),
+                0,
+                true,
+            )
+        };
+        if len < 0 {
+            // llama.cpp returns the size a piece needs, negated, when `buf` is
+            // too small for it.
+            buf.resize(len.unsigned_abs() as usize, 0);
+            // SAFETY: as above, after the resize.
+            len = unsafe {
                 ffi::token_to_piece(
                     self.as_ptr(),
                     token,
@@ -177,32 +233,9 @@ impl LlamaModel {
                     true,
                 )
             };
-            if len > 0 {
-                let len_usize = len as usize;
-                if len_usize >= buf.len() {
-                    buf.resize(len_usize + 1, 0);
-                    // SAFETY: buf resized above.
-                    let retry_len = unsafe {
-                        ffi::token_to_piece(
-                            self.as_ptr(),
-                            token,
-                            buf.as_mut_ptr() as *mut std::os::raw::c_char,
-                            buf.len(),
-                            0,
-                            true,
-                        )
-                    };
-                    if retry_len > 0 {
-                        if let Ok(piece) = std::str::from_utf8(&buf[..retry_len as usize]) {
-                            result.push_str(piece);
-                        }
-                    }
-                } else if let Ok(piece) = std::str::from_utf8(&buf[..len_usize]) {
-                    result.push_str(piece);
-                }
-            }
         }
-        Ok(result)
+        let len = usize::try_from(len).unwrap_or(0).min(buf.len());
+        &buf[..len]
     }
 
     /// BOS (beginning-of-sequence) token.
@@ -225,6 +258,17 @@ impl LlamaModel {
     pub fn vocab_is_eog(&self, token: i32) -> bool {
         // SAFETY: the handle keeps the model pointer live.
         unsafe { ffi::vocab_is_eog(self.as_ptr(), token) }
+    }
+
+    /// True when tokenizing with `add_special` prepends the BOS token.
+    ///
+    /// Reads the GGUF `tokenizer.ggml.add_bos_token` flag. When it is
+    /// unset (LFM3), the BOS token only reaches the model if the prompt
+    /// text carries it, which is how the model's chat template renders
+    /// `bos_token`.
+    pub fn adds_bos(&self) -> bool {
+        // SAFETY: the handle keeps the model pointer live.
+        unsafe { ffi::vocab_get_add_bos(self.as_ptr()) }
     }
 
     /// Vocabulary size.
@@ -292,6 +336,7 @@ impl LlamaModel {
 //   - llama_token_bos_c             : read-only
 //   - llama_token_eos_c             : read-only
 //   - llama_vocab_is_eog_c          : read-only
+//   - llama_vocab_get_add_bos_c     : read-only
 //   - llama_model_chat_template_c   : read-only (returns interior C string)
 //   - llama_n_vocab_c               : read-only
 //   - llama_model_is_recurrent_c    : read-only

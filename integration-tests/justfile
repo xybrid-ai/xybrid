@@ -15,4 +15,25 @@ check-models:
     ./download.sh --check
 
 bootstrap:
-    ./download.sh --all 
+    ./download.sh --all
+
+# Decision wire/finalization without loading model weights.
+decision-protocol:
+    cargo test -p integration-tests --test decision_conformance -- --nocapture
+
+# Stage real weights and a matched-build upstream reference; never skip a model.
+decision-native:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ./download.sh d1-2b-q4km
+    ../tools/conformance/decision/build.sh
+    mkdir -p ../tools/conformance/decision/work
+    work_dir="$(mktemp -d ../tools/conformance/decision/work/decision.XXXXXX)"
+    work_dir="$(cd "$work_dir" && pwd)"
+    reference_dir="$work_dir/reference"
+    export XYBRID_NATIVES_PREBUILT_DIR="$work_dir/native"
+    python3 ../tools/conformance/decision/stage_native.py --out "$XYBRID_NATIVES_PREBUILT_DIR"
+    python3 ../tools/conformance/decision/stage_native.py --out "$XYBRID_NATIVES_PREBUILT_DIR" --check
+    python3 ../tools/conformance/decision/oracle.py --collect fixtures/decision/hf/cases --artifact d1-2b-q4km --expect-cases 63 --out "$reference_dir"
+    XYBRID_DECISION_REFERENCE_DIR="$reference_dir" XYBRID_REQUIRE_MODELS=1 cargo test -p integration-tests --features llm-llamacpp --test decision_conformance -- --nocapture --test-threads=1
+    XYBRID_REQUIRE_MODELS=1 cargo test -p xybrid-cli --features llm-llamacpp --test decision_cli_test -- --nocapture --test-threads=1

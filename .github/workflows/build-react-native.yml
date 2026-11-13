@@ -260,6 +260,10 @@ jobs:
           rm -rf bindings/kotlin/libs && mkdir -p bindings/kotlin/libs /tmp/aar
           unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
           cp -r /tmp/aar/jni/* bindings/kotlin/libs/
+          # Headroom left for Gradle: the AAR build extracts the NDK twice
+          # (@androidndk and @androidndk_api29, see MODULE.bazel), and this job
+          # has run out of disk before.
+          df -h /
 
       # No signing: guarded on signingInMemoryKey, absent here.
       - name: Publish xybrid-kotlin to mavenLocal

@@ -1,7 +1,10 @@
 {
-  "tag": null,
-  "commit": "b46812de78f8fbcb6cf0154947e8633ebc78d9ac",
-  "sdk_base_version": null,
-  "update_kind": null,
-  "sdk_release": null
+  "tag": "v0.8.0",
+  "commit": "8642541b255bfb5dc39cd351a178be09013a55d6",
+  "sdk_base_version": "0.15.0",
+  "update_kind": "minor",
+  "sdk_release": {
+    "version": "0.18.0",
+    "commit": "8642541b255bfb5dc39cd351a178be09013a55d6"
+  }
 }

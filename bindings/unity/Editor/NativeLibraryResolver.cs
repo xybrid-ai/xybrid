@@ -52,6 +52,18 @@ namespace Xybrid.Editor
         private const string RepoSlug = "xybrid-ai/xybrid";
         private const string ManifestAssetPrefix = "xybrid-unity-natives-v";
 
+        /// <summary>
+        /// Files earlier Android bundles installed in each ABI folder that the
+        /// current bundle no longer ships. The Android library links libc++
+        /// statically, and a leftover <c>libc++_shared.so</c> collides with the
+        /// copy Unity's GameActivity packages, failing the Gradle build.
+        /// </summary>
+        private static readonly string[] RetiredAndroidNatives =
+        {
+            "libc++_shared.so",
+            "libc++_shared.so.meta",
+        };
+
         /// <summary>Root under the consuming project where natives are installed.</summary>
         private static string InstallRoot =>
             Path.Combine(Application.dataPath, "Xybrid", "Plugins");
@@ -132,6 +144,8 @@ namespace Xybrid.Editor
                         $"SHA-256 mismatch for {entry.asset}: expected {entry.sha256}, got {actualSha}.");
                 }
 
+                // Extraction never deletes, so drop what an older bundle left behind.
+                if (platform == "android") PruneRetiredAndroidNatives(InstallRoot);
                 ExtractInto(tmpZip, InstallRoot);
                 File.Delete(tmpZip);
 
@@ -357,6 +371,31 @@ namespace Xybrid.Editor
                 var parked = path + "." + Guid.NewGuid().ToString("N") + ".old";
                 try { File.Move(path, parked); } catch { /* fall through */ }
             }
+        }
+
+        /// <summary>
+        /// Deletes the <see cref="RetiredAndroidNatives"/> from each ABI folder
+        /// under <c>{installRoot}/Android/</c>. Touches nothing else; a missing
+        /// <c>Android</c> folder is a no-op.
+        /// </summary>
+        /// <returns>The number of files deleted.</returns>
+        internal static int PruneRetiredAndroidNatives(string installRoot)
+        {
+            var androidRoot = Path.Combine(installRoot, "Android");
+            if (!Directory.Exists(androidRoot)) return 0;
+
+            var removed = 0;
+            foreach (var abiDir in Directory.GetDirectories(androidRoot))
+            {
+                foreach (var name in RetiredAndroidNatives)
+                {
+                    var path = Path.Combine(abiDir, name);
+                    if (!File.Exists(path)) continue;
+                    File.Delete(path);
+                    removed++;
+                }
+            }
+            return removed;
         }
 
         /// <summary>

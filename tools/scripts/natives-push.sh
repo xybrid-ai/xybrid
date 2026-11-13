@@ -41,7 +41,8 @@ SLICE="$EXPORT/$TARGET"
 # archives build.rs's resolve_prebuilt requires are present and non-empty in
 # lib/ OR lib64/ before publishing. Mirror required_archives() in build.rs:
 # MSVC names static libs `<name>.lib` (no prefix); every other target is
-# Unix-style `lib<name>.a`. Base set, plus ggml-metal on Apple, mtmd on vision,
+# Unix-style `lib<name>.a`. Base set, plus ggml-metal on Apple, mtmd and its
+# vendor-hash dependency on vision,
 # and ggml-vulkan on Vulkan feature sets.
 case "$TARGET" in
   *windows-msvc*) pfx=''; sfx='.lib' ;;
@@ -52,7 +53,7 @@ case "$TARGET" in
   *apple*) archives+=("${pfx}ggml-metal${sfx}") ;;
 esac
 case "$FEATURES" in
-  vision|vision-vulkan) archives+=("${pfx}mtmd${sfx}") ;;
+  vision|vision-vulkan) archives+=("${pfx}mtmd${sfx}" "${pfx}vendor-hash${sfx}") ;;
 esac
 case "$FEATURES" in
   vulkan|vision-vulkan) archives+=("${pfx}ggml-vulkan${sfx}") ;;
@@ -64,7 +65,10 @@ for a in "${archives[@]}"; do
   }
 done
 
-slice_dirs=(lib include)
+# Ship the complete licenses with every published native target, including
+# source builds whose install prefix contains only archives and headers.
+cp "$ROOT/crates/llama-cpp-sys/NOTICE" "$SLICE/NOTICE"
+slice_dirs=(lib include NOTICE)
 [ -d "$SLICE/lib64" ] && slice_dirs+=(lib64)
 
 # Everything below runs from INSIDE the slice dir so both tar and oras see

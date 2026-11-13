@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "upstream-test-payload",
+  "profile": "lfm3-d1/text/v1",
+  "title": "The payload of llama.cpp's own SystemOne tests: null choice descriptions, a 4-level score, a noul without criteria",
+  "covers": [
+    "description-null",
+    "multi-question",
+    "score-2-levels"
+  ],
+  "request_text": "{\"state\": \"I was charged twice for my order last week and nobody has replied.\", \"questions\": {\"route\": {\"type\": \"choice\", \"instructions\": \"Which team should handle this?\", \"criteria\": {\"billing\": \"payments and refunds\", \"shipping\": null, \"technical\": null}}, \"urgency\": {\"type\": \"score\", \"instructions\": \"How urgent is this?\", \"criteria\": [\"can wait\", \"this week\", \"today\", \"right now\"]}, \"angry\": {\"type\": \"noul\", \"instructions\": \"Is the customer angry?\"}}}",
+  "artifact": "d1-2b-hf"
+}

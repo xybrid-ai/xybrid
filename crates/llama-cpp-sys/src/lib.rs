@@ -12,8 +12,8 @@
 //!
 //! To get the actual FFI surface, build with `--features bindings`. The
 //! build script will use the in-tree `vendor/llama-cpp` directory if
-//! present, and otherwise clone the pinned commit
-//! `b46812de78f8fbcb6cf0154947e8633ebc78d9ac` from GitHub into `$OUT_DIR`.
+//! present, and otherwise clone the commit pinned in `build.rs` from GitHub
+//! into `$OUT_DIR`.
 //!
 //! # Safety and stability
 //!
@@ -78,9 +78,8 @@ pub mod bindings {
     //     honors the `vision` feature's extra `mtmd_*` surface.
     //   - `committed-bindings` (the Bazel path, which has no build script and
     //     therefore no bindgen/libclang): the committed src/bindings.rs
-    //     snapshot, generated WITHOUT `vision`. Regenerate it by building
-    //     with `--features bindings` and copying $OUT_DIR/bindings.rs over
-    //     src/bindings.rs — build.rs warns when the snapshot drifts.
+    //     snapshot, generated with `vision`. Regenerate it with
+    //     `python3 tools/scripts/llamacpp_update.py bindings`.
     #[cfg(feature = "committed-bindings")]
     include!("bindings.rs");
     #[cfg(not(feature = "committed-bindings"))]

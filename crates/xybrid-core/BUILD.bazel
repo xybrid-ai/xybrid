@@ -91,7 +91,12 @@ rust_library(
             "llm-llamacpp-vision",
         ],
         "//conditions:default": [],
-    }) + select({"//:tts_zzz_enabled": ["tts-zzz"], "//conditions:default": []}),
+    }) + select({
+        # Speech: identical at every tts-zzz forwarder (bazel/zzz/BUILD.bazel).
+        "//bazel/zzz:android_without_slice": [],
+        "//:tts_zzz_enabled": ["tts-zzz"],
+        "//conditions:default": [],
+    }),
     # Vulkan lane (--//:vulkan=true): `local_execution_provider` decides between
     # "vulkan" and "cpu" with `option_env!("XYBRID_LLAMA_CPP_VULKAN")`
     # (runtime_adapter/llm.rs) — a rustc-time lookup, which cargo satisfies from
@@ -108,7 +113,12 @@ rust_library(
     # default, so the optional `xybrid-whisper` path-dep is absent from it. The
     # feature is force-enabled above, so the dep has to be added by hand or the
     # crate fails to compile with an unresolved `xybrid_whisper` import.
-    deps = all_crate_deps(normal = True) + ["//crates/xybrid-whisper:xybrid_whisper"] + select({"//:tts_zzz_enabled": ["//crates/zzz-sys:xybrid_zzz_sys"], "//conditions:default": []}),
+    deps = all_crate_deps(normal = True) + ["//crates/xybrid-whisper:xybrid_whisper"] + select({
+        # Speech: identical at every tts-zzz forwarder (bazel/zzz/BUILD.bazel).
+        "//bazel/zzz:android_without_slice": [],
+        "//:tts_zzz_enabled": ["//crates/zzz-sys:xybrid_zzz_sys"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
 )
 
@@ -136,6 +146,7 @@ _CORE_INTEGRATION_TESTS = {
         ":xybrid-core",
         "@crates//:walkdir",
     ],
+    "llamacpp_stream_text": [":xybrid-core"],
     "llm_context_integration": [
         ":xybrid-core",
         "@crates//:serde_json",
@@ -174,12 +185,20 @@ _CORE_INTEGRATION_TESTS = {
         "@crates//:image",
         "@crates//:serde_json",
     ],
+    "lfm3_smoke": [
+        ":xybrid-core",
+        "@crates//:image",
+        "@crates//:serde_json",
+    ],
 }
 
-# vlm_lfm2_smoke opens with `#![cfg(feature = "llm-llamacpp")]`; without the
-# feature the file compiles to an EMPTY binary that still reports success. The
-# library target above already builds with llm-llamacpp, so this lines up.
+# vlm_lfm2_smoke, llamacpp_stream_text and lfm3_smoke open with
+# `#![cfg(feature = "llm-llamacpp")]`; without the feature each file compiles to
+# an EMPTY binary that still reports success. The library target above already
+# builds with llm-llamacpp, so this lines up.
 _CORE_TEST_FEATURES = {
+    "lfm3_smoke": ["llm-llamacpp"],
+    "llamacpp_stream_text": ["llm-llamacpp"],
     "vlm_lfm2_smoke": ["llm-llamacpp"],
 }
 
@@ -187,10 +206,12 @@ _CORE_TEST_FEATURES = {
 # looking for retired cache-key names, so the sources themselves are inputs.
 _CORE_TEST_DATA = {
     "legacy_cache_names": glob(["src/**/*.rs"]),
+    "llamacpp_stream_text": ["//integration-tests:model_metadata_fixtures"],
     "llm_context_integration": ["//integration-tests:model_metadata_fixtures"],
     "mobilenet_vision_parity": ["//integration-tests:model_metadata_fixtures"],
     "tts_integration": ["//integration-tests:model_metadata_fixtures"],
     "tts_smoke": ["//integration-tests:model_metadata_fixtures"],
+    "lfm3_smoke": ["//integration-tests:model_metadata_fixtures"],
     "vlm_lfm2_smoke": ["//integration-tests:model_metadata_fixtures"],
 }
 
@@ -242,6 +263,7 @@ rust_test(
         "@crates//:criterion",
         "@crates//:dirs",
         "@crates//:hound",
+        "@crates//:httpmock",
         "@crates//:libloading",
         "@crates//:tempfile",
     ] + _CORE_TEST_UREQ,

@@ -128,6 +128,11 @@ pub(crate) const SPECULATIVE_CLOUD_STREAMS: &str = "--speculative-cloud streams 
 /// `xybrid run --choice` sends. Without this a scorer would load and warm up,
 /// then fail on its first input.
 pub(crate) fn refuse_choice_scorer(model: &XybridModel, mode: &str) -> anyhow::Result<()> {
+    if model.is_decision_model() {
+        anyhow::bail!(
+            "decision models do not support {mode}; use `xybrid run --decision-request <file-or->`"
+        );
+    }
     if !model.is_choice_scorer() {
         return Ok(());
     }

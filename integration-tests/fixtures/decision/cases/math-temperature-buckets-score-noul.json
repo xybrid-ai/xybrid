@@ -1,0 +1,297 @@
+{
+  "schema_version": 1,
+  "id": "math-temperature-buckets-score-noul",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Bucket temperatures for score and noul questions",
+  "covers": ["math-temperature-bucket"],
+  "artifact": "d1-2b-q4km",
+  "metadata": {
+    "set": {
+      "lfm3.decision.temperature.score.2": "f32:0.5",
+      "lfm3.decision.temperature.score.3_5": "f32:2.0",
+      "lfm3.decision.temperature.score.6_10": "f32:4.0",
+      "lfm3.decision.temperature.noul.2": "f32:0.25"
+    }
+  },
+  "settings": null,
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"s2\": {\"type\": \"score\", \"instructions\": \"x\", \"criteria\": [\"0\", \"1\"]}, \"s4\": {\"type\": \"score\", \"instructions\": \"x\", \"criteria\": [\"0\", \"1\", \"2\", \"3\"]}, \"s10\": {\"type\": \"score\", \"instructions\": \"x\", \"criteria\": [\"0\", \"1\", \"2\", \"3\", \"4\", \"5\", \"6\", \"7\", \"8\", \"9\"]}, \"n\": {\"type\": \"noul\", \"instructions\": \"x\"}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "s2",
+          "type": "score",
+          "keys": ["0", "1"]
+        },
+        {
+          "id": "s4",
+          "type": "score",
+          "keys": ["0", "1", "2", "3"]
+        },
+        {
+          "id": "s10",
+          "type": "score",
+          "keys": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        },
+        {
+          "id": "n",
+          "type": "noul",
+          "keys": ["true", "false"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "s2",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nx\n\n0 0\n1 1\n\nReply with a single digit 0-1 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 96, 8, 24, 229, 24, 207, 25, 229, 25, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 25, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 46,
+          "select": [24, 25]
+        },
+        {
+          "question": "s4",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nx\n\n0 0\n1 1\n2 2\n3 3\n\nReply with a single digit 0-3 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 96, 8, 24, 229, 24, 207, 25, 229, 25, 207, 26, 229, 26, 207, 27, 229, 27, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 27, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 54,
+          "select": [24, 25, 26, 27]
+        },
+        {
+          "question": "s10",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nx\n\n0 0\n1 1\n2 2\n3 3\n4 4\n5 5\n6 6\n7 7\n8 8\n9 9\n\nReply with a single digit 0-9 only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 96, 8, 24, 229, 24, 207, 25, 229, 25, 207, 26, 229, 26, 207, 27, 229, 27, 207, 28, 229, 28, 207, 29, 229, 29, 207, 30, 229, 30, 207, 31, 229, 31, 207, 32, 229, 32, 207, 33, 229, 33, 8, 57922, 415, 267, 2936, 19763, 229, 24, 21, 33, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 78,
+          "select": [24, 25, 26, 27, 28, 29, 30, 31, 32, 33]
+        },
+        {
+          "question": "n",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nx\n\nReply with yes or no only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 96, 8, 57922, 415, 18171, 432, 794, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 34,
+          "select": [11683, 12447, 2243, 4547, 19598]
+        }
+      ],
+      "answers": [
+        {
+          "question": "s2",
+          "type": "score",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            }
+          ],
+          "temperature": "0.500000",
+          "temperature_f32": "0x3f000000"
+        },
+        {
+          "question": "s4",
+          "type": "score",
+          "pass": 1,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            }
+          ],
+          "temperature": "2.000000",
+          "temperature_f32": "0x40000000"
+        },
+        {
+          "question": "s10",
+          "type": "score",
+          "pass": 2,
+          "groups": [
+            {
+              "key": "0",
+              "code": "0",
+              "range": [0, 1]
+            },
+            {
+              "key": "1",
+              "code": "1",
+              "range": [1, 2]
+            },
+            {
+              "key": "2",
+              "code": "2",
+              "range": [2, 3]
+            },
+            {
+              "key": "3",
+              "code": "3",
+              "range": [3, 4]
+            },
+            {
+              "key": "4",
+              "code": "4",
+              "range": [4, 5]
+            },
+            {
+              "key": "5",
+              "code": "5",
+              "range": [5, 6]
+            },
+            {
+              "key": "6",
+              "code": "6",
+              "range": [6, 7]
+            },
+            {
+              "key": "7",
+              "code": "7",
+              "range": [7, 8]
+            },
+            {
+              "key": "8",
+              "code": "8",
+              "range": [8, 9]
+            },
+            {
+              "key": "9",
+              "code": "9",
+              "range": [9, 10]
+            }
+          ],
+          "temperature": "4.000000",
+          "temperature_f32": "0x40800000"
+        },
+        {
+          "question": "n",
+          "type": "noul",
+          "pass": 3,
+          "groups": [
+            {
+              "key": "true",
+              "code": "true",
+              "range": [0, 2]
+            },
+            {
+              "key": "false",
+              "code": "false",
+              "range": [2, 5]
+            }
+          ],
+          "temperature": "0.250000",
+          "temperature_f32": "0x3e800000"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "synthetic",
+      "raw_scores": [
+        ["0x00000000", "0x3f800000"],
+        ["0x00000000", "0x3f800000", "0x40000000", "0x3f000000"],
+        ["0x00000000", "0x3f800000", "0x40000000", "0x3f000000", "0xbf800000", "0x40400000", "0x40200000", "0x3fc00000", "0x3e800000", "0xbf000000"],
+        ["0x3f800000", "0x00000000", "0x00000000", "0xbf800000", "0xbf800000"]
+      ],
+      "scores": [
+        ["0x00000000", "0x3f800000"],
+        ["0x00000000", "0x3f800000", "0x40000000", "0x3f000000"],
+        ["0x00000000", "0x3f800000", "0x40000000", "0x3f000000", "0xbf800000", "0x40400000", "0x40200000", "0x3fc00000", "0x3e800000", "0xbf000000"],
+        ["0x3f800000", "0x00000000"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "s2": {
+          "type": "score",
+          "score": 1.0,
+          "legend": {
+            "0": "0",
+            "1": "1"
+          },
+          "probabilities": {
+            "0": 0.11920292202211755,
+            "1": 0.88079707797788231
+          },
+          "confidence": 0.88079707797788231
+        },
+        "s4": {
+          "type": "score",
+          "score": 2.0,
+          "legend": {
+            "0": "0",
+            "1": "1",
+            "2": "2",
+            "3": "3"
+          },
+          "probabilities": {
+            "0": 0.15035268569626095,
+            "1": 0.2478896710143163,
+            "2": 0.4087009733881603,
+            "3": 0.19305666990126247
+          },
+          "confidence": 0.4087009733881603
+        },
+        "s10": {
+          "type": "score",
+          "score": 5.0,
+          "legend": {
+            "0": "0",
+            "1": "1",
+            "2": "2",
+            "3": "3",
+            "4": "4",
+            "5": "5",
+            "6": "6",
+            "7": "7",
+            "8": "8",
+            "9": "9"
+          },
+          "probabilities": {
+            "0": 0.07557479540283718,
+            "1": 0.097039958158218823,
+            "2": 0.12460177270946793,
+            "3": 0.085637462501566855,
+            "4": 0.058857709840190814,
+            "5": 0.1599918431233058,
+            "6": 0.14119230599511789,
+            "7": 0.10996067847265523,
+            "8": 0.080448950940171099,
+            "9": 0.066694522856468333
+          },
+          "confidence": 0.1599918431233058
+        },
+        "n": {
+          "type": "noul",
+          "noul": 0.98201379003790845
+        }
+      },
+      "usage": {
+        "input_tokens": 216,
+        "output_tokens": 0
+      }
+    }
+  },
+  "xybrid": {
+    "load": "match",
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "given",
+    "finalize": "match"
+  }
+}

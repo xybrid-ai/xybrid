@@ -292,6 +292,12 @@ xybrid repl --huggingface "unsloth/SmolLM2-360M-Instruct-GGUF:Q4_K_M" --stream
 xybrid run --model-file ./my-model.gguf --input-text "Hello!"
 ```
 
+If the file has no `model_metadata.json` beside it, xybrid writes one from the
+GGUF header, with the context capped at 4,096 tokens. `run --model-file`
+regenerates the metadata on every run, so for a longer context raise
+`context_length` in that file and run the directory instead:
+`xybrid run --directory . --input-text "Hello!"`.
+
 ### Pipelines
 
 Chain models together with a YAML file:
@@ -339,7 +345,17 @@ xybrid run --config voice-assistant.yaml --input-audio question.wav --output res
 |------|-------------|
 | `-v`, `-vv` | Increase verbosity |
 | `-q`, `--quiet` | Suppress output, show errors only |
-| `--api-key` | Platform API key for telemetry (or `XYBRID_API_KEY` env) |
+| `--api-key` | Cloud API key (or `XYBRID_API_KEY` env); does not enable observability by itself |
+| `--platform-url` | Cloud gateway URL (or `XYBRID_PLATFORM_URL` env) |
+| `--observability` | Opt into Xybrid trace export; requires an API key |
+| `--traces-endpoint` | Full trace URL for `--observability` (default `https://ingest.xybrid.dev/v1/traces`) |
+
+Collector export uses `OTEL_EXPORTER_OTLP_ENDPOINT` or per-signal
+`OTEL_EXPORTER_OTLP_*_ENDPOINT` variables and does not require a Xybrid API key.
+`OTEL_SDK_DISABLED=true` disables export in either mode. The CLI flushes and
+shuts down its exporter when the command ends.
+Enabled observability captures prompts and outputs by default. Set
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT=no_content` for metadata only.
 
 ### `run` Input Sources
 

@@ -106,6 +106,7 @@ int32_t llama_token_bos_c(const XYBRID_LLAMA_MODEL* model);
 int32_t llama_token_eos_c(const XYBRID_LLAMA_MODEL* model);
 int32_t llama_token_nl_c(const XYBRID_LLAMA_MODEL* model);
 bool llama_vocab_is_eog_c(const XYBRID_LLAMA_MODEL* model, int32_t token);
+bool llama_vocab_get_add_bos_c(const XYBRID_LLAMA_MODEL* model);
 
 /* Model metadata */
 const char* llama_model_chat_template_c(const XYBRID_LLAMA_MODEL* model);
@@ -113,6 +114,35 @@ int  llama_n_vocab_c(const XYBRID_LLAMA_MODEL* model);
 int  llama_n_ctx_c(const XYBRID_LLAMA_CONTEXT* ctx);
 bool llama_model_is_recurrent_c(const XYBRID_LLAMA_MODEL* model);
 bool llama_model_has_recurrent_state_c(const XYBRID_LLAMA_MODEL* model);
+
+/* Decision-only primitives. All failures are content-free; C++ exceptions
+ * never cross these entry points. Vocab-only models must not create contexts. */
+XYBRID_LLAMA_MODEL* llama_load_decision_model_c(const char* path_model, bool vocab_only);
+int llama_model_metadata_c(const XYBRID_LLAMA_MODEL* model, const char* key, char* out, size_t capacity);
+int llama_model_metadata_count_c(const XYBRID_LLAMA_MODEL* model);
+int llama_model_metadata_key_c(const XYBRID_LLAMA_MODEL* model, int index, char* out, size_t capacity);
+int llama_model_named_template_c(const XYBRID_LLAMA_MODEL* model, const char* name, char* out, size_t capacity);
+int llama_vocab_text_c(const XYBRID_LLAMA_MODEL* model, int token, char* out, size_t capacity);
+bool llama_vocab_is_control_c(const XYBRID_LLAMA_MODEL* model, int token);
+XYBRID_LLAMA_CONTEXT* llama_decision_context_new_c(XYBRID_LLAMA_MODEL* model);
+bool llama_decision_context_valid_c(const XYBRID_LLAMA_CONTEXT* ctx);
+struct llama_decision_settings_c {
+    uint32_t n_ctx, n_ctx_seq, n_batch, n_ubatch, n_seq_max;
+    int32_t n_threads, n_threads_batch, n_devices;
+    bool causal_attn, has_memory;
+};
+bool llama_decision_context_settings_c(const XYBRID_LLAMA_CONTEXT* ctx,
+    struct llama_decision_settings_c* settings);
+typedef bool (*llama_decision_abort_c)(void* data);
+int llama_decision_evaluate_c(XYBRID_LLAMA_CONTEXT* ctx,
+    const int32_t* tokens, int n_tokens, const int32_t* labels, int n_labels,
+    float* selected, llama_decision_abort_c abort_callback, void* abort_data);
+void* llama_decision_renderer_new_c(const char* source, size_t source_len);
+void llama_decision_renderer_free_c(void* renderer);
+int llama_decision_renderer_render_c(void* renderer,
+    const char* json, size_t json_len, size_t max_output_bytes,
+    char** output, size_t* output_len);
+void llama_decision_rendered_free_c(char* output);
 
 /* Low-level generation primitives (carried in wrapper.cpp's exports
    even though xybrid-llama drives generation via the higher-level
@@ -230,7 +260,8 @@ mtmd_context* mtmd_init_from_file_c(
     bool use_gpu,
     bool warmup,
     int n_threads,
-    bool flash_attn);
+    bool flash_attn,
+    int image_max_tokens);
 void mtmd_free_c(mtmd_context* ctx);
 
 /* mtmd bitmap helpers */

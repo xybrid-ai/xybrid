@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use xybrid_core::gateway::ToolCall;
-use xybrid_core::ir::{ChoiceScores, Envelope, EnvelopeKind};
+use xybrid_core::ir::{ChoiceScores, Decisions, Envelope, EnvelopeKind, PhonemeTiming};
 
 /// Per-stage latency entry for pipeline runs.
 ///
@@ -98,6 +98,8 @@ pub enum OutputType {
     /// Scores from a choice scorer, one per candidate (see
     /// [`InferenceResult::choice_scores`]).
     ChoiceScores,
+    /// Typed decisions from a versioned decision protocol.
+    Decisions,
 }
 
 impl std::fmt::Display for OutputType {
@@ -108,6 +110,7 @@ impl std::fmt::Display for OutputType {
             OutputType::Embedding => write!(f, "embedding"),
             OutputType::Unknown => write!(f, "unknown"),
             OutputType::ChoiceScores => write!(f, "choice_scores"),
+            OutputType::Decisions => write!(f, "decisions"),
         }
     }
 }
@@ -132,6 +135,7 @@ impl std::fmt::Display for OutputType {
 ///     OutputType::Audio => println!("Audio: {} bytes", result.unwrap_audio().len()),
 ///     OutputType::Embedding => println!("Embedding: {} dims", result.unwrap_embedding().len()),
 ///     OutputType::ChoiceScores => println!("{} candidates", result.choice_scores().unwrap().entries.len()),
+///     OutputType::Decisions => println!("{} answers", result.decisions().unwrap().answers().len()),
 ///     OutputType::Unknown => println!("Unknown output"),
 /// }
 ///
@@ -156,6 +160,8 @@ pub struct InferenceResult {
     provenance: ExecutionProvenance,
     /// Typed metrics parsed from `envelope.metadata`
     metrics: InferenceMetrics,
+    /// Trace/span ids of the run's logical inference span, when traced
+    observation: Option<xybrid_observability::ObservationRef>,
 }
 
 /// Where a result was actually produced.
@@ -228,12 +234,29 @@ impl InferenceResult {
             model_id: model_id.into(),
             provenance,
             metrics,
+            observation: None,
         }
     }
 
     /// Where this result was actually produced — local or cloud.
     pub fn provenance(&self) -> ExecutionProvenance {
         self.provenance
+    }
+
+    /// Trace and span ids of this run's logical inference span, for linking
+    /// feedback and evaluation results. `None` when the run was not traced.
+    pub fn observation_ref(&self) -> Option<&xybrid_observability::ObservationRef> {
+        self.observation.as_ref()
+    }
+
+    pub(crate) fn with_observation(
+        mut self,
+        observation: Option<xybrid_observability::ObservationRef>,
+    ) -> Self {
+        if observation.is_some() {
+            self.observation = observation;
+        }
+        self
     }
 
     /// Create from envelope with pre-computed output type.
@@ -256,6 +279,7 @@ impl InferenceResult {
             model_id: model_id.into(),
             provenance: ExecutionProvenance::Local,
             metrics,
+            observation: None,
         }
     }
 
@@ -325,15 +349,32 @@ impl InferenceResult {
     ///
     /// Present when the request offered tools (`GenerationConfig::with_tools`)
     /// and the model emitted at least one well-formed tool-call block
-    /// (LFM2-style `<|tool_call_start|>...`, gemma-4-style
-    /// `<|tool_call>call:...`, or FunctionGemma-style
-    /// `<start_function_call>call:...`). The raw blocks stay in
+    /// (LFM2-style `<|tool_call_start|>...`, LFM3-style
+    /// `<tool_call><function=...>`, gemma-4-style `<|tool_call>call:...`, or
+    /// FunctionGemma-style `<start_function_call>call:...`). The raw blocks stay in
     /// [`text`](Self::text) untouched. Returns an empty vec when the metadata
     /// is absent or unparseable — malformed model output is never an error.
     pub fn tool_calls(&self) -> Vec<ToolCall> {
         self.envelope
             .metadata
             .get(Envelope::TOOL_CALLS_METADATA_KEY)
+            .and_then(|raw| serde_json::from_str(raw).ok())
+            .unwrap_or_default()
+    }
+
+    /// When each phoneme is spoken in the returned audio, for lip sync or
+    /// word highlighting.
+    ///
+    /// Present on a TTS result when the model reports how long each input
+    /// token lasts (an ONNX TTS model with a `duration` output). Times are
+    /// seconds from the first sample of [`audio_bytes`](Self::audio_bytes),
+    /// in order and never overlapping; padding and silence tokens are left
+    /// out. Returns an empty vec when the metadata is absent or unparseable,
+    /// as for models without durations, streamed audio and cloud results.
+    pub fn phoneme_timings(&self) -> Vec<PhonemeTiming> {
+        self.envelope
+            .metadata
+            .get(Envelope::PHONEME_TIMINGS_METADATA_KEY)
             .and_then(|raw| serde_json::from_str(raw).ok())
             .unwrap_or_default()
     }
@@ -366,6 +407,24 @@ impl InferenceResult {
     /// is not choice scores.
     pub fn choice_scores(&self) -> Option<&ChoiceScores> {
         self.envelope.as_choice_scores()
+    }
+
+    /// Typed answers in the request's question order.
+    pub fn decisions(&self) -> Option<&Decisions> {
+        match &self.envelope.kind {
+            EnvelopeKind::Decisions(decisions) => Some(decisions),
+            _ => None,
+        }
+    }
+
+    /// Total evaluated input tokens, including repeated state across decision questions.
+    pub fn tokens_in(&self) -> Option<u64> {
+        self.metadata("tokens_in")?.parse().ok()
+    }
+
+    /// Generated token count; decision protocols report zero.
+    pub fn tokens_out(&self) -> Option<u64> {
+        self.metadata("tokens_out")?.parse().ok()
     }
 
     // ========================================================================
@@ -437,15 +496,49 @@ pub(crate) fn output_type_for_envelope(envelope: &Envelope) -> OutputType {
         EnvelopeKind::Audio(_) => OutputType::Audio,
         EnvelopeKind::Embedding(_) => OutputType::Embedding,
         EnvelopeKind::ChoiceScores(_) => OutputType::ChoiceScores,
+        EnvelopeKind::Decisions(_) => OutputType::Decisions,
         EnvelopeKind::Image { .. }
         | EnvelopeKind::MultiPart(_)
-        | EnvelopeKind::ChoiceRequest(_) => OutputType::Unknown,
+        | EnvelopeKind::ChoiceRequest(_)
+        | EnvelopeKind::DecisionRequest(_) => OutputType::Unknown,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decisions_preserve_f64_answers_and_report_usage_without_generated_text() {
+        use xybrid_core::ir::{
+            DecisionAnswer, DecisionOrigin, DecisionScore, DecisionUsage, DecisionValue,
+        };
+        let probability = 0.5000000000000001;
+        let answer = DecisionAnswer::new(
+            "opaque-id",
+            vec![
+                DecisionScore::new("a", 1.0, probability, DecisionOrigin::Caller),
+                DecisionScore::new("b", 0.0, 1.0 - probability, DecisionOrigin::Caller),
+            ],
+            DecisionValue::choice("a"),
+            Some(probability),
+        )
+        .unwrap();
+        let decisions = Decisions::new(vec![answer], DecisionUsage::new(1, 17));
+        let mut envelope = Envelope::new(EnvelopeKind::Decisions(decisions.clone()));
+        envelope.metadata.insert("tokens_in".into(), "17".into());
+        envelope.metadata.insert("tokens_out".into(), "0".into());
+        let result = InferenceResult::new(envelope, "d1", 3);
+        assert_eq!(result.output_type(), OutputType::Decisions);
+        assert_eq!(result.decisions(), Some(&decisions));
+        assert_eq!(result.tokens_in(), Some(17));
+        assert_eq!(result.tokens_out(), Some(0));
+        assert!(result.text().is_none());
+        assert_eq!(
+            serde_json::to_string(&OutputType::Decisions).unwrap(),
+            "\"Decisions\""
+        );
+    }
 
     #[test]
     fn test_text_result() {
@@ -551,6 +644,72 @@ mod tests {
         let result = InferenceResult::new(envelope, "llm-model", 10);
 
         assert!(result.tool_calls().is_empty());
+    }
+
+    #[test]
+    fn test_phoneme_timings_parses_valid_metadata() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            Envelope::PHONEME_TIMINGS_METADATA_KEY.to_string(),
+            r#"[{"phoneme":"h","start":0.0125,"end":0.05},{"phoneme":"\"","start":0.05,"end":0.1}]"#
+                .to_string(),
+        );
+        let envelope = Envelope {
+            kind: EnvelopeKind::Audio(vec![0; 4800]),
+            metadata,
+        };
+        let result = InferenceResult::new(envelope, "kokoro-82m-timed", 50);
+
+        assert_eq!(
+            result.phoneme_timings(),
+            vec![
+                PhonemeTiming {
+                    phoneme: "h".to_string(),
+                    start: 0.0125,
+                    end: 0.05,
+                },
+                PhonemeTiming {
+                    phoneme: "\"".to_string(),
+                    start: 0.05,
+                    end: 0.1,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_phoneme_timings_absent_or_malformed_returns_empty_vec() {
+        let absent = InferenceResult::new(
+            Envelope {
+                kind: EnvelopeKind::Audio(vec![1, 2, 3, 4]),
+                metadata: HashMap::new(),
+            },
+            "kokoro-82m",
+            50,
+        );
+        assert!(absent.phoneme_timings().is_empty());
+
+        for raw in [
+            "not-json",
+            r#"{"phoneme":"h","start":0.0,"end":0.1}"#,
+            r#"[{"phoneme":"h","start":"soon","end":0.1}]"#,
+            r#"[{"phoneme":"h","start":0.0}]"#,
+        ] {
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                Envelope::PHONEME_TIMINGS_METADATA_KEY.to_string(),
+                raw.to_string(),
+            );
+            let malformed = InferenceResult::new(
+                Envelope {
+                    kind: EnvelopeKind::Audio(vec![1, 2, 3, 4]),
+                    metadata,
+                },
+                "kokoro-82m-timed",
+                50,
+            );
+            assert!(malformed.phoneme_timings().is_empty(), "{raw}");
+        }
     }
 
     #[test]
@@ -678,5 +837,21 @@ mod tests {
             EnvelopeKind::Text(text) => assert_eq!(text, "test"),
             _ => panic!("Expected Text"),
         }
+    }
+}
+
+/// Terminal streamed-speech result. Audio packets are delivered through the sink.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TtsStreamResult {
+    /// Existing runtime delivery summary.
+    pub summary: xybrid_core::execution::TtsStreamResult,
+    /// Inference reference; absent for disabled or explicitly suppressed tracing.
+    pub observation: Option<crate::observability::ObservationRef>,
+}
+
+impl std::ops::Deref for TtsStreamResult {
+    type Target = xybrid_core::execution::TtsStreamResult;
+    fn deref(&self) -> &Self::Target {
+        &self.summary
     }
 }

@@ -4,11 +4,26 @@
 Phonon and Kitten TTS 2, including release versions, archive checksums, ABI requirements,
 and linker metadata.
 
-| Binary target | Compiled baseline |
+| Pinned binary target | Compiled baseline |
 | --- | --- |
 | macOS ARM64 | macOS 13+ |
 | Android ARM64 | Android API 29+ |
 | Linux x86_64 | x86-64-v3 CPU, glibc 2.28+ |
+| iOS ARM64 device / simulator | iOS 16+ |
+| Linux ARM64 | baseline ARM64 CPU, glibc 2.28+ |
+
+On Linux x86_64, Rust checks the complete x86-64-v3 CPU feature set and
+OS-enabled AVX state before every engine FFI call, including capability
+probes and native defaults. Unsupported CPUs return ABI version `0`, report
+no supported models, and reject session work with a `LoadFailed` error naming
+the required CPU floor. `availability()` reports the same condition as
+`UnavailableReason::UnsupportedCpu` without opening model files. ABI `0`
+means the runtime is unavailable; it does not mean the pinned artifact failed
+ABI verification. Native defaults return zeroed settings with `struct_size`
+set in this case; opening a session checks availability before validating
+settings. Other target slices retain their existing behavior. The Rust host
+must itself be built for its intended CPU baseline; this check cannot make a
+host binary compiled for v3 run on v2.
 
 Privately stage a pinned slice before native builds with
 `python3 tools/scripts/zzz_pull.py --target <target>` from the repository root;
@@ -19,6 +34,46 @@ separately. The same verifier is included in the published crate as
 `zzz_pull.py`, beside `natives-manifest.json`; run it with
 `python3 <crate-directory>/zzz_pull.py --target <target>`. It works without this
 workspace and does not include the engine binary or private credentials.
+
+### Python and prebuilt directory selection
+
+The verifier requires **Python 3.11+**, including for offline verification. It
+checks the interpreter version before reading inputs or downloading anything.
+Cargo uses `python3` by default; set `XYBRID_ZZZ_PYTHON=python3.11` (or an
+absolute executable path) to select another interpreter. This variable names
+one executable, with no shell arguments; paths containing spaces work. Invoke
+manual staging commands with that same Python executable. Bazel's repository
+helper also accepts `--repo_env=XYBRID_ZZZ_PYTHON=<executable>`.
+
+`XYBRID_ZZZ_PREBUILT_DIR` accepts either of these private layouts:
+
+- **One slice:** the exact directory printed by `zzz_pull.py`, containing
+  `RECEIPT.json`, `.pinned-archive.tar.gz`, `lib/`, `include/`, and the other
+  verified payload files. Existing single-slice overrides keep working.
+- **Multiple targets:** a private root containing complete verified slices
+  directly under their Rust target triples, such as
+  `<root>/aarch64-apple-darwin/` and `<root>/aarch64-linux-android/`. Move or copy
+  each entire staged directory into the matching child, preserving private
+  permissions (directories `0700`, files `0600`); symlinked slices are rejected.
+  The `--dest` option still stages using release/target/profile/checksum keys;
+  it does not create this flat layout automatically.
+
+Cargo and the verifier select `<root>/<requested Rust target>` when that child
+exists; otherwise they treat the override as one slice. A present but invalid
+child fails verification and never falls back. The root must also have private
+permissions when selecting a child. Every selected slice is fully reverified
+against the committed pin, including its retained archive. A missing, wrong,
+or tampered override fails without downloading a replacement. For example:
+
+```bash
+XYBRID_ZZZ_PREBUILT_DIR=/private/engine-slices \
+  python3.11 crates/zzz-sys/zzz_pull.py --target aarch64-linux-android --verify-only
+```
+
+The command prints the selected slice directory only on success. A wrong-target
+receipt reports the requested and provided Rust targets when both are recognized;
+unrecognized receipt values and private paths are never echoed in that diagnostic.
+An enabled unsupported target still fails the build, even when an override is set.
 
 ## Rust bindings
 
@@ -33,13 +88,111 @@ verification.
 
 The `phonon-kitten-tts2` profile supplies exactly those two models in one
 archive and exposes only the `zzz_embed` API. Single-model archives export
-overlapping symbols and cannot be linked together. Staging verifies all four
+overlapping symbols and cannot be linked together. Staging verifies all 18
 payload files, the exact model/API declarations and the archive's SHA-256
-before either Cargo or Bazel links it. This SDK pins engine `v0.1.0-rc.8`
-with receipt schema 4. The full `combined` engine is not accepted.
+before either Cargo or Bazel links it. This SDK pins engine `v0.1.0-rc.9`
+with receipt schema 5. The full `combined` engine is not accepted.
+
+Receipt schema 4 remains accepted only for the frozen `rc.8` release. The
+current schema-5 pins require the immutable 14-file notice
+inventory, including runtime terms and upstream license texts. Each archive's
+manifest entry must pin the exact schema-5 `notice_files` map; the receipt map
+and every notice's bytes must match it before staging. Changing notice bytes
+requires a new receipt schema. All six current archives were independently
+compared with their published counterparts and inspected, staged and reverified
+through the packaged helper. Pin adoption alone does not enable speech in
+standard SDK binaries or qualify installed SDK applications. Only the Android
+SDK's arm64-v8a library opts in; see [Android SDK](#android-sdk).
+
+### Additional static platforms
+
+Cargo and Bazel recognize the following pinned schema-5 targets. All use
+the baseline ARM64 CPU. Enabling static `bindings` requires the exact verified
+staged slice. Schema 4 and frozen release tags cannot supply these new slices. No x86 iOS simulator
+or Mac Catalyst support is added.
+
+| Rust target | Receipt Zig target | Slice | Minimum | System libraries |
+| --- | --- | --- | --- | --- |
+| `aarch64-apple-ios` | `aarch64-ios-none` | `ios-arm64` | iOS 16.0 | `System` |
+| `aarch64-apple-ios-sim` | `aarch64-ios-simulator` | `ios-arm64-simulator` | iOS 16.0 | `System` |
+| `aarch64-unknown-linux-gnu` | `aarch64-linux-gnu` | `linux-arm64` | glibc 2.28 | `c`, `m`, `pthread`, `dl` |
+
+These requirements follow the engine's release slice contract. Pins and
+receipts must preserve that CPU, minimum, system-library list and device or
+simulator ABI. Bazel uses the existing iOS 16 configurations and pinned Apple
+toolchains: its two ARM64 selects distinguish apple_support's
+[`device` and `simulator` constraints](https://github.com/bazelbuild/apple_support/blob/2.2.0/constraints/BUILD),
+as emitted by [rules_rs 0.2.0's pinned rules_rust mapping](https://github.com/hermeticbuild/rules_rust/blob/2ab43f0bbaa406ffb1a0dd64ae2ecb8f7734f733/rust/platform/triple_mappings.bzl).
+Linux ARM64 additionally requires the GNU libc constraint.
+
+Bazel loads packages from unselected `select` arms. For only these three new
+targets, a genuinely absent target row produces an inert repository whose
+`zzz` rule fails when selected for analysis. Resolving that unused repository
+does not require a staged slice. Existing targets always retain strict
+verification, and any attempted new target row (including a malformed or
+duplicate pin) takes the verifier path. A selected target cannot silently omit
+the engine.
+
+Outside the Android SDK's arm64-v8a library, native SDK Cargo/Bazel linking
+and installed SDK runtime qualification remain required. Pin adoption does not
+change defaults, activate standard binaries, or qualify minimum iOS/glibc
+execution. Offline tests use synthetic archives and notices; actual published
+archive staging was verified separately.
 
 `PhononSettings::default()` reads the linked engine's defaults. Temperature `0`
 selects the GGUF's default; a positive finite value overrides it. Seed `0` is
 valid. Omitting the voice lets the engine select a bundled voice; this surface
 does not load external voice files or clone voices. Keep mapped model files
 unchanged until all session/cancellation handles are gone.
+
+## Android SDK
+
+The Android SDK (the `ai.xybrid:xybrid-kotlin` AAR, which React Native also
+uses) is the only standard SDK binary that links the engine. Its release build
+passes `--//:tts_zzz=true` and stages only the pinned `aarch64-linux-android`
+slice, which is linked statically into the AAR's arm64-v8a
+`libxybrid_bolt.so` (Android 10, API 29, the AAR's floor). Swift, Flutter,
+Unity, Python and the CLI still ship without it.
+
+- armeabi-v7a and x86_64 have no pinned slice. Under the flag they build
+  without speech through `//bazel/zzz:android_without_slice`, so one flag-on
+  AAR build covers every ABI. Every crate that forwards `tts-zzz` uses the same
+  select with that group first; `tools/scripts/tests/test_zzz_feature_wiring.py`
+  checks this per platform. Any other target without a slice (Windows, macOS
+  x86_64, Linux musl, x86 Android) still fails as incompatible when the flag is
+  set.
+- The flag is target-scoped (`scope = "target"`), so build tools in the exec
+  configuration never select the engine. A Bazel build therefore resolves only
+  its target platform's slice, not the build host's.
+- A custom flag-on `--config=android-arm64` build (the Flutter library or the
+  Unity plugin) links the same slice, but with the API-28 toolchain those
+  libraries use. The engine still needs Android 10, so such a build must not
+  claim a lower floor.
+- The fourteen notices travel in the AAR at `assets/xybrid/zzz/<path>`
+  (`//bazel/zzz:notices.bzl`). Analysis fails unless the verified slice
+  exports exactly those files. Android merges library assets into the APK, so
+  every app that ships the SDK carries them.
+- The engine is isolated before it is linked. The archive carries its own
+  runtime (string and math routines, compiler-rt helpers) and defines
+  memcpy, strlen, expf, `__stack_chk_fail` and more as global or weak
+  symbols, and the AAR's alwayslink Rust staticlib pulls in the whole
+  archive. Linked as is, those copies satisfied xybrid's own references in
+  `libxybrid_bolt.so` instead of bionic's. The Android slice therefore reaches
+  this crate only as `//bazel/zzz:android_engine` (`bazel/zzz/isolate.bzl`):
+  the archive prelinked with the target toolchain's `ld -r` into one object
+  whose only global definitions are the eight `zzz_embed_*` functions of
+  `src/api.rs`. Every other definition is local, the undefined imports stay
+  as they were, and the build action fails unless exactly that API is left
+  global. `--unique` keeps every input section apart, so the final link's
+  `--gc-sections` still drops dead engine code, and any `ld -r` warning fails
+  the action (a relocation into a discarded COMDAT section, which a final link
+  refuses, is only a warning there). A common symbol fails the action too: a
+  relocatable link cannot allocate one, so the engine must be built with
+  `-fno-common`. The AAR gate (`tools/scripts/verify_zzz_android.py`) then
+  requires every `libxybrid_bolt.so` to import memcpy, memset, memcmp,
+  strlen and `__stack_chk_fail` from bionic, and
+  `bazel/zzz/selftest` proves the mechanism on a fake engine.
+- The other slices still link their archive as is: the Bazel macOS, Linux,
+  iOS and Linux ARM64 arms of `BUILD.bazel`, and every Cargo build
+  (`build.rs` links `static=zzz_embed`). Their bundled runtime can interpose
+  on the host's libc in the same way; isolating them is a follow-up.

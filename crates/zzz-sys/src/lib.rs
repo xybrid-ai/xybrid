@@ -23,6 +23,8 @@
 //!
 //! # Public surface
 //!
+//! - `availability()` / `UnavailableReason` — whether this process can run
+//!   the linked engine (today only `UnsupportedCpu`, on Linux x86_64)
 //! - [`abi_version`] / [`supports_model`] — capability probes
 //! - [`EmbedOptions`] / [`KittenOptions`] / [`EmbedError`] / [`EmbedResult`]
 //!   — C-layout types with `Default`s mirroring the header's rules
@@ -33,8 +35,8 @@
 //!   with GGUF-selected voices and sampling defaults
 //! - [`SynthesisOutcome`] — delivery payload with the capped/partial flags
 //!
-//! Zero `unsafe` on the public surface: every `unsafe` block sits in
-//! [`mod@session`] with a `# Safety` comment, mirroring `xybrid-llama`'s and
+//! Zero `unsafe` on the public surface: every `unsafe` block sits in the
+//! private session/CPU modules with a safety comment, mirroring `xybrid-llama`'s and
 //! `xybrid-whisper`'s discipline. Both session types are deliberately not
 //! `Sync`: the header documents one synthesis at a time per session, with no
 //! re-entrant or concurrent calls.
@@ -223,9 +225,17 @@ const _: () = {
     }
 };
 
-#[cfg(feature = "bindings")]
+// Unit tests compile the session surface without `bindings`, dispatching to a
+// mock table so its lifetime rules run in every default test build.
+#[cfg(any(feature = "bindings", test))]
+mod api;
+#[cfg(any(feature = "bindings", test))]
+mod cpu;
+#[cfg(any(feature = "bindings", test))]
 mod session;
-#[cfg(feature = "bindings")]
+#[cfg(any(feature = "bindings", test))]
+pub use api::{availability, UnavailableReason};
+#[cfg(any(feature = "bindings", test))]
 pub use session::{
     abi_version, default_options, supports_model, ChunkInfo, KittenCancellation, KittenFlags,
     KittenSession, KittenSettings, PhononCancellation, PhononSession, PhononSettings,

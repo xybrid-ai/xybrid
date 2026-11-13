@@ -16,6 +16,14 @@
 
 #include "ggml-backend.h"
 
+// This file is compiled only for //bazel/ggml:android_arm64_cpu_variants,
+// whose //bazel/toolchains/android:api29 constraint selects the API-29 NDK
+// toolchain. If toolchain resolution ever falls back to the API-28 one, the
+// arm64 slice would silently lose its Android 10 floor: fail the build instead.
+#if !defined(__ANDROID_API__) || __ANDROID_API__ < 29
+#error "the AAR arm64 slice must build with the API-29 NDK toolchain (@androidndk_api29); see //bazel/toolchains/android"
+#endif
+
 namespace {
 
 // Most to least capable. Keep in sync with ANDROID_ARM64_CPU_VARIANTS in

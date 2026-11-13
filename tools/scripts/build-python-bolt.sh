@@ -53,13 +53,19 @@ echo "    Profile:  $PROFILE"
 PY_BOLT_DIR="$REPO_ROOT/bindings/python/xybrid/_bolt"
 mkdir -p "$PY_BOLT_DIR"
 
+# Apply the same guarded post-processes used by the committed sources before
+# packaging, including GIL release needed for in-flight cancellation. Disable
+# pack's internal regeneration so it compiles that exact native bridge.
+python3 "$REPO_ROOT/tools/scripts/gen_python_bolt.py"
+
 # `pack` owns the cargo build: it compiles the cdylib, then the CPython bridge
 # against it, then wheels both. Features must reach *that* build — a separate
 # `cargo build --features ...` would only warm the cache, since the artifact
-# staged below comes from the wheel.
+# staged below comes from the wheel. Python needs only the cdylib, so do not
+# also emit the crate's Rust rlib and static native archive in this build.
 # shellcheck disable=SC2086  # deliberate word-split: empty PROFILE_FLAG = debug
-(cd "$REPO_ROOT/crates/xybrid-bolt" && boltffi pack python $PROFILE_FLAG \
-    --cargo-arg=--features --cargo-arg="$FEATURES")
+(cd "$REPO_ROOT/crates/xybrid-bolt" && boltffi pack python --regenerate=false $PROFILE_FLAG \
+    --cargo-arg=--features --cargo-arg="$FEATURES" --cargo-arg=--crate-type=cdylib)
 
 # `pack` leaves the compiled bridge only inside the wheel, so take it from
 # there rather than from dist/, whose package dir holds just the sources.

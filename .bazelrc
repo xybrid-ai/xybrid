@@ -59,7 +59,7 @@ build:macos --platforms=@rules_rs//rs/platforms:aarch64-apple-darwin
 
 # Preinstalled host cmake/make/pkg-config for rfcc's exec tools — shared by the
 # local-only Mac lanes (macos-metal, ios). rfcc's from-source bootstrap is the
-# known mac-host wall, so both use the host's tools (macos-14 runners + dev Macs
+# known mac-host wall, so both use the host's tools (macOS runners + dev Macs
 # ship them).
 build:local_tools --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_cmake_toolchain
 build:local_tools --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_make_toolchain
@@ -120,7 +120,7 @@ build:ios-sim --action_env=IPHONEOS_DEPLOYMENT_TARGET=16.0
 # built without it is the union of every object of every crate. Opt-in by
 # config on purpose: the setting changes every Rust compile action, so it must
 # not leak into the CLI lane's cache keys. The rest of each archive is the
-# bundled ONNX Runtime, which Rust LTO cannot touch. Fallback if a macos-14
+# bundled ONNX Runtime, which Rust LTO cannot touch. Fallback if a macOS
 # runner runs out of memory on the iOS slices: lto=thin.
 build:rust-lto --@rules_rust//rust/settings:lto=fat
 

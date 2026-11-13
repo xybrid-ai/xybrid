@@ -3,8 +3,23 @@ import type { Envelope, PipelineInfo, PipelineResult } from './types';
 import {
   fromWirePipelineResult,
   toWireEnvelope,
+  toWireTraceOptions,
   type WirePipelineResult,
 } from './wire';
+
+/** Per-run options of a pipeline: the trace fields of `RunOptions`. */
+export interface PipelineRunOptions {
+  /** Correlation id recorded on this run's trace. */
+  correlationId?: string;
+  /** W3C `traceparent` of your span: the run's trace becomes its child. */
+  traceparent?: string;
+  /** W3C `tracestate` accompanying `traceparent`. */
+  tracestate?: string;
+  /** Your own conversation id, recorded on the run's trace. */
+  conversationId?: string;
+  /** Skip the detailed trace for this run; metrics are still recorded. */
+  suppressTrace?: boolean;
+}
 
 /**
  * A multi-stage pipeline (e.g. ASR → LLM → TTS) defined in YAML. A run
@@ -45,16 +60,14 @@ export class Pipeline {
 
   /**
    * Run every stage, downloading any missing model first. Per-stage
-   * generation settings belong in the YAML; only `correlationId` applies here.
+   * generation settings belong in the YAML; only the trace fields apply here.
    */
-  async run(
-    envelope: Envelope,
-    options: { correlationId?: string } = {},
-  ): Promise<PipelineResult> {
+  async run(envelope: Envelope, options: PipelineRunOptions = {}): Promise<PipelineResult> {
+    const trace = toWireTraceOptions(options);
     const wire = await NativeXybrid.runPipeline(
       this.handle,
       toWireEnvelope(envelope),
-      options.correlationId !== undefined ? { correlationId: options.correlationId } : null,
+      Object.keys(trace).length > 0 ? trace : null,
     );
     return fromWirePipelineResult(wire as WirePipelineResult);
   }

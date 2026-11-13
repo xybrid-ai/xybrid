@@ -3,6 +3,19 @@
 
 from __future__ import annotations
 
+import sys
+
+# Check before importing verifier dependencies or touching any private inputs.
+# In particular, hashlib.file_digest is only available starting in Python 3.11.
+if sys.version_info < (3, 11):
+    print(
+        "zzz-pull: Python 3.11+ is required "
+        f"(found {sys.version_info[0]}.{sys.version_info[1]}); "
+        "invoke this tool with Python 3.11+ or set XYBRID_ZZZ_PYTHON for Cargo builds",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
 import argparse
 import hashlib
 import json
@@ -11,7 +24,6 @@ import re
 import shutil
 import stat
 import subprocess
-import sys
 import tarfile
 import tempfile
 from dataclasses import dataclass
@@ -29,10 +41,44 @@ MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_PAYLOAD_BYTES = 256 * 1024 * 1024
 MAX_JSON_BYTES = 1024 * 1024
 CHUNK_BYTES = 1024 * 1024
+SCHEMA4_RELEASE_TAG = "v0.1.0-rc.8"
+FROZEN_RELEASE_TAGS = {f"v0.1.0-rc.{number}" for number in range(1, 9)}
+# Immutable schema-5 contract. A change to any notice byte requires a new
+# receipt schema, not a receipt or manifest that blesses its own replacement.
+SCHEMA5_NOTICE_FILES = {
+    "LICENSES/Go-BSD-3-Clause.txt": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+    "LICENSES/KittenTTS-APACHE-2.0.txt": "787aa312b93eee80b636f35652469df29efdb7582239d6a9c088467555a3c7fd",
+    "LICENSES/LLVM-compiler-rt.txt": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d",
+    "LICENSES/PrismML-llama-MIT.txt": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+    "LICENSES/Zig-MIT.txt": "5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177",
+    "LICENSES/compiler-rt-release_80.txt": "dd27f8c290bcdc8368549cd7cd98710a9dbdc34122f2e096a1edb97824ed4148",
+    "LICENSES/musl-COPYRIGHT.txt": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+    "LICENSES/musl-math-NOTICES.txt": "84cdee129cf7ea3d37731292a0b41bebe53d370b3206859b2748df9050fc6da5",
+    "LICENSES/xn-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "LICENSES/xn-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "LICENSES/xn-ptts-APACHE-2.0.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "LICENSES/xn-ptts-MIT.txt": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "RUNTIME_TERMS.md": "6efce1cf8639bb04218b01a3fe69ae5fcc0ad31befb6fbaf271c6fe9e7d4ff93",
+    "THIRD_PARTY_NOTICES.md": "cbf1b58004ae71c11e7ddda97a116d255118641bf81ffacd25ad837a26be6bab",
+}
 ZIG_TARGETS = {
     "aarch64-apple-darwin": "aarch64-macos-none",
+    "aarch64-apple-ios": "aarch64-ios-none",
+    "aarch64-apple-ios-sim": "aarch64-ios-simulator",
     "aarch64-linux-android": "aarch64-linux-android",
+    "aarch64-unknown-linux-gnu": "aarch64-linux-gnu",
     "x86_64-unknown-linux-gnu": "x86_64-linux-gnu",
+}
+# Targets added with schema 5 (pinned from rc.9). Frozen rc.8 has no such archives.
+# Mirrors the engine release slice contract; these are requirements, not pins.
+NEW_TARGET_CONTRACTS = {
+    "aarch64-apple-ios": ("ios-arm64", "baseline", "16.0", ["System"]),
+    "aarch64-apple-ios-sim": (
+        "ios-arm64-simulator", "baseline", "16.0", ["System"]
+    ),
+    "aarch64-unknown-linux-gnu": (
+        "linux-arm64", "baseline", "glibc-2.28", ["c", "m", "pthread", "dl"]
+    ),
 }
 
 
@@ -70,17 +116,22 @@ class Pin:
     entry: dict
 
     @property
+    def notices(self) -> dict[str, str]:
+        return self.entry.get("notice_files", {})
+
+    @property
     def files(self) -> set[str]:
         return {
             self.entry["library"],
             *self.entry["headers"],
             "RECEIPT.json",
             "share/zzz_embed.json",
+            *self.notices,
         }
 
     @property
     def directories(self) -> set[str]:
-        return {"lib", "include", "share"}
+        return {"lib", "include", "share"} | ({"LICENSES"} if self.notices else set())
 
     @property
     def key(self) -> tuple[str, ...]:
@@ -119,15 +170,26 @@ def select_pin(target: str, manifest: Path = DEFAULT_MANIFEST) -> Pin:
         "profile": PROFILE,
         "models": MODELS,
         "backend": "cpu",
-        "receipt_schema": 4,
         "apis": APIS,
         "library": "lib/libzzz_embed.a",
         "headers": HEADERS,
     }.items():
         expect(entry, field, value, "pin")
+    schema = entry.get("receipt_schema")
+    require(type(schema) is int and schema in (4, 5), "pin mismatch: receipt_schema")
+    if schema == 4:
+        require(tag == SCHEMA4_RELEASE_TAG, "schema 4 requires the frozen rc.8 release")
+        require(target not in NEW_TARGET_CONTRACTS, "schema 4 has no pin for this target")
+        require("notice_files" not in entry, "schema 4 cannot carry notice pins")
+    else:
+        require(tag not in FROZEN_RELEASE_TAGS, "frozen releases cannot use schema 5")
+        expect(entry, "notice_files", SCHEMA5_NOTICE_FILES, "pin")
     slices = {
         "aarch64-apple-darwin": "macos-arm64",
+        "aarch64-apple-ios": "ios-arm64",
+        "aarch64-apple-ios-sim": "ios-arm64-simulator",
         "aarch64-linux-android": "android-arm64",
+        "aarch64-unknown-linux-gnu": "linux-arm64",
         "x86_64-unknown-linux-gnu": "linux-x86_64",
     }
     expect(entry, "slice", slices[target], "pin")
@@ -147,11 +209,35 @@ def select_pin(target: str, manifest: Path = DEFAULT_MANIFEST) -> Pin:
         isinstance(libs, list) and libs and all(isinstance(v, str) and v for v in libs),
         "invalid system library pins",
     )
+    if target in NEW_TARGET_CONTRACTS:
+        _, cpu, minimum, libraries = NEW_TARGET_CONTRACTS[target]
+        for field, value in {
+            "cpu": cpu, "deployment_minimum": minimum, "system_libraries": libraries
+        }.items():
+            expect(entry, field, value, "pin")
     return Pin(tag, entry)
+
+
+def receipt_target_mismatch(receipt: dict, pin: Pin) -> str | None:
+    # Only names from the public target table may enter diagnostics. A receipt
+    # may be unverified, malformed, or contain private data in any other field.
+    for target, zig_target in ZIG_TARGETS.items():
+        if receipt.get("target") == zig_target and target != pin.entry["target"]:
+            return (
+                f"receipt target mismatch: requested '{pin.entry['target']}', "
+                f"provided '{target}'"
+            )
+    return None
 
 
 def validate_receipt(receipt: dict, metadata: dict, pin: Pin) -> None:
     entry = pin.entry
+    mismatch = receipt_target_mismatch(receipt, pin)
+    require(mismatch is None, mismatch or "receipt mismatch: target")
+    if entry["receipt_schema"] == 5:
+        expect(receipt, "notice_files", pin.notices, "receipt")
+    else:
+        require("notice_files" not in receipt, "schema 4 cannot carry notice files")
     for field, value in {
         "schema_version": entry["receipt_schema"],
         "release_tag": pin.release_tag,
@@ -187,7 +273,10 @@ def validate_receipt(receipt: dict, metadata: dict, pin: Pin) -> None:
     minimum = re.escape(entry["deployment_minimum"])
     target_patterns = {
         "aarch64-apple-darwin": rf"aarch64-macos\.{minimum}(?:\.\.\.[0-9.]+)?-none",
+        "aarch64-apple-ios": rf"aarch64-ios\.{minimum}(?:\.\.\.[0-9.]+)?-none",
+        "aarch64-apple-ios-sim": rf"aarch64-ios\.{minimum}(?:\.\.\.[0-9.]+)?-simulator",
         "aarch64-linux-android": rf"aarch64-linux(?:\.[0-9.]+)?-android\.{minimum}",
+        "aarch64-unknown-linux-gnu": rf"aarch64-linux(?:\.[0-9.]+)?-gnu\.{re.escape(entry['deployment_minimum'].removeprefix('glibc-'))}",
         "x86_64-unknown-linux-gnu": rf"x86_64-linux(?:\.[0-9.]+)?-gnu\.{re.escape(entry['deployment_minimum'].removeprefix('glibc-'))}",
     }
     require(
@@ -270,6 +359,15 @@ def inspect_archive(
                 with archive.extractfile(files[name]) as source:
                     documents.append(json_object(source.read(), name))
             validate_receipt(*documents, pin)
+            # Notice bytes are checked against independently pinned schema
+            # semantics before any destination files are written.
+            for name, expected_hash in pin.notices.items():
+                with archive.extractfile(files[name]) as source:
+                    require(
+                        hashlib.file_digest(source, "sha256").hexdigest()
+                        == expected_hash,
+                        "notice payload checksum mismatch",
+                    )
             hashes = {}
             for name, member in files.items():
                 digest = hashlib.sha256()
@@ -325,7 +423,24 @@ def verify_staged(path: Path, pin: Pin) -> Path:
                 )
                 found.add(relative)
     require(found == expected, "missing staged payload or pinned archive")
-    hashes = inspect_archive(path / STAGED_ARCHIVE, pin)
+    try:
+        hashes = inspect_archive(path / STAGED_ARCHIVE, pin)
+    except StageError as error:
+        if str(error) == "archive checksum mismatch":
+            # A wrong single-slice override otherwise fails at its checksum,
+            # before the verifier can explain which target was supplied. Read
+            # only a bounded receipt for a diagnostic hint, never for acceptance.
+            try:
+                with open_regular(path / "RECEIPT.json") as source:
+                    data = source.read(MAX_JSON_BYTES + 1)
+                require(len(data) <= MAX_JSON_BYTES, "metadata exceeds size limit")
+                receipt = json_object(data, "receipt")
+                mismatch = receipt_target_mismatch(receipt, pin)
+            except (OSError, ValueError):
+                mismatch = None
+            if mismatch:
+                raise StageError(mismatch) from None
+        raise
     for name, expected_hash in hashes.items():
         with open_regular(path / name) as source:
             require(
@@ -333,6 +448,28 @@ def verify_staged(path: Path, pin: Pin) -> Path:
                 "staged payload differs from pinned archive",
             )
     return path.absolute()
+
+
+def verify_prebuilt(path: Path, pin: Pin) -> Path:
+    """Accept a single slice or a private root with Rust-target children."""
+    require(
+        not path.is_symlink() and path.is_dir(), "missing or unsafe staged directory"
+    )
+    child = path / pin.entry["target"]
+    if child.exists() or child.is_symlink():
+        require(
+            not path.stat().st_mode & 0o077,
+            "prebuilt root requires private permissions (0700)",
+        )
+        # An explicitly supplied child always wins, even if it is invalid.
+        # Never fetch or fall back to a different target on verification failure.
+        return verify_staged(child, pin)
+    require(
+        (path / "RECEIPT.json").exists(),
+        f"missing prebuilt slice for requested target '{pin.entry['target']}'; "
+        "expected a verified slice or a private root/<Rust target> directory",
+    )
+    return verify_staged(path, pin)
 
 
 def github_environment(use_gh_auth: bool) -> tuple[str, dict[str, str]]:
@@ -517,7 +654,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--verify-only",
         action="store_true",
-        help="Verify XYBRID_ZZZ_PREBUILT_DIR without fetching or staging.",
+        help="Verify XYBRID_ZZZ_PREBUILT_DIR (a slice or private root/<Rust target>) without fetching or staging.",
     )
     args = parser.parse_args(argv)
     try:
@@ -527,7 +664,7 @@ def main(argv: list[str] | None = None) -> int:
             not (prebuilt and args.archive), "choose a staged override or local archive"
         )
         if prebuilt:
-            result = verify_staged(Path(prebuilt), pin)
+            result = verify_prebuilt(Path(prebuilt), pin)
         else:
             require(
                 not args.verify_only, "--verify-only requires XYBRID_ZZZ_PREBUILT_DIR"

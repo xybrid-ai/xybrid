@@ -74,23 +74,27 @@ use crate::registry_client::RegistryClient;
 use crate::result::{output_type_for_envelope, OutputType};
 use crate::run_options::RunOptions;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use xybrid_core::cache_provider::CacheProvider;
-use xybrid_core::context::{DeviceMetrics, StageDescriptor, DEVICE_CLASS_SCHEMA_VERSION};
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+use xybrid_core::context::DEVICE_CLASS_SCHEMA_VERSION;
+use xybrid_core::context::{DeviceMetrics, StageDescriptor};
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use xybrid_core::device::ResourceMonitor;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use xybrid_core::event_bus::{EventContext, OrchestratorEvent};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::routing_engine::LocalAvailability;
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use xybrid_core::orchestrator::{
-    LocalAuthority, OrchestrationAuthority, Orchestrator, ResolvedTarget, StageContext,
-    StageExecutionResult,
+    LocalAuthority, OrchestrationAuthority, ResolvedTarget, StageContext,
 };
+use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use xybrid_core::orchestrator::{PolicyOutcome, PolicyRequest};
 use xybrid_core::pipeline::{ExecutionTarget, IntegrationProvider, StageOptions};
@@ -98,6 +102,12 @@ use xybrid_core::pipeline_config::PipelineConfig;
 
 /// Result type for pipeline operations.
 pub type PipelineResult<T> = Result<T, SdkError>;
+
+fn guard_decision_pipeline_input(envelope: &Envelope) -> PipelineResult<()> {
+    xybrid_core::execution::decision::ensure_no_decision_kinds("pipeline", [envelope]).map_err(
+        |error| crate::model::sdk_execution_error("Decision pipeline input refused", error),
+    )
+}
 
 // ============================================================================
 // PipelineRef - Lightweight reference from YAML
@@ -308,6 +318,8 @@ pub struct StageTiming {
     /// Retained so an `ASR -> LLM -> TTS` caller can read the transcript and
     /// the reply text, not only the final audio.
     pub output: Envelope,
+    /// Reference to this execution; absent when tracing is disabled or suppressed.
+    pub observation_ref: Option<crate::ObservationRef>,
 }
 
 /// Result of pipeline execution.
@@ -321,6 +333,8 @@ pub struct PipelineExecutionResult {
     /// The final stage's output — the same envelope as the last entry of
     /// [`stages`](Self::stages).
     pub output: Envelope,
+    /// Reference to this execution; absent when tracing is disabled or suppressed.
+    pub observation_ref: Option<crate::ObservationRef>,
 }
 
 impl PipelineExecutionResult {
@@ -516,12 +530,94 @@ fn publish_streaming_fast_path_events(
     stage_name: &str,
     model_id: &str,
     route: &StreamingFastPathRoute,
-    pipeline_id: Option<uuid::Uuid>,
-    trace_id: Option<uuid::Uuid>,
 ) {
     for event in streaming_fast_path_events(stage_name, model_id, route) {
         let telemetry = crate::telemetry::convert_orchestrator_event(&event);
-        crate::telemetry::publish_telemetry_event_in_context(telemetry, pipeline_id, trace_id);
+        crate::telemetry::publish_telemetry_event(telemetry);
+    }
+}
+
+/// The single local stage the streaming fast path runs.
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", test))]
+struct StreamingStage<'a> {
+    name: &'a str,
+    model_id: &'a str,
+    metadata: &'a xybrid_core::execution::ModelMetadata,
+    /// The stage's prepared input.
+    input: &'a Envelope,
+}
+
+/// Runs the streaming fast path's stage as `workflow`'s stage inference, with
+/// one local attempt: `execute` streams it through a callback that hands each
+/// token to `on_token`.
+///
+/// A consumer stops a streaming pipeline by failing `on_token`; it has no
+/// other way. That is the caller's cancellation: the stream stops at that
+/// token, and the stage, its attempt and `workflow` end `cancelled`, with no
+/// exception, while the caller still receives the stage's error.
+/// `chunk_count` counts the tokens `on_token` accepted.
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", test))]
+fn observe_streaming_stage(
+    workflow: &crate::observability::WorkflowScope,
+    options: &RunOptions,
+    stage: StreamingStage<'_>,
+    mut on_token: xybrid_core::runtime_adapter::types::StreamingCallback<'_>,
+    execute: impl FnOnce(
+        xybrid_core::runtime_adapter::types::StreamingCallback<'_>,
+    ) -> xybrid_core::runtime_adapter::AdapterResult<Envelope>,
+) -> crate::model::SdkResult<(Envelope, Option<crate::observability::ObservationRef>)> {
+    let inference_options = workflow.child_options(options);
+    let obs = crate::observability::RunObservation::start(crate::observability::RunStart {
+        subject: crate::observability::RunSubject::from_metadata(stage.model_id, stage.metadata),
+        input: Some(stage.input),
+        history: &[],
+        options: Some(&inference_options),
+        generation: options.generation_config.as_ref(),
+        streaming: true,
+        location: crate::observability::Location::Local,
+        parent: None,
+        provider: None,
+        server: None,
+    });
+    obs.operation()
+        .set_attribute(crate::observability::KeyValue::new(
+            "xybrid.stage.name",
+            stage.name.to_owned(),
+        ));
+    obs.operation()
+        .set_attribute(crate::observability::KeyValue::new(
+            "xybrid.routing.target",
+            "local",
+        ));
+    let attempt = obs.attempt(crate::observability::AttemptSpec {
+        reason: crate::observability::AttemptReason::Initial,
+        location: crate::observability::Location::Local,
+        provider: None,
+        model: Some(stage.model_id),
+    });
+    let resource_guard = obs.begin_resources();
+    let chunks = obs.chunk_sink();
+    let stopped = workflow.cancel_mark().clone();
+    let callback: xybrid_core::runtime_adapter::types::StreamingCallback<'_> =
+        Box::new(move |token| {
+            chunks.deliver(|| on_token(token)).inspect_err(|_| {
+                chunks.cancel_mark().set();
+                stopped.set();
+            })
+        });
+    let output =
+        execute(callback).map_err(|e| SdkError::inference_src("LLM streaming execution failed", e));
+    obs.resource(resource_guard.finish().as_ref());
+    attempt.end_adapter(&output);
+    match output {
+        Ok(output) => {
+            let reference = obs.succeed(&output);
+            Ok((output, reference))
+        }
+        Err(e) => {
+            obs.fail(&e);
+            Err(e)
+        }
     }
 }
 
@@ -567,6 +663,9 @@ struct PipelineHandle {
     stage_configs: Vec<StageConfig>,
     /// Bundle paths for each stage (set after downloading)
     bundle_paths: HashMap<String, PathBuf>,
+    /// Stage ids whose own model has been fetched. `bundle_paths` is keyed by
+    /// stage ids and model ids alike, so it cannot answer this.
+    loaded_stages: HashSet<String>,
 }
 
 // ============================================================================
@@ -660,7 +759,8 @@ impl Pipeline {
         if let Some(ref client) = client {
             for stage_config in &stage_configs {
                 let model_id = stage_config.model_id();
-                let is_cached = client.is_cached(&model_id, None).unwrap_or(false);
+                let is_cached = client.resolve_offline(&model_id).is_some()
+                    || client.is_cached(&model_id, None).unwrap_or(false);
                 availability_map.insert(model_id, is_cached);
             }
         }
@@ -671,6 +771,7 @@ impl Pipeline {
             registry_url,
             stage_configs,
             bundle_paths: HashMap::new(),
+            loaded_stages: HashSet::new(),
         };
 
         let handle = Arc::new(RwLock::new(handle));
@@ -764,11 +865,14 @@ impl Pipeline {
 
             let (status, download_bytes) =
                 if matches!(stage_target, StageTarget::Device | StageTarget::Auto) {
-                    // For device/auto stages, check if model is cached (might run locally)
+                    // For device/auto stages, check if model is cached (might run locally).
+                    // Passthrough models (GGUF) have no bundle, only an extracted
+                    // directory, which `is_cached` does not look at.
                     let model_id = stage_config.model_id();
                     match client.resolve(&model_id, None) {
                         Ok(resolved) => {
-                            let is_cached = client.is_cached(&model_id, None).unwrap_or(false);
+                            let is_cached = client.resolve_offline(&model_id).is_some()
+                                || client.is_cached(&model_id, None).unwrap_or(false);
                             if is_cached {
                                 (StageStatus::Cached, None)
                             } else {
@@ -838,18 +942,20 @@ impl Pipeline {
     /// Check if all device models are cached and ready.
     ///
     /// Must hold BOTH: every stage is cached on disk (can run locally)
-    /// AND this handle has loaded each Cached stage's bundle path into
-    /// `handle.bundle_paths`. A freshly-constructed `Pipeline` with a
-    /// warm on-disk cache satisfies the first but not the second, so
-    /// `run()` used to skip `load_models()` and hit the core's mock
-    /// fallback. Integration (cloud-routed) stages don't need a local
-    /// bundle and pass through.
+    /// AND this handle has fetched each stage's own model (`loaded_stages`).
+    /// A freshly-constructed `Pipeline` with a warm on-disk cache satisfies
+    /// the first but not the second, so `run()` used to skip `load_models()`
+    /// and hit the core's mock fallback. Integration (cloud-routed) stages don't need a local
+    /// bundle and pass through. A stage downloaded by `load_models()` keeps
+    /// its `NeedsDownload` status but is ready once its model is fetched.
     pub fn is_ready(&self) -> bool {
         let Ok(handle) = self.handle.read() else {
             return false;
         };
         self.stages.iter().all(|s| match s.status {
-            StageStatus::Cached => handle.bundle_paths.contains_key(&s.id),
+            StageStatus::Cached | StageStatus::NeedsDownload => {
+                handle.loaded_stages.contains(&s.id)
+            }
             StageStatus::Integration => true,
             _ => false,
         })
@@ -878,14 +984,24 @@ impl Pipeline {
 
     /// Preload models with progress callback.
     ///
-    /// **Routing-Aware Downloads**: Before downloading each model, this method
-    /// consults the `OrchestrationAuthority` to determine if the stage will
-    /// actually run locally. If the authority routes to cloud (e.g., low battery,
-    /// model too large), the download is skipped.
-    ///
-    /// This ensures we don't waste bandwidth downloading models that won't be
-    /// used locally.
+    /// Every device or auto stage gets its model. A stage that names a
+    /// provider is an integration stage and downloads nothing; any other
+    /// stage has no cloud leg to fall back to, so it must run locally.
     pub fn load_models_with_progress<F>(&self, progress_callback: F) -> PipelineResult<()>
+    where
+        F: Fn(DownloadProgress),
+    {
+        self.fetch_stage_models(progress_callback, "load")
+    }
+
+    /// Resolves (and downloads when needed) every local stage's model, each as
+    /// a `load_model` operation with `trigger` (`load` when the application
+    /// preloads, `lazy` when a run has to).
+    fn fetch_stage_models<F>(
+        &self,
+        progress_callback: F,
+        trigger: &'static str,
+    ) -> PipelineResult<()>
     where
         F: Fn(DownloadProgress),
     {
@@ -902,41 +1018,46 @@ impl Pipeline {
             RegistryClient::from_env()?
         };
 
-        // Create authority for routing decisions
-        let authority = LocalAuthority::new();
-
-        // Get current device metrics for routing decisions
-        let metrics = DeviceMetrics::default();
+        let observed_fetch = |model_id: &str,
+                              size_bytes: Option<u64>,
+                              fetch: &dyn Fn() -> crate::model::SdkResult<PathBuf>|
+         -> crate::model::SdkResult<PathBuf> {
+            let load =
+                crate::observability::LoadScope::start_with_trigger(model_id, None, None, trigger);
+            if let Some(bytes) = size_bytes.filter(|bytes| *bytes > 0) {
+                load.size_bytes(bytes);
+            }
+            let result = fetch();
+            if let Ok(directory) = &result {
+                load.describe_directory(model_id, directory);
+            }
+            load.end(&result);
+            result
+        };
 
         let stages_to_fetch: Vec<_> = self
             .stages
             .iter()
-            .enumerate()
-            .filter(|(_, s)| matches!(s.status, StageStatus::Cached | StageStatus::NeedsDownload))
-            .filter_map(|(idx, s)| {
-                s.model_id.as_ref().map(|m| {
-                    (
-                        idx,
-                        s.id.clone(),
-                        m.clone(),
-                        s.download_bytes.unwrap_or(0),
-                        s.target.clone(),
-                        s.status.clone(),
-                    )
-                })
+            .filter(|s| matches!(s.status, StageStatus::Cached | StageStatus::NeedsDownload))
+            .filter_map(|s| {
+                s.model_id
+                    .as_ref()
+                    .map(|m| (s.id.clone(), m.clone(), s.download_bytes, s.status.clone()))
             })
             .collect();
 
         let total_stages = stages_to_fetch
             .iter()
-            .filter(|(_, _, _, _, _, status)| matches!(status, StageStatus::NeedsDownload))
+            .filter(|(_, _, _, status)| matches!(status, StageStatus::NeedsDownload))
             .count();
-        let mut skipped_count = 0;
 
         let mut download_stage_idx = 0;
-        for (_, stage_id, model_id, total_bytes, stage_target, stage_status) in stages_to_fetch {
+        for (stage_id, model_id, declared_bytes, stage_status) in stages_to_fetch {
+            let total_bytes = declared_bytes.unwrap_or(0);
             if matches!(stage_status, StageStatus::Cached) {
-                let model_dir = client.fetch_extracted(&model_id, None, |_| {})?;
+                let model_dir = observed_fetch(&model_id, declared_bytes, &|| {
+                    client.fetch_extracted(&model_id, None, |_| {})
+                })?;
                 let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
                 handle.availability_map.insert(model_id.clone(), true);
                 handle.availability_map.insert(stage_id.clone(), true);
@@ -944,93 +1065,40 @@ impl Pipeline {
                     .bundle_paths
                     .insert(stage_id.clone(), model_dir.clone());
                 handle.bundle_paths.insert(model_id, model_dir);
+                handle.loaded_stages.insert(stage_id);
                 continue;
             }
 
             let stage_idx = download_stage_idx;
             download_stage_idx += 1;
 
-            // Convert StageTarget to ExecutionTarget for authority
-            // - Device: user explicitly wants local, authority should respect it
-            // - Auto: let authority decide based on device conditions
-            // - Cloud/Integration: shouldn't reach here (filtered earlier), but handle anyway
-            let explicit_target = match &stage_target {
-                StageTarget::Device => Some(ExecutionTarget::Device),
-                StageTarget::Auto => None, // Let authority decide
-                StageTarget::Cloud => Some(ExecutionTarget::Cloud),
-                StageTarget::Integration { .. } => Some(ExecutionTarget::Cloud),
+            // Byte counts come from the download itself; `total_bytes` (the
+            // registry listing's figure) is the fallback for sources that
+            // declare no size.
+            let progress_for_model = |status: crate::DownloadStatus| {
+                progress_callback(DownloadProgress {
+                    model_id: model_id.clone(),
+                    percent: (status.progress * 100.0) as u32,
+                    bytes_downloaded: status.downloaded_bytes,
+                    bytes_total: status.total_bytes.unwrap_or(total_bytes),
+                    stage_index: stage_idx,
+                    total_stages,
+                });
             };
 
-            // Consult authority before downloading
-            let stage_context = StageContext {
-                stage_id: stage_id.clone(),
-                model_id: model_id.clone(),
-                input_kind: EnvelopeKind::Text("".to_string()), // At preload time, we don't have actual input
-                metrics: metrics.clone(),
-                resource_monitor: ResourceMonitor::global(),
-                explicit_target,
-                local_availability: None,
-                device_class: Some(metrics.canonical_device_class()),
-                device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
-            };
+            let model_dir = observed_fetch(&model_id, declared_bytes, &|| {
+                client.fetch_extracted(&model_id, None, progress_for_model)
+            })?;
 
-            let decision = authority.resolve_target(&stage_context);
-
-            // Only download if authority routes to device
-            match decision.result {
-                ResolvedTarget::Device => {
-                    // Authority says run locally - proceed with download
-                    // Byte counts now come from the download itself rather
-                    // than being back-computed from a fraction; `total_bytes`
-                    // (the registry listing's figure) is the fallback for
-                    // sources that declare no size.
-                    let progress_for_model = |status: crate::DownloadStatus| {
-                        progress_callback(DownloadProgress {
-                            model_id: model_id.clone(),
-                            percent: (status.progress * 100.0) as u32,
-                            bytes_downloaded: status.downloaded_bytes,
-                            bytes_total: status.total_bytes.unwrap_or(total_bytes),
-                            stage_index: stage_idx,
-                            total_stages,
-                        });
-                    };
-
-                    // Fetch model and extract to permanent cache directory
-                    // Uses CacheManager.ensure_extracted() as single source of truth
-                    let model_dir = client.fetch_extracted(&model_id, None, progress_for_model)?;
-
-                    {
-                        // Recover from poisoned RwLock to prevent permanent lock errors
-                        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
-
-                        handle.availability_map.insert(model_id.clone(), true);
-                        handle.availability_map.insert(stage_id.clone(), true);
-                        // Store the extracted directory path for this stage
-                        handle
-                            .bundle_paths
-                            .insert(stage_id.clone(), model_dir.clone());
-                        handle.bundle_paths.insert(model_id.clone(), model_dir);
-                    }
-                }
-                ResolvedTarget::Cloud { .. } | ResolvedTarget::Server { .. } => {
-                    // Authority routes to cloud/server - skip download
-                    skipped_count += 1;
-                    // Log the skip decision (could use telemetry here)
-                    #[cfg(debug_assertions)]
-                    eprintln!(
-                        "[pipeline] Skipping download for '{}': authority routed to {:?} ({})",
-                        model_id, decision.result, decision.reason
-                    );
-                }
-            }
-        }
-
-        if skipped_count > 0 {
-            #[cfg(debug_assertions)]
-            eprintln!(
-                "[pipeline] Skipped {} downloads based on authority routing decisions",
-                skipped_count
-            );
+            // Recover from poisoned RwLock to prevent permanent lock errors
+            let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+            handle.availability_map.insert(model_id.clone(), true);
+            handle.availability_map.insert(stage_id.clone(), true);
+            handle
+                .bundle_paths
+                .insert(stage_id.clone(), model_dir.clone());
+            handle.bundle_paths.insert(model_id, model_dir);
+            handle.loaded_stages.insert(stage_id);
         }
 
         Ok(())
@@ -1068,11 +1136,7 @@ impl Pipeline {
     pub fn warmup(&self) -> PipelineResult<()> {
         log::info!(target: "xybrid_sdk", "Warming up pipeline: {:?}", self.name);
 
-        // Ensure models are downloaded first
-        if !self.is_ready() {
-            self.load_models()?;
-        }
-
+        // Preload and execution share the warmup scope on the blocking thread.
         // Create a minimal warmup input
         // Use text as it works for most model types
         let warmup_input = Envelope {
@@ -1081,7 +1145,7 @@ impl Pipeline {
         };
 
         let start = std::time::Instant::now();
-        let _ = self.run(&warmup_input)?;
+        self.warmup_blocking(&warmup_input)?;
         let elapsed = start.elapsed();
 
         log::info!(
@@ -1123,11 +1187,7 @@ impl Pipeline {
     pub async fn warmup_async(&self) -> PipelineResult<()> {
         log::info!(target: "xybrid_sdk", "Warming up pipeline (async): {:?}", self.name);
 
-        // Ensure models are downloaded first
-        if !self.is_ready() {
-            self.load_models()?;
-        }
-
+        // Preload and execution share the warmup scope on the blocking thread.
         // Create a minimal warmup input
         let warmup_input = Envelope {
             kind: EnvelopeKind::Text("Hi".to_string()),
@@ -1135,7 +1195,14 @@ impl Pipeline {
         };
 
         let start = std::time::Instant::now();
-        let _ = self.run_async(&warmup_input).await?;
+        let pipeline = self.clone();
+        let context = crate::observability::CapturedContext::capture();
+        tokio::task::spawn_blocking(move || {
+            let _context = context.enter();
+            pipeline.warmup_blocking(&warmup_input)
+        })
+        .await
+        .map_err(|e| SdkError::pipeline_src("Task join error", e))??;
         let elapsed = start.elapsed();
 
         log::info!(
@@ -1146,6 +1213,36 @@ impl Pipeline {
         );
 
         Ok(())
+    }
+
+    /// Runs the warmup input through every stage under a generic
+    /// `warmup <pipeline>` span: stages are not inferences (no workflow, no
+    /// GenAI metrics, no input content); weights loaded on the way are
+    /// `load_model` operations with trigger `warmup`.
+    fn warmup_blocking(&self, warmup_input: &Envelope) -> PipelineResult<()> {
+        let span = crate::observability::SpanScope::start(
+            &format!("warmup {}", self.name.as_deref().unwrap_or("pipeline")),
+            Vec::new(),
+        );
+        let result = (|| {
+            if !self.is_ready() {
+                self.fetch_stage_models(|_| {}, "warmup")?;
+            }
+            let (stage_descriptors, availability_map) = self.resolve_run_inputs();
+            execute_orchestrated(
+                self.name.clone(),
+                stage_descriptors,
+                availability_map,
+                warmup_input,
+                &RunOptions::default(),
+                &pipeline_metrics(&RunOptions::default()),
+                span.context(),
+                crate::observability::PipelinePurpose::Warmup,
+            )
+            .map(|(result, _)| result)
+        })();
+        span.end(&result);
+        result.map(|_| ())
     }
 
     /// Run inference on the pipeline.
@@ -1166,18 +1263,8 @@ impl Pipeline {
         envelope: &Envelope,
         options: &RunOptions,
     ) -> PipelineResult<PipelineExecutionResult> {
-        if !self.is_ready() {
-            self.load_models()?;
-        }
-
-        let (stage_descriptors, availability_map) = self.resolve_run_inputs();
-        execute_blocking(
-            self.name.clone(),
-            stage_descriptors,
-            availability_map,
-            envelope,
-            options,
-        )
+        guard_decision_pipeline_input(envelope)?;
+        execute_blocking(self, envelope, options)
     }
 
     /// Run inference asynchronously.
@@ -1192,6 +1279,7 @@ impl Pipeline {
         envelope: &Envelope,
         options: &RunOptions,
     ) -> PipelineResult<PipelineExecutionResult> {
+        guard_decision_pipeline_input(envelope)?;
         // `Pipeline` shares its handle via `Arc`, so a clone is a cheap
         // `'static + Send` handle we can move into `spawn_blocking`. Running
         // the *whole* operation — preload (a synchronous model download) and
@@ -1201,18 +1289,10 @@ impl Pipeline {
         let envelope = envelope.clone();
         let options = options.clone();
 
+        let context = crate::observability::CapturedContext::capture();
         tokio::task::spawn_blocking(move || {
-            if !pipeline.is_ready() {
-                pipeline.load_models()?;
-            }
-            let (stage_descriptors, availability_map) = pipeline.resolve_run_inputs();
-            execute_blocking(
-                pipeline.name,
-                stage_descriptors,
-                availability_map,
-                &envelope,
-                &options,
-            )
+            let _context = context.enter();
+            execute_blocking(&pipeline, &envelope, &options)
         })
         .await
         .map_err(|e| SdkError::pipeline_src("Task join error", e))?
@@ -1253,27 +1333,77 @@ impl Pipeline {
 /// previously had its own copy that, at one point, omitted the
 /// `PipelineComplete` event entirely.
 fn execute_blocking(
+    pipeline: &Pipeline,
+    envelope: &Envelope,
+    options: &RunOptions,
+) -> PipelineResult<PipelineExecutionResult> {
+    with_pipeline_workflow(pipeline, options, |workflow| {
+        execute_workflow_stages(pipeline, envelope, options, workflow.context())
+    })
+}
+
+// Both batch execution and the streaming fast path install controls before
+// preloads. A streaming fallback reuses this workflow rather than nesting one.
+fn with_pipeline_workflow(
+    pipeline: &Pipeline,
+    options: &RunOptions,
+    execute: impl FnOnce(
+        &crate::observability::WorkflowScope,
+    ) -> PipelineResult<PipelineExecutionResult>,
+) -> PipelineResult<PipelineExecutionResult> {
+    let workflow = crate::observability::WorkflowScope::start(
+        pipeline.name.as_deref().unwrap_or("pipeline"),
+        options,
+    );
+    let result = execute(&workflow);
+    let reference = workflow.end(&result);
+    result.map(|mut result| {
+        result.observation_ref = reference;
+        result
+    })
+}
+
+fn execute_workflow_stages(
+    pipeline: &Pipeline,
+    envelope: &Envelope,
+    options: &RunOptions,
+    parent: Option<crate::ObservationContext>,
+) -> PipelineResult<PipelineExecutionResult> {
+    if !pipeline.is_ready() {
+        pipeline.fetch_stage_models(|_| {}, "lazy")?;
+    }
+    let (stage_descriptors, availability_map) = pipeline.resolve_run_inputs();
+    execute_orchestrated(
+        pipeline.name.clone(),
+        stage_descriptors,
+        availability_map,
+        envelope,
+        options,
+        &pipeline_metrics(options),
+        parent,
+        crate::observability::PipelinePurpose::Run,
+    )
+    .map(|(mut result, stage_references)| {
+        for (stage, reference) in result.stages.iter_mut().zip(stage_references) {
+            stage.observation_ref = reference;
+        }
+        result
+    })
+}
+
+/// Stage references in execution order, zipped into [`StageTiming`]s.
+type StageReferences = Vec<Option<crate::ObservationRef>>;
+
+fn execute_orchestrated(
     name: Option<String>,
     stage_descriptors: Vec<StageDescriptor>,
     availability_map: HashMap<String, bool>,
     envelope: &Envelope,
     options: &RunOptions,
-) -> PipelineResult<PipelineExecutionResult> {
-    // Collect runtime metrics from caller options when provided.
-    let metrics = pipeline_metrics(options);
-
-    // Install per-call pipeline context. The RAII guard clears on every exit
-    // (success, `?` error, panic) so we don't leak the global `trace_id` onto
-    // later unrelated telemetry — replaces the manual
-    // `set_telemetry_pipeline_context(None, None)` calls that previously had
-    // to be threaded through every exit.
-    let trace_id = uuid::Uuid::new_v4();
-    let pipeline_id = name
-        .as_ref()
-        .map(|n| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes()));
-    let _context_guard =
-        crate::telemetry::TelemetryPipelineContextGuard::install(pipeline_id, Some(trace_id));
-
+    metrics: &DeviceMetrics,
+    parent: Option<crate::ObservationContext>,
+    purpose: crate::observability::PipelinePurpose,
+) -> PipelineResult<(PipelineExecutionResult, StageReferences)> {
     let mut orchestrator = Orchestrator::new();
     // Subscribe after construction: bootstrap events emitted by
     // `Orchestrator::new()` are constructor-local, while execution events
@@ -1287,9 +1417,45 @@ fn execute_blocking(
     };
 
     let start_time = std::time::Instant::now();
+    // Callers install the run's workflow (or the warmup span) on this thread,
+    // so this samples with the mode of the session that operation is pinned to.
     let resource_guard = crate::telemetry::begin_resource_run();
-    let execution_result =
-        orchestrator.execute_pipeline(&stage_descriptors, envelope, &metrics, &availability_fn);
+    let mut stage_references = Vec::with_capacity(stage_descriptors.len());
+    let execution_result = orchestrator.execute_pipeline_with_stage(
+        &stage_descriptors,
+        envelope,
+        metrics,
+        &availability_fn,
+        |orchestrator, stage, input, metrics, availability| {
+            // The stage operation starts once the route is known, so a
+            // bundle-present stage routed to cloud is a remote (CLIENT)
+            // inference with the gateway as provider.
+            let mut observation = None;
+            let result = orchestrator.execute_stage_routed(
+                stage,
+                input,
+                metrics,
+                availability,
+                &mut |route| {
+                    observation = Some(crate::observability::StageObservation::start(
+                        stage,
+                        input,
+                        route,
+                        options,
+                        parent.clone(),
+                        purpose,
+                    ));
+                },
+            );
+            if let Some(observation) = observation {
+                let reference = observation.finish(&result);
+                if result.is_ok() {
+                    stage_references.push(reference);
+                }
+            }
+            result
+        },
+    );
     drop(orchestrator);
     // Join the event bridge unconditionally so its thread never leaks, but
     // surface the *execution* error first when both fail — the pipeline
@@ -1334,20 +1500,19 @@ fn execute_blocking(
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0),
     };
-    crate::telemetry::publish_with_resource_summary_in_context(
-        event,
-        resource_guard,
-        pipeline_id,
-        Some(trace_id),
-    );
+    crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
-    Ok(PipelineExecutionResult {
-        name,
-        stages,
-        total_latency_ms,
-        output_type,
-        output,
-    })
+    Ok((
+        PipelineExecutionResult {
+            name,
+            stages,
+            total_latency_ms,
+            output_type,
+            output,
+            observation_ref: None,
+        },
+        stage_references,
+    ))
 }
 
 /// Turn the orchestrator's per-stage results into [`StageTiming`]s plus the
@@ -1367,6 +1532,7 @@ fn summarize_stage_results(
             target: result.routing_decision.target.to_string(),
             reason: result.routing_decision.reason,
             output: result.output,
+            observation_ref: None,
         })
         .collect();
 
@@ -1434,6 +1600,7 @@ impl Xybrid {
         envelope: &Envelope,
         options: &RunOptions,
     ) -> PipelineResult<PipelineExecutionResult> {
+        guard_decision_pipeline_input(envelope)?;
         let pipeline = PipelineRef::from_yaml(yaml)?.load()?;
         pipeline.run_with_options(envelope, options)
     }
@@ -1509,153 +1676,154 @@ impl Xybrid {
     ) -> PipelineResult<PipelineExecutionResult> {
         use xybrid_core::execution::{ModelMetadata, TemplateExecutor};
 
+        guard_decision_pipeline_input(envelope)?;
         let pipeline_ref = PipelineRef::from_yaml(yaml)?;
         let pipeline = pipeline_ref.load()?;
 
-        // Load models if needed
-        if !pipeline.is_ready() {
-            pipeline.load_models()?;
-        }
+        with_pipeline_workflow(&pipeline, options, |workflow| {
+            if !pipeline.is_ready() {
+                pipeline.fetch_stage_models(|_| {}, "lazy")?;
+            }
 
-        let handle = pipeline
-            .handle
-            .read()
-            .map_err(|_| SdkError::pipeline("Failed to acquire pipeline lock"))?;
+            let handle = pipeline
+                .handle
+                .read()
+                .map_err(|_| SdkError::pipeline("Failed to acquire pipeline lock"))?;
 
-        // For streaming, we need to identify if there's an LLM stage and execute it with streaming
-        // For now, support single-stage LLM pipelines
-        if handle.stage_descriptors.len() == 1 {
-            let stage_name = handle.stage_descriptors[0].name.clone();
-            if let Some(bundle_path) = handle.bundle_paths.get(&stage_name) {
-                let bundle_path = bundle_path.clone(); // Clone to avoid borrow issues
-                let stage_descriptor =
-                    stage_descriptor_with_bundle_path(&handle.stage_descriptors[0], &bundle_path);
-                let metadata_path = bundle_path.join("model_metadata.json");
-                if metadata_path.exists() {
-                    let metadata_str = std::fs::read_to_string(&metadata_path)
-                        .map_err(|e| SdkError::pipeline_src("Failed to read metadata", e))?;
-                    let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
-                        .map_err(|e| SdkError::pipeline_src("Failed to parse metadata", e))?;
+            // For streaming, we need to identify if there's an LLM stage and execute it with streaming
+            // For now, support single-stage LLM pipelines
+            if handle.stage_descriptors.len() == 1 {
+                let stage_name = handle.stage_descriptors[0].name.clone();
+                if let Some(bundle_path) = handle.bundle_paths.get(&stage_name) {
+                    let bundle_path = bundle_path.clone(); // Clone to avoid borrow issues
+                    let stage_descriptor = stage_descriptor_with_bundle_path(
+                        &handle.stage_descriptors[0],
+                        &bundle_path,
+                    );
+                    let metadata_path = bundle_path.join("model_metadata.json");
+                    if metadata_path.exists() {
+                        let metadata_str = std::fs::read_to_string(&metadata_path)
+                            .map_err(|e| SdkError::pipeline_src("Failed to read metadata", e))?;
+                        let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
+                            .map_err(|e| SdkError::pipeline_src("Failed to parse metadata", e))?;
 
-                    // Check if this is an LLM model
-                    if matches!(
-                        metadata.execution_template,
-                        xybrid_core::execution::ExecutionTemplate::Gguf { .. }
-                    ) {
-                        let model_id = metadata.model_id.clone();
-                        // The fast path bypasses the orchestrator, so it must
-                        // run the same shared generation-option merge (and
-                        // validation) the batch path does.
-                        let prepared =
-                            prepare_streaming_fast_path_input(&stage_descriptor, envelope)?;
-                        let metrics = pipeline_metrics(options);
-                        let authority = LocalAuthority::with_cache_provider(Arc::new(
-                            StreamingFastPathCacheProvider::new(
-                                model_id.clone(),
-                                bundle_path.clone(),
-                            ),
-                        ));
-                        let route = resolve_streaming_fast_path_route(
-                            &authority,
-                            &stage_descriptor,
-                            &model_id,
-                            &prepared,
-                            &metrics,
-                        );
-
-                        if !route.can_stream_locally {
-                            drop(handle);
-                            return pipeline.run_with_options(envelope, options);
-                        }
-
-                        drop(handle); // Release lock before executor call
-
-                        let trace_id = uuid::Uuid::new_v4();
-                        let pipeline_id = pipeline
-                            .name
-                            .as_ref()
-                            .map(|n| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, n.as_bytes()));
-                        let _context_guard =
-                            crate::telemetry::TelemetryPipelineContextGuard::install(
-                                pipeline_id,
-                                Some(trace_id),
+                        // Check if this is an LLM model
+                        if matches!(
+                            metadata.execution_template,
+                            xybrid_core::execution::ExecutionTemplate::Gguf { .. }
+                        ) {
+                            let model_id = metadata.model_id.clone();
+                            // The fast path bypasses the orchestrator, so it must
+                            // run the same shared generation-option merge (and
+                            // validation) the batch path does.
+                            let prepared =
+                                prepare_streaming_fast_path_input(&stage_descriptor, envelope)?;
+                            let metrics = pipeline_metrics(options);
+                            let authority = LocalAuthority::with_cache_provider(Arc::new(
+                                StreamingFastPathCacheProvider::new(
+                                    model_id.clone(),
+                                    bundle_path.clone(),
+                                ),
+                            ));
+                            let route = resolve_streaming_fast_path_route(
+                                &authority,
+                                &stage_descriptor,
+                                &model_id,
+                                &prepared,
+                                &metrics,
                             );
-                        publish_streaming_fast_path_events(
-                            &stage_name,
-                            &model_id,
-                            &route,
-                            pipeline_id,
-                            Some(trace_id),
-                        );
 
-                        let mut executor =
-                            TemplateExecutor::with_base_path(bundle_path.to_str().unwrap_or(""));
+                            if !route.can_stream_locally {
+                                drop(handle);
+                                return execute_workflow_stages(
+                                    &pipeline,
+                                    envelope,
+                                    options,
+                                    workflow.context(),
+                                );
+                            }
 
-                        let start_time = std::time::Instant::now();
-                        let output = executor
-                            .execute_streaming(&metadata, &prepared, on_token, None)
-                            .map_err(|e| {
-                                SdkError::inference_src("LLM streaming execution failed", e)
-                            })?;
-                        let total_latency_ms = start_time.elapsed().as_millis() as u32;
+                            drop(handle); // Release lock before executor call
 
-                        let output_type = output_type_for_envelope(&output);
+                            publish_streaming_fast_path_events(&stage_name, &model_id, &route);
 
-                        // Publish a `ModelComplete` mirroring the
-                        // `XybridModel::run_streaming` SDK path so the
-                        // streaming-fast-path branch isn't silent on the
-                        // Traces dashboard. Without this the policy /
-                        // routing events fire but no completion event
-                        // ever lands — billing, cost-attribution, and the
-                        // dashboard's per-turn row all go missing for
-                        // calls that take this code path.
-                        let event = crate::telemetry::TelemetryEvent {
-                            event_type: "ModelComplete".to_string(),
-                            stage_name: Some(model_id.clone()),
-                            target: Some(route.target.clone()),
-                            latency_ms: Some(total_latency_ms),
-                            error: None,
-                            data: Some(
-                                serde_json::json!({
-                                    "model_id": model_id,
-                                    "version": metadata.version,
-                                    "output_type": format!("{:?}", output_type),
-                                    "streaming": true,
-                                })
-                                .to_string(),
-                            ),
-                            timestamp_ms: std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_millis() as u64)
-                                .unwrap_or(0),
-                        };
-                        crate::telemetry::publish_telemetry_event_in_context(
-                            event,
-                            pipeline_id,
-                            Some(trace_id),
-                        );
+                            let mut executor = TemplateExecutor::with_base_path(
+                                bundle_path.to_str().unwrap_or(""),
+                            );
 
-                        return Ok(PipelineExecutionResult {
-                            name: pipeline.name.clone(),
-                            stages: vec![StageTiming {
-                                name: pipeline_ref.config.stages[0].stage_id(),
-                                latency_ms: total_latency_ms,
-                                target: route.target,
-                                reason: route.reason,
-                                output: output.clone(),
-                            }],
-                            total_latency_ms,
-                            output_type,
-                            output,
-                        });
+                            let start_time = std::time::Instant::now();
+                            let (output, inference_reference) = observe_streaming_stage(
+                                workflow,
+                                options,
+                                StreamingStage {
+                                    name: &stage_name,
+                                    model_id: &model_id,
+                                    metadata: &metadata,
+                                    input: &prepared,
+                                },
+                                on_token,
+                                |on_token| {
+                                    executor.execute_streaming(&metadata, &prepared, on_token, None)
+                                },
+                            )?;
+                            let total_latency_ms = start_time.elapsed().as_millis() as u32;
+
+                            let output_type = output_type_for_envelope(&output);
+
+                            // Publish a `ModelComplete` mirroring the
+                            // `XybridModel::run_streaming` SDK path so the
+                            // streaming-fast-path branch isn't silent on the
+                            // Traces dashboard. Without this the policy /
+                            // routing events fire but no completion event
+                            // ever lands — billing, cost-attribution, and the
+                            // dashboard's per-turn row all go missing for
+                            // calls that take this code path.
+                            let event = crate::telemetry::TelemetryEvent {
+                                event_type: "ModelComplete".to_string(),
+                                stage_name: Some(model_id.clone()),
+                                target: Some(route.target.clone()),
+                                latency_ms: Some(total_latency_ms),
+                                error: None,
+                                data: Some(
+                                    serde_json::json!({
+                                        "model_id": model_id,
+                                        "version": metadata.version,
+                                        "output_type": format!("{:?}", output_type),
+                                        "streaming": true,
+                                    })
+                                    .to_string(),
+                                ),
+                                timestamp_ms: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_millis() as u64)
+                                    .unwrap_or(0),
+                            };
+                            crate::telemetry::publish_telemetry_event(event);
+
+                            return Ok(PipelineExecutionResult {
+                                name: pipeline.name.clone(),
+                                stages: vec![StageTiming {
+                                    name: pipeline_ref.config.stages[0].stage_id(),
+                                    latency_ms: total_latency_ms,
+                                    target: route.target,
+                                    reason: route.reason,
+                                    output: output.clone(),
+                                    observation_ref: inference_reference,
+                                }],
+                                total_latency_ms,
+                                output_type,
+                                output,
+                                observation_ref: None,
+                            });
+                        }
                     }
                 }
             }
-        }
 
-        // Fall back to non-streaming execution for multi-stage or non-LLM pipelines
-        drop(handle);
-        pipeline.run_with_options(envelope, options)
+            // Fall back to non-streaming execution for multi-stage or non-LLM pipelines
+            drop(handle);
+            execute_workflow_stages(&pipeline, envelope, options, workflow.context())
+        })
     }
 
     /// Stub for when LLM features are disabled.
@@ -1695,6 +1863,683 @@ mod tests {
     use super::*;
     use xybrid_core::orchestrator::routing_engine::{RouteTarget, RoutingDecision};
 
+    mod observation {
+        use super::super::*;
+        use crate::observability::test_support::*;
+        use crate::observability::{semconv, ObservationContext, ObservationOptions};
+        use httpmock::prelude::*;
+
+        const COMPLETION: &str = r#"{"choices":[{"message":{"role":"assistant","content":"stage output"},"finish_reason":"stop"}]}"#;
+
+        fn gateway() -> (MockServer, String) {
+            let server = MockServer::start();
+            server.mock(|when, then| {
+                when.method(POST)
+                    .path("/v1/chat/completions")
+                    .header_exists("traceparent");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(COMPLETION);
+            });
+            let url = server.url("/v1");
+            (server, url)
+        }
+
+        /// A loopback gateway is not the configured Xybrid platform gateway,
+        /// so it receives the run's context only once the session allowlists
+        /// its origin (the mock above requires `traceparent`).
+        fn allowing(
+            server: &MockServer,
+        ) -> (
+            crate::observability::ObservabilitySession,
+            Memory,
+            opentelemetry_sdk::trace::SdkTracerProvider,
+        ) {
+            memory_session_allowing(&[&server.base_url()])
+        }
+
+        fn cloud_yaml(gateway: &str) -> String {
+            format!(
+                "name: rust-observed\nstages:\n  - id: draft\n    model: loopback-model\n    target: cloud\n    provider: openai\n    gateway_url: \"{gateway}\"\n    api_key: local-test-only\n    timeout_ms: 5000\n"
+            )
+        }
+
+        #[test]
+        fn a_consumer_that_stops_a_streaming_pipeline_cancels_its_stage_and_workflow() {
+            // A consumer stops a streaming pipeline by failing `on_token`, here
+            // at its third token. That is the caller's cancellation: the stage
+            // stops at that token, and the stage, its attempt and the workflow
+            // end `cancelled`, with no exception, while the caller still
+            // receives the stage's error. (The fast path itself needs an LLM
+            // build and a GGUF stage; it runs its stage through this helper.)
+            use xybrid_core::runtime_adapter::types::{PartialToken, StreamingCallback};
+            use xybrid_core::runtime_adapter::AdapterError;
+            const DELIVERED: usize = 2;
+            let signals = memory_session_with_signals();
+            let options = RunOptions::default()
+                .with_observation(ObservationOptions::default().with_session(&signals.session));
+            let mut metadata =
+                xybrid_core::execution::ModelMetadata::onnx("stage-model", "1.0", "model.onnx");
+            metadata
+                .metadata
+                .insert("task".into(), serde_json::json!("text-generation"));
+            let input = Envelope::new(EnvelopeKind::Text("hi".into()));
+            let workflow = crate::observability::WorkflowScope::start("streaming-stop", &options);
+            let mut received = 0;
+            let on_token: StreamingCallback<'_> = Box::new(move |_token| {
+                if received == DELIVERED {
+                    return Err("the consumer stopped reading".into());
+                }
+                received += 1;
+                Ok(())
+            });
+            let mut callbacks = 0;
+
+            let error = observe_streaming_stage(
+                &workflow,
+                &options,
+                StreamingStage {
+                    name: "draft",
+                    model_id: "stage-model",
+                    metadata: &metadata,
+                    input: &input,
+                },
+                on_token,
+                |mut on_token| {
+                    for index in 0..5 {
+                        callbacks += 1;
+                        on_token(PartialToken {
+                            token: format!("t{index} "),
+                            token_id: None,
+                            index,
+                            cumulative_text: String::new(),
+                            finish_reason: None,
+                            tool_calls: Vec::new(),
+                            raw_text: None,
+                        })
+                        .map_err(AdapterError::from_streaming_callback_error)?;
+                    }
+                    Ok(Envelope::new(EnvelopeKind::Text("five tokens".into())))
+                },
+            )
+            .expect_err("the consumer stopped the stream");
+            assert!(
+                matches!(&error, SdkError::InferenceError { message, .. } if message == "LLM streaming execution failed"),
+                "{error:?}"
+            );
+            assert_eq!(workflow.end(&Err::<(), _>(error)), None);
+
+            assert_eq!(callbacks, DELIVERED + 1);
+            for name in [
+                "chat stage-model",
+                "attempt 0",
+                "invoke_workflow streaming-stop",
+            ] {
+                let span = signals.spans.named(name);
+                assert!(
+                    matches!(span.status, opentelemetry::trace::Status::Error { .. }),
+                    "{name}: {:?}",
+                    span.status
+                );
+                assert_eq!(
+                    attr(&span, semconv::attr::ERROR_TYPE).as_deref(),
+                    Some("cancelled"),
+                    "{name}"
+                );
+            }
+            assert_eq!(
+                attr(
+                    &signals.spans.named("chat stage-model"),
+                    semconv::attr::RESPONSE_CHUNK_COUNT
+                )
+                .as_deref(),
+                Some("2")
+            );
+            for metric in [
+                semconv::metric::INFERENCE_DURATION,
+                semconv::metric::WORKFLOW_DURATION,
+            ] {
+                let points = signals.points(metric);
+                assert_eq!(points.len(), 1, "{metric}: {points:?}");
+                assert_eq!(
+                    (points[0].attr(semconv::attr::ERROR_TYPE), points[0].count),
+                    (Some("cancelled"), 1),
+                    "{metric}"
+                );
+            }
+            assert!(
+                !signals
+                    .log_events()
+                    .iter()
+                    .any(|e| e == semconv::event::OPERATION_EXCEPTION),
+                "{:?}",
+                signals.log_events()
+            );
+        }
+
+        fn options_with(
+            session: &crate::observability::ObservabilitySession,
+            parent: Option<ObservationContext>,
+        ) -> RunOptions {
+            let mut observation = ObservationOptions::default()
+                .with_session(session)
+                .with_conversation_id("pipeline-conversation");
+            observation.parent = parent;
+            RunOptions::default().with_observation(observation)
+        }
+
+        #[test]
+        fn streaming_fallback_reuses_one_workflow_and_caller_controls() {
+            let (server, url) = gateway();
+            let (session, memory, _provider) = allowing(&server);
+            let parent = ObservationContext::from_traceparent(
+                "00-5bf92f3577b34da6a3ce929d0e0e4736-2222222222222222-01",
+                None,
+            )
+            .unwrap();
+            let result = Xybrid::run_pipeline_streaming_with_options(
+                &cloud_yaml(&url),
+                &Envelope::new(EnvelopeKind::Text("streaming fallback".into())),
+                &options_with(&session, Some(parent.clone())),
+                Box::new(|_| panic!("cloud fallback is non-streaming")),
+            )
+            .unwrap();
+            let workflow_ref = result.observation_ref.unwrap();
+            let workflow = memory.by_ref(&workflow_ref);
+            assert_eq!(parent_id(&workflow), parent.span_id());
+            assert_eq!(trace_id(&workflow), parent.trace_id());
+            assert_eq!(
+                attr(&workflow, semconv::attr::CONVERSATION_ID).as_deref(),
+                Some("pipeline-conversation")
+            );
+            assert_eq!(
+                memory
+                    .spans()
+                    .iter()
+                    .filter(|s| s.name.starts_with("invoke_workflow"))
+                    .count(),
+                1,
+                "fallback must reuse its caller's pipeline workflow"
+            );
+            let stage = memory.by_ref(result.stages[0].observation_ref.as_ref().unwrap());
+            assert_eq!(parent_id(&stage), workflow_ref.span_id);
+            assert_eq!(trace_id(&stage), workflow_ref.trace_id);
+        }
+
+        #[test]
+        fn pipeline_runs_return_workflow_and_stage_references_that_export() {
+            let (server, url) = gateway();
+            let (session, memory, _provider) = allowing(&server);
+            let parent = ObservationContext::from_traceparent(
+                "00-5bf92f3577b34da6a3ce929d0e0e4736-2222222222222222-01",
+                None,
+            )
+            .unwrap();
+            let pipeline = PipelineRef::from_yaml(&cloud_yaml(&url))
+                .unwrap()
+                .load()
+                .unwrap();
+            let result = pipeline
+                .run_with_options(
+                    &Envelope::new(EnvelopeKind::Text("original input".into())),
+                    &options_with(&session, Some(parent.clone())),
+                )
+                .unwrap();
+            assert_eq!(result.text(), Some("stage output"));
+            let workflow_ref = result.observation_ref.clone().expect("workflow reference");
+            let stage_ref = result.stages[0]
+                .observation_ref
+                .clone()
+                .expect("stage reference");
+            let workflow = memory.by_ref(&workflow_ref);
+            assert_eq!(workflow.name, "invoke_workflow rust-observed");
+            assert_eq!(parent_id(&workflow), parent.span_id());
+            let stage = memory.by_ref(&stage_ref);
+            assert_eq!(trace_id(&stage), parent.trace_id());
+            assert_eq!(parent_id(&stage), workflow_ref.span_id);
+            assert_eq!(stage.span_kind, opentelemetry::trace::SpanKind::Client);
+            assert_eq!(stage.name, "chat loopback-model");
+            assert_eq!(attr(&stage, "xybrid.stage.name").as_deref(), Some("draft"));
+            assert_eq!(
+                attr(&stage, semconv::attr::CONVERSATION_ID).as_deref(),
+                Some("pipeline-conversation")
+            );
+            assert_eq!(
+                attr(&stage, "xybrid.routing.target").as_deref(),
+                Some("cloud")
+            );
+            assert_eq!(attr(&stage, "xybrid.routing.reason"), None);
+            assert_eq!(attr(&stage, semconv::attr::ERROR_TYPE), None);
+            // Each routed execution is an attempt; core stages and gateway
+            // propagation live beneath it, and its usage feeds the logical total once.
+            let attempt = memory
+                .spans()
+                .into_iter()
+                .find(|s| {
+                    parent_id(s) == stage_ref.span_id
+                        && attr(s, semconv::attr::ATTEMPT_REASON).as_deref() == Some("initial")
+                })
+                .expect("routed execution attempt");
+            assert_eq!(attempt.span_kind, opentelemetry::trace::SpanKind::Client);
+            let children: Vec<String> = memory
+                .spans()
+                .iter()
+                .filter(|s| parent_id(s) == span_id(&attempt))
+                .map(|s| s.name.to_string())
+                .collect();
+            assert!(
+                !children.is_empty(),
+                "core stages under the stage inference: {:?}",
+                memory
+                    .spans()
+                    .iter()
+                    .map(|s| (s.name.to_string(), parent_id(s)))
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        #[test]
+        fn a_bundle_present_stage_routed_to_cloud_is_a_remote_client_inference() {
+            let (server, url) = gateway();
+            let (session, memory, _provider) = allowing(&server);
+            let bundle = tempfile::tempdir().unwrap();
+            let mut metadata =
+                xybrid_core::execution::ModelMetadata::onnx("bundle-model", "1.0", "model.onnx");
+            metadata
+                .metadata
+                .insert("task".into(), serde_json::json!("text-generation"));
+            std::fs::write(
+                bundle.path().join("model_metadata.json"),
+                serde_json::to_vec(&metadata).unwrap(),
+            )
+            .unwrap();
+            let mut stage_options = StageOptions::new();
+            stage_options.set("gateway_url", url.clone());
+            stage_options.set("api_key", "local-test-only");
+            stage_options.set("timeout_ms", 5000_u32);
+            let mut stage = StageDescriptor::new("draft")
+                .with_bundle_path(bundle.path().to_string_lossy().to_string());
+            stage.provider = Some(IntegrationProvider::OpenAI);
+            stage.model = Some("loopback-model".into());
+            stage.options = Some(stage_options);
+            assert!(
+                stage.is_locally_runnable(),
+                "the old pre-routing check would call this stage local"
+            );
+            // A low battery makes the authority route the local-capable stage to cloud.
+            let mut metrics = DeviceMetrics::default();
+            metrics.capabilities.battery_level = 10;
+            let options = options_with(&session, None).with_device_metrics(metrics.clone());
+            let workflow = crate::observability::WorkflowScope::start("routed", &options);
+            let parent = workflow.context();
+            let availability = HashMap::from([("draft".to_owned(), true)]);
+            let executed = execute_orchestrated(
+                Some("routed".into()),
+                vec![stage],
+                availability,
+                &Envelope::new(EnvelopeKind::Text("input".into())),
+                &options,
+                &metrics,
+                parent.clone(),
+                crate::observability::PipelinePurpose::Run,
+            );
+            let workflow_ref = workflow.end(&executed);
+            let (result, references) = executed.unwrap();
+            assert_eq!(result.stages[0].target, "cloud");
+            let stage_ref = references[0].clone().unwrap();
+            let stage = memory.by_ref(&stage_ref);
+            assert_eq!(parent_id(&stage), workflow_ref.unwrap().span_id);
+            assert_eq!(stage.span_kind, opentelemetry::trace::SpanKind::Client);
+            assert_eq!(
+                attr(&stage, semconv::attr::EXECUTION_LOCATION).as_deref(),
+                Some("remote")
+            );
+            assert_eq!(
+                attr(&stage, semconv::attr::PROVIDER_NAME).as_deref(),
+                Some("xybrid")
+            );
+            assert_eq!(
+                attr(&stage, semconv::attr::RUNTIME_NAME).as_deref(),
+                Some("http")
+            );
+            assert_eq!(
+                attr(&stage, semconv::attr::SERVER_ADDRESS).as_deref(),
+                Some(server.host().as_str())
+            );
+            assert_eq!(
+                attr(&stage, semconv::attr::SERVER_PORT),
+                Some(server.port().to_string())
+            );
+            assert_eq!(
+                attr(&stage, "xybrid.routing.target").as_deref(),
+                Some("cloud")
+            );
+            assert_eq!(
+                attr(&stage, "xybrid.routing.source").as_deref(),
+                Some("local")
+            );
+            assert_eq!(
+                attr(&stage, "xybrid.routing.policy_allowed").as_deref(),
+                Some("true")
+            );
+            // The authority's free-text reason never leaves the process.
+            for span in memory.spans() {
+                for kv in &span.attributes {
+                    assert!(
+                        !kv.value.to_string().contains("stress_throttle"),
+                        "{}={}",
+                        kv.key,
+                        kv.value
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn pipeline_warmup_records_loads_but_no_workflow_inference_or_input() {
+            let (server, url) = gateway();
+            let (session, memory, _provider) = allowing(&server);
+            let pipeline = PipelineRef::from_yaml(&cloud_yaml(&url))
+                .unwrap()
+                .load()
+                .unwrap();
+            let root = crate::observability::start_workflow(
+                "test-root",
+                &ObservationOptions::default().with_session(&session),
+            );
+            {
+                let _scope = root.enter();
+                pipeline.warmup().unwrap();
+            }
+            root.end();
+            let spans = memory.spans();
+            let warmup = memory.named("warmup rust-observed");
+            assert_eq!(
+                parent_id(&warmup),
+                span_id(&memory.named("invoke_workflow test-root"))
+            );
+            assert_eq!(
+                spans
+                    .iter()
+                    .filter(|s| s.name.starts_with("invoke_workflow"))
+                    .count(),
+                1,
+                "warmup starts no pipeline workflow"
+            );
+            for span in &spans {
+                let operation = attr(span, semconv::attr::OPERATION_NAME);
+                assert!(
+                    !matches!(
+                        operation.as_deref(),
+                        Some("chat" | "generate_content" | "predict" | "embeddings")
+                    ),
+                    "warmup recorded an inference: {}",
+                    span.name
+                );
+                assert!(attr(span, semconv::attr::INPUT_MESSAGES).is_none());
+            }
+        }
+
+        #[test]
+        fn async_pipeline_entry_points_take_the_callers_parent_only_from_where_they_run() {
+            // `Pipeline::run_async`, `Pipeline::warmup_async` and the
+            // legacy `run_pipeline_async(path)` select no observation options
+            // and report to the default session. Plain `tokio::spawn` after
+            // `Context::attach` exports a root (the legacy function starts its
+            // workflow only after an await); `with_context` or a `block_on` on
+            // the caller's thread exports the caller's child. An explicit
+            // parent given to `run_async_with_options` wins over all three.
+            let _default = default_session_lock();
+            let (server, url) = gateway();
+            let (session, memory, _provider) = allowing(&server);
+            let _installed = DefaultSession::install(&session);
+            // Its own name: the default session collects every test's
+            // unpinned operations while it is installed.
+            let yaml = cloud_yaml(&url).replace("name: rust-observed", "name: a2-ambient");
+            let pipeline = PipelineRef::from_yaml(&yaml).unwrap().load().unwrap();
+            let config = tempfile::tempdir().unwrap();
+            let legacy = config.path().join("legacy.yaml");
+            // Stages name no provider: the cloud adapter refuses them before
+            // any request, and the workflow still records the run.
+            std::fs::write(
+                &legacy,
+                "name: a2-legacy\nstages:\n  - hop-model\ninput:\n  kind: Text\navailability: {}\n",
+            )
+            .unwrap();
+            let legacy = legacy.to_str().unwrap().to_owned();
+            let caller = |entry: usize, case: usize| {
+                ObservationContext::from_traceparent(
+                    &format!(
+                        "00-{:032x}-{:016x}-01",
+                        0xa280 + entry * 16 + case,
+                        0xa280 + entry * 16 + case
+                    ),
+                    None,
+                )
+                .unwrap()
+            };
+
+            for (case, hop) in Hop::ALL.into_iter().enumerate() {
+                let parent = caller(1, case);
+                let mark = memory.mark();
+                let p = pipeline.clone();
+                let ran = hop.run(&parent, async move {
+                    p.run_async(&Envelope::new(EnvelopeKind::Text("ambient".into())))
+                        .await
+                });
+                assert_eq!(
+                    ran.expect("the gateway answers").text(),
+                    Some("stage output")
+                );
+                hop.assert_parent(
+                    &memory.named_since(mark, "invoke_workflow a2-ambient"),
+                    &parent,
+                );
+
+                let parent = caller(2, case);
+                let mark = memory.mark();
+                let p = pipeline.clone();
+                hop.run(&parent, async move { p.warmup_async().await })
+                    .expect("the warmup completes");
+                hop.assert_parent(&memory.named_since(mark, "warmup a2-ambient"), &parent);
+
+                let parent = caller(3, case);
+                let mark = memory.mark();
+                let path = legacy.clone();
+                let ran = hop.run(
+                    &parent,
+                    async move { crate::run_pipeline_async(&path).await },
+                );
+                let error = ran.map(|_| ()).unwrap_err().to_string();
+                assert!(error.contains("Missing 'provider'"), "{hop:?}: {error}");
+                hop.assert_parent(
+                    &memory.named_since(mark, "invoke_workflow a2-legacy"),
+                    &parent,
+                );
+
+                // The run's explicit parent wins over the ambient one,
+                // wherever the future runs.
+                let parent = caller(4, case);
+                let explicit = caller(5, case);
+                let mark = memory.mark();
+                let p = pipeline.clone();
+                let options = RunOptions::default()
+                    .with_observation(ObservationOptions::default().with_parent(explicit.clone()));
+                let ran = hop.run(&parent, async move {
+                    p.run_async_with_options(
+                        &Envelope::new(EnvelopeKind::Text("explicit".into())),
+                        &options,
+                    )
+                    .await
+                });
+                assert_eq!(
+                    ran.expect("the gateway answers").text(),
+                    Some("stage output")
+                );
+                let workflow = memory.named_since(mark, "invoke_workflow a2-ambient");
+                assert_eq!(parent_id(&workflow), explicit.span_id(), "{hop:?}");
+                assert_eq!(trace_id(&workflow), explicit.trace_id(), "{hop:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn decision_pipeline_facades_refuse_before_yaml_parsing_or_resolution() {
+        let input = Envelope::new(EnvelopeKind::MultiPart(vec![Envelope::decision_request(
+            crate::decode_decision_request(
+                r#"{"state":"private-pipeline-canary","questions":{"q":{"type":"noul","instructions":"yes?"}}}"#,
+            )
+            .unwrap(),
+        )]));
+        let options = RunOptions::default();
+        for error in [
+            Xybrid::run_pipeline_with_options("[invalid yaml", &input, &options).unwrap_err(),
+            Xybrid::run_pipeline_streaming_with_options(
+                "[invalid yaml",
+                &input,
+                &options,
+                Box::new(|_| panic!("refused decision must not stream")),
+            )
+            .unwrap_err(),
+        ] {
+            assert!(matches!(error, SdkError::UnsupportedModelCapability { .. }));
+            assert!(!error.is_retryable());
+            assert!(!format!("{error:?}").contains("private-pipeline-canary"));
+        }
+    }
+
+    mod passthrough_models {
+        use super::super::*;
+        use httpmock::prelude::*;
+
+        const GGUF: &[u8] = b"not really a gguf";
+
+        /// A registry that resolves `model_id` to a passthrough GGUF served
+        /// from the same server (answering `download_status`), as the
+        /// platform does for external repos.
+        fn registry<'a>(
+            server: &'a MockServer,
+            model_id: &str,
+            download_status: u16,
+        ) -> httpmock::Mock<'a> {
+            let file = format!("/{model_id}.gguf");
+            server.mock(|when, then| {
+                when.method(GET)
+                    .path_contains(format!("/v1/models/{model_id}/resolve"));
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(serde_json::json!({
+                        "mask": model_id,
+                        "platform": "test",
+                        "resolved": {
+                            "hf_repo": "xybrid-ai/external",
+                            "file": "model.gguf",
+                            "download_url": server.url(&file),
+                            "format": "gguf",
+                            "quantization": "q4_k_m",
+                            "size_bytes": GGUF.len(),
+                            "sha256": "",
+                            "passthrough": true,
+                            "model_metadata": {
+                                "model_id": model_id,
+                                "version": "1.0",
+                                "execution_template": { "type": "Gguf", "model_file": "model.gguf" },
+                                "files": ["model.gguf"],
+                                "metadata": {}
+                            }
+                        }
+                    }));
+            });
+            server.mock(|when, then| {
+                when.method(GET).path(file.as_str());
+                then.status(download_status).body(GGUF);
+            })
+        }
+
+        fn provider_less_pipeline(server: &MockServer, model_id: &str) -> Pipeline {
+            PipelineRef::from_yaml(&format!(
+                "name: passthrough\nregistry: {}\nstages:\n  - id: llm\n    model: {model_id}\n",
+                server.base_url()
+            ))
+            .unwrap()
+            .load()
+            .unwrap()
+        }
+
+        #[test]
+        fn an_extracted_passthrough_model_is_cached_and_loads_without_a_download() {
+            let model_id = "pipeline-passthrough-extracted";
+            let server = MockServer::start();
+            let download = registry(&server, model_id, 200);
+            let client = RegistryClient::with_url(server.base_url()).unwrap();
+            let dir = client.extraction_dir(model_id);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("model.gguf"), GGUF).unwrap();
+            std::fs::write(
+                dir.join("model_metadata.json"),
+                serde_json::json!({
+                    "model_id": model_id,
+                    "version": "1.0",
+                    "execution_template": { "type": "Gguf", "model_file": "model.gguf" },
+                    "files": ["model.gguf"],
+                    "metadata": {}
+                })
+                .to_string(),
+            )
+            .unwrap();
+
+            let pipeline = provider_less_pipeline(&server, model_id);
+            assert_eq!(pipeline.stages()[0].status, StageStatus::Cached);
+            assert_eq!(pipeline.download_size(), 0);
+
+            pipeline.load_models().unwrap();
+            assert!(pipeline.is_ready());
+            assert_eq!(download.hits(), 0);
+        }
+
+        #[test]
+        fn a_provider_less_stage_downloads_its_passthrough_model() {
+            let model_id = "pipeline-passthrough-download";
+            let server = MockServer::start();
+            let download = registry(&server, model_id, 200);
+
+            let pipeline = provider_less_pipeline(&server, model_id);
+            assert_eq!(pipeline.stages()[0].status, StageStatus::NeedsDownload);
+            assert_eq!(pipeline.stages()[0].target, StageTarget::Auto);
+
+            pipeline.load_models().unwrap();
+            assert!(pipeline.is_ready(), "{:?}", pipeline.stages());
+            assert_eq!(download.hits(), 1);
+            let client = RegistryClient::with_url(server.base_url()).unwrap();
+            assert_eq!(
+                std::fs::read(client.extraction_dir(model_id).join("model.gguf")).unwrap(),
+                GGUF
+            );
+        }
+
+        #[test]
+        fn a_stage_whose_model_failed_is_not_ready_when_its_id_names_another_model() {
+            // Stage `first` runs model B; stage B runs model C, whose download fails.
+            let fetched = "pipeline-passthrough-collide-b";
+            let failing = "pipeline-passthrough-collide-c";
+            let server = MockServer::start();
+            registry(&server, fetched, 200);
+            registry(&server, failing, 500);
+            let pipeline = PipelineRef::from_yaml(&format!(
+                "name: collide\nregistry: {}\nstages:\n  - id: first\n    model: {fetched}\n  - id: {fetched}\n    model: {failing}\n",
+                server.base_url()
+            ))
+            .unwrap()
+            .load()
+            .unwrap();
+
+            pipeline
+                .load_models()
+                .expect_err("model C cannot be downloaded");
+            assert!(!pipeline.is_ready(), "{:?}", pipeline.stages());
+        }
+    }
+
     #[test]
     fn test_pipeline_ref_from_yaml() {
         let yaml = r#"
@@ -1715,6 +2560,7 @@ stages:
             target: "local".to_string(),
             reason: "local_available".to_string(),
             output: Envelope::new(EnvelopeKind::Text(String::new())),
+            observation_ref: None,
         }];
 
         let json = pipeline_complete_data(&stages, &OutputType::Text, Some("run-abc"));
@@ -1735,6 +2581,7 @@ stages:
             target: "device".to_string(),
             reason: "local_available".to_string(),
             output: Envelope::new(EnvelopeKind::Audio(Vec::new())),
+            observation_ref: None,
         }];
 
         let json = pipeline_complete_data(&stages, &OutputType::Audio, None);

@@ -86,8 +86,8 @@ is Flutter, Unity staging, and dev-env chores:
 
 ```bash
 cargo xtask build-flutter --platform <linux|macos|windows>  # Flutter native (deliberately cargo)
-cargo xtask build-ffi --target <triple> --release           # xybrid-bolt cdylib (Unity native)
-cargo xtask build-unity                                     # xybrid-bolt across Unity platforms
+cargo xtask build-ffi --target <triple> --release           # xybrid-bolt cdylib (Unity native; Android via Bazel)
+cargo xtask build-unity                                     # xybrid-bolt across Unity platforms (skips Android)
 cargo xtask deploy-unity-native --lib <path> --target <triple>  # stage a Bazel-built lib into Unity
 cargo xtask setup-test-env                                  # dev-env chore
 ```
@@ -97,6 +97,10 @@ through cargokit → cargo, so the contributor path must match. `build-ffi` /
 `build-unity` build `xybrid-bolt` (the pre-bolt `xybrid-ffi` C ABI is retired);
 `deploy-unity-native` exists so a Bazel-built lib can be staged into
 `bindings/unity/Runtime/Plugins/` with the right per-platform `.meta`.
+Unity Android natives are Bazel-only: `//crates/xybrid-bolt:xybrid_bolt_cdylib`
+links libc++ statically there and the Unity package ships no
+`libc++_shared.so`, while cargo-ndk links the shared runtime — so
+`build-ffi --deploy-unity` refuses Android and `build-unity` skips it.
 
 After editing `bindings/flutter/rust`, regenerate the Dart glue with
 `flutter_rust_bridge_codegen generate` (CLI version must match the pinned
@@ -121,6 +125,70 @@ Android is configured as `CMAKE_SYSTEM_NAME=Linux`, so a CMake hook
 (`bazel/ggml/android_system_name.cmake`) makes ggml build its Android variant
 set, and `CMAKE_PLATFORM_NO_VERSIONED_SONAME` keeps sonames unversioned (an APK
 only carries `lib*.so`).
+
+**The same platform carries the Android 10 floor; nothing else does.**
+`//bazel/ggml:android_arm64_cpu_variants` also carries
+`//bazel/toolchains/android:api29`, so the AAR's arm64 slice compiles and links
+with `@androidndk_api29` (the pinned NDK at API 29), which is why the Kotlin
+and React Native SDKs require Android 10 (`minSdk 29`). Every other Bazel
+Android target (the AAR's armeabi-v7a / x86_64 slices, the Flutter precompiled
+libraries, the Unity plugin via `--config=android-*`) stays on `@androidndk` at
+API 28 and must not require Android 10. The API-29 toolchain wins only because
+MODULE.bazel registers it before `@androidndk//:all`, whose toolchains match any
+Android platform of their CPU; keep that order. `ggml_cpu_backend.cpp` refuses
+to compile below API 29, so a fallback to API 28 fails the build. CI also reads
+the API level each library was linked for from its `.note.android.ident`
+(`tools/scripts/verify_android_api_level.py`): build-android.yml requires 29 for
+the AAR's arm64 libraries and 28 for its other slices, and
+`verify_unity_android_natives.py` and release-prep's Flutter payload check
+require 28.
+
+**Speech ships only in the AAR's arm64 slice.** The Kotlin AAR (so Kotlin and
+React Native) is the only standard binary built with `--//:tts_zzz=true`: its
+arm64-v8a `libxybrid_bolt.so` links the private zzz engine (Phonon, Kitten TTS
+2) statically, and armeabi-v7a / x86_64 build without it through
+`//bazel/zzz:android_without_slice`. Every crate that forwards `tts-zzz`
+(xybrid-core's features and zzz-sys dep, xybrid-sdk, both xybrid-bolt
+libraries, integration-tests' `tts_abort`) uses the identical select
+`{"//bazel/zzz:android_without_slice": [], "//:tts_zzz_enabled": [...],
+"//conditions:default": []}`. A mismatch still compiles and misroutes speech at
+runtime; `tools/scripts/tests/test_zzz_feature_wiring.py` and bazel.yml's
+speech guard catch it. A new Android ABI either gets a pinned slice or joins
+that group, or every flag-on AAR build fails as incompatible. The flag is
+`scope = "target"` so build tools in the exec configuration never resolve the
+build host's slice; keep it. The engine's fourteen notices ride in the AAR at
+`assets/xybrid/zzz/<path>` (`//bazel/zzz:notices.bzl`) and are never committed.
+release-prep's Build Android job takes the engine secrets from the
+`zzz-release` environment and fails without them; `zzz-engine` stays
+master-only for test-zzz-engine.yml, trusted-zzz-sdk.yml and the
+test-zzz-android.yml proof lane. `zzz-release`'s branch rule admits `release/v*`
+refs and GitHub checks only the run's ref, so any workflow on a `release/v*`
+branch can bind it: never bind it outside Build Android, and treat push access
+to `release/v*` as what guards the credentials (a repository ruleset should
+limit it to maintainers and the release automation). `tools/scripts/verify_zzz_android.py` gates the
+AAR, the `xybrid-android-<tag>.zip` and the Gradle-built AAR (speech in
+arm64-v8a only, the fourteen notices byte-exact, minSdk 29, no static TLS,
+libc imported from bionic) in
+release-prep, whose Verify Android Gradle packaging job replays the Gradle
+publish before the draft exists, and again in release-publish before Maven
+Central.
+
+**The engine is isolated at build time: only `zzz_embed_*` stays global.** Its
+archive bundles its own runtime and defines memcpy, strlen, expf,
+`__stack_chk_fail` and other libc, libm and compiler-rt names globally, and the
+AAR takes the whole archive into `libxybrid_bolt.so`, where those copies used
+to satisfy xybrid's own references instead of bionic's. zzz-sys therefore links
+`//bazel/zzz:android_engine` (`bazel/zzz/isolate.bzl`), never
+`@zzz_android//:zzz`: the target toolchain's `ld -r --unique` prelinks the
+archive into one object (each input section kept apart, so `--gc-sections`
+still drops dead engine code; any `ld -r` warning fails), `llvm-objcopy` makes
+every definition but the C API local, and the action fails unless exactly that
+API (`ZZZ_EMBED_API`, kept equal to `crates/zzz-sys/src/api.rs` by
+`test_zzz_isolation.py`) is left global. A new engine function goes into both
+lists. The AAR gate's libc canary and the proof lane's compare-imports
+check the shipped library, and `bazel/zzz/selftest` proves the mechanism on a
+fake engine in bazel.yml. The other static slices and Cargo builds still link
+the archive as is (a follow-up; see `crates/zzz-sys/README.md`).
 
 
 ### Prebuilt llama.cpp natives (the cargo fast path)
@@ -157,6 +225,55 @@ cmake/cc/NDK versions. That is right for publisher/consumer cache parity and
 wrong for distribution, which is why the download path selects by target +
 feature set + ABI attributes from the manifest instead of recomputing it.
 
+### Liquid decision models (`lfm3-d1/text/v1`)
+
+Decision models answer typed questions without generating text. A request is
+an `EnvelopeKind::DecisionRequest` on the ordinary `run` / `run_async` /
+`run_with_options` surface; there is no decision-specific `run*` method. The
+contract is `docs/development/liquid-decision-protocol.md`, and
+`docs/development/decision-conformance.md` says what is and is not qualified.
+
+- **No build advertises the d1 registry capability.**
+  `llamacpp-lfm3-d1-text-v1` is absent on purpose from
+  `xybrid_core::features` and from the SDK's `ARTIFACT_BACKENDS`, so the
+  registry serves no decision artifact while the reference comparison (P02 in
+  the conformance record) is open. A test in each file fails if it is added.
+  Loads that do not go through the registry are unaffected.
+- **The chat path refuses decision artifacts that generate no text.** A GGUF
+  carries a decision marker when a metadata key is
+  `tokenizer.chat_template.systemone`, starts with `systemone.` or contains
+  `.decision.`. It stays a chat model only when its
+  `<architecture>.decision.type` is one that also generates text
+  (`decision_type_generates_text`: `granite-switch`, the one type the pinned
+  llama.cpp's `server_model_output_modalities` serves as text too); xybrid
+  answers no decisions with those. The SDK's header sniff
+  (`xybrid_core::execution::decision`) is best effort; the authority is
+  `LlamaModel::load`, which scans every key after loading and refuses.
+  `xybrid_llama` keeps its own copy of the rules. Change both together: core
+  tests compare them.
+- **`Decision CPU conformance` is a required check.**
+  `test-decision-conformance.yml` has no path filter, and
+  `tools/scripts/llamacpp_update.py` waits on that job name. It collects a
+  fresh upstream reference on the runner and compares bit for bit. Never loosen
+  the comparison to make it pass.
+- **The llama.cpp pin has copies the update automation does not rewrite:**
+  `tools/conformance/decision/{check.py,oracle.py}`,
+  `integration-tests/fixtures/decision/{integrity.json,oracle.json}`,
+  `integration-tests/tests/decision_conformance.rs`, and the commit named in
+  `crates/llama-cpp-sys/NOTICE`. A llama.cpp update PR migrates them by hand,
+  and rechecks `decision_type_generates_text` against upstream's list.
+- **`crates/llama-cpp-sys/NOTICE` is the notice source.** Byte-identical copies
+  are committed for the Kotlin AAR (`assets/xybrid/llama/NOTICE`, gated by
+  `verify_zzz_android.py`), Python and Unity; React Native, the web package,
+  native slices and the CLI release assets copy it at build time. Edit the
+  source, then the committed copies.
+- **The wrapper compiles llama.cpp's Jinja closure** (`common/jinja/*.cpp`,
+  `common/json.cpp`, `common/unicode.cpp`). The list is in
+  `crates/llama-cpp-sys/build.rs` and in `//:llama_decision_jinja`; keep them
+  equal (`tools/scripts/tests/test_decision_jinja_sources.py` fails when they
+  differ). Keep llama.cpp's `src/` off the wrapper's include path: a second
+  `ggml.h` breaks the iOS build.
+
 ### Releases
 
 **Releases are cut by branch name, not by hand.** Push a `release/v<version>`
@@ -188,12 +305,22 @@ extends the same runtime without replacing the offline path:
    the engine — the direction being actively built out. When a developer
    authenticates, these light up *on top of* the same local runtime:
    - **Auth / API keys** — `crates/xybrid-core/src/cloud/config.rs`
-     (`set_xybrid_api_key`, `XYBRID_API_KEY`). Gates the cloud gateway *and* the
-     telemetry exporter. Default gateway: `api.xybrid.dev`.
+     (`set_xybrid_api_key`, `XYBRID_API_KEY`). Gates the cloud gateway. Default
+     gateway: `api.xybrid.dev`. A key alone exports no telemetry (see the
+     observability bullet).
    - **Cloud routing** — `crates/xybrid-core/src/cloud/` +
      `crates/xybrid-core/src/orchestrator/routing_engine.rs` (local→cloud fallback under device stress).
-   - **Telemetry / observability** — `crates/xybrid-core/src/telemetry/`;
-     SDK exporter in `crates/xybrid-sdk/src/telemetry.rs`; ingest at `ingest.xybrid.dev`.
+   - **Observability** — OpenTelemetry (GenAI conventions, OTLP/HTTP) in the
+     portable `crates/xybrid-observability` and `bindings/observability-js`
+     (`@xybrid/observability`), which depend on OpenTelemetry only, never on
+     xybrid crates; their shared contract is
+     `crates/xybrid-observability/CONTRACT.md`. The SDK wires them in
+     `crates/xybrid-sdk/src/observability.rs`. Export is **off until
+     configured explicitly** (a Xybrid preset to `ingest.xybrid.dev/v1/traces`,
+     or any OTLP endpoint or application-owned provider). `xybrid-core` stays
+     free of observability types: it reports stages through
+     `crates/xybrid-core/src/tracing.rs`. `crates/xybrid-sdk/src/telemetry.rs`
+     is the in-process event stream only and never leaves the process.
    - **Remote routing authority** — `crates/xybrid-core/src/orchestrator/authority/remote.rs`
      (`GET /v1/routing/advice`; partial).
    - **Control sync** — `crates/xybrid-core/src/control_sync.rs` (policy /
@@ -214,7 +341,8 @@ Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
 | Crate                          | Role                                                       | Layer    |
 |--------------------------------|------------------------------------------------------------|----------|
 | `crates/xybrid-core`           | ML execution + pipelines; **additive platform plane** (cloud routing, telemetry, control sync) | core lib |
-| `crates/xybrid-sdk`            | Public Rust SDK; model load/run/stream + platform init (auth, telemetry) | lib      |
+| `crates/xybrid-sdk`            | Public Rust SDK; model load/run/stream + platform init (auth, observability) | lib      |
+| `crates/xybrid-observability`  | Portable OpenTelemetry instrumentation and OTLP export; no xybrid dependencies (JS twin: `bindings/observability-js`) | lib |
 | `crates/xybrid-cli`            | `xybrid` binary                                            | bin      |
 | `crates/xybrid-ffi-facade`     | FFI-agnostic POD/Arc facade over the SDK (one canonical translation) | FFI |
 | `crates/xybrid-bolt`           | BoltFFI bindings: Swift / Kotlin / Java / C# (Unity) / WASM + C header — the sole native binding crate | FFI |
@@ -278,6 +406,7 @@ xybrid-bolt ──► xybrid-ffi-facade ─► xybrid-sdk ─► xybrid-core
 flutter rust──► xybrid-ffi-facade ─► xybrid-sdk ─► xybrid-core
 xtask ────────────────────────────► xybrid-core
 integration-tests ────────────────► xybrid-core
+xybrid-sdk, xybrid-cli ───────────► xybrid-observability (depends on no xybrid crate)
 ```
 
 Workspace **package metadata** is inherited via `[workspace.package]` —
@@ -438,7 +567,9 @@ patch, draft GitHub Release, the release PR, the tag, and the crates.io / pub.de
 ```bash
 git switch -c release/v<version> origin/master
 just bump-version <version>     # syncs every manifest: Cargo, pubspec, Unity,
-                                # Kotlin, Package.swift sdkVersion, Python pyproject
+                                # Kotlin, Package.swift sdkVersion, Python
+                                # pyproject, and the install-snippet pins in
+                                # the READMEs and docs pages (install_pins.py)
 ./bindings/apple/scripts/set-natives-mode.sh --set-remote   # useLocalNatives=false
 # fill the CHANGELOG entry for <version> (and bindings/flutter/CHANGELOG.md)
 git commit -am "bump: <version>" && git push -u origin release/v<version>
@@ -464,10 +595,30 @@ Pushing `release/v*` triggers `release-prep.yml`, which:
   not committed). Run `bindings/apple/scripts/set-natives-mode.sh --set-remote`
   before committing — remote (`false`) is the canonical committed state.
 
+Install snippets in the READMEs and docs pages that name a release are pins in
+`PINS` (`tools/scripts/install_pins.py`). A new snippet shape, or a new page
+carrying one, gets an entry there or no bump rewrites it. CI's `Version sync`
+job runs `version-sync.sh --check` and `test_install_pins.py` on every PR,
+docs-only ones included: a stale or dropped pin fails, and so does a known shape
+on an unlisted page or a package named with a version no pin owns. Pins follow
+prereleases too: an rc release PR merges to master, so until the final release
+the READMEs on master and docs.xybrid.dev say to install the rc.
+
 `just bump-version` only rewrites the workspace `version`; it does **not** touch
 internal path-dep `version = "..."` pins (e.g. `xybrid-sdk`/`xybrid-core` in
 sibling `Cargo.toml`s). If those drift, lockfile regen fails under `^0.1.x` —
 update them to match and re-run `cargo update -w` when bumping.
+
+**Native changes after the bump need a Flutter crate edit.** cargokit names
+the Flutter precompiled release after a hash of `bindings/flutter/rust` alone,
+and release-prep reuses whatever that release already holds. If anything the
+library is built from (any `Cargo.toml`, workspace crates, `vendor/` gitlinks,
+Bazel config) changes on a release branch after the bump, a master merge
+included, or you rebase or re-cut the branch after release-prep ran, change a
+line of `bindings/flutter/rust/Cargo.toml` too. The Verify release branch job
+runs `tools/scripts/check_flutter_precompiled_inputs.py`, which fails on the
+first case from history and on most of the second from the release's
+publication date.
 
 **llama.cpp stable updates (POC).** `llamacpp-update.yml` checks official
 `vX.Y.Z` releases daily and opens one version-specific update PR at a time.
@@ -513,7 +664,7 @@ is generated from the workflow files, and these rules keep it true:
   to the path, and `release-publish.yml` and the docs call
   `gh workflow run <file>`. Change `name:` instead.
 - **Job names are matched as checks; never rename them.** `CI Success`
-  (`ci.yml` and `ci-docs.yml`) and `Bazel graph + RBE targets` (`bazel.yml`)
+  (`ci.yml`) and `Bazel graph + RBE targets` (`bazel.yml`)
   gate `master` through branch protection. `tools/scripts/llamacpp_update.py`
   also waits on job names (`REQUIRED_CHECKS`, `AUTOMATION_CHECKS`) before it
   cuts a llama.cpp release. Edit a workflow's `name:` freely.

@@ -11,11 +11,13 @@ Android SDK 通过 BoltFFI 为 Xybrid 运行时提供原生 Kotlin 绑定，支�
 
 ```kotlin title="build.gradle.kts"
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.13.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.18.0")
 }
 ```
 
-最低 SDK 版本：**24**（Android 7.0）
+最低 SDK 版本：0.16.0 及更高版本为 **29**（Android 10）：请在应用的 `defaultConfig` 中将 `minSdk` 设为 29 或更高，否则构建会在清单合并阶段失败。0.16.0 之前的版本为 **24**（Android 7.0）。
+
+从注册表下载模型需要网络访问，而 SDK 不声明任何权限：请在应用的 `AndroidManifest.xml` 中添加 `<uses-permission android:name="android.permission.INTERNET" />`。
 
 ## 快速开始
 
@@ -34,17 +36,51 @@ if (result.success) {
 }
 ```
 
-`Xybrid.init(context)` 还会注册 `BatteryManager` 以及（在 API 29+ 上）`PowerManager.OnThermalStatusChangedListener` 观察者，将读数转发给路由引擎。
+`Xybrid.init(context)` 还会注册 `BatteryManager` 以及 `PowerManager.OnThermalStatusChangedListener` 观察者，将读数转发给路由引擎。
 
 ## 初始化
 
-无论是否鉴权，推理都完全在本地运行。传入 `apiKey` 即可点亮[控制台](https://dashboard.xybrid.dev)——这一次调用会启动遥测导出器，你的 `model.run(...)` 调用便会自动上报执行轨迹：
+无论是否鉴权，推理都完全在本地运行。`apiKey` 用于云端网关鉴权，`gatewayUrl` 可覆盖网关地址：
 
 ```kotlin
 Xybrid.init(this, apiKey = BuildConfig.XYBRID_API_KEY)
 ```
 
-未提供密钥时，遥测处于禁用状态，首次推理会打印一条一次性提示指向控制台（可通过环境变量 `XYBRID_QUIET=1` 关闭）。在 [dashboard.xybrid.dev](https://dashboard.xybrid.dev) 免费获取密钥。若使用自托管控制台，请额外传入 `ingestUrl`。
+密钥前缀与作用域、导出内容以及临时工作区，参见 [API 密钥](/zh/docs/concepts/api-keys)。
+
+## 可观测性
+
+在你完成配置之前，轨迹导出处于关闭状态——仅提供 API 密钥不会启用导出。在 `Xybrid.init` 之后，用两种预设之一启动一次即可：
+
+```kotlin
+import ai.xybrid.service
+import ai.xybrid.start
+
+// 将轨迹发送到 Xybrid
+Xybrid.Observability.xybrid(BuildConfig.XYBRID_API_KEY)
+    .service("MyApp", version = BuildConfig.VERSION_NAME)
+    .start()
+
+// 将轨迹、指标和日志发送到 OTLP/HTTP 端点（例如 OpenTelemetry Collector）
+Xybrid.Observability.otlp("http://collector:4318").start()
+```
+
+默认会采集提示词与输出；添加 `.metadataOnly()` 则只导出元数据。`.tracesEndpoint(url)` 可将 Xybrid 预设指向自托管端点。在配置导出之前，首次推理会打印一条一次性提示（可通过 `XYBRID_QUIET=1` 关闭）。在 [console.xybrid.dev](https://console.xybrid.dev) 获取密钥。
+
+运行选项可携带单次运行的轨迹上下文，每个结果的 `observation` 标识其所属轨迹：
+
+```kotlin
+val result = model.runAsync(
+    envelope,
+    runOptions(traceparent = parentTraceparent, conversationId = chatId),
+)
+result.observation?.let {
+    Xybrid.Observability.recordFeedback(it, score = 1.0, label = "thumbs_up")
+}
+Xybrid.Observability.flushAsync()
+```
+
+反馈与评估（`recordEvaluation(target, name, ...)`）需要日志信号，因此在仅发送轨迹的 Xybrid 预设下会返回 `false`。
 
 ---
 
@@ -147,14 +183,20 @@ scope.launch {
 // From the AudioRecord loop, converted to float mono 16 kHz:
 session.feed(pcm)
 
-val transcript = session.flush()
+val result = session.flush()
+val transcript = result.text
 ```
 
 部分转写文本是**累积的，而不是增量**：请用新的结果替换上一条显示，而不是追加。
 在订阅之前产生的部分结果会立即送达，因此一句话开头的词不会丢失。
 
-`flush()` 结束会话并返回完整转写文本；若其间有任何音频块转写失败，它会返回错误——
+`flush()` 结束会话并返回 `XybridTranscriptionResult`：完整转写文本在 `text` 中，另含
+`durationMs`、`chunksProcessed` 以及会话的 `observation` 引用。若其间有任何音频块转写失败，它会返回错误——
 那段音频已经丢失，否则返回的转写结果看起来完整却缺了一段。`cancel()` 结束会话并丢弃排队中的音频。
+
+<Callout type="warn">
+早期版本以 `String` 返回转写文本。现在请改为读取结果的 `.text`。
+</Callout>
 
 语音活动检测按语音边界切分，而不是按固定时钟，可避免窗口落在词中间造成的断续。
 它需要一个包含 `model.onnx` 的 Silero VAD 模型目录；SDK 不附带该模型，
@@ -220,10 +262,37 @@ try {
 
 ---
 
+## 语音合成（Phonon / Kitten TTS 2）
+
+arm64-v8a 库静态链接了 zzz 语音引擎，因此 arm64 设备可以在本地运行 Phonon 和
+Kitten TTS 2，arm64-v8a 模拟器镜像（例如 Apple Silicon Mac 上的模拟器）同样可以。
+armeabi-v7a 和 x86_64 库（包括 x86_64 模拟器镜像加载的库）不包含该引擎：在这些
+ABI 上，注册表不会提供 `phonon-31m-en`，Kitten 模型包也无法运行。请在 `abiFilters`
+或 App Bundle 拆分中保留 arm64-v8a。
+
+```kotlin
+// 从注册表加载 Phonon：输出 24 kHz 单声道 PCM16 小端音频。
+val phonon = Xybrid.model("phonon-31m-en").load()
+val pcm = phonon.runAsync(Envelope.text("Hello from Phonon.", voiceId = "easton")).audioBytes
+
+// 从本地目录加载 Kitten TTS 2（目录中包含 ZzzEmbed 模板的 model_metadata.json）。
+val kitten = Xybrid.model(ModelSource.directory(kittenDir.path)).load()
+val speech = kitten.runAsync(Envelope.text("Hello from Kitten."))
+```
+
+引擎的运行时条款和上游许可证随 AAR 一起发布，位于 `assets/xybrid/zzz/`。Android
+会把它们合并进你的 APK，因此所有包含本 SDK 的应用都会携带这些文件；请不要在打包时
+排除它们。音色和选项见
+[Phonon speech](https://github.com/xybrid-ai/xybrid/blob/master/docs/sdk/PHONON.md)，
+Kitten 模型包和流式播放见
+[Kotlin README](https://github.com/xybrid-ai/xybrid/blob/master/bindings/kotlin/README.md#speech-phonon--kitten-tts-2)。
+
+---
+
 ## 平台支持
 
 | 架构 | 状态 |
 |-------------|--------|
-| arm64-v8a | 支持 |
-| armeabi-v7a | 支持 |
-| x86_64 | 支持（模拟器） |
+| arm64-v8a | 支持，含 Phonon / Kitten TTS 2 语音合成（设备和 arm64 模拟器镜像） |
+| armeabi-v7a | 支持，不含语音合成 |
+| x86_64 | 支持（x86_64 模拟器镜像），不含语音合成 |

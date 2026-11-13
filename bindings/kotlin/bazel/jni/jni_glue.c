@@ -641,6 +641,32 @@ JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1release_1class_1xybrid_1bo
     return;
 }
 
+JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1init_1class_1xybrid_1bolt_1xybrid_1model_1load(JNIEnv *env, jclass cls, jobject source, jint __boltffi_source_len, jobject observation, jint __boltffi_observation_len) {
+    (void)cls;
+
+    void *__boltffi_source_ptr = NULL;
+    void *__boltffi_observation_ptr = NULL;
+    uint64_t __boltffi_return = (uint64_t){0};
+
+    if (!boltffi_jni_direct_buffer_address(env, source, (jlong)__boltffi_source_len, &__boltffi_source_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, observation, (jlong)__boltffi_observation_len, &__boltffi_observation_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_init_class_xybrid_bolt_xybrid_model_load((const uint8_t *)__boltffi_source_ptr, (uintptr_t)__boltffi_source_len, (const uint8_t *)__boltffi_observation_ptr, (uintptr_t)__boltffi_observation_len, &__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return 0;
+    }
+
+    return (jlong)__boltffi_return;
+__boltffi_error:
+    return 0;
+}
+
 JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1init_1class_1xybrid_1bolt_1xybrid_1model_1from_1registry(JNIEnv *env, jclass cls, jobject id, jint __boltffi_id_len) {
     (void)cls;
 
@@ -797,6 +823,15 @@ JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1init_1class_1xybrid_1bolt
     return (jlong)__boltffi_return;
 __boltffi_error:
     return 0;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1model_1load_1observation_1ref(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    FfiBuf_u8 __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_ref(receiver);
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_result);
 }
 
 JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1model_1model_1id(JNIEnv *env, jclass cls, jlong receiver) {
@@ -1391,16 +1426,16 @@ JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bol
     return;
 }
 
-JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1release_1class_1xybrid_1bolt_1xybrid_1telemetry_1config(JNIEnv *env, jclass cls, jlong handle) {
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1release_1class_1xybrid_1bolt_1xybrid_1observability_1config(JNIEnv *env, jclass cls, jlong handle) {
     (void)cls;
 
     (void)env;
-    boltffi_release_class_xybrid_bolt_xybrid_telemetry_config(handle);
+    boltffi_release_class_xybrid_bolt_xybrid_observability_config(handle);
 
     return;
 }
 
-JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1init_1class_1xybrid_1bolt_1xybrid_1telemetry_1config_1new(JNIEnv *env, jclass cls, jobject api_key, jint __boltffi_api_key_len) {
+JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1init_1class_1xybrid_1bolt_1xybrid_1observability_1config_1xybrid(JNIEnv *env, jclass cls, jobject api_key, jint __boltffi_api_key_len) {
     (void)cls;
 
     void *__boltffi_api_key_ptr = NULL;
@@ -1410,14 +1445,14 @@ JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1init_1class_1xybrid_1bolt
     }
 
     (void)env;
-    uint64_t __boltffi_result = boltffi_init_class_xybrid_bolt_xybrid_telemetry_config_new((const uint8_t *)__boltffi_api_key_ptr, (uintptr_t)__boltffi_api_key_len);
+    uint64_t __boltffi_result = boltffi_init_class_xybrid_bolt_xybrid_observability_config_xybrid((const uint8_t *)__boltffi_api_key_ptr, (uintptr_t)__boltffi_api_key_len);
 
     return (jlong)__boltffi_result;
 __boltffi_error:
     return 0;
 }
 
-JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1telemetry_1config_1set_1endpoint(JNIEnv *env, jclass cls, jlong receiver, jobject endpoint, jint __boltffi_endpoint_len) {
+JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1init_1class_1xybrid_1bolt_1xybrid_1observability_1config_1otlp(JNIEnv *env, jclass cls, jobject endpoint, jint __boltffi_endpoint_len) {
     (void)cls;
 
     void *__boltffi_endpoint_ptr = NULL;
@@ -1426,7 +1461,24 @@ JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bol
         goto __boltffi_error;
     }
 
-    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_endpoint(receiver, (const uint8_t *)__boltffi_endpoint_ptr, (uintptr_t)__boltffi_endpoint_len);
+    (void)env;
+    uint64_t __boltffi_result = boltffi_init_class_xybrid_bolt_xybrid_observability_config_otlp((const uint8_t *)__boltffi_endpoint_ptr, (uintptr_t)__boltffi_endpoint_len);
+
+    return (jlong)__boltffi_result;
+__boltffi_error:
+    return 0;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1observability_1config_1set_1traces_1endpoint(JNIEnv *env, jclass cls, jlong receiver, jobject endpoint, jint __boltffi_endpoint_len) {
+    (void)cls;
+
+    void *__boltffi_endpoint_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, endpoint, (jlong)__boltffi_endpoint_len, &__boltffi_endpoint_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_traces_endpoint(receiver, (const uint8_t *)__boltffi_endpoint_ptr, (uintptr_t)__boltffi_endpoint_len);
 
     if (__boltffi_status.code != 0) {
         boltffi_jni_throw_status(env, __boltffi_status);
@@ -1438,16 +1490,58 @@ __boltffi_error:
     return;
 }
 
-JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1telemetry_1config_1set_1app_1version(JNIEnv *env, jclass cls, jlong receiver, jobject version, jint __boltffi_version_len) {
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1observability_1config_1set_1header(JNIEnv *env, jclass cls, jlong receiver, jobject name, jint __boltffi_name_len, jobject value, jint __boltffi_value_len) {
     (void)cls;
 
+    void *__boltffi_name_ptr = NULL;
+    void *__boltffi_value_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, name, (jlong)__boltffi_name_len, &__boltffi_name_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, value, (jlong)__boltffi_value_len, &__boltffi_value_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_header(receiver, (const uint8_t *)__boltffi_name_ptr, (uintptr_t)__boltffi_name_len, (const uint8_t *)__boltffi_value_ptr, (uintptr_t)__boltffi_value_len);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1observability_1config_1set_1json_1protocol(JNIEnv *env, jclass cls, jlong receiver, jboolean json) {
+    (void)cls;
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_json_protocol(receiver, json);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1observability_1config_1set_1service(JNIEnv *env, jclass cls, jlong receiver, jobject name, jint __boltffi_name_len, jobject version, jint __boltffi_version_len) {
+    (void)cls;
+
+    void *__boltffi_name_ptr = NULL;
     void *__boltffi_version_ptr = NULL;
 
+    if (!boltffi_jni_direct_buffer_address(env, name, (jlong)__boltffi_name_len, &__boltffi_name_ptr)) {
+        goto __boltffi_error;
+    }
     if (!boltffi_jni_direct_buffer_address(env, version, (jlong)__boltffi_version_len, &__boltffi_version_ptr)) {
         goto __boltffi_error;
     }
 
-    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_app_version(receiver, (const uint8_t *)__boltffi_version_ptr, (uintptr_t)__boltffi_version_len);
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_service(receiver, (const uint8_t *)__boltffi_name_ptr, (uintptr_t)__boltffi_name_len, (const uint8_t *)__boltffi_version_ptr, (uintptr_t)__boltffi_version_len);
 
     if (__boltffi_status.code != 0) {
         boltffi_jni_throw_status(env, __boltffi_status);
@@ -1459,28 +1553,7 @@ __boltffi_error:
     return;
 }
 
-JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1telemetry_1config_1set_1device_1label(JNIEnv *env, jclass cls, jlong receiver, jobject label, jint __boltffi_label_len) {
-    (void)cls;
-
-    void *__boltffi_label_ptr = NULL;
-
-    if (!boltffi_jni_direct_buffer_address(env, label, (jlong)__boltffi_label_len, &__boltffi_label_ptr)) {
-        goto __boltffi_error;
-    }
-
-    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_device_label(receiver, (const uint8_t *)__boltffi_label_ptr, (uintptr_t)__boltffi_label_len);
-
-    if (__boltffi_status.code != 0) {
-        boltffi_jni_throw_status(env, __boltffi_status);
-        return;
-    }
-
-    return;
-__boltffi_error:
-    return;
-}
-
-JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1telemetry_1config_1set_1device_1attribute(JNIEnv *env, jclass cls, jlong receiver, jobject key, jint __boltffi_key_len, jobject value, jint __boltffi_value_len) {
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1observability_1config_1set_1resource_1attribute(JNIEnv *env, jclass cls, jlong receiver, jobject key, jint __boltffi_key_len, jobject value, jint __boltffi_value_len) {
     (void)cls;
 
     void *__boltffi_key_ptr = NULL;
@@ -1493,7 +1566,7 @@ JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bol
         goto __boltffi_error;
     }
 
-    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_device_attribute(receiver, (const uint8_t *)__boltffi_key_ptr, (uintptr_t)__boltffi_key_len, (const uint8_t *)__boltffi_value_ptr, (uintptr_t)__boltffi_value_len);
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_resource_attribute(receiver, (const uint8_t *)__boltffi_key_ptr, (uintptr_t)__boltffi_key_len, (const uint8_t *)__boltffi_value_ptr, (uintptr_t)__boltffi_value_len);
 
     if (__boltffi_status.code != 0) {
         boltffi_jni_throw_status(env, __boltffi_status);
@@ -1505,10 +1578,10 @@ __boltffi_error:
     return;
 }
 
-JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1telemetry_1config_1set_1batch_1size(JNIEnv *env, jclass cls, jlong receiver, jint batch_size) {
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1observability_1config_1set_1metadata_1only(JNIEnv *env, jclass cls, jlong receiver, jboolean metadata_only) {
     (void)cls;
 
-    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_batch_size(receiver, batch_size);
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_metadata_only(receiver, metadata_only);
 
     if (__boltffi_status.code != 0) {
         boltffi_jni_throw_status(env, __boltffi_status);
@@ -1518,10 +1591,10 @@ JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bol
     return;
 }
 
-JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1telemetry_1config_1set_1flush_1interval_1secs(JNIEnv *env, jclass cls, jlong receiver, jint secs) {
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1observability_1config_1set_1max_1content_1bytes(JNIEnv *env, jclass cls, jlong receiver, jint bytes) {
     (void)cls;
 
-    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_flush_interval_secs(receiver, secs);
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_max_content_bytes(receiver, bytes);
 
     if (__boltffi_status.code != 0) {
         boltffi_jni_throw_status(env, __boltffi_status);
@@ -1531,10 +1604,111 @@ JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bol
     return;
 }
 
-JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1telemetry_1config_1init(JNIEnv *env, jclass cls, jlong receiver) {
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1observability_1config_1allow_1provider_1context(JNIEnv *env, jclass cls, jlong receiver, jobject origin, jint __boltffi_origin_len) {
     (void)cls;
 
-    FfiBuf_u8 error = boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_init(receiver);
+    void *__boltffi_origin_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, origin, (jlong)__boltffi_origin_len, &__boltffi_origin_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_method_class_xybrid_bolt_xybrid_observability_config_allow_provider_context(receiver, (const uint8_t *)__boltffi_origin_ptr, (uintptr_t)__boltffi_origin_len);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1observability_1config_1set_1device_1id(JNIEnv *env, jclass cls, jlong receiver, jobject id, jint __boltffi_id_len) {
+    (void)cls;
+
+    void *__boltffi_id_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, id, (jlong)__boltffi_id_len, &__boltffi_id_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_device_id(receiver, (const uint8_t *)__boltffi_id_ptr, (uintptr_t)__boltffi_id_len);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1observability_1config_1add_1literal_1redaction(JNIEnv *env, jclass cls, jlong receiver, jobject find, jint __boltffi_find_len, jobject replacement, jint __boltffi_replacement_len) {
+    (void)cls;
+
+    void *__boltffi_find_ptr = NULL;
+    void *__boltffi_replacement_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, find, (jlong)__boltffi_find_len, &__boltffi_find_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, replacement, (jlong)__boltffi_replacement_len, &__boltffi_replacement_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_method_class_xybrid_bolt_xybrid_observability_config_add_literal_redaction(receiver, (const uint8_t *)__boltffi_find_ptr, (uintptr_t)__boltffi_find_len, (const uint8_t *)__boltffi_replacement_ptr, (uintptr_t)__boltffi_replacement_len);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1observability_1config_1omit_1content_1attribute(JNIEnv *env, jclass cls, jlong receiver, jobject key, jint __boltffi_key_len) {
+    (void)cls;
+
+    void *__boltffi_key_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, key, (jlong)__boltffi_key_len, &__boltffi_key_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_method_class_xybrid_bolt_xybrid_observability_config_omit_content_attribute(receiver, (const uint8_t *)__boltffi_key_ptr, (uintptr_t)__boltffi_key_len);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1observability_1config_1set_1live_1trace_1interval_1ms(JNIEnv *env, jclass cls, jlong receiver, jint ms) {
+    (void)cls;
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_live_trace_interval_ms(receiver, ms);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1observability_1config_1init(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    FfiBuf_u8 error = boltffi_method_class_xybrid_bolt_xybrid_observability_config_init(receiver);
 
     if (error.ptr != NULL || error.len != 0) {
         boltffi_jni_throw_error_buffer(env, error);
@@ -1689,6 +1863,721 @@ __boltffi_error:
     return;
 }
 
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1release_1class_1xybrid_1bolt_1xybrid_1workflow_1observation(JNIEnv *env, jclass cls, jlong handle) {
+    (void)cls;
+
+    (void)env;
+    boltffi_release_class_xybrid_bolt_xybrid_workflow_observation(handle);
+
+    return;
+}
+
+JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1init_1class_1xybrid_1bolt_1xybrid_1workflow_1observation_1new(JNIEnv *env, jclass cls, jobject name, jint __boltffi_name_len, jobject options, jint __boltffi_options_len) {
+    (void)cls;
+
+    void *__boltffi_name_ptr = NULL;
+    void *__boltffi_options_ptr = NULL;
+    uint64_t __boltffi_return = (uint64_t){0};
+
+    if (!boltffi_jni_direct_buffer_address(env, name, (jlong)__boltffi_name_len, &__boltffi_name_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, options, (jlong)__boltffi_options_len, &__boltffi_options_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_init_class_xybrid_bolt_xybrid_workflow_observation_new((const uint8_t *)__boltffi_name_ptr, (uintptr_t)__boltffi_name_len, (const uint8_t *)__boltffi_options_ptr, (uintptr_t)__boltffi_options_len, &__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return 0;
+    }
+
+    return (jlong)__boltffi_return;
+__boltffi_error:
+    return 0;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1workflow_1observation_1context(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    FfiBuf_u8 __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_context(receiver);
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_result);
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1workflow_1observation_1observation_1ref(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    FfiBuf_u8 __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_observation_ref(receiver);
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_result);
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1workflow_1observation_1complete(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_complete(receiver);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1workflow_1observation_1fail(JNIEnv *env, jclass cls, jlong receiver, jobject error_type, jint __boltffi_error_type_len, jobject message, jint __boltffi_message_len) {
+    (void)cls;
+
+    void *__boltffi_error_type_ptr = NULL;
+    void *__boltffi_message_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, error_type, (jlong)__boltffi_error_type_len, &__boltffi_error_type_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, message, (jlong)__boltffi_message_len, &__boltffi_message_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_fail(receiver, (const uint8_t *)__boltffi_error_type_ptr, (uintptr_t)__boltffi_error_type_len, (const uint8_t *)__boltffi_message_ptr, (uintptr_t)__boltffi_message_len);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1workflow_1observation_1cancel(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_cancel(receiver);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+}
+
+JNIEXPORT jboolean JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1workflow_1observation_1is_1finished(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    bool __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_is_finished(receiver);
+
+    return (jboolean)__boltffi_result;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1release_1class_1xybrid_1bolt_1xybrid_1tool_1observation(JNIEnv *env, jclass cls, jlong handle) {
+    (void)cls;
+
+    (void)env;
+    boltffi_release_class_xybrid_bolt_xybrid_tool_observation(handle);
+
+    return;
+}
+
+JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1init_1class_1xybrid_1bolt_1xybrid_1tool_1observation_1new(JNIEnv *env, jclass cls, jobject call, jint __boltffi_call_len, jobject options, jint __boltffi_options_len) {
+    (void)cls;
+
+    void *__boltffi_call_ptr = NULL;
+    void *__boltffi_options_ptr = NULL;
+    uint64_t __boltffi_return = (uint64_t){0};
+
+    if (!boltffi_jni_direct_buffer_address(env, call, (jlong)__boltffi_call_len, &__boltffi_call_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, options, (jlong)__boltffi_options_len, &__boltffi_options_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_init_class_xybrid_bolt_xybrid_tool_observation_new((const uint8_t *)__boltffi_call_ptr, (uintptr_t)__boltffi_call_len, (const uint8_t *)__boltffi_options_ptr, (uintptr_t)__boltffi_options_len, &__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return 0;
+    }
+
+    return (jlong)__boltffi_return;
+__boltffi_error:
+    return 0;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1tool_1observation_1context(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    FfiBuf_u8 __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_tool_observation_context(receiver);
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_result);
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1tool_1observation_1observation_1ref(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    FfiBuf_u8 __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_tool_observation_observation_ref(receiver);
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_result);
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1tool_1observation_1complete(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_tool_observation_complete(receiver);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1tool_1observation_1fail(JNIEnv *env, jclass cls, jlong receiver, jobject error_type, jint __boltffi_error_type_len, jobject message, jint __boltffi_message_len) {
+    (void)cls;
+
+    void *__boltffi_error_type_ptr = NULL;
+    void *__boltffi_message_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, error_type, (jlong)__boltffi_error_type_len, &__boltffi_error_type_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, message, (jlong)__boltffi_message_len, &__boltffi_message_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_tool_observation_fail(receiver, (const uint8_t *)__boltffi_error_type_ptr, (uintptr_t)__boltffi_error_type_len, (const uint8_t *)__boltffi_message_ptr, (uintptr_t)__boltffi_message_len);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1tool_1observation_1cancel(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_tool_observation_cancel(receiver);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+}
+
+JNIEXPORT jboolean JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1tool_1observation_1is_1finished(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    bool __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_tool_observation_is_finished(receiver);
+
+    return (jboolean)__boltffi_result;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1tool_1observation_1record_1result(JNIEnv *env, jclass cls, jlong receiver, jobject result_json, jint __boltffi_result_json_len) {
+    (void)cls;
+
+    void *__boltffi_result_json_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, result_json, (jlong)__boltffi_result_json_len, &__boltffi_result_json_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_method_class_xybrid_bolt_xybrid_tool_observation_record_result(receiver, (const uint8_t *)__boltffi_result_json_ptr, (uintptr_t)__boltffi_result_json_len);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1release_1class_1xybrid_1bolt_1xybrid_1inference_1observation(JNIEnv *env, jclass cls, jlong handle) {
+    (void)cls;
+
+    (void)env;
+    boltffi_release_class_xybrid_bolt_xybrid_inference_observation(handle);
+
+    return;
+}
+
+JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1init_1class_1xybrid_1bolt_1xybrid_1inference_1observation_1new(JNIEnv *env, jclass cls, jobject request, jint __boltffi_request_len, jobject options, jint __boltffi_options_len) {
+    (void)cls;
+
+    void *__boltffi_request_ptr = NULL;
+    void *__boltffi_options_ptr = NULL;
+    uint64_t __boltffi_return = (uint64_t){0};
+
+    if (!boltffi_jni_direct_buffer_address(env, request, (jlong)__boltffi_request_len, &__boltffi_request_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, options, (jlong)__boltffi_options_len, &__boltffi_options_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_init_class_xybrid_bolt_xybrid_inference_observation_new((const uint8_t *)__boltffi_request_ptr, (uintptr_t)__boltffi_request_len, (const uint8_t *)__boltffi_options_ptr, (uintptr_t)__boltffi_options_len, &__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return 0;
+    }
+
+    return (jlong)__boltffi_return;
+__boltffi_error:
+    return 0;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1inference_1observation_1context(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    FfiBuf_u8 __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_context(receiver);
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_result);
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1inference_1observation_1observation_1ref(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    FfiBuf_u8 __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_observation_ref(receiver);
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_result);
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1inference_1observation_1complete(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_complete(receiver);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1inference_1observation_1fail(JNIEnv *env, jclass cls, jlong receiver, jobject error_type, jint __boltffi_error_type_len, jobject message, jint __boltffi_message_len) {
+    (void)cls;
+
+    void *__boltffi_error_type_ptr = NULL;
+    void *__boltffi_message_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, error_type, (jlong)__boltffi_error_type_len, &__boltffi_error_type_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, message, (jlong)__boltffi_message_len, &__boltffi_message_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_fail(receiver, (const uint8_t *)__boltffi_error_type_ptr, (uintptr_t)__boltffi_error_type_len, (const uint8_t *)__boltffi_message_ptr, (uintptr_t)__boltffi_message_len);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1inference_1observation_1cancel(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_cancel(receiver);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+}
+
+JNIEXPORT jboolean JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1inference_1observation_1is_1finished(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    bool __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_is_finished(receiver);
+
+    return (jboolean)__boltffi_result;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1inference_1observation_1record_1system_1instructions(JNIEnv *env, jclass cls, jlong receiver, jobject parts_json, jint __boltffi_parts_json_len) {
+    (void)cls;
+
+    void *__boltffi_parts_json_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, parts_json, (jlong)__boltffi_parts_json_len, &__boltffi_parts_json_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_system_instructions(receiver, (const uint8_t *)__boltffi_parts_json_ptr, (uintptr_t)__boltffi_parts_json_len);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1inference_1observation_1record_1input_1messages(JNIEnv *env, jclass cls, jlong receiver, jobject messages_json, jint __boltffi_messages_json_len) {
+    (void)cls;
+
+    void *__boltffi_messages_json_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, messages_json, (jlong)__boltffi_messages_json_len, &__boltffi_messages_json_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_input_messages(receiver, (const uint8_t *)__boltffi_messages_json_ptr, (uintptr_t)__boltffi_messages_json_len);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1inference_1observation_1record_1output_1messages(JNIEnv *env, jclass cls, jlong receiver, jobject messages_json, jint __boltffi_messages_json_len) {
+    (void)cls;
+
+    void *__boltffi_messages_json_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, messages_json, (jlong)__boltffi_messages_json_len, &__boltffi_messages_json_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_output_messages(receiver, (const uint8_t *)__boltffi_messages_json_ptr, (uintptr_t)__boltffi_messages_json_len);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1inference_1observation_1record_1tool_1definitions(JNIEnv *env, jclass cls, jlong receiver, jobject definitions_json, jint __boltffi_definitions_json_len) {
+    (void)cls;
+
+    void *__boltffi_definitions_json_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, definitions_json, (jlong)__boltffi_definitions_json_len, &__boltffi_definitions_json_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_tool_definitions(receiver, (const uint8_t *)__boltffi_definitions_json_ptr, (uintptr_t)__boltffi_definitions_json_len);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1inference_1observation_1record_1chunk(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_chunk(receiver);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1inference_1observation_1record_1first_1token(JNIEnv *env, jclass cls, jlong receiver, jobject at_epoch_ms, jint __boltffi_at_epoch_ms_len) {
+    (void)cls;
+
+    void *__boltffi_at_epoch_ms_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, at_epoch_ms, (jlong)__boltffi_at_epoch_ms_len, &__boltffi_at_epoch_ms_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_first_token(receiver, (const uint8_t *)__boltffi_at_epoch_ms_ptr, (uintptr_t)__boltffi_at_epoch_ms_len);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1inference_1observation_1record_1usage(JNIEnv *env, jclass cls, jlong receiver, jobject usage, jint __boltffi_usage_len) {
+    (void)cls;
+
+    void *__boltffi_usage_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, usage, (jlong)__boltffi_usage_len, &__boltffi_usage_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_usage(receiver, (const uint8_t *)__boltffi_usage_ptr, (uintptr_t)__boltffi_usage_len);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1inference_1observation_1record_1finish_1reasons(JNIEnv *env, jclass cls, jlong receiver, jobject reasons, jint __boltffi_reasons_len) {
+    (void)cls;
+
+    void *__boltffi_reasons_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, reasons, (jlong)__boltffi_reasons_len, &__boltffi_reasons_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_finish_reasons(receiver, (const uint8_t *)__boltffi_reasons_ptr, (uintptr_t)__boltffi_reasons_len);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1inference_1observation_1record_1response(JNIEnv *env, jclass cls, jlong receiver, jobject response_id, jint __boltffi_response_id_len, jobject model, jint __boltffi_model_len) {
+    (void)cls;
+
+    void *__boltffi_response_id_ptr = NULL;
+    void *__boltffi_model_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, response_id, (jlong)__boltffi_response_id_len, &__boltffi_response_id_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, model, (jlong)__boltffi_model_len, &__boltffi_model_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_response(receiver, (const uint8_t *)__boltffi_response_id_ptr, (uintptr_t)__boltffi_response_id_len, (const uint8_t *)__boltffi_model_ptr, (uintptr_t)__boltffi_model_len);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1release_1class_1xybrid_1bolt_1xybrid_1model_1load_1observation(JNIEnv *env, jclass cls, jlong handle) {
+    (void)cls;
+
+    (void)env;
+    boltffi_release_class_xybrid_bolt_xybrid_model_load_observation(handle);
+
+    return;
+}
+
+JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1init_1class_1xybrid_1bolt_1xybrid_1model_1load_1observation_1new(JNIEnv *env, jclass cls, jobject info, jint __boltffi_info_len, jobject options, jint __boltffi_options_len) {
+    (void)cls;
+
+    void *__boltffi_info_ptr = NULL;
+    void *__boltffi_options_ptr = NULL;
+    uint64_t __boltffi_return = (uint64_t){0};
+
+    if (!boltffi_jni_direct_buffer_address(env, info, (jlong)__boltffi_info_len, &__boltffi_info_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, options, (jlong)__boltffi_options_len, &__boltffi_options_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_init_class_xybrid_bolt_xybrid_model_load_observation_new((const uint8_t *)__boltffi_info_ptr, (uintptr_t)__boltffi_info_len, (const uint8_t *)__boltffi_options_ptr, (uintptr_t)__boltffi_options_len, &__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return 0;
+    }
+
+    return (jlong)__boltffi_return;
+__boltffi_error:
+    return 0;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1model_1load_1observation_1context(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    FfiBuf_u8 __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_context(receiver);
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_result);
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1model_1load_1observation_1observation_1ref(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    FfiBuf_u8 __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_observation_ref(receiver);
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_result);
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1model_1load_1observation_1complete(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_complete(receiver);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1model_1load_1observation_1fail(JNIEnv *env, jclass cls, jlong receiver, jobject error_type, jint __boltffi_error_type_len, jobject message, jint __boltffi_message_len) {
+    (void)cls;
+
+    void *__boltffi_error_type_ptr = NULL;
+    void *__boltffi_message_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, error_type, (jlong)__boltffi_error_type_len, &__boltffi_error_type_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, message, (jlong)__boltffi_message_len, &__boltffi_message_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_fail(receiver, (const uint8_t *)__boltffi_error_type_ptr, (uintptr_t)__boltffi_error_type_len, (const uint8_t *)__boltffi_message_ptr, (uintptr_t)__boltffi_message_len);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1model_1load_1observation_1cancel(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_cancel(receiver);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+}
+
+JNIEXPORT jboolean JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1model_1load_1observation_1is_1finished(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    bool __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_is_finished(receiver);
+
+    return (jboolean)__boltffi_result;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1model_1load_1observation_1record_1cache_1hit(JNIEnv *env, jclass cls, jlong receiver, jboolean hit) {
+    (void)cls;
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_record_cache_hit(receiver, hit);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1decision_1request_1envelope(JNIEnv *env, jclass cls, jobject request, jint __boltffi_request_len) {
+    (void)cls;
+
+    void *__boltffi_request_ptr = NULL;
+    FfiBuf_u8 __boltffi_return = (FfiBuf_u8){0};
+
+    if (!boltffi_jni_direct_buffer_address(env, request, (jlong)__boltffi_request_len, &__boltffi_request_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_function_xybrid_bolt_decision_request_envelope((const uint8_t *)__boltffi_request_ptr, (uintptr_t)__boltffi_request_len, &__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return NULL;
+    }
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_return);
+__boltffi_error:
+    return NULL;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1decision_1request_1json_1envelope(JNIEnv *env, jclass cls, jobject json, jint __boltffi_json_len) {
+    (void)cls;
+
+    void *__boltffi_json_ptr = NULL;
+    FfiBuf_u8 __boltffi_return = (FfiBuf_u8){0};
+
+    if (!boltffi_jni_direct_buffer_address(env, json, (jlong)__boltffi_json_len, &__boltffi_json_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_function_xybrid_bolt_decision_request_json_envelope((const uint8_t *)__boltffi_json_ptr, (uintptr_t)__boltffi_json_len, &__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return NULL;
+    }
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_return);
+__boltffi_error:
+    return NULL;
+}
+
 JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1tool_1results_1envelope(JNIEnv *env, jclass cls, jobject user_text, jint __boltffi_user_text_len, jobject prior_assistant_text, jint __boltffi_prior_assistant_text_len, jobject results, jint __boltffi_results_len) {
     (void)cls;
 
@@ -1785,12 +2674,11 @@ JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1cl
     return;
 }
 
-JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1configure_1runtime(JNIEnv *env, jclass cls, jobject api_key, jint __boltffi_api_key_len, jobject gateway_url, jint __boltffi_gateway_url_len, jobject ingest_url, jint __boltffi_ingest_url_len) {
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1configure_1runtime(JNIEnv *env, jclass cls, jobject api_key, jint __boltffi_api_key_len, jobject gateway_url, jint __boltffi_gateway_url_len) {
     (void)cls;
 
     void *__boltffi_api_key_ptr = NULL;
     void *__boltffi_gateway_url_ptr = NULL;
-    void *__boltffi_ingest_url_ptr = NULL;
 
     if (!boltffi_jni_direct_buffer_address(env, api_key, (jlong)__boltffi_api_key_len, &__boltffi_api_key_ptr)) {
         goto __boltffi_error;
@@ -1798,11 +2686,8 @@ JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1co
     if (!boltffi_jni_direct_buffer_address(env, gateway_url, (jlong)__boltffi_gateway_url_len, &__boltffi_gateway_url_ptr)) {
         goto __boltffi_error;
     }
-    if (!boltffi_jni_direct_buffer_address(env, ingest_url, (jlong)__boltffi_ingest_url_len, &__boltffi_ingest_url_ptr)) {
-        goto __boltffi_error;
-    }
 
-    FfiStatus __boltffi_status = boltffi_function_xybrid_bolt_configure_runtime((const uint8_t *)__boltffi_api_key_ptr, (uintptr_t)__boltffi_api_key_len, (const uint8_t *)__boltffi_gateway_url_ptr, (uintptr_t)__boltffi_gateway_url_len, (const uint8_t *)__boltffi_ingest_url_ptr, (uintptr_t)__boltffi_ingest_url_len);
+    FfiStatus __boltffi_status = boltffi_function_xybrid_bolt_configure_runtime((const uint8_t *)__boltffi_api_key_ptr, (uintptr_t)__boltffi_api_key_len, (const uint8_t *)__boltffi_gateway_url_ptr, (uintptr_t)__boltffi_gateway_url_len);
 
     if (__boltffi_status.code != 0) {
         boltffi_jni_throw_status(env, __boltffi_status);
@@ -2137,31 +3022,120 @@ JNIEXPORT jboolean JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt
     return (jboolean)__boltffi_result;
 }
 
-JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1telemetry_1default_1endpoint(JNIEnv *env, jclass cls) {
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1observability_1default_1traces_1endpoint(JNIEnv *env, jclass cls) {
     (void)cls;
 
     (void)env;
-    FfiBuf_u8 __boltffi_result = boltffi_function_xybrid_bolt_telemetry_default_endpoint();
+    FfiBuf_u8 __boltffi_result = boltffi_function_xybrid_bolt_observability_default_traces_endpoint();
 
     return boltffi_jni_buffer_to_byte_array(env, __boltffi_result);
 }
 
-JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1telemetry_1flush(JNIEnv *env, jclass cls) {
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1observability_1stats(JNIEnv *env, jclass cls) {
     (void)cls;
 
     (void)env;
-    boltffi_function_xybrid_bolt_telemetry_flush();
+    FfiBuf_u8 __boltffi_result = boltffi_function_xybrid_bolt_observability_stats();
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_result);
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1observability_1flush(JNIEnv *env, jclass cls, jint timeout_ms) {
+    (void)cls;
+
+    FfiBuf_u8 error = boltffi_function_xybrid_bolt_observability_flush(timeout_ms);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return;
+    }
 
     return;
 }
 
-JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1telemetry_1shutdown(JNIEnv *env, jclass cls) {
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1observability_1shutdown(JNIEnv *env, jclass cls, jint timeout_ms) {
     (void)cls;
 
-    (void)env;
-    boltffi_function_xybrid_bolt_telemetry_shutdown();
+    FfiBuf_u8 error = boltffi_function_xybrid_bolt_observability_shutdown(timeout_ms);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return;
+    }
 
     return;
+}
+
+JNIEXPORT jboolean JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1observability_1record_1feedback(JNIEnv *env, jclass cls, jobject target, jint __boltffi_target_len, jobject score, jint __boltffi_score_len, jobject label, jint __boltffi_label_len, jobject comment, jint __boltffi_comment_len) {
+    (void)cls;
+
+    void *__boltffi_target_ptr = NULL;
+    void *__boltffi_score_ptr = NULL;
+    void *__boltffi_label_ptr = NULL;
+    void *__boltffi_comment_ptr = NULL;
+    bool __boltffi_return = (bool){0};
+
+    if (!boltffi_jni_direct_buffer_address(env, target, (jlong)__boltffi_target_len, &__boltffi_target_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, score, (jlong)__boltffi_score_len, &__boltffi_score_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, label, (jlong)__boltffi_label_len, &__boltffi_label_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, comment, (jlong)__boltffi_comment_len, &__boltffi_comment_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_function_xybrid_bolt_observability_record_feedback((const uint8_t *)__boltffi_target_ptr, (uintptr_t)__boltffi_target_len, (const uint8_t *)__boltffi_score_ptr, (uintptr_t)__boltffi_score_len, (const uint8_t *)__boltffi_label_ptr, (uintptr_t)__boltffi_label_len, (const uint8_t *)__boltffi_comment_ptr, (uintptr_t)__boltffi_comment_len, &__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return JNI_FALSE;
+    }
+
+    return (jboolean)__boltffi_return;
+__boltffi_error:
+    return JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1observability_1record_1evaluation(JNIEnv *env, jclass cls, jobject target, jint __boltffi_target_len, jobject name, jint __boltffi_name_len, jobject score_value, jint __boltffi_score_value_len, jobject score_label, jint __boltffi_score_label_len, jobject explanation, jint __boltffi_explanation_len) {
+    (void)cls;
+
+    void *__boltffi_target_ptr = NULL;
+    void *__boltffi_name_ptr = NULL;
+    void *__boltffi_score_value_ptr = NULL;
+    void *__boltffi_score_label_ptr = NULL;
+    void *__boltffi_explanation_ptr = NULL;
+    bool __boltffi_return = (bool){0};
+
+    if (!boltffi_jni_direct_buffer_address(env, target, (jlong)__boltffi_target_len, &__boltffi_target_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, name, (jlong)__boltffi_name_len, &__boltffi_name_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, score_value, (jlong)__boltffi_score_value_len, &__boltffi_score_value_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, score_label, (jlong)__boltffi_score_label_len, &__boltffi_score_label_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, explanation, (jlong)__boltffi_explanation_len, &__boltffi_explanation_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_function_xybrid_bolt_observability_record_evaluation((const uint8_t *)__boltffi_target_ptr, (uintptr_t)__boltffi_target_len, (const uint8_t *)__boltffi_name_ptr, (uintptr_t)__boltffi_name_len, (const uint8_t *)__boltffi_score_value_ptr, (uintptr_t)__boltffi_score_value_len, (const uint8_t *)__boltffi_score_label_ptr, (uintptr_t)__boltffi_score_label_len, (const uint8_t *)__boltffi_explanation_ptr, (uintptr_t)__boltffi_explanation_len, &__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return JNI_FALSE;
+    }
+
+    return (jboolean)__boltffi_return;
+__boltffi_error:
+    return JNI_FALSE;
 }
 
 JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1download_1progress_1subscribe(JNIEnv *env, jclass cls, jlong receiver) {

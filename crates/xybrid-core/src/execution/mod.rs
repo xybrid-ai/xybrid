@@ -65,6 +65,9 @@ pub mod template;
 // Choice-scoring primitives (decision models)
 pub mod choice;
 
+// Versioned typed decision inference.
+pub mod decision;
+
 // Chat template formatting for LLM prompts
 pub mod chat_template;
 pub use chat_template::{ChatTemplateFormat, ChatTemplateFormatter};
@@ -103,6 +106,9 @@ pub(crate) mod session_cache;
 
 // TTS text chunking (internal)
 pub(crate) mod text_chunking;
+
+// TTS per-phoneme timing arithmetic (internal)
+pub(crate) mod tts_timing;
 
 // LLM telemetry span stampers (internal, LLM features only)
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]

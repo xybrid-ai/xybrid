@@ -1,0 +1,267 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "Live sessions suppress traces for most frames; metrics still count every frame and outcome. A suppressed generative call still records its token usage: the operation token histograms and the usage counters (per modality, with the unknown remainder, and reasoning) count exactly as for a traced call.",
+  "expect": {
+    "logs": [
+      {
+        "attributes": {
+          "exception.message": "frame decode failed",
+          "exception.type": "invalid_input"
+        },
+        "event_name": "gen_ai.client.operation.exception",
+        "severity_number": 13,
+        "span": null
+      }
+    ],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.02
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.inference.operation.input_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 12
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.operation.output_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 5
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.usage.input_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "gen_ai.token.modality": "text",
+              "xybrid.genai.execution.location": "local"
+            },
+            "value": 8
+          },
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "gen_ai.token.modality": "unknown",
+              "xybrid.genai.execution.location": "local"
+            },
+            "value": 4
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.usage.output_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "gen_ai.token.modality": "unknown",
+              "xybrid.genai.execution.location": "local"
+            },
+            "value": 5
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.usage.reasoning.output_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "gen_ai.token.modality": "unknown",
+              "xybrid.genai.execution.location": "local"
+            },
+            "value": 2
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.operation.duration",
+        "points": [
+          {
+            "attributes": {
+              "error.type": "invalid_input",
+              "gen_ai.operation.name": "predict",
+              "gen_ai.provider.name": "onnxruntime",
+              "gen_ai.request.model": "yolo",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.015
+          },
+          {
+            "attributes": {
+              "gen_ai.operation.name": "predict",
+              "gen_ai.provider.name": "onnxruntime",
+              "gen_ai.request.model": "yolo",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 2,
+            "sum": 0.06
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "predict",
+          "gen_ai.provider.name": "onnxruntime",
+          "gen_ai.request.model": "yolo",
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.runtime.name": "onnxruntime",
+          "xybrid.genai.task": "object_detection"
+        },
+        "end_ms": 30,
+        "id": "f0",
+        "kind": "INTERNAL",
+        "name": "predict yolo",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      }
+    ]
+  },
+  "name": "suppressed_trace_keeps_metrics",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "f0",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "yolo",
+        "operation": "predict",
+        "provider": "onnxruntime",
+        "runtime": "onnxruntime",
+        "task": "object_detection"
+      }
+    },
+    {
+      "at_ms": 30,
+      "id": "f0",
+      "op": "end"
+    },
+    {
+      "at_ms": 40,
+      "id": "f1",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "yolo",
+        "operation": "predict",
+        "provider": "onnxruntime",
+        "runtime": "onnxruntime",
+        "task": "object_detection"
+      },
+      "trace": "suppress"
+    },
+    {
+      "at_ms": 70,
+      "id": "f1",
+      "op": "end"
+    },
+    {
+      "at_ms": 80,
+      "id": "f2",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "yolo",
+        "operation": "predict",
+        "provider": "onnxruntime",
+        "runtime": "onnxruntime",
+        "task": "object_detection"
+      },
+      "trace": "suppress"
+    },
+    {
+      "at_ms": 95,
+      "error_type": "invalid_input",
+      "id": "f2",
+      "message": "frame decode failed",
+      "op": "end_with_error"
+    },
+    {
+      "at_ms": 100,
+      "id": "c0",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp"
+      },
+      "trace": "suppress"
+    },
+    {
+      "at_ms": 110,
+      "id": "c0",
+      "input_tokens": 12,
+      "op": "usage",
+      "output_tokens": 5,
+      "reasoning_output_tokens": 2,
+      "text_input_tokens": 8
+    },
+    {
+      "at_ms": 120,
+      "id": "c0",
+      "op": "end"
+    }
+  ]
+}

@@ -8,6 +8,9 @@
 # boltffi generate`, then copy dist/apple/include/xybrid-bolt.h here). Committed
 # like the Swift wrapper; a CI drift check keeps it fresh.
 load("@build_bazel_rules_apple//apple:apple.bzl", "apple_static_xcframework")
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load(":zzz_notices.bzl", "zzz_xcframework")
+load(":native_notices.bzl", "native_notices_xcframework")
 
 # Device + simulator (G4a). The simulator arm64 slice links a FETCHED ONNX
 # Runtime slice (@ort_ios_arm64_sim — the same binary boltffi ships), so the
@@ -16,7 +19,7 @@ load("@build_bazel_rules_apple//apple:apple.bzl", "apple_static_xcframework")
 # module name, which must match `import XybridFFI` in the committed
 # xybrid_bolt.swift + Package.swift.
 apple_static_xcframework(
-    name = "XybridFFI",
+    name = "XybridFFI_raw",
     bundle_name = "XybridFFI",
     # bundle_id gives the EMBEDDED framework its Info.plist (nested_bundle_id in
     # rules_apple) — without it the .framework has no Info.plist and Xcode
@@ -40,6 +43,41 @@ apple_static_xcframework(
     # wildcard builds like the advisory CI's `//bindings/...` analyze, which
     # runs on a LINUX runner where no macOS exec platform exists (same reason
     # //:llama_metal is `manual`). Explicit `--config=ios` builds still work.
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
+
+# Keep the public artifact name stable and include complete native licenses.
+py_binary(
+    name = "pack_native_notices",
+    srcs = ["pack_native_notices.py"],
+    main = "pack_native_notices.py",
+    python_version = "PY3",
+)
+
+native_notices_xcframework(
+    name = "XybridFFI",
+    archive = ":XybridFFI_raw",
+    notice = "//crates/llama-cpp-sys:decision_notices",
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
+
+py_binary(
+    name = "pack_zzz_notices",
+    srcs = ["pack_zzz_notices.py", "//crates/zzz-sys:zzz_pull.py"],
+    main = "pack_zzz_notices.py",
+    python_version = "PY3",
+)
+
+# Opt-in prerequisite for a future reviewed zzz producer. The standard target
+# and release workflow above keep their current artifact paths and defaults.
+zzz_xcframework(
+    name = "XybridFFI_zzz",
+    archive = ":XybridFFI",
+    device_notices = "@zzz_ios//:notices",
+    simulator_notices = "@zzz_ios_sim//:notices",
+    enabled = select({"//:tts_zzz_enabled": True, "//conditions:default": False}),
     tags = ["manual"],
     visibility = ["//visibility:public"],
 )

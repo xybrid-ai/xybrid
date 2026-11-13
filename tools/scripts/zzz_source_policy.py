@@ -33,6 +33,7 @@ JSON_PACKAGES = {
 }
 VERSION_TEXT = {
     "README.md", "docs/content/docs/quickstart.mdx", "docs/content/docs/quickstart.zh.mdx",
+    "bindings/unity/README.md",
     "docs/content/docs/(integration)/sdks/android.mdx",
     "docs/content/docs/(integration)/sdks/android.zh.mdx",
     "docs/content/docs/(integration)/sdks/flutter.mdx",

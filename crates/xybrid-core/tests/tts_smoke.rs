@@ -7,6 +7,11 @@
 //! several chunks through the chunked batch and streaming paths. Every result
 //! must be speech-length audio.
 //!
+//! A model whose ONNX graph has a per-token duration output (`duration`,
+//! `durations` or `pred_dur`) must also report phoneme timings on its batch
+//! results: in order, within the audio, and ending at most an audible end pad
+//! before it does. Any other model must report none.
+//!
 //! Marked `#[ignore]` because it requires downloaded ONNX model files.
 //!
 //! ```bash
@@ -22,8 +27,12 @@
 //! ```
 
 use std::collections::HashMap;
-use xybrid_core::execution::{ModelMetadata, PostprocessingStep, TemplateExecutor};
-use xybrid_core::ir::{Envelope, EnvelopeKind};
+use std::path::Path;
+use xybrid_core::execution::{
+    ExecutionTemplate, ModelMetadata, PostprocessingStep, TemplateExecutor,
+};
+use xybrid_core::ir::{Envelope, EnvelopeKind, PhonemeTiming};
+use xybrid_core::runtime_adapter::{ExecutionProviderKind, ONNXSession, SessionOptions};
 use xybrid_core::testing::model_fixtures;
 
 /// Short text, synthesized in one chunk.
@@ -48,6 +57,21 @@ const MIN_AUDIO_SECS: f64 = 0.3;
 /// Runs of [`TEXT`] per model. Output selection once depended on hash-map
 /// order, which changes from run to run, so a single run could pass by luck.
 const RUNS_PER_MODEL: usize = 3;
+
+/// Output names the executor reads per-token durations from.
+const DURATION_OUTPUT_NAMES: [&str; 3] = ["duration", "durations", "pred_dur"];
+
+/// Longest a timed model's audio may run on after its last phoneme ends: the
+/// frames of the end padding token, which timings never list, that the
+/// encoder's -40 dB trim keeps. Kokoro's end pad is silent and trimmed away,
+/// so its last phoneme ends with the audio. KittenTTS 0.8's is audible (the
+/// release of the last sound) and kept: Nano runs on for about 50 ms, Mini
+/// 78 ms and Micro up to 100 ms, four of its 25 ms frames. The bound allows
+/// six.
+const MAX_TAIL_SECS: f64 = 0.15;
+
+/// Slack for comparing `f32` timings with the audio length in `f64` seconds.
+const TIMING_EPSILON_SECS: f64 = 1e-4;
 
 /// Discover all TTS model directories that have both model_metadata.json and
 /// the ONNX model file present.
@@ -141,7 +165,7 @@ fn pcm16_secs(bytes: usize, sample_rate: u32) -> f64 {
 
 /// `(bytes, seconds)` of the audio in `result`, or why there is none.
 fn audio_len<E: std::fmt::Display>(
-    result: Result<Envelope, E>,
+    result: &Result<Envelope, E>,
     sample_rate: u32,
 ) -> Result<(usize, f64), String> {
     match result {
@@ -154,6 +178,115 @@ fn audio_len<E: std::fmt::Display>(
             std::mem::discriminant(&other.kind)
         )),
         Err(e) => Err(format!("execution failed: {}", e)),
+    }
+}
+
+/// Whether the model's ONNX graph has a per-token duration output next to
+/// its waveform, so its batch results must carry phoneme timings.
+fn declares_duration_output(metadata: &ModelMetadata, model_dir: &Path) -> Result<bool, String> {
+    let ExecutionTemplate::Onnx { model_file } = &metadata.execution_template else {
+        return Ok(false);
+    };
+    let path = model_dir.join(model_file);
+    let path = path
+        .to_str()
+        .ok_or_else(|| format!("model path {} is not UTF-8", path.display()))?;
+    let session = ONNXSession::build(path, ExecutionProviderKind::Cpu, SessionOptions::default())
+        .map_err(|e| format!("cannot open {}: {}", path, e))?;
+    let names = session.output_names();
+    Ok(names.len() > 1
+        && names
+            .iter()
+            .any(|name| DURATION_OUTPUT_NAMES.contains(&name.as_str())))
+}
+
+/// The phoneme timings on `envelope`, checked against its `audio_secs` of
+/// audio, or what is wrong with them.
+///
+/// With `timed`, they must be present, non-empty spans in order that never
+/// overlap, lie within the audio, and end no more than [`MAX_TAIL_SECS`]
+/// before it does. Without, the metadata key must be absent.
+fn checked_timings(
+    envelope: &Envelope,
+    audio_secs: f64,
+    timed: bool,
+) -> Result<Vec<PhonemeTiming>, String> {
+    let raw = envelope
+        .metadata
+        .get(Envelope::PHONEME_TIMINGS_METADATA_KEY);
+    let raw = match (raw, timed) {
+        (None, false) => return Ok(Vec::new()),
+        (Some(_), false) => {
+            return Err("reports phoneme timings without a duration output".to_string())
+        }
+        (None, true) => return Err("has a duration output but no phoneme timings".to_string()),
+        (Some(raw), true) => raw,
+    };
+    let timings: Vec<PhonemeTiming> =
+        serde_json::from_str(raw).map_err(|e| format!("unparseable phoneme timings: {}", e))?;
+    let (Some(first), Some(last)) = (timings.first(), timings.last()) else {
+        return Err("reports an empty list of phoneme timings".to_string());
+    };
+    if first.start < 0.0 {
+        return Err(format!(
+            "first phoneme starts before the audio: {:?}",
+            first
+        ));
+    }
+    if let Some(empty) = timings.iter().find(|t| t.start >= t.end) {
+        return Err(format!("empty phoneme span {:?}", empty));
+    }
+    if let Some(pair) = timings.windows(2).find(|pair| pair[0].end > pair[1].start) {
+        return Err(format!("phoneme spans overlap: {:?}", pair));
+    }
+    let last_end = f64::from(last.end);
+    if last_end > audio_secs + TIMING_EPSILON_SECS {
+        return Err(format!(
+            "last phoneme ends at {:.4} s, after the {:.4} s of audio",
+            last_end, audio_secs
+        ));
+    }
+    if audio_secs - last_end > MAX_TAIL_SECS + TIMING_EPSILON_SECS {
+        return Err(format!(
+            "last phoneme ends at {:.4} s, {:.0} ms before the end of the {:.4} s of audio",
+            last_end,
+            (audio_secs - last_end) * 1000.0,
+            audio_secs
+        ));
+    }
+    Ok(timings)
+}
+
+/// Runs [`checked_timings`] on a batch `result` with `audio_secs` of audio,
+/// printing a summary under `label` or recording what is wrong in `failures`.
+fn check_timings<E>(
+    label: &str,
+    result: &Result<Envelope, E>,
+    audio_secs: f64,
+    timed: bool,
+    failures: &mut Vec<String>,
+) {
+    let Ok(envelope) = result else {
+        return; // Already reported as an execution failure.
+    };
+    match checked_timings(envelope, audio_secs, timed) {
+        Ok(timings) if timings.is_empty() => {}
+        Ok(timings) => {
+            let sample: Vec<String> = timings
+                .iter()
+                .take(6)
+                .map(|t| format!("{} {:.3}-{:.3}", t.phoneme, t.start, t.end))
+                .collect();
+            println!(
+                "  {}: {} phoneme timing(s), last ends {:.4} s of {:.4} s [{} ...]",
+                label,
+                timings.len(),
+                timings.last().map_or(0.0, |t| t.end),
+                audio_secs,
+                sample.join(", ")
+            );
+        }
+        Err(e) => failures.push(format!("{} {}", label, e)),
     }
 }
 
@@ -193,13 +326,19 @@ fn test_all_tts_models_produce_audio() {
         let sample_rate = sample_rate(&metadata);
         let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
         let mut failures = Vec::new();
+        let timed = match declares_duration_output(&metadata, model_dir) {
+            Ok(timed) => timed,
+            Err(e) => {
+                failures.push(e);
+                false
+            }
+        };
+        println!("  duration output: {}", timed);
 
         // Short text: one chunk through the batch path, several times.
         for run in 1..=RUNS_PER_MODEL {
-            match audio_len(
-                executor.execute(&metadata, &text_input(TEXT), None),
-                sample_rate,
-            ) {
+            let result = executor.execute(&metadata, &text_input(TEXT), None);
+            match audio_len(&result, sample_rate) {
                 Ok((bytes, secs)) => {
                     println!("  output: Audio ({} bytes, {:.3} s)", bytes, secs);
                     if secs < MIN_AUDIO_SECS {
@@ -208,6 +347,7 @@ fn test_all_tts_models_produce_audio() {
                             run, secs, bytes
                         ));
                     }
+                    check_timings(&format!("run {}", run), &result, secs, timed, &mut failures);
                 }
                 Err(e) => failures.push(format!("run {} {}", run, e)),
             }
@@ -250,10 +390,8 @@ fn test_all_tts_models_produce_audio() {
             }
         }
         let streamed_secs: f64 = chunk_secs.iter().sum();
-        match audio_len(
-            executor.execute(&chunked_metadata, &text_input(MULTI_CHUNK_TEXT), None),
-            sample_rate,
-        ) {
+        let chunked = executor.execute(&chunked_metadata, &text_input(MULTI_CHUNK_TEXT), None);
+        match audio_len(&chunked, sample_rate) {
             Ok((bytes, secs)) => {
                 println!("  chunked: Audio ({} bytes, {:.3} s)", bytes, secs);
                 if secs < 0.8 * streamed_secs {
@@ -262,6 +400,8 @@ fn test_all_tts_models_produce_audio() {
                         secs, streamed_secs
                     ));
                 }
+                // Timings stay in order across the crossfaded chunk joins.
+                check_timings("chunked run", &chunked, secs, timed, &mut failures);
             }
             Err(e) => failures.push(format!("chunked run {}", e)),
         }

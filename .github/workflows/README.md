@@ -28,7 +28,7 @@ decisions to keep.
   is genuinely misleading, rename it on purpose and plan for the new history and
   the new code-scanning configuration.
 - **Job names are the required checks.** Branch protection on `master` requires
-  `CI Success` (reported by both `ci.yml` and `ci-docs.yml`) and
+  `CI Success` (`ci.yml`) and
   `Bazel graph + RBE targets` (`bazel.yml`), matched by job name.
   `tools/scripts/llamacpp_update.py` waits on more job names before it cuts a
   llama.cpp release (its `REQUIRED_CHECKS`). A workflow's `name:` can change
@@ -59,11 +59,12 @@ Workspace validation, pull-request gates and backend test suites.
 | [`test-candle.yml`](test-candle.yml) | CI: Candle backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Test the Candle backend (Metal runs only on macOS), scoped to the paths that can affect it. |
 | [`test-choice-conformance.yml`](test-choice-conformance.yml) | CI: Choice conformance | push to `master`, pull_request to `master`, schedule (`23 5 * * *`), workflow_dispatch | none | Regenerate and verify choice-scoring conformance artifacts against pinned sha256s, then score FORMS through core, the Rust SDK and the CLI; daily cold rebuild. |
 | [`clean-scripts.yml`](clean-scripts.yml) | CI: Clean scripts | push to `master`, pull_request to `master` | none | Test the root and per-folder clean.sh scripts and clean-lib.sh; every path they list must be one git ignores. |
-| [`ci-docs.yml`](ci-docs.yml) | CI: Docs-only gate | push to `master`, pull_request to `master` | none | Report the CI Success gate for docs-only changes, which ci.yml skips. |
+| [`test-decision-conformance.yml`](test-decision-conformance.yml) | CI: Decision conformance | push to `master`, pull_request to `master`, schedule (`41 5 * * *`), workflow_dispatch | none | Verify the decision corpus and run isolated preparation, finalization, matched CPU inference and SDK lifecycle checks against pinned d1 weights. |
 | [`llamacpp-validate.yml`](llamacpp-validate.yml) | CI: llama.cpp backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Check the llama.cpp pins and generated bindings, then run real text and vision models on a source build. |
 | [`test-policy-routing.yml`](test-policy-routing.yml) | CI: Policy routing | push to `master`, pull_request to `master`, workflow_dispatch | none | Drive the xybrid binary through a policy-routed hybrid stage: local GGUF leg, fake DeepSeek cloud leg. |
 | [`test-whispercpp.yml`](test-whispercpp.yml) | CI: whisper.cpp backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Exercise whisper.cpp with real multilingual weights: translation, per-request language, long windows, non-speech suppression. |
-| [`ci.yml`](ci.yml) | CI: Workspace | push to `master`, pull_request to `master` | none | Rust format, lint, tests and feature matrix, plus binding drift, API contract, Python and Web SDK checks. Gates merges. |
+| [`ci.yml`](ci.yml) | CI: Workspace | push to `master`, pull_request to `master` | none | Rust format, lint, tests and feature matrix, plus binding drift, API contract, observability, Python SDK, Web SDK and agent skills checks. Gates merges. |
+| [`test-zzz-android.yml`](test-zzz-android.yml) | CI: zzz Android AAR | push to `master`, workflow_dispatch | none | Build the arm64-v8a speech AAR on master with the pinned engine, gate it and its Gradle repackaging, then dlopen its x86_64 slice on an emulator. |
 | [`test-zzz-engine.yml`](test-zzz-engine.yml) | CI: zzz engine | push to `master`, workflow_dispatch | none | Fetch and verify the pinned Phonon/Kitten-only engine slices and link them into Rust tests on each pinned target. |
 
 ### SDK
@@ -72,11 +73,12 @@ Per-platform SDK builds, wrapper tests and example apps.
 
 | File | Name | Triggers | Writes | Purpose |
 | --- | --- | --- | --- | --- |
-| [`build-android.yml`](build-android.yml) | SDK: Android | push to `master`, pull_request to `master`, workflow_dispatch | none | Build the Android .so files for every ABI, test the Kotlin wrapper, and gate dlopen on an x86_64 emulator. |
-| [`build-apple.yml`](build-apple.yml) | SDK: Apple | push to `master`, pull_request to `master`, workflow_dispatch | none | Build and verify the Apple XCFramework, then compile and unit-test the Swift wrapper on an iOS Simulator. |
-| [`build-flutter.yml`](build-flutter.yml) | SDK: Flutter | push to `master`, pull_request to `master`, workflow_dispatch | none | Analyze and test the Dart wrapper, build the native libraries, and build a consumer app against the packaged layout. |
+| [`build-android.yml`](build-android.yml) | SDK: Android | push to `master`, pull_request to `master`, workflow_dispatch | none | Build the Android .so files for every ABI, test the Kotlin wrapper, and gate dlopen and the observability scenario on an x86_64 emulator. |
+| [`build-apple.yml`](build-apple.yml) | SDK: Apple | push to `master`, pull_request to `master`, workflow_dispatch | none | Build and verify the Apple XCFramework, then unit-test the Swift wrapper and run the observability runtime scenario on an iOS Simulator. |
+| [`build-flutter.yml`](build-flutter.yml) | SDK: Flutter | push to `master`, pull_request to `master`, workflow_dispatch | none | Analyze and test the Dart wrapper, build the native libraries, run the observability runtime scenario on the Linux library, and build a consumer app against the packaged layout. |
 | [`build-react-native.yml`](build-react-native.yml) | SDK: React Native | push to `master`, pull_request to `master`, workflow_dispatch | none | Test and npm-pack the JS package; build the iOS and Android example apps. |
-| [`unity-editor.yml`](unity-editor.yml) | SDK: Unity Editor | push to `master`, pull_request to `master`, workflow_dispatch | checks | Run a real Unity Editor: EditMode tests against a Bazel-built native, then an IL2CPP player smoke. |
+| [`trusted-zzz-sdk.yml`](trusted-zzz-sdk.yml) | SDK: Trusted zzz Apple candidate (manual) | workflow_dispatch | none | Manual: Produce a source-verified, notice-bearing Apple SDK candidate from genuine schema-5 engine pins on protected master. |
+| [`unity-editor.yml`](unity-editor.yml) | SDK: Unity Editor | push to `master`, pull_request to `master`, workflow_dispatch | checks | Run a real Unity Editor: EditMode tests against a Bazel-built native, an IL2CPP player smoke, then the observability runtime scenario. |
 | [`web-webgpu.yml`](web-webgpu.yml) | SDK: WebGPU inference (manual) | workflow_dispatch | none | Manual: build the Web SDK and run WebGPU generation in Chromium on a self-hosted GPU runner. |
 
 ### Artifacts
@@ -116,7 +118,7 @@ Manual utilities, run on demand.
 
 | File | Name | Triggers | Writes | Purpose |
 | --- | --- | --- | --- | --- |
-| [`test-ci.yml`](test-ci.yml) | Maintenance: Packaging tools (manual) | workflow_dispatch | contents | Manual: precompile and upload Flutter binaries per platform, and dry-run the Kotlin publish. |
+| [`test-ci.yml`](test-ci.yml) | Maintenance: Packaging tools (manual) | workflow_dispatch | contents | Manual: precompile and upload Flutter binaries per platform, and dry-run the speech-free Kotlin packaging. |
 | [`unity-activation.yml`](unity-activation.yml) | Maintenance: Unity activation (manual) | workflow_dispatch | none | Manual: emit the Unity license activation request (.alf); re-run when Editor activation starts failing. |
 
 ### Community
@@ -140,10 +142,12 @@ not a repository write, and `star-history.yml` writes to the unprotected
 
 ## How they fit together
 
-**Docs-only changes.** `ci.yml` skips itself when a change touches only docs
-paths (its `paths-ignore`), which would leave the required `CI Success` check
-pending forever. `ci-docs.yml` runs on exactly those paths and reports the same
-check. Keep the two path lists in sync and the job names identical.
+**Docs-only changes.** `ci.yml` runs on every change. Its first job classifies
+the changed paths with `tools/scripts/ci_gate.py`. When every path is
+documentation, the build matrix is skipped. `CI Success` still reports, and it
+checks that each skipped job had a recorded reason. `Workflow index` and
+`Version sync` have no path gate and run on every change: the docs carry the
+install snippets `version-sync.sh` keeps on the current release.
 
 **Natives.** `build-natives.yml` compiles the llama.cpp static slices once per
 target and feature set and pushes them to `ghcr.io/xybrid-ai/llama-natives`. It
@@ -175,9 +179,25 @@ Both need `RELEASE_PAT`; without it the job summary prints the
 `release: published` event. The full flow is in [AGENTS.md](../../AGENTS.md),
 Releases.
 
+**Android speech.** The Kotlin AAR links the private Phonon/Kitten TTS 2 engine
+into its arm64-v8a slice. `release-prep.yml`'s Build Android job binds the
+`zzz-release` environment to stage the engine, and fails without it;
+`tools/scripts/verify_zzz_android.py` gates the AAR and the
+`xybrid-android-<tag>.zip` there, its Verify Android Gradle packaging job
+replays the Gradle publish on that zip before the draft exists, and
+`release-publish.yml` gates both again before Maven Central. The environment's
+branch rule admits `release/v*` refs, and GitHub checks only the run's ref: any
+workflow on a `release/v*` branch can bind it. Who may push `release/v*` is
+therefore what guards the engine credentials; a repository ruleset should
+limit it to maintainers and the release automation. `test-zzz-android.yml` proves the same
+build, gates and Gradle packaging on `master` with the master-only
+`zzz-engine` environment, which `test-zzz-engine.yml` and `trusted-zzz-sdk.yml`
+also use.
+
 **Manual only.** `test-ci.yml` precompiles the Flutter binaries per platform and
-uploads them to GitHub Releases (`contents: write`), and dry-runs the Kotlin
-publish. `unity-activation.yml` emits the Unity license activation request; it is
+uploads them to GitHub Releases (`contents: write`), and dry-runs the
+speech-free Kotlin packaging; the speech publish path is rehearsed by
+dispatching `test-zzz-android.yml` on `master`. `unity-activation.yml` emits the Unity license activation request; it is
 kept for when the license expires or the GameCI image changes.
 `web-webgpu.yml` runs WebGPU generation on a self-hosted runner labelled
 `webgpu`, because hosted runners have no GPU adapter with `shader-f16`.

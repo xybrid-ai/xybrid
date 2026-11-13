@@ -1,4 +1,4 @@
-# Purpose: Manual: precompile and upload Flutter binaries per platform, and dry-run the Kotlin publish.
+# Purpose: Manual: precompile and upload Flutter binaries per platform, and dry-run the speech-free Kotlin packaging.
 name: "Maintenance: Packaging tools (manual)"
 
 on:
@@ -32,7 +32,7 @@ jobs:
     permissions:
       contents: write   # cargokit precompile-binaries uploads release assets
     if: inputs.platform == 'darwin-precompile'
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -62,6 +62,9 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: test-precompile-darwin
+          # Per-image cache: ort-sys's build-script output records this image's
+          # Xcode clang-runtime path, which other images may lack.
+          env-vars: ImageOS
 
       - uses: dart-lang/setup-dart@e51d8e571e22473a2ddebf0ef8a2123f0ab2c02c # v1
 
@@ -220,6 +223,12 @@ jobs:
   #
   # Publish Kotlin SDK (dry-run: build Android + assemble AAR, no actual publish)
   #
+  # Rehearses only the speech-free packaging: the default Bazel AAR's natives
+  # through Gradle, gated with --no-speech. The release path (speech in
+  # arm64-v8a, the engine's notices, pack-dist -> stage-gradle ->
+  # bundleReleaseAar -> `aar --speech`) needs the private engine; its
+  # rehearsal is test-zzz-android.yml (dispatch it on master), and
+  # release-prep.yml's verify-android-gradle replays it on every release.
   publish-kotlin:
     name: Publish Kotlin SDK (dry-run)
     if: inputs.platform == 'publish-kotlin'
@@ -349,3 +358,12 @@ jobs:
           echo ""
           echo "AAR contents:"
           unzip -l "$AAR_PATH" | grep -E "\.so|\.jar|AndroidManifest" | head -20
+
+      # The release gate in its speech-free mode (GNU readelf): no engine and
+      # no notices anywhere, minSdk 29, the per-ABI API levels, JNI exports,
+      # libc imported from bionic (the canary).
+      - name: Gate the Gradle-built AAR (speech-free)
+        run: |
+          python3 tools/scripts/verify_zzz_android.py aar \
+            bindings/kotlin/build/outputs/aar/xybrid-kotlin-release.aar \
+            --readelf readelf --no-speech --min-sdk 29

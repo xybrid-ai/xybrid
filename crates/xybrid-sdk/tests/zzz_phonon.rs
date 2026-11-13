@@ -76,8 +76,10 @@ fn collect(
         .unwrap();
     assert!(packets > 1, "native audio arrives incrementally");
     assert!(pcm
-        .chunks_exact(2)
-        .any(|sample| i16::from_le_bytes([sample[0], sample[1]]) != 0));
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .any(|sample| i16::from_le_bytes(*sample) != 0));
     assert_eq!(summary.samples, pcm.len() as u64 / 2);
     (pcm, summary)
 }

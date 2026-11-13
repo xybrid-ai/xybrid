@@ -17,8 +17,10 @@ What it does:
   2. Copies the generated package into bindings/python/xybrid/_bolt/, which the
      hand-written `xybrid/__init__.py` wrapper re-exports.
   3. Prunes stale files so a removed export cannot linger.
-  4. Makes the append-only `XybridResult.reasoning_content` tail optional while
-     decoding the merged tool-calling wire shape.
+  4. Makes the append-only `XybridResult.reasoning_content` and `observation`
+     tails optional while decoding older wire shapes that omit them.
+  5. Releases the GIL around the blocking native model run, so another Python
+     thread can use the existing cancellation token during evaluation.
 
 The compiled extension is NOT built here — `tools/scripts/build-python-bolt.sh`
 runs `boltffi pack python`, which compiles `_native` and stages the cdylib.
@@ -54,6 +56,28 @@ TRACKED_SUFFIXES = (".py", ".pyi", ".c", ".typed")
 STAGED_SUFFIXES = (".dylib", ".so", ".dll", ".pyd")
 
 
+def _release_run_gil(source: str) -> str:
+    """Only the native call runs unlocked; owned wire buffers remain retained.
+
+    The target is a Rust function with no Python callbacks or Python API use.
+    Parsing, reference counting and error/result decoding still hold the GIL.
+    The public wrapper in _sugar.py owns the model and keeps a shared hold on
+    the token during this call, since Bolt's synchronous borrowed handles are
+    not retained.
+    """
+    target = (
+        "    return_error = boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run"
+        "(receiver, envelope_ptr, envelope_len, options_ptr, options_len, cancel, &return_success);"
+    )
+    if source.count(target) != 1:
+        sys.exit("error: expected one blocking Python model.run native call")
+    return source.replace(
+        target,
+        "    Py_BEGIN_ALLOW_THREADS\n" + target + "\n    Py_END_ALLOW_THREADS",
+        1,
+    )
+
+
 def _add_result_wire_compatibility(source: str) -> str:
     reader_target = """    def finish(self) -> None:
         if self._offset != len(self._data):
@@ -85,6 +109,7 @@ def _add_result_wire_compatibility(source: str) -> str:
             metrics=XybridInferenceMetrics._boltffi_from_reader(reader),
             tool_calls=reader.sequence(lambda: XybridToolCall._boltffi_from_reader(reader)),
             reasoning_content=reader.optional(lambda: reader.string()),
+            observation=reader.optional(lambda: XybridObservationRef._boltffi_from_reader(reader)),
         )
 """
     decoder_replacement = """    @classmethod
@@ -104,6 +129,11 @@ def _add_result_wire_compatibility(source: str) -> str:
                 None,
             )
         )
+        observation = (
+            reader.optional(lambda: XybridObservationRef._boltffi_from_reader(reader))
+            if reader.has_remaining()
+            else None
+        )
         return cls(
             envelope=envelope,
             output_type=output_type,
@@ -113,6 +143,7 @@ def _add_result_wire_compatibility(source: str) -> str:
             metrics=metrics,
             tool_calls=tool_calls,
             reasoning_content=reasoning_content,
+            observation=observation,
         )
 """
     if source.count(decoder_target) != 1:
@@ -144,17 +175,34 @@ def generate() -> list[Path]:
     # Anchored on the field declaration alone: boltffi 0.30 renders the Rust
     # doc comment as a docstring *between* the field and whatever follows it,
     # so anchoring on the next declaration breaks on every doc edit.
-    target = "    reasoning_content: str | None\n"
-    replacement = "    reasoning_content: str | None = None\n"
+    defaults = (
+        ("    reasoning_content: str | None\n", "    reasoning_content: str | None = None\n"),
+        (
+            "    observation: XybridObservationRef | None\n",
+            "    observation: XybridObservationRef | None = None\n",
+        ),
+        (
+            "    observation: XybridObservationOptions | None\n",
+            "    observation: XybridObservationOptions | None = None\n",
+        ),
+        (
+            "    decoder_observation: XybridObservationRef | None\n",
+            "    decoder_observation: XybridObservationRef | None = None\n",
+        ),
+    )
     for name in ("__init__.py", "__init__.pyi"):
         path = RAW_DIR / name
         source = path.read_text()
-        if source.count(target) != 1:
-            sys.exit(f"error: expected one XybridResult reasoning field in {path}")
-        source = source.replace(target, replacement)
+        for target, replacement in defaults:
+            expected = 4 if target.strip() == "observation: XybridObservationRef | None" else 1
+            if source.count(target) != expected:
+                sys.exit(f"error: expected {expected} `{target.strip()}` fields in {path}")
+            source = source.replace(target, replacement)
         if name == "__init__.py":
             source = _add_result_wire_compatibility(source)
         path.write_text(source)
+    native = RAW_DIR / "_native.c"
+    native.write_text(_release_run_gil(native.read_text()))
     sources = sorted(
         p for p in RAW_DIR.iterdir() if p.is_file() and p.suffix in TRACKED_SUFFIXES
     )

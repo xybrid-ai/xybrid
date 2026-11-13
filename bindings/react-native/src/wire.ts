@@ -8,6 +8,8 @@
 // on Node.
 
 import type {
+  Decisions,
+  DecisionRequest,
   DownloadStatus,
   Envelope,
   EnvelopeMetadata,
@@ -15,6 +17,7 @@ import type {
   InferenceMetrics,
   InferenceResult,
   MessageRole,
+  ObservationRef,
   OutputType,
   PipelineResult,
   StageResult,
@@ -40,7 +43,9 @@ export type WireEnvelope =
   | { kind: 'audio'; bytesBase64: string; metadata: EnvelopeMetadata }
   | { kind: 'embedding'; data: number[]; metadata: EnvelopeMetadata }
   | { kind: 'image'; bytesBase64: string; format: string; metadata: EnvelopeMetadata }
-  | { kind: 'multipart'; parts: WireEnvelope[]; metadata: EnvelopeMetadata };
+  | { kind: 'multipart'; parts: WireEnvelope[]; metadata: EnvelopeMetadata }
+  | { kind: 'decisionRequest'; request?: DecisionRequest; requestJson?: string; metadata: EnvelopeMetadata }
+  | { kind: 'decisions'; decisions: Decisions; metadata: EnvelopeMetadata };
 
 export interface WireToolDefinition {
   name: string;
@@ -66,6 +71,11 @@ export interface WireRunOptions {
   fallbackToCloud?: boolean;
   maxGraceTokens?: number;
   correlationId?: string;
+  traceparent?: string;
+  tracestate?: string;
+  conversationId?: string;
+  suppressTrace?: boolean;
+  frameSessionId?: string;
   /** Conversation-context handle. */
   context?: string;
   /** Cancellation-token handle. */
@@ -81,6 +91,7 @@ export interface WireResult {
   metrics: InferenceMetrics;
   toolCalls: ToolCall[];
   reasoningContent?: string;
+  observation?: ObservationRef | null;
 }
 
 export interface WireStreamToken {
@@ -95,9 +106,11 @@ export interface WireStreamToken {
 
 export type WireStreamEvent =
   | { kind: 'token'; token: WireStreamToken }
+  | { kind: 'audio'; audio: import('./types').TtsAudioChunk }
   | { kind: 'complete'; result: WireResult };
 
 export interface WireStageResult {
+  observation?: ObservationRef | null;
   stageId: string;
   envelope: WireEnvelope;
   outputType: OutputType;
@@ -107,6 +120,7 @@ export interface WireStageResult {
 }
 
 export interface WirePipelineResult {
+  observation?: ObservationRef | null;
   envelope: WireEnvelope;
   outputType: OutputType;
   latencyMs: number;
@@ -132,6 +146,16 @@ export function toWireEnvelope(envelope: Envelope): WireEnvelope {
   setIfDefined(metadata, KEY_ROLE, envelope.role);
 
   switch (envelope.kind) {
+    case 'decisionRequest':
+      if (typeof envelope.requestJson === 'string' && envelope.request === undefined) {
+        return { kind: 'decisionRequest', requestJson: envelope.requestJson, metadata };
+      }
+      if (envelope.request !== undefined && envelope.requestJson === undefined) {
+        return { kind: 'decisionRequest', request: envelope.request, metadata };
+      }
+      throw new TypeError('decision request requires exactly one typed request or JSON string');
+    case 'decisions':
+      throw new TypeError('decision results cannot be used as model input');
     case 'text':
       requireType(envelope.text, 'string', 'text envelope: `text`');
       setIfDefined(metadata, KEY_VOICE_ID, envelope.voiceId);
@@ -176,6 +200,12 @@ export function fromWireEnvelope(wire: WireEnvelope): Envelope {
     metadata,
   };
   switch (wire.kind) {
+    case 'decisionRequest':
+      if (wire.request !== undefined) return { kind: 'decisionRequest', request: wire.request, ...base };
+      if (typeof wire.requestJson === 'string') return { kind: 'decisionRequest', requestJson: wire.requestJson, ...base };
+      throw new Error('invalid decision request from native');
+    case 'decisions':
+      return { kind: 'decisions', decisions: wire.decisions, ...base };
     case 'text': {
       const speed = parseNumber(metadata[KEY_SPEED]);
       return {
@@ -273,7 +303,15 @@ export interface RunOptionsInput {
   fallbackToCloud?: boolean;
   maxGraceTokens?: number;
   correlationId?: string;
+  traceparent?: string;
+  tracestate?: string;
+  conversationId?: string;
+  suppressTrace?: boolean;
+  frameSessionId?: string;
 }
+
+/** The per-call trace fields, which pipelines accept too. */
+const TRACE_KEYS = ['correlationId', 'traceparent', 'tracestate', 'conversationId', 'suppressTrace'] as const;
 
 /**
  * Build the wire options. Sampling parameters must sit under
@@ -301,10 +339,21 @@ export function toWireRunOptions(
   if (options?.abortOn) wire.abortOn = [...options.abortOn];
   if (options?.fallbackToCloud !== undefined) wire.fallbackToCloud = options.fallbackToCloud;
   if (options?.maxGraceTokens !== undefined) wire.maxGraceTokens = options.maxGraceTokens;
-  if (options?.correlationId !== undefined) wire.correlationId = options.correlationId;
+  if (options) Object.assign(wire, toWireTraceOptions(options));
+  // A model-run field: pipelines take the trace fields only.
+  if (options?.frameSessionId !== undefined) wire.frameSessionId = options.frameSessionId;
   if (handles.context) wire.context = handles.context;
   if (handles.cancel) wire.cancel = handles.cancel;
   return Object.keys(wire).length > 0 ? wire : null;
+}
+
+/** Only the trace fields of `options` that are set. */
+export function toWireTraceOptions(options: RunOptionsInput): WireRunOptions {
+  const wire: WireRunOptions = {};
+  for (const key of TRACE_KEYS) {
+    if (options[key] !== undefined) (wire as Record<string, unknown>)[key] = options[key];
+  }
+  return wire;
 }
 
 export function toWireToolResult(result: ToolResult): {
@@ -327,8 +376,11 @@ function payloadFields(envelope: WireEnvelope): {
   text?: string;
   audioBytesBase64?: string;
   embedding?: number[];
+  decisions?: Decisions;
 } {
   switch (envelope.kind) {
+    case 'decisions':
+      return { decisions: envelope.decisions };
     case 'text':
       return { text: envelope.text };
     case 'audio':
@@ -341,7 +393,11 @@ function payloadFields(envelope: WireEnvelope): {
 }
 
 export function fromWireResult(wire: WireResult): InferenceResult {
+  const tokensIn = parseNumber(wire.envelope.metadata?.tokens_in);
+  const tokensOut = parseNumber(wire.envelope.metadata?.tokens_out);
   return {
+    ...(tokensIn !== undefined ? { tokensIn } : {}),
+    ...(tokensOut !== undefined ? { tokensOut } : {}),
     envelope: fromWireEnvelope(wire.envelope),
     outputType: wire.outputType,
     modelId: wire.modelId,
@@ -351,6 +407,7 @@ export function fromWireResult(wire: WireResult): InferenceResult {
     latencyMs: wire.latencyMs,
     metrics: wire.metrics,
     executionTarget: wire.executionTarget,
+    ...(wire.observation ? { observation: wire.observation } : {}),
   };
 }
 
@@ -371,6 +428,7 @@ function fromWireStage(wire: WireStageResult): StageResult {
     latencyMs: wire.latencyMs,
     executionTarget: wire.executionTarget,
     metrics: wire.metrics,
+    ...(wire.observation ? { observation: wire.observation } : {}),
   };
 }
 
@@ -385,6 +443,7 @@ export function fromWirePipelineResult(wire: WirePipelineResult): PipelineResult
       : {}),
     latencyMs: wire.latencyMs,
     stages: wire.stages.map(fromWireStage),
+    ...(wire.observation ? { observation: wire.observation } : {}),
   };
 }
 

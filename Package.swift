@@ -37,12 +37,12 @@ let useLocalNatives = false
 
 // Version for remote XybridFFI download (used when useLocalNatives = false).
 // Updated by the release workflow at tag time.
-let sdkVersion = "0.13.1"
+let sdkVersion = "0.18.0"
 
 // SHA-256 of XybridFFI-v<sdkVersion>.xcframework.zip on the GitHub release.
 // Updated by `bindings/apple/scripts/sync-spm-checksum.sh` (or the release
 // workflow) so the manifest at the tagged commit matches the published asset.
-let xybridFFIChecksum = "63c1bb5c7702f4d84623e39ffa87508dd06a0308f022e8dad02e8b75f2fc6aa7"
+let xybridFFIChecksum = "84a5da1c7aee5d36fdf6da1de6ce1f16333cb84f16b3a52809595db8d5e1cde0"
 
 let package = Package(
     name: "Xybrid",

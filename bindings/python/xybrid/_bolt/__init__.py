@@ -390,11 +390,11 @@ def _boltffi_read_wire(data: bytes, decode):
 
 
 
-def _boltffi_read_347d2e2b11e825e8(data: bytes):
+def _boltffi_read_34528e6dc3960a70(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridDownloadStatus._boltffi_from_reader(reader))
 
 
-_native._register_wire_codec("read_347d2e2b11e825e8", _boltffi_read_347d2e2b11e825e8)
+_native._register_wire_codec("read_34528e6dc3960a70", _boltffi_read_34528e6dc3960a70)
 
 
 def _boltffi_read_4319db60c88eabca(data: bytes):
@@ -411,6 +411,20 @@ def _boltffi_read_09404a3c98b3f16c(data: bytes):
 _native._register_wire_codec("read_09404a3c98b3f16c", _boltffi_read_09404a3c98b3f16c)
 
 
+def _boltffi_read_b4129ed1ce1ae13c(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: XybridTranscriptionResult._boltffi_from_reader(reader))
+
+
+_native._register_wire_codec("read_b4129ed1ce1ae13c", _boltffi_read_b4129ed1ce1ae13c)
+
+
+def _boltffi_read_f10b2d97234cb922(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: XybridObservationRef._boltffi_from_reader(reader)))
+
+
+_native._register_wire_codec("read_f10b2d97234cb922", _boltffi_read_f10b2d97234cb922)
+
+
 def _boltffi_read_89cd31291d2aefa4(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.string())
 
@@ -418,46 +432,46 @@ def _boltffi_read_89cd31291d2aefa4(data: bytes):
 _native._register_wire_codec("read_89cd31291d2aefa4", _boltffi_read_89cd31291d2aefa4)
 
 
-def _boltffi_read_94828222bbb26957(data: bytes):
+def _boltffi_read_f45d365d172a914e(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridGenerationConfig._boltffi_from_reader(reader))
 
 
-_native._register_wire_codec("read_94828222bbb26957", _boltffi_read_94828222bbb26957)
+_native._register_wire_codec("read_f45d365d172a914e", _boltffi_read_f45d365d172a914e)
 
 
-def _boltffi_read_6cf2e6f5d394fbfa(data: bytes):
+def _boltffi_read_6d1d86b321e71772(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_6cf2e6f5d394fbfa", _boltffi_read_6cf2e6f5d394fbfa)
+_native._register_wire_codec("read_6d1d86b321e71772", _boltffi_read_6d1d86b321e71772)
 
 
-def _boltffi_read_3080a66fe4c1dfdc(data: bytes):
+def _boltffi_read_30ab462d3313fb54(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_3080a66fe4c1dfdc", _boltffi_read_3080a66fe4c1dfdc)
+_native._register_wire_codec("read_30ab462d3313fb54", _boltffi_read_30ab462d3313fb54)
 
 
-def _boltffi_read_146d324414895b9b(data: bytes):
+def _boltffi_read_14429286c6374023(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridResult._boltffi_from_reader(reader))
 
 
-_native._register_wire_codec("read_146d324414895b9b", _boltffi_read_146d324414895b9b)
+_native._register_wire_codec("read_14429286c6374023", _boltffi_read_14429286c6374023)
 
 
-def _boltffi_read_54628a54c0f4d4bd(data: bytes):
+def _boltffi_read_5437ea9772a2b945(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridStreamEvent._boltffi_from_reader(reader))
 
 
-_native._register_wire_codec("read_54628a54c0f4d4bd", _boltffi_read_54628a54c0f4d4bd)
+_native._register_wire_codec("read_5437ea9772a2b945", _boltffi_read_5437ea9772a2b945)
 
 
-def _boltffi_read_f45d365d172a914e(data: bytes):
+def _boltffi_read_f432969fc8d875d6(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridPipelineResult._boltffi_from_reader(reader))
 
 
-_native._register_wire_codec("read_f45d365d172a914e", _boltffi_read_f45d365d172a914e)
+_native._register_wire_codec("read_f432969fc8d875d6", _boltffi_read_f432969fc8d875d6)
 
 
 def _boltffi_read_88fe13077020b58c(data: bytes):
@@ -474,6 +488,13 @@ def _boltffi_read_0d42d278c66eef7b(data: bytes):
 _native._register_wire_codec("read_0d42d278c66eef7b", _boltffi_read_0d42d278c66eef7b)
 
 
+def _boltffi_read_d02612fd9e53657d(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: XybridObservationContext._boltffi_from_reader(reader)))
+
+
+_native._register_wire_codec("read_d02612fd9e53657d", _boltffi_read_d02612fd9e53657d)
+
+
 def _boltffi_read_1497d20162db7713(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridEnvelope._boltffi_from_reader(reader))
 
@@ -481,18 +502,25 @@ def _boltffi_read_1497d20162db7713(data: bytes):
 _native._register_wire_codec("read_1497d20162db7713", _boltffi_read_1497d20162db7713)
 
 
-def _boltffi_read_34528e6dc3960a70(data: bytes):
+def _boltffi_read_3427eeb07543eef8(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridCacheStatus._boltffi_from_reader(reader))
 
 
-_native._register_wire_codec("read_34528e6dc3960a70", _boltffi_read_34528e6dc3960a70)
+_native._register_wire_codec("read_3427eeb07543eef8", _boltffi_read_3427eeb07543eef8)
 
 
-def _boltffi_read_0ced92fe29cab88b(data: bytes):
+def _boltffi_read_0d1832bb781cd403(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridCacheEntry._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_0ced92fe29cab88b", _boltffi_read_0ced92fe29cab88b)
+_native._register_wire_codec("read_0d1832bb781cd403", _boltffi_read_0d1832bb781cd403)
+
+
+def _boltffi_read_7547a4ee45ee2862(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: XybridObservabilityStats._boltffi_from_reader(reader))
+
+
+_native._register_wire_codec("read_7547a4ee45ee2862", _boltffi_read_7547a4ee45ee2862)
 
 
 
@@ -510,11 +538,25 @@ def _boltffi_write_cfe97cd6dcce32b6(platform) -> bytes:
 _native._register_wire_codec("write_cfe97cd6dcce32b6", _boltffi_write_cfe97cd6dcce32b6)
 
 
-def _boltffi_write_cffb2372ddb2985c(config) -> bytes:
+def _boltffi_write_d025c3302c04b3d4(config) -> bytes:
     return config._boltffi_wire()
 
 
-_native._register_wire_codec("write_cffb2372ddb2985c", _boltffi_write_cffb2372ddb2985c)
+_native._register_wire_codec("write_d025c3302c04b3d4", _boltffi_write_d025c3302c04b3d4)
+
+
+def _boltffi_write_e9de22b119d12e3c(source) -> bytes:
+    return source._boltffi_wire()
+
+
+_native._register_wire_codec("write_e9de22b119d12e3c", _boltffi_write_e9de22b119d12e3c)
+
+
+def _boltffi_write_e998b8d6e8076073(observation) -> bytes:
+    return _boltffi_wire_optional(observation, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire())
+
+
+_native._register_wire_codec("write_e998b8d6e8076073", _boltffi_write_e998b8d6e8076073)
 
 
 def _boltffi_write_766cdeb069dd2b0a(path) -> bytes:
@@ -552,11 +594,11 @@ def _boltffi_write_183cd822b59b9ed8(envelope) -> bytes:
 _native._register_wire_codec("write_183cd822b59b9ed8", _boltffi_write_183cd822b59b9ed8)
 
 
-def _boltffi_write_360ec15d925d8351(options) -> bytes:
+def _boltffi_write_d5decda89a41246a(options) -> bytes:
     return _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire())
 
 
-_native._register_wire_codec("write_360ec15d925d8351", _boltffi_write_360ec15d925d8351)
+_native._register_wire_codec("write_d5decda89a41246a", _boltffi_write_d5decda89a41246a)
 
 
 def _boltffi_write_ab1ae15bdd9d5612(yaml) -> bytes:
@@ -580,25 +622,11 @@ def _boltffi_write_736b3e4af7f4fdd8(endpoint) -> bytes:
 _native._register_wire_codec("write_736b3e4af7f4fdd8", _boltffi_write_736b3e4af7f4fdd8)
 
 
-def _boltffi_write_f1696b1e73a7f219(version) -> bytes:
-    return _boltffi_wire_string(version)
+def _boltffi_write_97bb6e0de5b532da(name) -> bytes:
+    return _boltffi_wire_string(name)
 
 
-_native._register_wire_codec("write_f1696b1e73a7f219", _boltffi_write_f1696b1e73a7f219)
-
-
-def _boltffi_write_15a81e8bd2929d67(label) -> bytes:
-    return _boltffi_wire_string(label)
-
-
-_native._register_wire_codec("write_15a81e8bd2929d67", _boltffi_write_15a81e8bd2929d67)
-
-
-def _boltffi_write_94d2821c547dda88(key) -> bytes:
-    return _boltffi_wire_string(key)
-
-
-_native._register_wire_codec("write_94d2821c547dda88", _boltffi_write_94d2821c547dda88)
+_native._register_wire_codec("write_97bb6e0de5b532da", _boltffi_write_97bb6e0de5b532da)
 
 
 def _boltffi_write_ed06f1a2bac0816e(value) -> bytes:
@@ -608,11 +636,158 @@ def _boltffi_write_ed06f1a2bac0816e(value) -> bytes:
 _native._register_wire_codec("write_ed06f1a2bac0816e", _boltffi_write_ed06f1a2bac0816e)
 
 
+def _boltffi_write_f4039d2d45a87097(version) -> bytes:
+    return _boltffi_wire_optional(version, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0))
+
+
+_native._register_wire_codec("write_f4039d2d45a87097", _boltffi_write_f4039d2d45a87097)
+
+
+def _boltffi_write_94d2821c547dda88(key) -> bytes:
+    return _boltffi_wire_string(key)
+
+
+_native._register_wire_codec("write_94d2821c547dda88", _boltffi_write_94d2821c547dda88)
+
+
+def _boltffi_write_87dd7fa66ea47c51(origin) -> bytes:
+    return _boltffi_wire_string(origin)
+
+
+_native._register_wire_codec("write_87dd7fa66ea47c51", _boltffi_write_87dd7fa66ea47c51)
+
+
+def _boltffi_write_eff08632b4be245e(find) -> bytes:
+    return _boltffi_wire_string(find)
+
+
+_native._register_wire_codec("write_eff08632b4be245e", _boltffi_write_eff08632b4be245e)
+
+
+def _boltffi_write_1566a63ee58cae89(replacement) -> bytes:
+    return _boltffi_wire_string(replacement)
+
+
+_native._register_wire_codec("write_1566a63ee58cae89", _boltffi_write_1566a63ee58cae89)
+
+
 def _boltffi_write_1b888e23ceb4a009(output_dir) -> bytes:
     return _boltffi_wire_string(output_dir)
 
 
 _native._register_wire_codec("write_1b888e23ceb4a009", _boltffi_write_1b888e23ceb4a009)
+
+
+def _boltffi_write_75843a3653d2aa0b(options) -> bytes:
+    return _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire())
+
+
+_native._register_wire_codec("write_75843a3653d2aa0b", _boltffi_write_75843a3653d2aa0b)
+
+
+def _boltffi_write_df8d8bf0dde4cb3f(error_type) -> bytes:
+    return _boltffi_wire_string(error_type)
+
+
+_native._register_wire_codec("write_df8d8bf0dde4cb3f", _boltffi_write_df8d8bf0dde4cb3f)
+
+
+def _boltffi_write_e41510ec4b1bca8e(message) -> bytes:
+    return _boltffi_wire_optional(message, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0))
+
+
+_native._register_wire_codec("write_e41510ec4b1bca8e", _boltffi_write_e41510ec4b1bca8e)
+
+
+def _boltffi_write_39710fc82a8067e6(call) -> bytes:
+    return call._boltffi_wire()
+
+
+_native._register_wire_codec("write_39710fc82a8067e6", _boltffi_write_39710fc82a8067e6)
+
+
+def _boltffi_write_b52d5dcf03ba9866(result_json) -> bytes:
+    return _boltffi_wire_string(result_json)
+
+
+_native._register_wire_codec("write_b52d5dcf03ba9866", _boltffi_write_b52d5dcf03ba9866)
+
+
+def _boltffi_write_49fbc65394c11312(request) -> bytes:
+    return request._boltffi_wire()
+
+
+_native._register_wire_codec("write_49fbc65394c11312", _boltffi_write_49fbc65394c11312)
+
+
+def _boltffi_write_bdae0b4945b6aa21(parts_json) -> bytes:
+    return _boltffi_wire_string(parts_json)
+
+
+_native._register_wire_codec("write_bdae0b4945b6aa21", _boltffi_write_bdae0b4945b6aa21)
+
+
+def _boltffi_write_b9e0b0cdbd57071f(messages_json) -> bytes:
+    return _boltffi_wire_string(messages_json)
+
+
+_native._register_wire_codec("write_b9e0b0cdbd57071f", _boltffi_write_b9e0b0cdbd57071f)
+
+
+def _boltffi_write_16064143888048c1(definitions_json) -> bytes:
+    return _boltffi_wire_string(definitions_json)
+
+
+_native._register_wire_codec("write_16064143888048c1", _boltffi_write_16064143888048c1)
+
+
+def _boltffi_write_a3b908bb225f91b6(usage) -> bytes:
+    return usage._boltffi_wire()
+
+
+_native._register_wire_codec("write_a3b908bb225f91b6", _boltffi_write_a3b908bb225f91b6)
+
+
+def _boltffi_write_1b74b38bf3caaae0(reasons) -> bytes:
+    return _boltffi_wire_sequence(reasons, len(reasons), lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0))
+
+
+_native._register_wire_codec("write_1b74b38bf3caaae0", _boltffi_write_1b74b38bf3caaae0)
+
+
+def _boltffi_write_bb42a4cab703ecbf(response_id) -> bytes:
+    return _boltffi_wire_optional(response_id, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0))
+
+
+_native._register_wire_codec("write_bb42a4cab703ecbf", _boltffi_write_bb42a4cab703ecbf)
+
+
+def _boltffi_write_e107c808841968d0(model) -> bytes:
+    return _boltffi_wire_optional(model, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0))
+
+
+_native._register_wire_codec("write_e107c808841968d0", _boltffi_write_e107c808841968d0)
+
+
+def _boltffi_write_f6b4eac054be622c(info) -> bytes:
+    return info._boltffi_wire()
+
+
+_native._register_wire_codec("write_f6b4eac054be622c", _boltffi_write_f6b4eac054be622c)
+
+
+def _boltffi_write_2a964961d0aab6a5(request) -> bytes:
+    return request._boltffi_wire()
+
+
+_native._register_wire_codec("write_2a964961d0aab6a5", _boltffi_write_2a964961d0aab6a5)
+
+
+def _boltffi_write_c4bcbc7e6bbad9f5(json) -> bytes:
+    return _boltffi_wire_string(json)
+
+
+_native._register_wire_codec("write_c4bcbc7e6bbad9f5", _boltffi_write_c4bcbc7e6bbad9f5)
 
 
 def _boltffi_write_3f05cdfbd6f68333(user_text) -> bytes:
@@ -629,11 +804,11 @@ def _boltffi_write_544f2725dda888e0(prior_assistant_text) -> bytes:
 _native._register_wire_codec("write_544f2725dda888e0", _boltffi_write_544f2725dda888e0)
 
 
-def _boltffi_write_27d48eea4b9a1762(results) -> bytes:
+def _boltffi_write_0799f345ffe9319d(results) -> bytes:
     return _boltffi_wire_sequence(results, len(results), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire())
 
 
-_native._register_wire_codec("write_27d48eea4b9a1762", _boltffi_write_27d48eea4b9a1762)
+_native._register_wire_codec("write_0799f345ffe9319d", _boltffi_write_0799f345ffe9319d)
 
 
 def _boltffi_write_cd5b56c1c6bfc6e0(schema_json) -> bytes:
@@ -655,13 +830,6 @@ def _boltffi_write_d1c12e1524cd3dbc(gateway_url) -> bytes:
 
 
 _native._register_wire_codec("write_d1c12e1524cd3dbc", _boltffi_write_d1c12e1524cd3dbc)
-
-
-def _boltffi_write_5575cc29a91ce4ea(ingest_url) -> bytes:
-    return _boltffi_wire_optional(ingest_url, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0))
-
-
-_native._register_wire_codec("write_5575cc29a91ce4ea", _boltffi_write_5575cc29a91ce4ea)
 
 
 def _boltffi_write_73b9be8d33badc3c(cache_dir) -> bytes:
@@ -697,6 +865,41 @@ def _boltffi_write_b4a023e995953df2(url) -> bytes:
 
 
 _native._register_wire_codec("write_b4a023e995953df2", _boltffi_write_b4a023e995953df2)
+
+
+def _boltffi_write_4a4bf5212a359d5c(target) -> bytes:
+    return target._boltffi_wire()
+
+
+_native._register_wire_codec("write_4a4bf5212a359d5c", _boltffi_write_4a4bf5212a359d5c)
+
+
+def _boltffi_write_f455225b9d9372a9(label) -> bytes:
+    return _boltffi_wire_optional(label, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0))
+
+
+_native._register_wire_codec("write_f455225b9d9372a9", _boltffi_write_f455225b9d9372a9)
+
+
+def _boltffi_write_f6c0918d58ac0c9c(comment) -> bytes:
+    return _boltffi_wire_optional(comment, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0))
+
+
+_native._register_wire_codec("write_f6c0918d58ac0c9c", _boltffi_write_f6c0918d58ac0c9c)
+
+
+def _boltffi_write_942744922de99cdd(score_label) -> bytes:
+    return _boltffi_wire_optional(score_label, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0))
+
+
+_native._register_wire_codec("write_942744922de99cdd", _boltffi_write_942744922de99cdd)
+
+
+def _boltffi_write_2036dcbd8ac07932(explanation) -> bytes:
+    return _boltffi_wire_optional(explanation, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0))
+
+
+_native._register_wire_codec("write_2036dcbd8ac07932", _boltffi_write_2036dcbd8ac07932)
 
 
 
@@ -778,6 +981,8 @@ class XybridError:
             return XybridErrorInvalidImage._boltffi_from_reader_payload(reader)
         if tag == 22:
             return XybridErrorCancelled._boltffi_from_reader_payload(reader)
+        if tag == 23:
+            return XybridErrorTelemetryDelivery._boltffi_from_reader_payload(reader)
         raise ValueError("invalid XybridError tag")
 
 
@@ -1142,6 +1347,23 @@ class XybridErrorCancelled(XybridError):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class XybridErrorTelemetryDelivery(XybridError):
+    """Telemetry delivery is incomplete or unknown; do not rerun inference."""
+    message: str
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(23) + b"".join((
+            _boltffi_wire_string(self.message),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridErrorTelemetryDelivery":
+        return cls(
+            message=reader.string(),
+        )
+
+
 
 _native._register_xybrid_error(XybridError)
 
@@ -1181,6 +1403,10 @@ class XybridEnvelopeKind:
             return XybridEnvelopeKindImage._boltffi_from_reader_payload(reader)
         if tag == 4:
             return XybridEnvelopeKindMultiPart._boltffi_from_reader_payload(reader)
+        if tag == 5:
+            return XybridEnvelopeKindDecisionRequest._boltffi_from_reader_payload(reader)
+        if tag == 6:
+            return XybridEnvelopeKindDecisions._boltffi_from_reader_payload(reader)
         raise ValueError("invalid XybridEnvelopeKind tag")
 
 
@@ -1267,6 +1493,38 @@ class XybridEnvelopeKindMultiPart(XybridEnvelopeKind):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class XybridEnvelopeKindDecisionRequest(XybridEnvelopeKind):
+    request: XybridDecisionRequest
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(5) + b"".join((
+            self.request._boltffi_wire(),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridEnvelopeKindDecisionRequest":
+        return cls(
+            request=XybridDecisionRequest._boltffi_from_reader(reader),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class XybridEnvelopeKindDecisions(XybridEnvelopeKind):
+    decisions: XybridDecisions
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(6) + b"".join((
+            self.decisions._boltffi_wire(),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridEnvelopeKindDecisions":
+        return cls(
+            decisions=XybridDecisions._boltffi_from_reader(reader),
+        )
+
+
 
 _native._register_xybrid_envelope_kind(XybridEnvelopeKind)
 
@@ -1278,6 +1536,249 @@ class XybridMessageRole(IntEnum):
     ASSISTANT = 2
 
 _native._register_xybrid_message_role(XybridMessageRole)
+
+
+
+class XybridDecisionContent:
+    """Foreign DecisionContent; variants are append-only."""
+    __slots__ = ()
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridDecisionContent":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionContent":
+        tag = reader.u32()
+        if tag == 0:
+            return XybridDecisionContentText._boltffi_from_reader_payload(reader)
+        if tag == 1:
+            return XybridDecisionContentJson._boltffi_from_reader_payload(reader)
+        raise ValueError("invalid XybridDecisionContent tag")
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionContentText(XybridDecisionContent):
+    text: str
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(0) + b"".join((
+            _boltffi_wire_string(self.text),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionContentText":
+        return cls(
+            text=reader.string(),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionContentJson(XybridDecisionContent):
+    json_text: str
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(1) + b"".join((
+            _boltffi_wire_string(self.json_text),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionContentJson":
+        return cls(
+            json_text=reader.string(),
+        )
+
+
+
+_native._register_xybrid_decision_content(XybridDecisionContent)
+
+
+
+class XybridDecisionQuestionKind:
+    """Foreign DecisionQuestionKind; variants are append-only."""
+    __slots__ = ()
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridDecisionQuestionKind":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionQuestionKind":
+        tag = reader.u32()
+        if tag == 0:
+            return XybridDecisionQuestionKindChoice._boltffi_from_reader_payload(reader)
+        if tag == 1:
+            return XybridDecisionQuestionKindYesNo._boltffi_from_reader_payload(reader)
+        if tag == 2:
+            return XybridDecisionQuestionKindScore._boltffi_from_reader_payload(reader)
+        raise ValueError("invalid XybridDecisionQuestionKind tag")
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionQuestionKindChoice(XybridDecisionQuestionKind):
+    options: list[XybridDecisionOption]
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(0) + b"".join((
+            _boltffi_wire_sequence(self.options, len(self.options), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionQuestionKindChoice":
+        return cls(
+            options=reader.sequence(lambda: XybridDecisionOption._boltffi_from_reader(reader)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionQuestionKindYesNo(XybridDecisionQuestionKind):
+    yes: XybridDecisionContent | None
+    no: XybridDecisionContent | None
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(1) + b"".join((
+            _boltffi_wire_optional(self.yes, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+            _boltffi_wire_optional(self.no, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionQuestionKindYesNo":
+        return cls(
+            yes=reader.optional(lambda: XybridDecisionContent._boltffi_from_reader(reader)),
+            no=reader.optional(lambda: XybridDecisionContent._boltffi_from_reader(reader)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionQuestionKindScore(XybridDecisionQuestionKind):
+    levels: list[XybridDecisionLevel]
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(2) + b"".join((
+            _boltffi_wire_sequence(self.levels, len(self.levels), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionQuestionKindScore":
+        return cls(
+            levels=reader.sequence(lambda: XybridDecisionLevel._boltffi_from_reader(reader)),
+        )
+
+
+
+_native._register_xybrid_decision_question_kind(XybridDecisionQuestionKind)
+
+
+
+class XybridDecisionOrigin(IntEnum):
+    """Foreign DecisionOrigin; variants are append-only."""
+    CALLER = 0
+    FIXED = 1
+
+_native._register_xybrid_decision_origin(XybridDecisionOrigin)
+
+
+
+class XybridScoreStatistic(IntEnum):
+    """Foreign ScoreStatistic; variants are append-only."""
+    MEDIAN = 0
+    EXPECTED = 1
+
+_native._register_xybrid_score_statistic(XybridScoreStatistic)
+
+
+
+class XybridDecisionValue:
+    """Foreign DecisionValue; variants are append-only."""
+    __slots__ = ()
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridDecisionValue":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionValue":
+        tag = reader.u32()
+        if tag == 0:
+            return XybridDecisionValueChoice._boltffi_from_reader_payload(reader)
+        if tag == 1:
+            return XybridDecisionValueYesNo._boltffi_from_reader_payload(reader)
+        if tag == 2:
+            return XybridDecisionValueScore._boltffi_from_reader_payload(reader)
+        raise ValueError("invalid XybridDecisionValue tag")
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionValueChoice(XybridDecisionValue):
+    key: str
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(0) + b"".join((
+            _boltffi_wire_string(self.key),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionValueChoice":
+        return cls(
+            key=reader.string(),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionValueYesNo(XybridDecisionValue):
+    p_yes: float
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(1) + b"".join((
+            _boltffi_wire_f64(self.p_yes),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionValueYesNo":
+        return cls(
+            p_yes=reader.f64(),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionValueScore(XybridDecisionValue):
+    value: float
+    statistic: XybridScoreStatistic
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(2) + b"".join((
+            _boltffi_wire_f64(self.value),
+            _boltffi_wire_i32(_boltffi_enum_value(self.statistic, XybridScoreStatistic, "XybridScoreStatistic")),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionValueScore":
+        return cls(
+            value=reader.f64(),
+            statistic=XybridScoreStatistic(reader.i32()),
+        )
+
+
+
+_native._register_xybrid_decision_value(XybridDecisionValue)
 
 
 
@@ -1296,6 +1797,7 @@ class XybridOutputType(IntEnum):
     AUDIO = 1
     EMBEDDING = 2
     UNKNOWN = 3
+    DECISIONS = 4
 
 _native._register_xybrid_output_type(XybridOutputType)
 
@@ -1419,6 +1921,135 @@ _native._register_xybrid_vad_mode(XybridVadMode)
 
 
 
+class XybridModelSource:
+    """Model source for the options-enabled load surface."""
+    __slots__ = ()
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridModelSource":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridModelSource":
+        tag = reader.u32()
+        if tag == 0:
+            return XybridModelSourceRegistry._boltffi_from_reader_payload(reader)
+        if tag == 1:
+            return XybridModelSourceDirectory._boltffi_from_reader_payload(reader)
+        if tag == 2:
+            return XybridModelSourceBundle._boltffi_from_reader_payload(reader)
+        if tag == 3:
+            return XybridModelSourceHuggingFace._boltffi_from_reader_payload(reader)
+        if tag == 4:
+            return XybridModelSourceModelFile._boltffi_from_reader_payload(reader)
+        raise ValueError("invalid XybridModelSource tag")
+
+
+@dataclass(frozen=True, slots=True)
+class XybridModelSourceRegistry(XybridModelSource):
+    id: str
+    speculative: bool
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(0) + b"".join((
+            _boltffi_wire_string(self.id),
+            _boltffi_wire_bool(self.speculative),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridModelSourceRegistry":
+        return cls(
+            id=reader.string(),
+            speculative=reader.bool(),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class XybridModelSourceDirectory(XybridModelSource):
+    path: str
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(1) + b"".join((
+            _boltffi_wire_string(self.path),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridModelSourceDirectory":
+        return cls(
+            path=reader.string(),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class XybridModelSourceBundle(XybridModelSource):
+    path: str
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(2) + b"".join((
+            _boltffi_wire_string(self.path),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridModelSourceBundle":
+        return cls(
+            path=reader.string(),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class XybridModelSourceHuggingFace(XybridModelSource):
+    repo: str
+    revision: str | None
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(3) + b"".join((
+            _boltffi_wire_string(self.repo),
+            _boltffi_wire_optional(self.revision, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridModelSourceHuggingFace":
+        return cls(
+            repo=reader.string(),
+            revision=reader.optional(lambda: reader.string()),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class XybridModelSourceModelFile(XybridModelSource):
+    path: str
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(4) + b"".join((
+            _boltffi_wire_string(self.path),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridModelSourceModelFile":
+        return cls(
+            path=reader.string(),
+        )
+
+
+
+_native._register_xybrid_model_source(XybridModelSource)
+
+
+
+class XybridExecutionLocation(IntEnum):
+    LOCAL = 0
+    REMOTE = 1
+
+_native._register_xybrid_execution_location(XybridExecutionLocation)
+
+
+
 
 @dataclass(frozen=True, slots=True)
 class XybridMetadataEntry:
@@ -1488,6 +2119,259 @@ class XybridEnvelope:
 
 
 _native._register_xybrid_envelope(XybridEnvelope)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionOption:
+    """Foreign DecisionOption; field order is frozen."""
+    key: str
+    description: XybridDecisionContent | None
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.key),
+            _boltffi_wire_optional(self.description, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridDecisionOption":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionOption":
+        return cls(
+            key=reader.string(),
+            description=reader.optional(lambda: XybridDecisionContent._boltffi_from_reader(reader)),
+        )
+
+
+_native._register_xybrid_decision_option(XybridDecisionOption)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionLevel:
+    """Foreign DecisionLevel; field order is frozen."""
+    description: XybridDecisionContent | None
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_optional(self.description, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridDecisionLevel":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionLevel":
+        return cls(
+            description=reader.optional(lambda: XybridDecisionContent._boltffi_from_reader(reader)),
+        )
+
+
+_native._register_xybrid_decision_level(XybridDecisionLevel)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionQuestion:
+    """Foreign DecisionQuestion; field order is frozen."""
+    id: str
+    instructions: XybridDecisionContent | None
+    kind: XybridDecisionQuestionKind
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.id),
+            _boltffi_wire_optional(self.instructions, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+            self.kind._boltffi_wire(),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridDecisionQuestion":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionQuestion":
+        return cls(
+            id=reader.string(),
+            instructions=reader.optional(lambda: XybridDecisionContent._boltffi_from_reader(reader)),
+            kind=XybridDecisionQuestionKind._boltffi_from_reader(reader),
+        )
+
+
+_native._register_xybrid_decision_question(XybridDecisionQuestion)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionRequest:
+    """Foreign DecisionRequest; field order is frozen."""
+    state: XybridDecisionContent | None
+    questions: list[XybridDecisionQuestion]
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_optional(self.state, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+            _boltffi_wire_sequence(self.questions, len(self.questions), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridDecisionRequest":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionRequest":
+        return cls(
+            state=reader.optional(lambda: XybridDecisionContent._boltffi_from_reader(reader)),
+            questions=reader.sequence(lambda: XybridDecisionQuestion._boltffi_from_reader(reader)),
+        )
+
+
+_native._register_xybrid_decision_request(XybridDecisionRequest)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionScore:
+    """Foreign DecisionScore; field order is frozen."""
+    key: str
+    raw_score: float
+    probability: float
+    origin: XybridDecisionOrigin
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.key),
+            _boltffi_wire_f32(self.raw_score),
+            _boltffi_wire_f64(self.probability),
+            _boltffi_wire_i32(_boltffi_enum_value(self.origin, XybridDecisionOrigin, "XybridDecisionOrigin")),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridDecisionScore":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionScore":
+        return cls(
+            key=reader.string(),
+            raw_score=reader.f32(),
+            probability=reader.f64(),
+            origin=XybridDecisionOrigin(reader.i32()),
+        )
+
+
+_native._register_xybrid_decision_score(XybridDecisionScore)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionAnswer:
+    """Foreign DecisionAnswer; field order is frozen."""
+    question_id: str
+    distribution: list[XybridDecisionScore]
+    value: XybridDecisionValue
+    confidence: float | None
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.question_id),
+            _boltffi_wire_sequence(self.distribution, len(self.distribution), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+            self.value._boltffi_wire(),
+            _boltffi_wire_optional(self.confidence, lambda __boltffi_value_0: _boltffi_wire_f64(__boltffi_value_0)),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridDecisionAnswer":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridDecisionAnswer":
+        return cls(
+            question_id=reader.string(),
+            distribution=reader.sequence(lambda: XybridDecisionScore._boltffi_from_reader(reader)),
+            value=XybridDecisionValue._boltffi_from_reader(reader),
+            confidence=reader.optional(lambda: reader.f64()),
+        )
+
+
+_native._register_xybrid_decision_answer(XybridDecisionAnswer)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisions:
+    """Foreign Decisions; field order is frozen."""
+    answers: list[XybridDecisionAnswer]
+    passes: int
+    input_tokens: int
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_sequence(self.answers, len(self.answers), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+            _boltffi_wire_u32(self.passes),
+            _boltffi_wire_u64(self.input_tokens),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridDecisions":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridDecisions":
+        return cls(
+            answers=reader.sequence(lambda: XybridDecisionAnswer._boltffi_from_reader(reader)),
+            passes=reader.u32(),
+            input_tokens=reader.u64(),
+        )
+
+
+_native._register_xybrid_decisions(XybridDecisions)
 
 
 
@@ -1682,6 +2566,21 @@ class XybridRunOptions:
     fallback_to_cloud: bool
     max_grace_tokens: int
     correlation_id: str | None
+    traceparent: str | None
+    """W3C `traceparent` of the caller's span: the run becomes its child."""
+    tracestate: str | None
+    """W3C `tracestate` accompanying `traceparent`."""
+    conversation_id: str | None
+    """Caller-owned conversation id recorded on the run."""
+    suppress_trace: bool
+    """Skip the detailed trace for this run; metrics are still recorded."""
+    frame_session_id: str | None
+    """Your id for one continuous live-capture session (a camera or
+    microphone loop). Every run of the session is counted in metrics, and
+    detailed traces are kept for roughly one run per live trace interval
+    per session (`set_live_trace_interval_ms`). Blank values are ignored.
+    Applies to model runs: a pipeline run ignores it.
+    """
 
     def _boltffi_wire(self) -> bytes:
         return b"".join((
@@ -1690,6 +2589,11 @@ class XybridRunOptions:
             _boltffi_wire_bool(self.fallback_to_cloud),
             _boltffi_wire_u32(self.max_grace_tokens),
             _boltffi_wire_optional(self.correlation_id, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.traceparent, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.tracestate, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.conversation_id, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_bool(self.suppress_trace),
+            _boltffi_wire_optional(self.frame_session_id, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
         ))
 
     @classmethod
@@ -1710,10 +2614,51 @@ class XybridRunOptions:
             fallback_to_cloud=reader.bool(),
             max_grace_tokens=reader.u32(),
             correlation_id=reader.optional(lambda: reader.string()),
+            traceparent=reader.optional(lambda: reader.string()),
+            tracestate=reader.optional(lambda: reader.string()),
+            conversation_id=reader.optional(lambda: reader.string()),
+            suppress_trace=reader.bool(),
+            frame_session_id=reader.optional(lambda: reader.string()),
         )
 
 
 _native._register_xybrid_run_options(XybridRunOptions)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridObservationRef:
+    """Trace and span ids (lowercase hex) of a recorded run, for linking
+    feedback and evaluation results.
+    """
+    trace_id: str
+    span_id: str
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.trace_id),
+            _boltffi_wire_string(self.span_id),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridObservationRef":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridObservationRef":
+        return cls(
+            trace_id=reader.string(),
+            span_id=reader.string(),
+        )
+
+
+_native._register_xybrid_observation_ref(XybridObservationRef)
 
 
 
@@ -1822,6 +2767,8 @@ class XybridResult:
     """Model reasoning emitted separately from the final answer text.
     Appended last because `#[data]` fields serialize in declaration order.
     """
+    observation: XybridObservationRef | None = None
+    """The run's trace reference, when it was traced."""
 
     def _boltffi_wire(self) -> bytes:
         return b"".join((
@@ -1833,6 +2780,7 @@ class XybridResult:
             self.metrics._boltffi_wire(),
             _boltffi_wire_sequence(self.tool_calls, len(self.tool_calls), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
             _boltffi_wire_optional(self.reasoning_content, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.observation, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
         ))
 
     @classmethod
@@ -1862,6 +2810,11 @@ class XybridResult:
                 None,
             )
         )
+        observation = (
+            reader.optional(lambda: XybridObservationRef._boltffi_from_reader(reader))
+            if reader.has_remaining()
+            else None
+        )
         return cls(
             envelope=envelope,
             output_type=output_type,
@@ -1871,6 +2824,7 @@ class XybridResult:
             metrics=metrics,
             tool_calls=tool_calls,
             reasoning_content=reasoning_content,
+            observation=observation,
         )
 
 
@@ -1951,6 +2905,8 @@ class XybridStageResult:
     """Generation figures (TTFT, tokens per second) when this stage is a
     language model; `total_ms` is the stage latency.
     """
+    observation: XybridObservationRef | None = None
+    """The logical inference performed by this stage, when observed."""
 
     def _boltffi_wire(self) -> bytes:
         return b"".join((
@@ -1960,6 +2916,7 @@ class XybridStageResult:
             _boltffi_wire_u32(self.latency_ms),
             _boltffi_wire_i32(_boltffi_enum_value(self.execution_target, XybridExecutionTarget, "XybridExecutionTarget")),
             self.metrics._boltffi_wire(),
+            _boltffi_wire_optional(self.observation, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
         ))
 
     @classmethod
@@ -1981,6 +2938,7 @@ class XybridStageResult:
             latency_ms=reader.u32(),
             execution_target=XybridExecutionTarget(reader.i32()),
             metrics=XybridInferenceMetrics._boltffi_from_reader(reader),
+            observation=reader.optional(lambda: XybridObservationRef._boltffi_from_reader(reader)),
         )
 
 
@@ -2003,6 +2961,8 @@ class XybridPipelineResult:
     """Wall-clock time of the whole run."""
     stages: list[XybridStageResult]
     """Every executed stage, in order."""
+    observation: XybridObservationRef | None = None
+    """The workflow enclosing this execution, when observed."""
 
     def _boltffi_wire(self) -> bytes:
         return b"".join((
@@ -2010,6 +2970,7 @@ class XybridPipelineResult:
             _boltffi_wire_i32(_boltffi_enum_value(self.output_type, XybridOutputType, "XybridOutputType")),
             _boltffi_wire_u32(self.latency_ms),
             _boltffi_wire_sequence(self.stages, len(self.stages), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+            _boltffi_wire_optional(self.observation, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
         ))
 
     @classmethod
@@ -2029,6 +2990,7 @@ class XybridPipelineResult:
             output_type=XybridOutputType(reader.i32()),
             latency_ms=reader.u32(),
             stages=reader.sequence(lambda: XybridStageResult._boltffi_from_reader(reader)),
+            observation=reader.optional(lambda: XybridObservationRef._boltffi_from_reader(reader)),
         )
 
 
@@ -2329,6 +3291,7 @@ class XybridStreamingConfig:
     """Language hint (e.g. `"en"`); null uses the model default."""
     audio_ctx: int | None
     """Whisper encoder context in mel frames; null uses the model default."""
+    observation: XybridObservationOptions | None = None
 
     def _boltffi_wire(self) -> bytes:
         return b"".join((
@@ -2337,6 +3300,7 @@ class XybridStreamingConfig:
             _boltffi_wire_f32(self.vad_threshold),
             _boltffi_wire_optional(self.language, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
             _boltffi_wire_optional(self.audio_ctx, lambda __boltffi_value_0: _boltffi_wire_u32(__boltffi_value_0)),
+            _boltffi_wire_optional(self.observation, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
         ))
 
     @classmethod
@@ -2357,10 +3321,51 @@ class XybridStreamingConfig:
             vad_threshold=reader.f32(),
             language=reader.optional(lambda: reader.string()),
             audio_ctx=reader.optional(lambda: reader.u32()),
+            observation=reader.optional(lambda: XybridObservationOptions._boltffi_from_reader(reader)),
         )
 
 
 _native._register_xybrid_streaming_config(XybridStreamingConfig)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridObservationOptions:
+    """W3C parent, suppression and conversation controls shared by execution APIs."""
+    traceparent: str | None
+    tracestate: str | None
+    conversation_id: str | None
+    suppress_trace: bool
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_optional(self.traceparent, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.tracestate, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.conversation_id, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_bool(self.suppress_trace),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridObservationOptions":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridObservationOptions":
+        return cls(
+            traceparent=reader.optional(lambda: reader.string()),
+            tracestate=reader.optional(lambda: reader.string()),
+            conversation_id=reader.optional(lambda: reader.string()),
+            suppress_trace=reader.bool(),
+        )
+
+
+_native._register_xybrid_observation_options(XybridObservationOptions)
 
 
 
@@ -2377,6 +3382,7 @@ class XybridPartialResult:
     """Monotonic chunk sequence number this result corresponds to."""
     audio_duration_ms: int
     """Audio covered so far, in milliseconds."""
+    decoder_observation: XybridObservationRef | None = None
 
     def _boltffi_wire(self) -> bytes:
         return b"".join((
@@ -2384,6 +3390,7 @@ class XybridPartialResult:
             _boltffi_wire_bool(self.is_stable),
             _boltffi_wire_u64(self.chunk_sequence),
             _boltffi_wire_u64(self.audio_duration_ms),
+            _boltffi_wire_optional(self.decoder_observation, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
         ))
 
     @classmethod
@@ -2403,10 +3410,350 @@ class XybridPartialResult:
             is_stable=reader.bool(),
             chunk_sequence=reader.u64(),
             audio_duration_ms=reader.u64(),
+            decoder_observation=reader.optional(lambda: XybridObservationRef._boltffi_from_reader(reader)),
         )
 
 
 _native._register_xybrid_partial_result(XybridPartialResult)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridTranscriptionResult:
+    """Final transcript and its ASR session workflow."""
+    text: str
+    duration_ms: int
+    chunks_processed: int
+    observation: XybridObservationRef | None = None
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.text),
+            _boltffi_wire_u64(self.duration_ms),
+            _boltffi_wire_u64(self.chunks_processed),
+            _boltffi_wire_optional(self.observation, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridTranscriptionResult":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridTranscriptionResult":
+        return cls(
+            text=reader.string(),
+            duration_ms=reader.u64(),
+            chunks_processed=reader.u64(),
+            observation=reader.optional(lambda: XybridObservationRef._boltffi_from_reader(reader)),
+        )
+
+
+_native._register_xybrid_transcription_result(XybridTranscriptionResult)
+
+
+
+XybridSignalStats = _native.XybridSignalStats
+XybridSignalStats.__module__ = __name__
+XybridSignalStats.__doc__ = """Delivery counts for a single signal. Pending includes queued and in-flight items."""
+XybridSignalStats.__match_args__ = ("accepted","exported","dropped","failed","pending",)
+XybridSignalStats.__annotations__ = {"accepted": int, "exported": int, "dropped": int, "failed": int, "pending": int}
+_BOLTFFI_STRUCT_XybridSignalStats = struct.Struct("<QQQQQ")
+
+
+def _boltffi_attach_XybridSignalStats_wire(self) -> bytes:
+    return _BOLTFFI_STRUCT_XybridSignalStats.pack(self.accepted, self.exported, self.dropped, self.failed, self.pending)
+
+
+def _boltffi_attach_XybridSignalStats_from_wire(cls, data: bytes) -> "XybridSignalStats":
+    reader = _BoltFfiWireReader(data)
+    try:
+        value = cls._boltffi_from_reader(reader)
+    except struct.error as error:
+        raise ValueError("truncated BoltFFI wire bytes") from error
+    reader.finish()
+    return value
+
+
+def _boltffi_attach_XybridSignalStats_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridSignalStats":
+    return cls(*reader.fixed(_BOLTFFI_STRUCT_XybridSignalStats))
+
+
+XybridSignalStats._boltffi_wire = _boltffi_attach_XybridSignalStats_wire
+XybridSignalStats._boltffi_from_wire = classmethod(_boltffi_attach_XybridSignalStats_from_wire)
+XybridSignalStats._boltffi_from_reader = classmethod(_boltffi_attach_XybridSignalStats_from_reader)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridObservabilityStats:
+    """Delivery counters of the observability pipeline."""
+    enabled: bool
+    traces: XybridSignalStats
+    logs: XybridSignalStats
+    metrics: XybridSignalStats
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_bool(self.enabled),
+            self.traces._boltffi_wire(),
+            self.logs._boltffi_wire(),
+            self.metrics._boltffi_wire(),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridObservabilityStats":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridObservabilityStats":
+        return cls(
+            enabled=reader.bool(),
+            traces=XybridSignalStats._boltffi_from_reader(reader),
+            logs=XybridSignalStats._boltffi_from_reader(reader),
+            metrics=XybridSignalStats._boltffi_from_reader(reader),
+        )
+
+
+_native._register_xybrid_observability_stats(XybridObservabilityStats)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridObservationContext:
+    """Typed metadata for manual observations."""
+    traceparent: str
+    tracestate: str | None
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.traceparent),
+            _boltffi_wire_optional(self.tracestate, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridObservationContext":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridObservationContext":
+        return cls(
+            traceparent=reader.string(),
+            tracestate=reader.optional(lambda: reader.string()),
+        )
+
+
+_native._register_xybrid_observation_context(XybridObservationContext)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridInferenceRequest:
+    """Typed metadata for manual observations."""
+    operation: str
+    provider: str
+    model: str | None
+    location: XybridExecutionLocation
+    runtime: str | None
+    task: str | None
+    stream: bool
+    max_tokens: int | None
+    temperature: float | None
+    top_p: float | None
+    server_address: str | None
+    server_port: int | None
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.operation),
+            _boltffi_wire_string(self.provider),
+            _boltffi_wire_optional(self.model, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_i32(_boltffi_enum_value(self.location, XybridExecutionLocation, "XybridExecutionLocation")),
+            _boltffi_wire_optional(self.runtime, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.task, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_bool(self.stream),
+            _boltffi_wire_optional(self.max_tokens, lambda __boltffi_value_0: _boltffi_wire_i64(__boltffi_value_0)),
+            _boltffi_wire_optional(self.temperature, lambda __boltffi_value_0: _boltffi_wire_f64(__boltffi_value_0)),
+            _boltffi_wire_optional(self.top_p, lambda __boltffi_value_0: _boltffi_wire_f64(__boltffi_value_0)),
+            _boltffi_wire_optional(self.server_address, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.server_port, lambda __boltffi_value_0: _boltffi_wire_i64(__boltffi_value_0)),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridInferenceRequest":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridInferenceRequest":
+        return cls(
+            operation=reader.string(),
+            provider=reader.string(),
+            model=reader.optional(lambda: reader.string()),
+            location=XybridExecutionLocation(reader.i32()),
+            runtime=reader.optional(lambda: reader.string()),
+            task=reader.optional(lambda: reader.string()),
+            stream=reader.bool(),
+            max_tokens=reader.optional(lambda: reader.i64()),
+            temperature=reader.optional(lambda: reader.f64()),
+            top_p=reader.optional(lambda: reader.f64()),
+            server_address=reader.optional(lambda: reader.string()),
+            server_port=reader.optional(lambda: reader.i64()),
+        )
+
+
+_native._register_xybrid_inference_request(XybridInferenceRequest)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridToolCallInfo:
+    """Typed metadata for manual observations."""
+    name: str
+    call_id: str | None
+    tool_type: str | None
+    description: str | None
+    arguments_json: str | None
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.name),
+            _boltffi_wire_optional(self.call_id, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.tool_type, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.description, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.arguments_json, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridToolCallInfo":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridToolCallInfo":
+        return cls(
+            name=reader.string(),
+            call_id=reader.optional(lambda: reader.string()),
+            tool_type=reader.optional(lambda: reader.string()),
+            description=reader.optional(lambda: reader.string()),
+            arguments_json=reader.optional(lambda: reader.string()),
+        )
+
+
+_native._register_xybrid_tool_call_info(XybridToolCallInfo)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridUsage:
+    """Typed metadata for manual observations."""
+    input_tokens: int | None
+    output_tokens: int | None
+    cache_read_input_tokens: int | None
+    cache_write_input_tokens: int | None
+    reasoning_output_tokens: int | None
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_optional(self.input_tokens, lambda __boltffi_value_0: _boltffi_wire_u64(__boltffi_value_0)),
+            _boltffi_wire_optional(self.output_tokens, lambda __boltffi_value_0: _boltffi_wire_u64(__boltffi_value_0)),
+            _boltffi_wire_optional(self.cache_read_input_tokens, lambda __boltffi_value_0: _boltffi_wire_u64(__boltffi_value_0)),
+            _boltffi_wire_optional(self.cache_write_input_tokens, lambda __boltffi_value_0: _boltffi_wire_u64(__boltffi_value_0)),
+            _boltffi_wire_optional(self.reasoning_output_tokens, lambda __boltffi_value_0: _boltffi_wire_u64(__boltffi_value_0)),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridUsage":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridUsage":
+        return cls(
+            input_tokens=reader.optional(lambda: reader.u64()),
+            output_tokens=reader.optional(lambda: reader.u64()),
+            cache_read_input_tokens=reader.optional(lambda: reader.u64()),
+            cache_write_input_tokens=reader.optional(lambda: reader.u64()),
+            reasoning_output_tokens=reader.optional(lambda: reader.u64()),
+        )
+
+
+_native._register_xybrid_usage(XybridUsage)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridModelLoadInfo:
+    """Typed metadata for manual observations."""
+    model: str
+    provider: str | None
+    runtime: str | None
+    format: str | None
+    size_bytes: int | None
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.model),
+            _boltffi_wire_optional(self.provider, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.runtime, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.format, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.size_bytes, lambda __boltffi_value_0: _boltffi_wire_u64(__boltffi_value_0)),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridModelLoadInfo":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridModelLoadInfo":
+        return cls(
+            model=reader.string(),
+            provider=reader.optional(lambda: reader.string()),
+            runtime=reader.optional(lambda: reader.string()),
+            format=reader.optional(lambda: reader.string()),
+            size_bytes=reader.optional(lambda: reader.u64()),
+        )
+
+
+_native._register_xybrid_model_load_info(XybridModelLoadInfo)
 
 
 
@@ -2559,14 +3906,14 @@ class XybridStreamingSession:
         """
         _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_streaming_session_feed(self._handle, samples))
 
-    def flush(self) -> str:
+    def flush(self) -> XybridTranscriptionResult:
         """Finalize: drain buffered audio and return the complete transcript.
 
         The session is over afterwards — `feed` fails and the partial stream
         closes. Blocks until the last chunk is transcribed, so call it off the
         UI thread.
         """
-        return _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_streaming_session_flush(self._handle))
+        return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_streaming_session_flush(self._handle)), lambda reader: XybridTranscriptionResult._boltffi_from_reader(reader))
 
     def reset(self) -> None:
         """Reset to transcribe fresh audio without reloading the model."""
@@ -2692,6 +4039,11 @@ class XybridModel:
             _native._boltffi_xybrid_model_release(handle)
 
     @classmethod
+    def load(cls, source: XybridModelSource, observation: XybridObservationOptions | None) -> "XybridModel":
+        """Load any supported source with explicit observation controls."""
+        return XybridModel._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_load(source._boltffi_wire(), _boltffi_wire_optional(observation, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()))))
+
+    @classmethod
     def from_registry(cls, id: str) -> "XybridModel":
         """Load from the xybrid registry. Recommended path."""
         return XybridModel._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_from_registry(id)))
@@ -2736,6 +4088,10 @@ class XybridModel:
         GGUF header (written next to the file if absent).
         """
         return XybridModel._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_from_model_file(path)))
+
+    def load_observation_ref(self) -> XybridObservationRef | None:
+        """The immutable observation of the load that created this model."""
+        return _boltffi_read_wire(_native._boltffi_xybrid_model_load_observation_ref(self._handle), lambda reader: reader.optional(lambda: XybridObservationRef._boltffi_from_reader(reader)))
 
     def model_id(self) -> str:
         return _native._boltffi_xybrid_model_model_id(self._handle)
@@ -2835,7 +4191,12 @@ class XybridModel:
         return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_stream_result(self._handle, stream_id)), lambda reader: XybridResult._boltffi_from_reader(reader))
 
     def stream_close(self, stream_id: int) -> None:
-        """Forget a streaming session."""
+        """Forget a streaming session.
+
+        Closing a session before its terminal event cancels its run: the run
+        stops at its next token and is recorded as a user cancellation
+        (`error.type` `cancelled`), not as an error.
+        """
         _native._boltffi_xybrid_model_stream_close(self._handle, stream_id)
 
     def run_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> XybridResult:
@@ -2956,7 +4317,7 @@ class XybridPipeline:
         """Execute every stage, downloading any missing models first, and return
         each stage's output alongside the final one.
 
-        Of `options`, only `correlation_id` applies to a pipeline run. Setting
+        Observation controls and `correlation_id` apply to a pipeline run. Setting
         `generation_config` or `abort_on` fails with `ConfigError` rather than
         being ignored; per-stage generation settings belong in the YAML.
         """
@@ -3040,19 +4401,16 @@ class XybridConversationContext:
 
 
 
-class XybridTelemetryConfig:
+class XybridObservabilityConfig:
     __slots__ = ("_handle",)
 
 
-
-    def __init__(self, api_key: str) -> None:
-        """A new config bound to the default ingest endpoint and the given API key."""
-        self._handle = _native._boltffi_xybrid_telemetry_config_new(api_key)
-
+    def __init__(self) -> None:
+        raise TypeError("XybridObservabilityConfig cannot be constructed directly")
 
 
     @classmethod
-    def _from_handle(cls, handle: int) -> "XybridTelemetryConfig":
+    def _from_handle(cls, handle: int) -> "XybridObservabilityConfig":
         value = cls.__new__(cls)
         value._handle = handle
         return value
@@ -3061,46 +4419,90 @@ class XybridTelemetryConfig:
         handle = getattr(self, "_handle", None)
         if handle is not None:
             self._handle = None
-            _native._boltffi_xybrid_telemetry_config_release(handle)
+            _native._boltffi_xybrid_observability_config_release(handle)
 
-    def set_endpoint(self, endpoint: str) -> None:
-        """Override the ingest endpoint (self-hosted collector / non-prod)."""
-        _native._boltffi_xybrid_telemetry_config_set_endpoint(self._handle, endpoint)
+    @classmethod
+    def xybrid(cls, api_key: str) -> "XybridObservabilityConfig":
+        """Traces to the Xybrid dashboard, authenticated with `api_key`."""
+        return XybridObservabilityConfig._from_handle(_native._boltffi_xybrid_observability_config_xybrid(api_key))
 
-    def set_app_version(self, version: str) -> None:
-        """Set the app version reported with every event."""
-        _native._boltffi_xybrid_telemetry_config_set_app_version(self._handle, version)
+    @classmethod
+    def otlp(cls, endpoint: str) -> "XybridObservabilityConfig":
+        """Traces, metrics, and logs to an OTLP/HTTP endpoint
+        (`http://host:4318`).
+        """
+        return XybridObservabilityConfig._from_handle(_native._boltffi_xybrid_observability_config_otlp(endpoint))
 
-    def set_device_label(self, label: str) -> None:
-        """Set the human-friendly device label reported with every event."""
-        _native._boltffi_xybrid_telemetry_config_set_device_label(self._handle, label)
+    def set_traces_endpoint(self, endpoint: str) -> None:
+        """Override the full trace endpoint URL (staging, self-hosted)."""
+        _native._boltffi_xybrid_observability_config_set_traces_endpoint(self._handle, endpoint)
 
-    def set_device_attribute(self, key: str, value: str) -> None:
-        """Attach an app-provided device attribute (stored under `device.custom`)."""
-        _native._boltffi_xybrid_telemetry_config_set_device_attribute(self._handle, key, value)
+    def set_header(self, name: str, value: str) -> None:
+        """Add an HTTP header sent with every export request."""
+        _native._boltffi_xybrid_observability_config_set_header(self._handle, name, value)
 
-    def set_batch_size(self, batch_size: int) -> None:
-        """Set the number of events buffered before a flush."""
-        _native._boltffi_xybrid_telemetry_config_set_batch_size(self._handle, batch_size)
+    def set_json_protocol(self, json: bool) -> None:
+        """Send OTLP JSON instead of protobuf."""
+        _native._boltffi_xybrid_observability_config_set_json_protocol(self._handle, json)
 
-    def set_flush_interval_secs(self, secs: int) -> None:
-        """Set the background flush interval, in seconds."""
-        _native._boltffi_xybrid_telemetry_config_set_flush_interval_secs(self._handle, secs)
+    def set_service(self, name: str, version: str | None) -> None:
+        """Set the reported service (app) name and version."""
+        _native._boltffi_xybrid_observability_config_set_service(self._handle, name, _boltffi_wire_optional(version, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)))
 
-    def init(self) -> None:
-        """Start the process-global telemetry exporter from this config.
+    def set_resource_attribute(self, key: str, value: str) -> None:
+        """Attach a resource attribute (for example `deployment.environment`)."""
+        _native._boltffi_xybrid_observability_config_set_resource_attribute(self._handle, key, value)
 
-        Consumes the config: subsequent setters no-op and a second `init` on the
-        same handle errors. Modeled as a method (not a free `telemetry_init`)
-        because boltffi 0.25.3 drops free functions that take a handle
-        parameter, but lowers a handle self-method fine (same reason the
-        generated `run` lives on `XybridModel`).
+    def set_metadata_only(self, metadata_only: bool) -> None:
+        """Record metadata only: no prompts, outputs, or tool payloads."""
+        _native._boltffi_xybrid_observability_config_set_metadata_only(self._handle, metadata_only)
+
+    def set_max_content_bytes(self, bytes: int) -> None:
+        """Maximum bytes per captured content attribute, clamped to at most
+        416 KiB (208 KiB when exporting OTLP/JSON, which can double content)
+        so that a span's content leaves 64 KiB of the 480 KiB export request
+        for its other data.
+        """
+        _native._boltffi_xybrid_observability_config_set_max_content_bytes(self._handle, bytes)
+
+    def allow_provider_context(self, origin: str) -> None:
+        """Allows context propagation to one exact third-party HTTP(S) origin."""
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_observability_config_allow_provider_context(self._handle, origin))
+
+    def set_device_id(self, id: str) -> None:
+        """Sets a caller-owned device identifier."""
+        _native._boltffi_xybrid_observability_config_set_device_id(self._handle, id)
+
+    def add_literal_redaction(self, find: str, replacement: str) -> None:
+        """Appends an ordered literal replacement of content string values.
 
         # Errors
-        Errors if this config was already consumed, or if telemetry is already
-        initialized without an intervening [`telemetry_shutdown`].
+        For an empty search string.
         """
-        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_telemetry_config_init(self._handle))
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_observability_config_add_literal_redaction(self._handle, find, replacement))
+
+    def omit_content_attribute(self, key: str) -> None:
+        """Omits an exact governed content attribute key.
+
+        # Errors
+        For an empty key.
+        """
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_observability_config_omit_content_attribute(self._handle, key))
+
+    def set_live_trace_interval_ms(self, ms: int) -> None:
+        """Minimum interval between traced frames of one live session."""
+        _native._boltffi_xybrid_observability_config_set_live_trace_interval_ms(self._handle, ms)
+
+    def init(self) -> None:
+        """Start exporting with this configuration, replacing any previous one.
+        Consumes the config: later setters no-op and a second `init` errors.
+        A method rather than a free function because boltffi drops free
+        functions that take a handle parameter.
+
+        # Errors
+        If this config was already consumed or is rejected.
+        """
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_observability_config_init(self._handle))
 
 
 
@@ -3173,9 +4575,255 @@ class XybridBundle:
 
 
 
+class XybridWorkflowObservation:
+    __slots__ = ("_handle",)
 
 
 
+    def __init__(self, name: str, options: XybridObservationOptions | None) -> None:
+        """Starts an operation using the configured SDK session and explicit parent controls."""
+        self._handle = _native._boltffi_xybrid_workflow_observation_new(name, _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()))
+
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridWorkflowObservation":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native._boltffi_xybrid_workflow_observation_release(handle)
+
+    def context(self) -> XybridObservationContext | None:
+        """Context for child operations, including valid unsampled spans."""
+        return _boltffi_read_wire(_native._boltffi_xybrid_workflow_observation_context(self._handle), lambda reader: reader.optional(lambda: XybridObservationContext._boltffi_from_reader(reader)))
+
+    def observation_ref(self) -> XybridObservationRef | None:
+        """Reference to this operation's own span."""
+        return _boltffi_read_wire(_native._boltffi_xybrid_workflow_observation_observation_ref(self._handle), lambda reader: reader.optional(lambda: XybridObservationRef._boltffi_from_reader(reader)))
+
+    def complete(self) -> None:
+        """Ends successfully. The first terminal call wins."""
+        _native._boltffi_xybrid_workflow_observation_complete(self._handle)
+
+    def fail(self, error_type: str, message: str | None) -> None:
+        """Ends with a governed error message."""
+        _native._boltffi_xybrid_workflow_observation_fail(self._handle, error_type, _boltffi_wire_optional(message, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)))
+
+    def cancel(self) -> None:
+        """Cancels without flushing."""
+        _native._boltffi_xybrid_workflow_observation_cancel(self._handle)
+
+    def is_finished(self) -> bool:
+        """Whether any terminal transition has happened."""
+        return _native._boltffi_xybrid_workflow_observation_is_finished(self._handle)
+
+
+
+class XybridToolObservation:
+    __slots__ = ("_handle",)
+
+
+
+    def __init__(self, call: XybridToolCallInfo, options: XybridObservationOptions | None) -> None:
+        """Starts an operation using the configured SDK session and explicit parent controls."""
+        self._handle = _native._boltffi_xybrid_tool_observation_new(call._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()))
+
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridToolObservation":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native._boltffi_xybrid_tool_observation_release(handle)
+
+    def context(self) -> XybridObservationContext | None:
+        """Context for child operations, including valid unsampled spans."""
+        return _boltffi_read_wire(_native._boltffi_xybrid_tool_observation_context(self._handle), lambda reader: reader.optional(lambda: XybridObservationContext._boltffi_from_reader(reader)))
+
+    def observation_ref(self) -> XybridObservationRef | None:
+        """Reference to this operation's own span."""
+        return _boltffi_read_wire(_native._boltffi_xybrid_tool_observation_observation_ref(self._handle), lambda reader: reader.optional(lambda: XybridObservationRef._boltffi_from_reader(reader)))
+
+    def complete(self) -> None:
+        """Ends successfully. The first terminal call wins."""
+        _native._boltffi_xybrid_tool_observation_complete(self._handle)
+
+    def fail(self, error_type: str, message: str | None) -> None:
+        """Ends with a governed error message."""
+        _native._boltffi_xybrid_tool_observation_fail(self._handle, error_type, _boltffi_wire_optional(message, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)))
+
+    def cancel(self) -> None:
+        """Cancels without flushing."""
+        _native._boltffi_xybrid_tool_observation_cancel(self._handle)
+
+    def is_finished(self) -> bool:
+        """Whether any terminal transition has happened."""
+        return _native._boltffi_xybrid_tool_observation_is_finished(self._handle)
+
+    def record_result(self, result_json: str) -> None:
+        """Records structured tool output through the content policy."""
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_tool_observation_record_result(self._handle, result_json))
+
+
+
+class XybridInferenceObservation:
+    __slots__ = ("_handle",)
+
+
+
+    def __init__(self, request: XybridInferenceRequest, options: XybridObservationOptions | None) -> None:
+        """Starts an operation using the configured SDK session and explicit parent controls."""
+        self._handle = _native._boltffi_xybrid_inference_observation_new(request._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()))
+
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridInferenceObservation":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native._boltffi_xybrid_inference_observation_release(handle)
+
+    def context(self) -> XybridObservationContext | None:
+        """Context for child operations, including valid unsampled spans."""
+        return _boltffi_read_wire(_native._boltffi_xybrid_inference_observation_context(self._handle), lambda reader: reader.optional(lambda: XybridObservationContext._boltffi_from_reader(reader)))
+
+    def observation_ref(self) -> XybridObservationRef | None:
+        """Reference to this operation's own span."""
+        return _boltffi_read_wire(_native._boltffi_xybrid_inference_observation_observation_ref(self._handle), lambda reader: reader.optional(lambda: XybridObservationRef._boltffi_from_reader(reader)))
+
+    def complete(self) -> None:
+        """Ends successfully. The first terminal call wins."""
+        _native._boltffi_xybrid_inference_observation_complete(self._handle)
+
+    def fail(self, error_type: str, message: str | None) -> None:
+        """Ends with a governed error message."""
+        _native._boltffi_xybrid_inference_observation_fail(self._handle, error_type, _boltffi_wire_optional(message, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)))
+
+    def cancel(self) -> None:
+        """Cancels without flushing."""
+        _native._boltffi_xybrid_inference_observation_cancel(self._handle)
+
+    def is_finished(self) -> bool:
+        """Whether any terminal transition has happened."""
+        return _native._boltffi_xybrid_inference_observation_is_finished(self._handle)
+
+    def record_system_instructions(self, parts_json: str) -> None:
+        """Records governed structured content."""
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_inference_observation_record_system_instructions(self._handle, parts_json))
+
+    def record_input_messages(self, messages_json: str) -> None:
+        """Records governed structured content."""
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_inference_observation_record_input_messages(self._handle, messages_json))
+
+    def record_output_messages(self, messages_json: str) -> None:
+        """Records governed structured content."""
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_inference_observation_record_output_messages(self._handle, messages_json))
+
+    def record_tool_definitions(self, definitions_json: str) -> None:
+        """Records governed structured content."""
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_inference_observation_record_tool_definitions(self._handle, definitions_json))
+
+    def record_chunk(self) -> None:
+        """Records a chunk arrival; this does not estimate first-token time."""
+        _native._boltffi_xybrid_inference_observation_record_chunk(self._handle)
+
+    def record_first_token(self, at_epoch_ms: int | None) -> None:
+        """Records a runtime-measured first token (epoch milliseconds, or now)."""
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_inference_observation_record_first_token(self._handle, at_epoch_ms))
+
+    def record_usage(self, usage: XybridUsage) -> None:
+        """Replaces the cumulative usage snapshot, preserving unknown fields."""
+        _native._boltffi_xybrid_inference_observation_record_usage(self._handle, usage._boltffi_wire())
+
+    def record_finish_reasons(self, reasons: Sequence[str]) -> None:
+        """Records measured finish reasons."""
+        _native._boltffi_xybrid_inference_observation_record_finish_reasons(self._handle, _boltffi_wire_sequence(reasons, len(reasons), lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)))
+
+    def record_response(self, response_id: str | None, model: str | None) -> None:
+        """Records provider-assigned response identifiers."""
+        _native._boltffi_xybrid_inference_observation_record_response(self._handle, _boltffi_wire_optional(response_id, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)), _boltffi_wire_optional(model, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)))
+
+
+
+class XybridModelLoadObservation:
+    __slots__ = ("_handle",)
+
+
+
+    def __init__(self, info: XybridModelLoadInfo, options: XybridObservationOptions | None) -> None:
+        """Starts an operation using the configured SDK session and explicit parent controls."""
+        self._handle = _native._boltffi_xybrid_model_load_observation_new(info._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()))
+
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridModelLoadObservation":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native._boltffi_xybrid_model_load_observation_release(handle)
+
+    def context(self) -> XybridObservationContext | None:
+        """Context for child operations, including valid unsampled spans."""
+        return _boltffi_read_wire(_native._boltffi_xybrid_model_load_observation_context(self._handle), lambda reader: reader.optional(lambda: XybridObservationContext._boltffi_from_reader(reader)))
+
+    def observation_ref(self) -> XybridObservationRef | None:
+        """Reference to this operation's own span."""
+        return _boltffi_read_wire(_native._boltffi_xybrid_model_load_observation_observation_ref(self._handle), lambda reader: reader.optional(lambda: XybridObservationRef._boltffi_from_reader(reader)))
+
+    def complete(self) -> None:
+        """Ends successfully. The first terminal call wins."""
+        _native._boltffi_xybrid_model_load_observation_complete(self._handle)
+
+    def fail(self, error_type: str, message: str | None) -> None:
+        """Ends with a governed error message."""
+        _native._boltffi_xybrid_model_load_observation_fail(self._handle, error_type, _boltffi_wire_optional(message, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)))
+
+    def cancel(self) -> None:
+        """Cancels without flushing."""
+        _native._boltffi_xybrid_model_load_observation_cancel(self._handle)
+
+    def is_finished(self) -> bool:
+        """Whether any terminal transition has happened."""
+        return _native._boltffi_xybrid_model_load_observation_is_finished(self._handle)
+
+    def record_cache_hit(self, hit: bool) -> None:
+        """Records the measured cache outcome."""
+        _native._boltffi_xybrid_model_load_observation_record_cache_hit(self._handle, hit)
+
+
+
+
+
+
+def decision_request_envelope(request: XybridDecisionRequest) -> XybridEnvelope:
+    """Validate ordered typed decision data and build input for the existing run API."""
+    return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native.decision_request_envelope(request._boltffi_wire())), lambda reader: XybridEnvelope._boltffi_from_reader(reader))
+def decision_request_json_envelope(json: str) -> XybridEnvelope:
+    """Decode bounded Liquid SystemOne JSON without foreign dictionary conversion."""
+    return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native.decision_request_json_envelope(json)), lambda reader: XybridEnvelope._boltffi_from_reader(reader))
 def tool_results_envelope(user_text: str, prior_assistant_text: str, results: Sequence[XybridToolResult]) -> XybridEnvelope:
     """Build the continuation envelope for the turn after the model asked for
     tools.
@@ -3204,14 +4852,15 @@ def set_battery_level(percent: int) -> None:
     _native.set_battery_level(percent)
 def clear_battery_level() -> None:
     _native.clear_battery_level()
-def configure_runtime(api_key: str | None, gateway_url: str | None, ingest_url: str | None) -> None:
-    """One-stop SDK initialization: API key + gateway/ingest URL overrides in
-    one call. Delegates to [`facade::configure_runtime`]; blank strings are
-    treated as absent. This is the canonical init the Swift
-    `Xybrid.initialize(apiKey:gatewayUrl:ingestUrl:)` and Kotlin
-    `Xybrid.init(context, apiKey, gatewayUrl, ingestUrl)` wrappers call.
+def configure_runtime(api_key: str | None, gateway_url: str | None) -> None:
+    """One-stop SDK initialization: API key + gateway URL override in one call.
+    Delegates to [`facade::configure_runtime`]; blank strings are treated as
+    absent. This is the canonical init the Swift
+    `Xybrid.initialize(apiKey:gatewayUrl:)` and Kotlin
+    `Xybrid.init(context, apiKey, gatewayUrl)` wrappers call. Observability
+    export is configured separately with [`XybridObservabilityConfig`].
     """
-    _native.configure_runtime(_boltffi_wire_optional(api_key, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)), _boltffi_wire_optional(gateway_url, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)), _boltffi_wire_optional(ingest_url, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)))
+    _native.configure_runtime(_boltffi_wire_optional(api_key, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)), _boltffi_wire_optional(gateway_url, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)))
 def init_sdk_cache_dir(cache_dir: str) -> None:
     _native.init_sdk_cache_dir(cache_dir)
 def cache_status() -> XybridCacheStatus:
@@ -3300,19 +4949,47 @@ def set_auto_release(enabled: bool) -> None:
 def is_auto_release_enabled() -> bool:
     """Whether automatic model release is enabled process-wide."""
     return _native.is_auto_release_enabled()
-def telemetry_default_endpoint() -> str:
-    """The SDK's default telemetry ingest endpoint (for display alongside a config)."""
-    return _native.telemetry_default_endpoint()
-def telemetry_flush() -> None:
-    """Flush pending telemetry events. Safe before init / after shutdown."""
-    _native.telemetry_flush()
-def telemetry_shutdown() -> None:
-    """Shut down the telemetry exporter. Idempotent."""
-    _native.telemetry_shutdown()
+def observability_default_traces_endpoint() -> str:
+    """The default Xybrid OTLP trace endpoint."""
+    return _native.observability_default_traces_endpoint()
+def observability_stats() -> XybridObservabilityStats:
+    """Delivery counters: live while export runs, the final ones after shutdown until the next init."""
+    return _boltffi_read_wire(_native.observability_stats(), lambda reader: XybridObservabilityStats._boltffi_from_reader(reader))
+def observability_flush(timeout_ms: int) -> None:
+    """Export queued telemetry, waiting at most `timeout_ms`.
+
+    # Errors
+    When the bound is exceeded.
+    """
+    _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native.observability_flush(timeout_ms))
+def observability_shutdown(timeout_ms: int) -> None:
+    """Flush and stop exporting, waiting at most `timeout_ms`. Idempotent.
+
+    # Errors
+    When the bound is exceeded.
+    """
+    _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native.observability_shutdown(timeout_ms))
+def observability_record_feedback(target: XybridObservationRef, score: float | None, label: str | None, comment: str | None) -> bool:
+    """Record end-user feedback on a run (`XybridResult::observation`). Returns
+    `false` when no logs signal is configured (the Xybrid preset sends traces
+    only).
+
+    # Errors
+    When `target` is not a valid trace/span id pair.
+    """
+    return _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native.observability_record_feedback(target, score, _boltffi_wire_optional(label, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)), _boltffi_wire_optional(comment, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0))))
+def observability_record_evaluation(target: XybridObservationRef, name: str, score_value: float | None, score_label: str | None, explanation: str | None) -> bool:
+    """Record an evaluation result on a run. Returns `false` when no logs signal
+    is configured.
+
+    # Errors
+    When `target` is not a valid trace/span id pair.
+    """
+    return _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native.observability_record_evaluation(target, name, score_value, _boltffi_wire_optional(score_label, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)), _boltffi_wire_optional(explanation, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0))))
 
 MODULE_NAME = "xybrid_bolt"
 PACKAGE_NAME = "xybrid_bolt"
-PACKAGE_VERSION = "0.13.1"
+PACKAGE_VERSION = "0.18.0"
 
 __all__ = [
     "MODULE_NAME",
@@ -3320,11 +4997,19 @@ __all__ = [
     "PACKAGE_VERSION",
     "XybridMetadataEntry",
     "XybridEnvelope",
+    "XybridDecisionOption",
+    "XybridDecisionLevel",
+    "XybridDecisionQuestion",
+    "XybridDecisionRequest",
+    "XybridDecisionScore",
+    "XybridDecisionAnswer",
+    "XybridDecisions",
     "XybridToolDefinition",
     "XybridToolCall",
     "XybridToolResult",
     "XybridGenerationConfig",
     "XybridRunOptions",
+    "XybridObservationRef",
     "XybridStageLatency",
     "XybridInferenceMetrics",
     "XybridResult",
@@ -3338,7 +5023,16 @@ __all__ = [
     "XybridCacheEntry",
     "XybridCacheStatus",
     "XybridStreamingConfig",
+    "XybridObservationOptions",
     "XybridPartialResult",
+    "XybridTranscriptionResult",
+    "XybridSignalStats",
+    "XybridObservabilityStats",
+    "XybridObservationContext",
+    "XybridInferenceRequest",
+    "XybridToolCallInfo",
+    "XybridUsage",
+    "XybridModelLoadInfo",
     "XybridError",
     "XybridErrorException",
     "XybridErrorModelNotFound",
@@ -3364,13 +5058,29 @@ __all__ = [
     "XybridErrorUnsupportedBackendCapability",
     "XybridErrorInvalidImage",
     "XybridErrorCancelled",
+    "XybridErrorTelemetryDelivery",
     "XybridEnvelopeKind",
     "XybridEnvelopeKindText",
     "XybridEnvelopeKindAudio",
     "XybridEnvelopeKindEmbedding",
     "XybridEnvelopeKindImage",
     "XybridEnvelopeKindMultiPart",
+    "XybridEnvelopeKindDecisionRequest",
+    "XybridEnvelopeKindDecisions",
     "XybridMessageRole",
+    "XybridDecisionContent",
+    "XybridDecisionContentText",
+    "XybridDecisionContentJson",
+    "XybridDecisionQuestionKind",
+    "XybridDecisionQuestionKindChoice",
+    "XybridDecisionQuestionKindYesNo",
+    "XybridDecisionQuestionKindScore",
+    "XybridDecisionOrigin",
+    "XybridScoreStatistic",
+    "XybridDecisionValue",
+    "XybridDecisionValueChoice",
+    "XybridDecisionValueYesNo",
+    "XybridDecisionValueScore",
     "XybridAbortSignal",
     "XybridOutputType",
     "XybridExecutionTarget",
@@ -3381,6 +5091,13 @@ __all__ = [
     "XybridVadMode",
     "XybridVadModeOff",
     "XybridVadModeEnabled",
+    "XybridModelSource",
+    "XybridModelSourceRegistry",
+    "XybridModelSourceDirectory",
+    "XybridModelSourceBundle",
+    "XybridModelSourceHuggingFace",
+    "XybridModelSourceModelFile",
+    "XybridExecutionLocation",
     "XybridDownload",
     "XybridDownloadProgressSubscription",
     "XybridStreamingSession",
@@ -3390,8 +5107,14 @@ __all__ = [
     "XybridModelDownloadProgressSubscription",
     "XybridPipeline",
     "XybridConversationContext",
-    "XybridTelemetryConfig",
+    "XybridObservabilityConfig",
     "XybridBundle",
+    "XybridWorkflowObservation",
+    "XybridToolObservation",
+    "XybridInferenceObservation",
+    "XybridModelLoadObservation",
+    "decision_request_envelope",
+    "decision_request_json_envelope",
     "tool_results_envelope",
     "json_schema_to_gbnf",
     "set_thermal_state",
@@ -3419,7 +5142,10 @@ __all__ = [
     "release_memory",
     "set_auto_release",
     "is_auto_release_enabled",
-    "telemetry_default_endpoint",
-    "telemetry_flush",
-    "telemetry_shutdown",
+    "observability_default_traces_endpoint",
+    "observability_stats",
+    "observability_flush",
+    "observability_shutdown",
+    "observability_record_feedback",
+    "observability_record_evaluation",
 ]

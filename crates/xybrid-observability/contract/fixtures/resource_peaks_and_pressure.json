@@ -1,0 +1,148 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "Resource samples carry peak CPU utilization (0-1 double), minimum available memory (int bytes) and memory pressure (normal/warn/critical) next to the existing resource attributes. Zero is a measurement and is kept; a memory-pressure value outside the vocabulary and every field the host did not measure are absent. Resource attributes never become metric dimensions.",
+  "expect": {
+    "logs": [],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "qwen2.5-0.5b-instruct",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 1.2
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.operation.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "load_model",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "qwen2.5-0.5b-instruct"
+            },
+            "count": 1,
+            "sum": 0.4
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "load_model",
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "qwen2.5-0.5b-instruct",
+          "xybrid.genai.model.format": "gguf",
+          "xybrid.genai.resource.cpu.peak_utilization": 1,
+          "xybrid.genai.resource.memory.min_available_bytes": 0,
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 400,
+        "id": "load",
+        "kind": "INTERNAL",
+        "name": "load_model qwen2.5-0.5b-instruct",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "chat",
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "qwen2.5-0.5b-instruct",
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.resource.battery.level": 0.8,
+          "xybrid.genai.resource.cpu.peak_utilization": 0.9,
+          "xybrid.genai.resource.cpu.utilization": 0.42,
+          "xybrid.genai.resource.memory.min_available_bytes": 1073741824,
+          "xybrid.genai.resource.memory.pressure": "warn",
+          "xybrid.genai.resource.process.peak_rss_bytes": 268435456,
+          "xybrid.genai.resource.thermal.state": "fair",
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 1700,
+        "id": "run",
+        "kind": "INTERNAL",
+        "name": "chat qwen2.5-0.5b-instruct",
+        "parent": null,
+        "start_ms": 500,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 1
+      }
+    ]
+  },
+  "name": "resource_peaks_and_pressure",
+  "steps": [
+    {
+      "at_ms": 0,
+      "format": "gguf",
+      "id": "load",
+      "model": "qwen2.5-0.5b-instruct",
+      "op": "start_model_load",
+      "provider": "llama.cpp",
+      "runtime": "llama.cpp"
+    },
+    {
+      "at_ms": 350,
+      "cpu_peak_utilization": 1,
+      "id": "load",
+      "memory_min_available_bytes": 0,
+      "memory_pressure": "high",
+      "op": "resource"
+    },
+    {
+      "at_ms": 400,
+      "id": "load",
+      "op": "end"
+    },
+    {
+      "at_ms": 500,
+      "id": "run",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "qwen2.5-0.5b-instruct",
+        "operation": "chat",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp"
+      }
+    },
+    {
+      "at_ms": 1650,
+      "battery_level": 0.8,
+      "cpu_peak_utilization": 0.9,
+      "cpu_utilization": 0.42,
+      "id": "run",
+      "memory_min_available_bytes": 1073741824,
+      "memory_pressure": "warn",
+      "op": "resource",
+      "process_peak_rss_bytes": 268435456,
+      "thermal_state": "fair"
+    },
+    {
+      "at_ms": 1700,
+      "id": "run",
+      "op": "end"
+    }
+  ]
+}

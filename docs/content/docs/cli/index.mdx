@@ -51,7 +51,7 @@ xybrid models list
 | `xybrid cache` | Manage the local cache: `list`, `status`, `clear [id]` |
 | `xybrid prepare` | Parse and validate a pipeline YAML |
 | `xybrid plan` | Show the execution plan: models, targets, download status |
-| [`xybrid trace`](/docs/cli/reference/trace) | Inspect telemetry from previous runs |
+| [`xybrid trace`](/docs/cli/reference/trace) | Analyze an explicitly exported OTLP/JSON trace |
 | `xybrid init` | Generate `model_metadata.json` for a model directory |
 | `xybrid pack` | Create a `.xyb` bundle from a model directory |
 | `xybrid bundle` | Fetch a registry model and produce a `.xyb` bundle |
@@ -80,8 +80,18 @@ xybrid fetch --model kokoro-82m
 
 | Flag | Environment variable | Description |
 |------|----------------------|-------------|
-| `--api-key` | `XYBRID_API_KEY` | API key for the Xybrid platform (optional — runs anonymously without one) |
-| `--platform-url` | — | Platform/registry URL (default `https://api.xybrid.dev`) |
+| `--api-key` | `XYBRID_API_KEY` | Cloud API key; does not enable observability by itself |
+| `--platform-url` | `XYBRID_PLATFORM_URL` | Cloud gateway URL (default `https://api.xybrid.dev`) |
+| `--observability` | — | Opt into Xybrid trace export; requires an API key |
+| `--traces-endpoint` | — | Full trace URL for `--observability` (default `https://ingest.xybrid.dev/v1/traces`) |
 | `--device-id` | `XYBRID_DEVICE_ID` | Stable device identifier for telemetry |
 | `-v`, `-vv` | — | Verbose output (`-vv` includes library logs) |
 | `-q` | — | Quiet mode (errors only) |
+
+For a Collector, configure `OTEL_EXPORTER_OTLP_ENDPOINT` or per-signal
+`OTEL_EXPORTER_OTLP_*_ENDPOINT` variables. This enables export independently of
+cloud authentication. `OTEL_SDK_DISABLED=true` disables export in either mode.
+The CLI flushes and shuts down its exporter when the command ends.
+Enabled observability captures prompts and outputs by default. Set
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT=no_content` for metadata only.
+See [API keys](/docs/concepts/api-keys) for key scopes and what gets exported.

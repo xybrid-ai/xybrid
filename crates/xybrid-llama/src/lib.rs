@@ -24,6 +24,9 @@
 //! - [`StreamingCallback`] — closure type alias for streaming generation
 //! - [`generate_streaming`] / [`generate_with_stops`] — the autoregressive
 //!   loops, including the prefix-reuse `n_past_in` knob
+//! - [`generation_end`] / [`GenerationEnd`] — why a loop ended (an
+//!   end-of-generation token, a stop sequence, or the token budget), read
+//!   from the tokens it returned
 //! - [`set_verbosity`] / [`get_verbosity`] — llama.cpp log-level control
 //! - [`LlamaError`] / [`LlamaResult`] — error surface
 //!
@@ -65,6 +68,8 @@ pub(crate) mod ffi;
 #[cfg(feature = "bindings")]
 mod context;
 #[cfg(feature = "bindings")]
+mod decision;
+#[cfg(feature = "bindings")]
 mod generation;
 #[cfg(feature = "bindings")]
 mod log_control;
@@ -72,15 +77,26 @@ mod log_control;
 mod model;
 #[cfg(feature = "bindings")]
 mod scoring;
+#[cfg(feature = "bindings")]
+mod utf8;
 #[cfg(all(feature = "bindings", feature = "vision"))]
 mod vision;
 
 #[cfg(feature = "bindings")]
 pub use context::{LlamaContext, LlamaSeqSnapshot};
+#[cfg(feature = "bindings")]
+pub use decision::{
+    decision_type_generates_text, is_decision_metadata_key, is_decision_type_key, DecisionContext,
+    DecisionContextSettings, DecisionRenderer, VocabularyModel, DECISION_CONTEXT_TOKENS,
+    DECISION_RENDER_BYTES,
+};
 #[cfg(all(feature = "bindings", feature = "vision"))]
 pub use generation::generate_from_current_logits_streaming;
 #[cfg(feature = "bindings")]
-pub use generation::{format_chat, generate_streaming, generate_with_stops, StreamingCallback};
+pub use generation::{
+    format_chat, generate_streaming, generate_with_stops, generation_end, GenerationEnd,
+    StreamingCallback,
+};
 #[cfg(feature = "bindings")]
 pub use log_control::{get_verbosity, set_verbosity};
 #[cfg(feature = "bindings")]

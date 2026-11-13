@@ -18,13 +18,44 @@ sys.path.insert(0, str(VERIFIER_DIR))
 
 import zzz_pull as zzz  # noqa: E402 (crate verifier directory must be added first)
 
+NEW_PLATFORMS = {
+    "aarch64-apple-ios": ("ios-arm64", "aarch64-ios-none", "16.0", ["System"]),
+    "aarch64-apple-ios-sim": (
+        "ios-arm64-simulator", "aarch64-ios-simulator", "16.0", ["System"]
+    ),
+    "aarch64-unknown-linux-gnu": (
+        "linux-arm64", "aarch64-linux-gnu", "glibc-2.28", ["c", "m", "pthread", "dl"]
+    ),
+}
+
+
+def frozen_schema4_fixture():
+    # Keep historical-format coverage independent of the adopted production pins.
+    targets = (
+        ("aarch64-apple-darwin", "macos-arm64", "apple_m1", "13.0", ["System"]),
+        ("aarch64-linux-android", "android-arm64", "baseline", "29", ["c", "m", "dl"]),
+        ("x86_64-unknown-linux-gnu", "linux-x86_64", "x86_64_v3", "glibc-2.28", ["c", "m", "pthread", "dl"]),
+    )
+    return {
+        "schema_version": 1, "engine": "zzz", "release_tag": "v0.1.0-rc.8",
+        "archives": [
+            {"target": target, "slice": slice_name, "profile": "phonon-kitten-tts2",
+             "archive": f"zzz-phonon-kitten-tts2-{slice_name}-v0.1.0-rc.8.tar.gz",
+             "sha256": "0" * 64, "receipt_schema": 4, "apis": {"zzz_embed": 1},
+             "models": ["phonon", "kitten-tts2"], "library": "lib/libzzz_embed.a",
+             "headers": ["include/zzz_embed.h"], "backend": "cpu", "cpu": cpu,
+             "deployment_minimum": minimum, "system_libraries": libraries}
+            for target, slice_name, cpu, minimum, libraries in targets
+        ],
+    }
+
 
 class ZzzPullTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.manifest_data = json.loads(zzz.DEFAULT_MANIFEST.read_text())
+        self.manifest_data = frozen_schema4_fixture()
         self.manifest = self.root / "manifest.json"
         self.target = "aarch64-apple-darwin"
         self.environment = {
@@ -37,7 +68,9 @@ class ZzzPullTests(unittest.TestCase):
         *,
         target=None,
         receipt_update=None,
+        receipt_omit=None,
         metadata_update=None,
+        payload_update=None,
         extra=None,
         omit=None,
     ):
@@ -45,7 +78,10 @@ class ZzzPullTests(unittest.TestCase):
         entry = next(e for e in self.manifest_data["archives"] if e["target"] == target)
         resolved = {
             "aarch64-apple-darwin": "aarch64-macos.13.0...15.6-none",
+            "aarch64-apple-ios": "aarch64-ios.16.0...18.6-none",
+            "aarch64-apple-ios-sim": "aarch64-ios.16.0...18.6-simulator",
             "aarch64-linux-android": "aarch64-linux.5.10...6.19-android.29",
+            "aarch64-unknown-linux-gnu": "aarch64-linux.5.10...6.19-gnu.2.28",
             "x86_64-unknown-linux-gnu": "x86_64-linux.5.10...6.19-gnu.2.28",
         }[target]
         receipt = {
@@ -64,7 +100,7 @@ class ZzzPullTests(unittest.TestCase):
         }
         receipt.update(
             {
-                "schema_version": 4,
+                "schema_version": entry["receipt_schema"],
                 "release_tag": self.manifest_data["release_tag"],
                 "engine_version": self.manifest_data["release_tag"][1:],
                 "abi_version": 1,
@@ -78,9 +114,13 @@ class ZzzPullTests(unittest.TestCase):
                 },
             }
         )
+        if "notice_files" in entry:
+            receipt["notice_files"] = copy.deepcopy(entry["notice_files"])
         if target == "aarch64-linux-android":
             receipt.update(android_api=29, elf_max_page_size=16384)
         receipt.update(receipt_update or {})
+        if receipt_omit is not None:
+            receipt.pop(receipt_omit)
         metadata = {
             k: copy.deepcopy(entry[k]) for k in ("apis", "models", "headers", "backend")
         }
@@ -91,13 +131,16 @@ class ZzzPullTests(unittest.TestCase):
             "share/zzz_embed.json": json.dumps(metadata).encode(),
             "lib/libzzz_embed.a": b"!<arch>\nsynthetic-library",
             **{header: b"/* synthetic engine header */\n" for header in entry["headers"]},
+            **getattr(self, "notice_payload", {}),
         }
+        payload.update(payload_update or {})
         archive_root = entry["archive"].removesuffix(".tar.gz")
         archive = self.root / entry["archive"]
         with tarfile.open(archive, "w:gz") as output:
             for directory in (
                 archive_root,
                 *(f"{archive_root}/{d}" for d in ("include", "lib", "share")),
+                *([f"{archive_root}/LICENSES"] if "notice_files" in entry else []),
             ):
                 member = tarfile.TarInfo(directory)
                 member.type = tarfile.DIRTYPE
@@ -119,6 +162,27 @@ class ZzzPullTests(unittest.TestCase):
         self.manifest.write_text(json.dumps(self.manifest_data))
         return archive, zzz.select_pin(target, self.manifest)
 
+    def use_schema5(self):
+        # Small synthetic contents exercise the real immutable-map validation
+        # without copying upstream license texts into the SDK's test source.
+        self.notice_payload = {
+            name: f"synthetic notice: {name}\n".encode()
+            for name in zzz.SCHEMA5_NOTICE_FILES
+        }
+        notices = {
+            name: hashlib.sha256(contents).hexdigest()
+            for name, contents in self.notice_payload.items()
+        }
+        patch = mock.patch.object(zzz, "SCHEMA5_NOTICE_FILES", notices)
+        patch.start()
+        self.addCleanup(patch.stop)
+        old_tag = self.manifest_data["release_tag"]
+        self.manifest_data["release_tag"] = "v0.1.0-rc.9"
+        for entry in self.manifest_data["archives"]:
+            entry["archive"] = entry["archive"].replace(old_tag, "v0.1.0-rc.9")
+            entry["receipt_schema"] = 5
+            entry["notice_files"] = copy.deepcopy(notices)
+
     def release_response(self, pin, archive):
         return {
             "tag_name": pin.release_tag,
@@ -132,6 +196,18 @@ class ZzzPullTests(unittest.TestCase):
                 }
             ],
         }
+
+    def add_future_target_pins(self):
+        # Synthetic test pins only; actual published archive staging is separate.
+        template = self.manifest_data["archives"][0]
+        for target, (slice_name, _, minimum, libraries) in NEW_PLATFORMS.items():
+            entry = copy.deepcopy(template)
+            entry.update(
+                target=target, slice=slice_name, cpu="baseline",
+                deployment_minimum=minimum, system_libraries=libraries,
+                archive=f"zzz-{zzz.PROFILE}-{slice_name}-{self.manifest_data['release_tag']}.tar.gz",
+            )
+            self.manifest_data["archives"].append(entry)
 
     def fake_gh(self, release, archive):
         def run(command, **kwargs):
@@ -171,11 +247,214 @@ class ZzzPullTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr.decode())
         self.assertTrue(Path(result.stdout.decode().strip()).is_dir())
 
+    def test_python_version_is_checked_before_imports_or_inputs(self):
+        runner = """
+import runpy
+import sys
+script, version = sys.argv[1:]
+sys.version_info = (*map(int, version.split('.')), 0, 'final', 0)
+sys.argv = [script, '--help']
+runpy.run_path(script, run_name='__main__')
+"""
+        for version in ("3.8", "3.9", "3.10", "3.11"):
+            with self.subTest(version=version):
+                result = subprocess.run(
+                    [sys.executable, "-I", "-c", runner,
+                     str(VERIFIER_DIR / "zzz_pull.py"), version],
+                    env={**os.environ, **self.environment,
+                         "XYBRID_ZZZ_PREBUILT_DIR": str(self.root / "private-input")},
+                    capture_output=True,
+                    check=False,
+                )
+                error = result.stderr.decode()
+                if version == "3.11":
+                    self.assertEqual(0, result.returncode, error)
+                    self.assertIn(b"--verify-only", result.stdout)
+                else:
+                    self.assertEqual(1, result.returncode)
+                    self.assertEqual(b"", result.stdout)
+                    self.assertIn("Python 3.11+ is required", error)
+                    self.assertIn(f"found {version}", error)
+                    self.assertIn("XYBRID_ZZZ_PYTHON", error)
+                    self.assertNotIn("Traceback", error)
+                    self.assertNotIn("AttributeError", error)
+                for private in (*self.environment.values(), str(self.root)):
+                    self.assertNotIn(private, error)
+
     def test_committed_manifest_carries_only_the_public_keys(self):
         self.assertEqual(
             {"schema_version", "engine", "release_tag", "archives"},
             set(self.manifest_data),
         )
+
+    def test_schema5_contract_matches_the_reviewed_immutable_notice_inventory(self):
+        # SHA256 of the reviewed schema-5 contract's .files object, encoded as
+        # UTF-8 JSON with sorted keys and compact separators. Changes require a
+        # new schema, even when a new archive and its receipt agree with them.
+        contract = json.dumps(
+            zzz.SCHEMA5_NOTICE_FILES, sort_keys=True, separators=(",", ":")
+        ).encode()
+        self.assertEqual(14, len(zzz.SCHEMA5_NOTICE_FILES))
+        self.assertEqual(
+            "a634e1fb5e0cdfa87efea950c72ff9bb522c6620cec16924395820e24b06c9ce",
+            hashlib.sha256(contract).hexdigest(),
+        )
+
+    def test_schema4_is_accepted_only_for_frozen_rc8_without_notices(self):
+        for tag in ("v0.1.0-rc.1", "v0.1.0-rc.7", "v0.1.0-rc.9", "v0.2.0"):
+            with self.subTest(tag=tag):
+                self.manifest_data["release_tag"] = tag
+                self.manifest.write_text(json.dumps(self.manifest_data))
+                with self.assertRaisesRegex(zzz.StageError, "schema 4 requires"):
+                    zzz.select_pin(self.target, self.manifest)
+        self.manifest_data["release_tag"] = "v0.1.0-rc.8"
+        self.manifest_data["archives"][0]["notice_files"] = {}
+        self.manifest.write_text(json.dumps(self.manifest_data))
+        with self.assertRaisesRegex(zzz.StageError, "schema 4 cannot carry"):
+            zzz.select_pin(self.target, self.manifest)
+
+    def test_schema5_cannot_reinterpret_any_frozen_release(self):
+        self.use_schema5()
+        for tag in sorted(zzz.FROZEN_RELEASE_TAGS):
+            with self.subTest(tag=tag):
+                self.manifest_data["release_tag"] = tag
+                self.manifest.write_text(json.dumps(self.manifest_data))
+                with self.assertRaisesRegex(zzz.StageError, "frozen releases"):
+                    zzz.select_pin(self.target, self.manifest)
+
+    def test_schema5_rejects_missing_extra_or_changed_notice_pins(self):
+        self.use_schema5()
+        name = "RUNTIME_TERMS.md"
+        exact = copy.deepcopy(zzz.SCHEMA5_NOTICE_FILES)
+        missing = copy.deepcopy(exact)
+        missing.pop(name)
+        for value in (
+            None,
+            [],
+            missing,
+            dict(exact, **{"LICENSES/extra.txt": "0" * 64}),
+            dict(exact, **{name: "0" * 64}),
+            dict(exact, **{name: exact[name].upper()}),
+            dict(exact, **{name: True}),
+        ):
+            with self.subTest(value=value):
+                self.manifest_data["archives"][0]["notice_files"] = value
+                self.manifest.write_text(json.dumps(self.manifest_data))
+                with self.assertRaisesRegex(
+                    zzz.StageError, "pin mismatch: notice_files"
+                ):
+                    zzz.select_pin(self.target, self.manifest)
+        self.manifest_data["archives"][0].pop("notice_files")
+        self.manifest.write_text(json.dumps(self.manifest_data))
+        with self.assertRaisesRegex(zzz.StageError, "pin mismatch: notice_files"):
+            zzz.select_pin(self.target, self.manifest)
+
+    def test_schema5_stages_all_notices_for_existing_targets_without_credentials(self):
+        self.use_schema5()
+        with mock.patch.dict(os.environ, {}, clear=True):
+            for target in [entry["target"] for entry in self.manifest_data["archives"]]:
+                with self.subTest(target=target):
+                    archive, pin = self.make_archive(target=target)
+                    staged = zzz.stage_archive(archive, pin, self.root / "staged")
+                    self.assertEqual(staged, zzz.verify_staged(staged, pin))
+                    self.assertEqual(18, len(pin.files))
+                    self.assertEqual(
+                        {"include", "lib", "share", "LICENSES"}, pin.directories
+                    )
+                    for name, expected in self.notice_payload.items():
+                        self.assertEqual(expected, (staged / name).read_bytes())
+                    for item in (staged, *staged.rglob("*")):
+                        self.assertEqual(0, item.stat().st_mode & 0o077)
+
+    def test_schema5_receipt_cannot_replace_its_independent_notice_pins(self):
+        self.use_schema5()
+        exact = copy.deepcopy(zzz.SCHEMA5_NOTICE_FILES)
+        missing = copy.deepcopy(exact)
+        missing.pop("RUNTIME_TERMS.md")
+        for value in (
+            None,
+            [],
+            missing,
+            dict(exact, **{"LICENSES/extra.txt": "0" * 64}),
+            dict(exact, **{"RUNTIME_TERMS.md": "0" * 64}),
+        ):
+            with self.subTest(value=value):
+                archive, pin = self.make_archive(receipt_update={"notice_files": value})
+                with self.assertRaisesRegex(
+                    zzz.StageError, "receipt mismatch: notice_files"
+                ):
+                    zzz.inspect_archive(archive, pin)
+        archive, pin = self.make_archive(receipt_omit="notice_files")
+        with self.assertRaisesRegex(zzz.StageError, "receipt mismatch: notice_files"):
+            zzz.inspect_archive(archive, pin)
+
+    def test_schema5_rejects_each_mutated_notice_before_staging(self):
+        self.use_schema5()
+        for name in self.notice_payload:
+            with self.subTest(name=name):
+                archive, pin = self.make_archive(
+                    payload_update={name: b"altered notice"}
+                )
+                destination = self.root / "staged"
+                with self.assertRaisesRegex(zzz.StageError, "notice payload checksum"):
+                    zzz.stage_archive(archive, pin, destination)
+                self.assertFalse(destination.exists())
+
+    def test_schema5_manifest_and_receipt_cannot_self_bless_changed_notice_bytes(self):
+        self.use_schema5()
+        changed = b"self-blessed replacement terms"
+        self.manifest_data["archives"][0]["notice_files"]["RUNTIME_TERMS.md"] = (
+            hashlib.sha256(changed).hexdigest()
+        )
+        # The helper copies that same map to the receipt and pins the changed
+        # compressed archive. Immutable schema semantics still reject it.
+        with self.assertRaisesRegex(zzz.StageError, "pin mismatch: notice_files"):
+            self.make_archive(payload_update={"RUNTIME_TERMS.md": changed})
+
+    def test_schema5_requires_every_notice_and_rejects_extra_entries_and_links(self):
+        self.use_schema5()
+        for name in self.notice_payload:
+            with self.subTest(missing=name):
+                archive, pin = self.make_archive(omit=name)
+                with self.assertRaisesRegex(zzz.StageError, "missing archive payload"):
+                    zzz.inspect_archive(archive, pin)
+        for name, kind in (
+            ("LICENSES/extra.txt", tarfile.REGTYPE),
+            ("LICENSES/empty", tarfile.DIRTYPE),
+            ("RUNTIME_TERMS.md", tarfile.SYMTYPE),
+            ("LICENSES/Zig-MIT.txt", tarfile.LNKTYPE),
+        ):
+            with self.subTest(extra=name, kind=kind):
+                archive, pin = self.make_archive(
+                    omit=name if name in self.notice_payload else None,
+                    extra=("{root}/" + name, kind),
+                )
+                with self.assertRaises(zzz.StageError):
+                    zzz.inspect_archive(archive, pin)
+
+    def test_schema5_rechecks_staged_notice_contents_and_links(self):
+        self.use_schema5()
+        for name in self.notice_payload:
+            with self.subTest(name=name):
+                archive, pin = self.make_archive()
+                staged = zzz.stage_archive(
+                    archive, pin, self.root / name.replace("/", "-")
+                )
+                (staged / name).write_bytes(b"tampered")
+                with self.assertRaisesRegex(zzz.StageError, "differs"):
+                    zzz.verify_staged(staged, pin)
+        archive, pin = self.make_archive()
+        staged = zzz.stage_archive(archive, pin, self.root / "linked-notice")
+        notice = staged / "RUNTIME_TERMS.md"
+        notice.unlink()
+        notice.symlink_to(archive)
+        with self.assertRaisesRegex(zzz.StageError, "links"):
+            zzz.verify_staged(staged, pin)
+
+    def test_schema4_receipts_cannot_claim_notice_files(self):
+        archive, pin = self.make_archive(receipt_update={"notice_files": {}})
+        with self.assertRaisesRegex(zzz.StageError, "schema 4 cannot carry"):
+            zzz.inspect_archive(archive, pin)
 
     def test_manifest_keys_beyond_the_public_four_are_rejected(self):
         for key in ("source_repository", "source_commit", "notes"):
@@ -184,17 +463,112 @@ class ZzzPullTests(unittest.TestCase):
             with self.assertRaisesRegex(zzz.StageError, "unexpected engine manifest keys"):
                 zzz.select_pin(self.target, self.manifest)
 
-    def test_committed_manifest_has_exactly_three_speech_only_targets(self):
+    def test_committed_manifest_has_exactly_six_schema5_speech_only_targets(self):
+        manifest = json.loads(zzz.DEFAULT_MANIFEST.read_text())
         self.assertEqual(
-            set(zzz.ZIG_TARGETS), {e["target"] for e in self.manifest_data["archives"]}
+            {"aarch64-apple-darwin", "aarch64-linux-android", "x86_64-unknown-linux-gnu", *NEW_PLATFORMS},
+            {e["target"] for e in manifest["archives"]},
         )
-        self.assertEqual(3, len(self.manifest_data["archives"]))
-        for target in zzz.ZIG_TARGETS:
+        self.assertEqual(6, len(manifest["archives"]))
+        for target in [entry["target"] for entry in manifest["archives"]]:
             pin = zzz.select_pin(target)
             self.assertEqual("phonon-kitten-tts2", pin.entry["profile"])
             self.assertEqual(zzz.MODELS, pin.entry["models"])
             self.assertEqual(zzz.APIS, pin.entry["apis"])
             self.assertEqual(zzz.HEADERS, pin.entry["headers"])
+            self.assertEqual(5, pin.entry["receipt_schema"])
+            self.assertEqual(zzz.SCHEMA5_NOTICE_FILES, pin.notices)
+
+    def test_missing_target_fixture_fails_before_fetch_or_staging(self):
+        self.manifest.write_text(json.dumps(self.manifest_data))
+        for target in NEW_PLATFORMS:
+            with self.subTest(target=target), mock.patch.dict(os.environ, {}, clear=True):
+                with self.assertRaisesRegex(zzz.StageError, "missing or duplicate target/profile pin"):
+                    zzz.select_pin(target, self.manifest)
+                select_pin = zzz.select_pin
+                # The packaged CLI intentionally has no manifest override. Route
+                # only its manifest input to this missing-target fixture.
+                with mock.patch.object(zzz, "select_pin", side_effect=lambda requested: select_pin(requested, self.manifest)), \
+                     mock.patch.object(zzz, "fetch_archive") as fetch, \
+                     mock.patch.object(zzz, "stage_archive") as stage, \
+                     contextlib.redirect_stderr(io.StringIO()) as error:
+                    self.assertEqual(1, zzz.main(["--target", target]))
+                self.assertIn("missing or duplicate target/profile pin", error.getvalue())
+                fetch.assert_not_called()
+                stage.assert_not_called()
+        for target in ("x86_64-apple-ios", "aarch64-apple-ios-macabi", "aarch64-unknown-linux-musl"):
+            with self.subTest(target=target), self.assertRaisesRegex(zzz.StageError, "unsupported zzz target"):
+                zzz.select_pin(target)
+
+    def test_future_schema5_targets_stage_the_exact_baseline_contract(self):
+        self.use_schema5()
+        self.add_future_target_pins()
+        for target, (slice_name, zig_target, minimum, libraries) in NEW_PLATFORMS.items():
+            with self.subTest(target=target), mock.patch.dict(os.environ, {}, clear=True):
+                archive, pin = self.make_archive(target=target)
+                self.assertEqual(zig_target, zzz.ZIG_TARGETS[target])
+                self.assertEqual(slice_name, pin.entry["slice"])
+                self.assertEqual("baseline", pin.entry["cpu"])
+                self.assertEqual(minimum, pin.entry["deployment_minimum"])
+                self.assertEqual(libraries, pin.entry["system_libraries"])
+                staged = zzz.stage_archive(archive, pin, self.root / "staged")
+                self.assertEqual(staged, zzz.verify_staged(staged, pin))
+
+    def test_new_targets_cannot_reinterpret_frozen_schema4_or_schema5_releases(self):
+        self.add_future_target_pins()
+        self.manifest.write_text(json.dumps(self.manifest_data))
+        for target in NEW_PLATFORMS:
+            with self.subTest(target=target), self.assertRaisesRegex(zzz.StageError, "schema 4 has no pin"):
+                zzz.select_pin(target, self.manifest)
+        self.use_schema5()
+        for tag in sorted(zzz.FROZEN_RELEASE_TAGS):
+            self.manifest_data["release_tag"] = tag
+            self.manifest.write_text(json.dumps(self.manifest_data))
+            for target in NEW_PLATFORMS:
+                with self.subTest(tag=tag, target=target), self.assertRaisesRegex(zzz.StageError, "frozen releases"):
+                    zzz.select_pin(target, self.manifest)
+
+    def test_future_target_pins_reject_changed_platform_contract_and_duplicates(self):
+        self.use_schema5()
+        self.add_future_target_pins()
+        for entry in self.manifest_data["archives"][3:]:
+            for field, value in (("cpu", "apple_m1"), ("deployment_minimum", "17.0"),
+                                 ("system_libraries", ["c"]), ("slice", "macos-arm64")):
+                with self.subTest(target=entry["target"], field=field):
+                    data = copy.deepcopy(self.manifest_data)
+                    candidate = next(e for e in data["archives"] if e["target"] == entry["target"])
+                    candidate[field] = value
+                    self.manifest.write_text(json.dumps(data))
+                    with self.assertRaisesRegex(zzz.StageError, "pin mismatch"):
+                        zzz.select_pin(entry["target"], self.manifest)
+            data = copy.deepcopy(self.manifest_data)
+            data["archives"].append(copy.deepcopy(entry))
+            self.manifest.write_text(json.dumps(data))
+            with self.assertRaisesRegex(zzz.StageError, "duplicate target/profile pin"):
+                zzz.select_pin(entry["target"], self.manifest)
+
+    def test_future_target_receipts_reject_cpu_minimum_libraries_and_abi_substitution(self):
+        self.use_schema5()
+        self.add_future_target_pins()
+        for target in NEW_PLATFORMS:
+            for change in (
+                {"cpu": "apple_m1"}, {"deployment_minimum": "17.0"},
+                {"dependencies": {"system_libraries": ["c"], "compiler_runtime": "bundled"}},
+                {"target": "aarch64-macos-none"},
+                {"resolved_target": "aarch64-ios.17.0-simulator"},
+                {"resolved_target": "aarch64-linux.5.10...6.19-gnu.2.29"},
+            ):
+                with self.subTest(target=target, change=change):
+                    archive, pin = self.make_archive(target=target, receipt_update=change)
+                    with self.assertRaisesRegex(zzz.StageError, "receipt"):
+                        zzz.inspect_archive(archive, pin)
+        for target, resolved in (
+            ("aarch64-apple-ios", "aarch64-ios.16.0...18.6-simulator"),
+            ("aarch64-apple-ios-sim", "aarch64-ios.16.0...18.6-none"),
+        ):
+            archive, pin = self.make_archive(target=target, receipt_update={"resolved_target": resolved})
+            with self.assertRaisesRegex(zzz.StageError, "resolved_target"):
+                zzz.inspect_archive(archive, pin)
 
     def test_other_profiles_cannot_substitute_for_the_speech_only_profile(self):
         for profile in ("combined", "phonon", "kitten-tts2"):
@@ -222,9 +596,9 @@ class ZzzPullTests(unittest.TestCase):
                 with self.assertRaisesRegex(zzz.StageError, "pin mismatch"):
                     zzz.select_pin(data["archives"][0]["target"], self.manifest)
 
-    def test_all_supported_slices_stage_and_verify_without_credentials(self):
+    def test_all_pinned_slices_stage_and_verify_without_credentials(self):
         with mock.patch.dict(os.environ, {}, clear=True):
-            for target in zzz.ZIG_TARGETS:
+            for target in [entry["target"] for entry in self.manifest_data["archives"]]:
                 with self.subTest(target=target):
                     archive, pin = self.make_archive(target=target)
                     staged = zzz.stage_archive(archive, pin, self.root / "staged")
@@ -672,6 +1046,136 @@ class ZzzPullTests(unittest.TestCase):
                 self.assertEqual(
                     1, zzz.main(["--target", self.target, "--verify-only"])
                 )
+
+    def run_prebuilt(self, target, path, *, verify_only=True):
+        select_pin = zzz.select_pin
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {**self.environment,
+                            "XYBRID_ZZZ_PREBUILT_DIR": str(path)}, clear=True),
+            mock.patch.object(zzz, "select_pin", side_effect=lambda requested:
+                              select_pin(requested, self.manifest)),
+            mock.patch.object(zzz, "fetch_archive") as fetch,
+            mock.patch.object(zzz, "stage_archive") as stage,
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            result = zzz.main(["--target", target] +
+                              (["--verify-only"] if verify_only else []))
+        fetch.assert_not_called()
+        stage.assert_not_called()
+        for private in (*self.environment.values(), str(self.root)):
+            self.assertNotIn(private, stderr.getvalue())
+        if result:
+            self.assertEqual("", stdout.getvalue())
+        return result, stdout.getvalue().strip(), stderr.getvalue()
+
+    def test_prebuilt_root_selects_and_reverifies_each_requested_target(self):
+        self.use_schema5()
+        root = self.root / "prebuilt"
+        root.mkdir(mode=0o700)
+        targets = (self.target, "aarch64-linux-android")
+        for target in targets:
+            archive, pin = self.make_archive(target=target)
+            staged = zzz.stage_archive(archive, pin, self.root / "staged")
+            staged.rename(root / target)
+        for target in targets:
+            for verify_only in (False, True):
+                with self.subTest(target=target, verify_only=verify_only):
+                    result, selected, error = self.run_prebuilt(
+                        target, root, verify_only=verify_only
+                    )
+                    self.assertEqual(0, result, error)
+                    self.assertEqual(str(root / target), selected)
+            (root / target / "lib/libzzz_embed.a").write_bytes(b"tampered")
+            result, _, error = self.run_prebuilt(target, root)
+            self.assertEqual(1, result)
+            self.assertIn("differs from pinned archive", error)
+
+    def test_prebuilt_root_missing_target_fails_without_fetching(self):
+        archive, pin = self.make_archive()
+        root = self.root / "prebuilt"
+        root.mkdir(mode=0o700)
+        zzz.stage_archive(archive, pin, self.root / "staged").rename(root / self.target)
+        result, _, error = self.run_prebuilt("aarch64-linux-android", root)
+        self.assertEqual(1, result)
+        self.assertIn("missing prebuilt slice", error)
+        self.assertIn("requested target 'aarch64-linux-android'", error)
+
+    def test_invalid_target_child_never_falls_back_to_single_slice(self):
+        archive, pin = self.make_archive()
+        root = zzz.stage_archive(archive, pin, self.root / "staged")
+        child = root / self.target
+        for kind in ("empty", "file", "link", "broken-link"):
+            with self.subTest(kind=kind):
+                if kind == "empty":
+                    child.mkdir(mode=0o700)
+                elif kind == "file":
+                    child.write_bytes(b"not a slice")
+                else:
+                    child.symlink_to(root if kind == "link" else root / "missing")
+                result, _, _ = self.run_prebuilt(self.target, root)
+                self.assertEqual(1, result)
+                if kind == "empty":
+                    child.rmdir()
+                else:
+                    child.unlink()
+        result, selected, error = self.run_prebuilt(self.target, root)
+        self.assertEqual(0, result, error)
+        self.assertEqual(str(root), selected)
+
+    def test_prebuilt_root_and_child_must_remain_private_and_unlinked(self):
+        archive, pin = self.make_archive()
+        root = self.root / "prebuilt"
+        root.mkdir(mode=0o700)
+        child = root / self.target
+        zzz.stage_archive(archive, pin, self.root / "staged").rename(child)
+        for path in (root, child):
+            with self.subTest(public=path.name):
+                path.chmod(0o755)
+                result, _, error = self.run_prebuilt(self.target, root)
+                self.assertEqual(1, result)
+                self.assertIn("private permissions", error)
+                path.chmod(0o700)
+        linked = self.root / "linked-prebuilt"
+        linked.symlink_to(root)
+        result, _, error = self.run_prebuilt(self.target, linked)
+        self.assertEqual(1, result)
+        self.assertIn("unsafe staged directory", error)
+
+    def test_wrong_single_slice_or_named_child_reports_both_targets(self):
+        archive, pin = self.make_archive()
+        staged = zzz.stage_archive(archive, pin, self.root / "staged")
+        requested = "aarch64-linux-android"
+        root = self.root / "prebuilt"
+        root.mkdir(mode=0o700)
+        for path in (staged, root):
+            if path == root:
+                staged.rename(root / requested)
+            result, _, error = self.run_prebuilt(requested, path)
+            self.assertEqual(1, result)
+            self.assertIn(f"requested '{requested}'", error)
+            self.assertIn(f"provided '{self.target}'", error)
+
+    def test_unverified_receipt_values_cannot_leak_through_target_diagnostics(self):
+        archive, pin = self.make_archive()
+        staged = zzz.stage_archive(archive, pin, self.root / "staged")
+        for value in ("fake-private-token", {"private": "fake-private-token"},
+                      ["fake-private-token"]):
+            with self.subTest(value=value):
+                (staged / "RECEIPT.json").write_text(json.dumps({"target": value}))
+                result, _, error = self.run_prebuilt("aarch64-linux-android", staged)
+                self.assertEqual(1, result)
+                self.assertIn("archive checksum mismatch", error)
+                self.assertNotIn("provided", error)
+        # A forged receipt claiming the requested target cannot make an
+        # incompatible archive pass its independently pinned checksum.
+        (staged / "RECEIPT.json").write_text(json.dumps({
+            "target": zzz.ZIG_TARGETS["aarch64-linux-android"]
+        }))
+        result, _, error = self.run_prebuilt("aarch64-linux-android", staged)
+        self.assertEqual(1, result)
+        self.assertIn("archive checksum mismatch", error)
 
     def test_unsupported_and_duplicate_pins_are_rejected(self):
         with self.assertRaisesRegex(zzz.StageError, "unsupported"):

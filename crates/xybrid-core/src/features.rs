@@ -1,6 +1,6 @@
 //! Runtime feature-flag introspection.
 //!
-//! Reports which Cargo features were enabled at compile time so callers
+//! Reports which compiled features are available on this host so callers
 //! (e.g. the registry telemetry header) can advertise the active backend set.
 
 use std::sync::OnceLock;
@@ -24,6 +24,19 @@ const ALL_FEATURES: &[(&str, bool)] = &[
     ("candle-cuda", cfg!(feature = "candle-cuda")),
     ("candle-metal", cfg!(feature = "candle-metal")),
     ("espeak", cfg!(feature = "espeak")),
+    // The registry serves `lfm3-1.7b` only to clients that list
+    // `llamacpp-lfm3`, and `lfm3-vl-2b` only to those that list
+    // `llamacpp-lfm3vl`. Older builds report `llm-llamacpp` too but can't run
+    // LFM3: 0.15.0 and earlier lack the `lfm3` architecture, and 0.16.0 loads
+    // it without LFM3's prompt format, tool calls or image-token cap.
+    ("llamacpp-lfm3", cfg!(feature = "llm-llamacpp")),
+    // `llamacpp-lfm3-d1-text-v1`, the registry capability for Liquid d1
+    // decisions, is deliberately absent. The registry serves a decision
+    // artifact to every client that lists it, and the reference comparison is
+    // still open (P02 in docs/development/decision-conformance.md). Add it
+    // here and to the SDK's `ARTIFACT_BACKENDS` when that closes. A local
+    // load needs no capability.
+    ("llamacpp-lfm3vl", cfg!(feature = "llm-llamacpp-vision")),
     ("llm-llamacpp", cfg!(feature = "llm-llamacpp")),
     ("llm-llamacpp-vision", cfg!(feature = "llm-llamacpp-vision")),
     ("llm-mistral", cfg!(feature = "llm-mistral")),
@@ -48,14 +61,31 @@ const ALL_FEATURES: &[(&str, bool)] = &[
 pub fn enabled() -> &'static [&'static str] {
     static ENABLED: OnceLock<Vec<&'static str>> = OnceLock::new();
     ENABLED
-        .get_or_init(|| filter_enabled(ALL_FEATURES))
+        .get_or_init(|| filter_enabled(ALL_FEATURES, zzz_available()))
         .as_slice()
 }
 
-fn filter_enabled(items: &[(&'static str, bool)]) -> Vec<&'static str> {
+fn zzz_available() -> bool {
+    #[cfg(feature = "tts-zzz")]
+    {
+        xybrid_zzz_sys::availability().is_ok()
+            && xybrid_zzz_sys::abi_version() == xybrid_zzz_sys::ZZZ_EMBED_ABI_VERSION
+            && xybrid_zzz_sys::supports_model("phonon")
+            && xybrid_zzz_sys::supports_model("kitten-tts2")
+    }
+    #[cfg(not(feature = "tts-zzz"))]
+    {
+        false
+    }
+}
+
+fn filter_enabled(items: &[(&'static str, bool)], zzz_available: bool) -> Vec<&'static str> {
     let mut names: Vec<&'static str> = items
         .iter()
-        .filter_map(|(name, on)| if *on { Some(*name) } else { None })
+        .filter_map(|(name, on)| {
+            let available = zzz_available || !matches!(*name, "tts-zzz" | "zzz-phonon-31m");
+            (*on && available).then_some(*name)
+        })
         .collect();
     names.sort();
     names
@@ -67,7 +97,7 @@ mod tests {
 
     #[test]
     fn empty_input_yields_empty_slice() {
-        let result = filter_enabled(&[]);
+        let result = filter_enabled(&[], true);
         assert!(result.is_empty());
     }
 
@@ -78,7 +108,7 @@ mod tests {
             ("ort-coreml", false),
             ("llm-llamacpp", false),
         ];
-        assert!(filter_enabled(items).is_empty());
+        assert!(filter_enabled(items, true).is_empty());
     }
 
     #[test]
@@ -89,7 +119,7 @@ mod tests {
             ("llm-llamacpp", true),
         ];
         assert_eq!(
-            filter_enabled(items),
+            filter_enabled(items, true),
             vec!["candle-metal", "llm-llamacpp", "ort-download"]
         );
     }
@@ -140,6 +170,24 @@ mod tests {
         assert!(enabled().contains(&"llm-llamacpp"));
     }
 
+    #[test]
+    fn lfm3_backends_follow_the_llama_cpp_features() {
+        assert_eq!(
+            enabled().contains(&"llamacpp-lfm3"),
+            cfg!(feature = "llm-llamacpp")
+        );
+        assert_eq!(
+            enabled().contains(&"llamacpp-lfm3vl"),
+            cfg!(feature = "llm-llamacpp-vision")
+        );
+    }
+
+    #[test]
+    fn the_d1_decision_capability_is_not_reported_before_qualification() {
+        // Listing it lets the registry serve decision artifacts to this build.
+        assert!(!enabled().contains(&"llamacpp-lfm3-d1-text-v1"));
+    }
+
     #[cfg(feature = "asr-whispercpp")]
     #[test]
     fn whisper_coreml_follows_the_encoder_bridge() {
@@ -153,7 +201,22 @@ mod tests {
     fn zzz_phonon_31m_follows_tts_zzz() {
         assert_eq!(
             enabled().contains(&"zzz-phonon-31m"),
-            cfg!(feature = "tts-zzz")
+            cfg!(feature = "tts-zzz") && zzz_available()
         );
+    }
+
+    #[test]
+    fn unavailable_zzz_is_not_advertised_but_other_backends_are_preserved() {
+        let items = &[
+            ("tts-zzz", true),
+            ("zzz-phonon-31m", true),
+            ("vision", true),
+        ];
+        assert_eq!(filter_enabled(items, false), vec!["vision"]);
+        assert_eq!(
+            filter_enabled(items, true),
+            vec!["tts-zzz", "vision", "zzz-phonon-31m"]
+        );
+        assert!(filter_enabled(&[("tts-zzz", false), ("zzz-phonon-31m", false)], true).is_empty());
     }
 }

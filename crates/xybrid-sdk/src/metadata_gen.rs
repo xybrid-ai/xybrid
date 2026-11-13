@@ -12,7 +12,7 @@
 use crate::model::{SdkError, SdkResult};
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek};
 use std::path::Path;
 use xybrid_core::execution::{
     template::GenerationParams, ExecutionTemplate, ModelMetadata, VisionEncoderConfig,
@@ -72,7 +72,9 @@ pub fn inspect_and_generate(
     let gguf_info = model_files
         .iter()
         .find(|f| f.format == ModelFormat::Gguf && !is_gguf_companion_filename(&f.filename))
-        .and_then(|f| read_gguf_metadata(&dir.join(&f.filename)));
+        .map(|f| read_gguf_metadata(&dir.join(&f.filename)))
+        .transpose()?
+        .flatten();
 
     let onnx_info = model_files
         .iter()
@@ -148,6 +150,66 @@ pub fn write_metadata(dir: &Path, metadata: &ModelMetadata) -> SdkResult<()> {
     Ok(())
 }
 
+/// Turns a sidecar generated before decision models existed into a decision
+/// sidecar, when the GGUF it names is a decision artifact.
+///
+/// An SDK without decision support generated a chat template for every GGUF.
+/// Such a sidecar can never load now: the chat loader refuses the artifact,
+/// and it would stay that way until someone deleted the file by hand. Only a
+/// sidecar marked `auto_generated` is touched, and only its execution template
+/// and task change. A sidecar a person wrote is theirs.
+///
+/// Returns the new metadata and replaces the file in `dir`. A directory that
+/// cannot be written still gets the new metadata for this load.
+pub(crate) fn refresh_generated_decision_sidecar(
+    dir: &Path,
+    metadata: &ModelMetadata,
+) -> Option<ModelMetadata> {
+    let generated = metadata
+        .metadata
+        .get("auto_generated")
+        .and_then(serde_json::Value::as_bool);
+    let ExecutionTemplate::Gguf { model_file, .. } = &metadata.execution_template else {
+        return None;
+    };
+    if generated != Some(true) {
+        return None;
+    }
+    let info = read_gguf_metadata(&dir.join(model_file)).ok().flatten()?;
+    if !info.decision_marked {
+        return None;
+    }
+
+    let mut refreshed = metadata.clone();
+    refreshed.execution_template = ExecutionTemplate::Decision(
+        xybrid_core::execution::template::DecisionTemplate::new(model_file.clone()),
+    );
+    refreshed
+        .metadata
+        .insert("task".to_string(), serde_json::json!("decision"));
+    if let Err(error) = replace_metadata(dir, &refreshed) {
+        log::warn!(
+            target: "xybrid_sdk",
+            "Could not rewrite the generated model_metadata.json in {}: {}",
+            dir.display(),
+            error
+        );
+    }
+    Some(refreshed)
+}
+
+/// Replaces `model_metadata.json` with a new file. Writing through the old
+/// one would also change a cache snapshot it is hard-linked to.
+fn replace_metadata(dir: &Path, metadata: &ModelMetadata) -> std::io::Result<()> {
+    let json = serde_json::to_string_pretty(metadata)?;
+    let staged = dir.join(format!(".model_metadata.json.{}.tmp", uuid::Uuid::new_v4()));
+    std::fs::write(&staged, json)
+        .and_then(|()| std::fs::rename(&staged, dir.join("model_metadata.json")))
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&staged);
+        })
+}
+
 /// Sanitize a name to lowercase kebab-case for use as a model_id.
 /// Strips non-alphanumeric characters (except hyphens), replaces spaces and underscores with hyphens.
 fn sanitize_model_id(name: &str) -> String {
@@ -200,6 +262,8 @@ fn list_model_files(dir: &Path) -> Vec<String> {
 ///
 /// Reads the GGUF binary header to extract architecture and context length,
 /// then returns a ready-to-use `ModelMetadata` without writing anything to disk.
+/// The context window is the model's native context capped at 4,096 tokens;
+/// the native value is kept as `metadata.max_context_length`.
 /// This enables `--model-file ./path/to/model.gguf` workflows.
 pub fn generate_metadata_for_gguf_file(gguf_path: &Path) -> SdkResult<ModelMetadata> {
     if !gguf_path.exists() {
@@ -220,7 +284,7 @@ pub fn generate_metadata_for_gguf_file(gguf_path: &Path) -> SdkResult<ModelMetad
         .to_lowercase()
         .replace(' ', "-");
 
-    let gguf_info = read_gguf_metadata(gguf_path);
+    let gguf_info = read_gguf_metadata(gguf_path)?;
 
     let file_info = ModelFileInfo {
         filename: filename.clone(),
@@ -436,6 +500,9 @@ pub(crate) struct GgufInfo {
     pub projector_type: Option<String>,
     pub image_size: Option<u64>,
     pub patch_size: Option<u64>,
+    /// A named decision template or decision calibration metadata is present,
+    /// and the decision type is not one that also generates text.
+    pub decision_marked: bool,
 }
 
 fn is_vision_projector_filename(filename: &str) -> bool {
@@ -462,7 +529,13 @@ const GGUF_TYPE_UINT64: u32 = 10;
 const GGUF_TYPE_INT64: u32 = 11;
 const GGUF_TYPE_FLOAT64: u32 = 12;
 
-fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
+fn read_gguf_metadata(path: &Path) -> SdkResult<Option<GgufInfo>> {
+    read_gguf_metadata_inner(path).transpose()
+}
+
+// Unknown/corrupt formats retain the existing best-effort fallback. An
+// explicit inspection limit is an error: partial classification is unsafe.
+fn read_gguf_metadata_inner(path: &Path) -> Option<SdkResult<GgufInfo>> {
     let file = std::fs::File::open(path)
         .map_err(|e| {
             log::debug!(target: "xybrid_sdk", "Failed to open GGUF file: {}", e);
@@ -501,11 +574,25 @@ fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
         read_u32_le(&mut reader)? as u64
     };
 
-    // Limit to prevent runaway reads on corrupted files
-    let kv_limit = metadata_kv_count.min(1000);
+    // Match the decision native wrapper's metadata-copy bound: a header this
+    // large is refused rather than classified from a prefix.
+    if metadata_kv_count > 65_536 {
+        return Some(Err(SdkError::MetadataInvalid(
+            "GGUF metadata entry count exceeds the inspection limit".into(),
+        )));
+    }
 
-    // Read metadata key-value pairs
-    for _ in 0..kv_limit {
+    let mut vision_projector_type = None;
+    let mut decision_marker = false;
+    let mut generates_text = false;
+
+    // A decision marker usually follows the architecture and context keys, so
+    // read every declared entry instead of stopping at the first useful ones.
+    // An entry this reader cannot parse or skip (a truncated file, a value
+    // type newer than it knows) ends the scan and classifies from what was
+    // read: that keeps such a chat model loading. Should a decision marker
+    // hide behind it, the native chat loader still refuses the artifact.
+    for _ in 0..metadata_kv_count {
         let key = match read_gguf_string(&mut reader) {
             Some(k) => k,
             None => break,
@@ -517,6 +604,24 @@ fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
 
         // We only care about specific keys
         match key.as_str() {
+            k if xybrid_core::execution::decision::is_decision_metadata_key(k) => {
+                decision_marker = true;
+                // A marker whose value cannot be read or skipped still marks
+                // the file. End the scan and keep it: the decision runtime
+                // then refuses the artifact for what it is, where a chat
+                // sidecar would only fail later in the chat loader.
+                if xybrid_core::execution::decision::is_decision_type_key(k)
+                    && value_type == GGUF_TYPE_STRING
+                {
+                    let Some(kind) = read_gguf_string(&mut reader) else {
+                        break;
+                    };
+                    generates_text |=
+                        xybrid_core::execution::decision::decision_type_generates_text(&kind);
+                } else if !skip_gguf_value(&mut reader, value_type) {
+                    break;
+                }
+            }
             "general.architecture" => {
                 if value_type == GGUF_TYPE_STRING {
                     info.architecture = read_gguf_string(&mut reader);
@@ -538,6 +643,16 @@ fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
                     skip_gguf_value(&mut reader, value_type);
                 }
             }
+            // Projectors converted for mixed modalities (LiquidAI's LFM3-VL
+            // mmproj among them) name the vision projector here instead.
+            // llama.cpp reads it only when the default key is absent.
+            "clip.vision.projector_type" => {
+                if value_type == GGUF_TYPE_STRING {
+                    vision_projector_type = read_gguf_string(&mut reader);
+                } else {
+                    skip_gguf_value(&mut reader, value_type);
+                }
+            }
             "clip.vision.image_size" => {
                 info.image_size = read_gguf_uint_value(&mut reader, value_type);
             }
@@ -555,10 +670,16 @@ fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
             }
         }
 
-        // Early exit if we have everything we need
-        if info.architecture.is_some() && info.context_length.is_some() {
-            break;
-        }
+        // Decision markers commonly appear after architecture/context keys.
+        // Scan the whole header before classifying the execution protocol.
+    }
+
+    // A decision type that also generates text stays a chat model, as it was
+    // before decision models existed. The native chat loader has the same rule.
+    info.decision_marked = decision_marker && !generates_text;
+
+    if info.projector_type.is_none() {
+        info.projector_type = vision_projector_type;
     }
 
     // Infer quantization from filename
@@ -566,7 +687,7 @@ fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
     info.quantization = infer_quantization_from_filename(filename);
 
     log::debug!(target: "xybrid_sdk", "GGUF metadata: {:?}", info);
-    Some(info)
+    Some(Ok(info))
 }
 
 fn infer_quantization_from_filename(filename: &str) -> Option<String> {
@@ -598,7 +719,7 @@ fn read_u64_le<R: Read>(reader: &mut R) -> Option<u64> {
 }
 
 fn read_gguf_string<R: Read>(reader: &mut R) -> Option<String> {
-    let len = read_u64_le(reader)? as usize;
+    let len = usize::try_from(read_u64_le(reader)?).ok()?;
     if len > 1_000_000 {
         return None; // Sanity limit
     }
@@ -628,40 +749,58 @@ fn read_gguf_uint_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> Opti
     }
 }
 
+/// Byte width of a GGUF value type whose values all have the same size.
+fn gguf_fixed_width(value_type: u32) -> Option<u64> {
+    match value_type {
+        GGUF_TYPE_UINT8 | GGUF_TYPE_INT8 | GGUF_TYPE_BOOL => Some(1),
+        GGUF_TYPE_UINT16 | GGUF_TYPE_INT16 => Some(2),
+        GGUF_TYPE_UINT32 | GGUF_TYPE_INT32 | GGUF_TYPE_FLOAT32 => Some(4),
+        GGUF_TYPE_UINT64 | GGUF_TYPE_INT64 | GGUF_TYPE_FLOAT64 => Some(8),
+        _ => None,
+    }
+}
+
+/// Move `bytes` forward. A buffered reader keeps its buffer when the target
+/// is inside it.
+fn skip_gguf_bytes<R: Seek>(reader: &mut R, bytes: u64) -> bool {
+    i64::try_from(bytes).is_ok_and(|bytes| reader.seek_relative(bytes).is_ok())
+}
+
 /// Skip a GGUF value of the given type. Returns false if the reader is at EOF or corrupted.
 fn skip_gguf_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> bool {
-    let skip_bytes: i64 = match value_type {
-        GGUF_TYPE_UINT8 | GGUF_TYPE_INT8 | GGUF_TYPE_BOOL => 1,
-        GGUF_TYPE_UINT16 | GGUF_TYPE_INT16 => 2,
-        GGUF_TYPE_UINT32 | GGUF_TYPE_INT32 | GGUF_TYPE_FLOAT32 => 4,
-        GGUF_TYPE_UINT64 | GGUF_TYPE_INT64 | GGUF_TYPE_FLOAT64 => 8,
-        GGUF_TYPE_STRING => {
-            if let Some(len) = read_u64_le(reader) {
-                return reader.seek(SeekFrom::Current(len as i64)).is_ok();
-            }
-            return false;
-        }
+    if let Some(width) = gguf_fixed_width(value_type) {
+        return skip_gguf_bytes(reader, width);
+    }
+    match value_type {
+        GGUF_TYPE_STRING => read_u64_le(reader).is_some_and(|len| skip_gguf_bytes(reader, len)),
         GGUF_TYPE_ARRAY => {
             // Array: element_type (u32) + count (u64) + elements
-            let elem_type = match read_u32_le(reader) {
-                Some(t) => t,
-                None => return false,
+            let Some(elem_type) = read_u32_le(reader) else {
+                return false;
             };
-            let count = match read_u64_le(reader) {
-                Some(c) => c,
-                None => return false,
+            let Some(count) = read_u64_le(reader) else {
+                return false;
             };
-            let limit = count.min(100_000);
-            for _ in 0..limit {
-                if !skip_gguf_value(reader, elem_type) {
-                    return false;
-                }
+            // Fixed-width elements are skipped in one seek. A seek per
+            // element that leaves the reader's buffer discards it, and the
+            // next one finds it empty again: every element became a system
+            // call, over 500,000 of them for the scores and token types of a
+            // 262,144-entry vocabulary.
+            if let Some(width) = gguf_fixed_width(elem_type) {
+                return count
+                    .checked_mul(width)
+                    .is_some_and(|bytes| skip_gguf_bytes(reader, bytes));
             }
-            return true;
+            // Returning success after skipping only part of an array loses
+            // header alignment and can hide a later decision marker.
+            // GGUF arrays cannot nest, and the bound covers modern vocabularies.
+            if count > 1_000_000 || elem_type == GGUF_TYPE_ARRAY {
+                return false;
+            }
+            (0..count).all(|_| skip_gguf_value(reader, elem_type))
         }
-        _ => return false,
-    };
-    reader.seek(SeekFrom::Current(skip_bytes)).is_ok()
+        _ => false,
+    }
 }
 
 // ============================================================================
@@ -964,6 +1103,11 @@ fn build_metadata(
         .unwrap_or_else(|| "unknown".to_string());
 
     match primary.format {
+        ModelFormat::Gguf if gguf_info.is_some_and(|info| info.decision_marked) => {
+            // A companion projector cannot turn a decision checkpoint into
+            // a generative VLM. Text/v1 validates and loads only the model.
+            build_gguf_metadata(model_id, model_id, primary, &task, card, gguf_info)
+        }
         ModelFormat::Gguf => model_files
             .iter()
             .find(|file| {
@@ -971,13 +1115,33 @@ fn build_metadata(
             })
             .and_then(|projector| {
                 read_gguf_metadata(&cache_dir.join(&projector.filename))
-                    .filter(|info| info.projector_type.as_deref() == Some("qwen3vl_merger"))
+                    .ok()
+                    .flatten()
+                    .filter(|info| {
+                        matches!(
+                            info.projector_type.as_deref(),
+                            Some("qwen3vl_merger" | "lfm3vl")
+                        )
+                    })
                     .map(|info| (projector, info))
             })
             .map_or_else(
                 || build_gguf_metadata(model_id, model_id, primary, &task, card, gguf_info),
-                |(projector, projector_info)| {
-                    build_qwen3vl_metadata(model_id, primary, projector, gguf_info, &projector_info)
+                |(projector, projector_info)| match projector_info.projector_type.as_deref() {
+                    Some("lfm3vl") => build_lfm3vl_metadata(
+                        model_id,
+                        primary,
+                        projector,
+                        gguf_info,
+                        &projector_info,
+                    ),
+                    _ => build_qwen3vl_metadata(
+                        model_id,
+                        primary,
+                        projector,
+                        gguf_info,
+                        &projector_info,
+                    ),
                 },
             ),
         ModelFormat::Onnx => build_onnx_metadata(
@@ -1055,6 +1219,13 @@ fn build_uninspected_metadata(
     }
 }
 
+/// Metadata for a GGUF language model without a vision projector.
+///
+/// llama.cpp allocates the KV cache for the whole context window at load, so
+/// the window is the GGUF's native context capped at 4,096 tokens, the size
+/// the vision builders use. Uncapped, LFM3 1.7B (262,144 tokens) would
+/// reserve about 5.9 GB of f16 KV cache. The native value is kept as
+/// `max_context_length`.
 fn build_gguf_metadata(
     model_id: &str,
     repo: &str,
@@ -1065,7 +1236,17 @@ fn build_gguf_metadata(
 ) -> ModelMetadata {
     use xybrid_core::execution::ExecutionTemplate;
 
-    let context_length = gguf_info.and_then(|g| g.context_length).unwrap_or(4096) as usize;
+    const DEFAULT_CONTEXT_LENGTH: usize = 4096;
+
+    // A declared 0 counts as unknown: llama.cpp reads `n_ctx = 0` as "use the
+    // training context", the allocation this cap exists to avoid.
+    let max_context_length = gguf_info
+        .and_then(|g| g.context_length)
+        .filter(|&tokens| tokens > 0)
+        .and_then(|tokens| usize::try_from(tokens).ok());
+    let context_length = max_context_length.map_or(DEFAULT_CONTEXT_LENGTH, |native| {
+        native.min(DEFAULT_CONTEXT_LENGTH)
+    });
 
     let architecture = gguf_info
         .and_then(|g| g.architecture.clone())
@@ -1086,10 +1267,14 @@ fn build_gguf_metadata(
     );
     metadata_map.insert(
         "context_length".to_string(),
-        serde_json::json!(gguf_info
-            .and_then(|g| g.context_length)
-            .unwrap_or(context_length as u64)),
+        serde_json::json!(context_length),
     );
+    if let Some(max_context_length) = max_context_length {
+        metadata_map.insert(
+            "max_context_length".to_string(),
+            serde_json::json!(max_context_length),
+        );
+    }
     metadata_map.insert(
         "source_repo".to_string(),
         serde_json::Value::String(repo.to_string()),
@@ -1117,14 +1302,24 @@ fn build_gguf_metadata(
         .or_else(|| card.and_then(|c| c.model_name.clone()))
         .unwrap_or_else(|| format!("{} (auto-generated from {})", model_id, repo));
 
+    let decision_marked = gguf_info.is_some_and(|info| info.decision_marked);
+    if decision_marked {
+        metadata_map.insert("task".to_string(), serde_json::json!("decision"));
+    }
     ModelMetadata {
         model_id: model_id.to_string(),
         version: "1.0".to_string(),
-        execution_template: ExecutionTemplate::Gguf {
-            model_file: primary.filename.clone(),
-            chat_template: None,
-            context_length,
-            generation_params: None,
+        execution_template: if decision_marked {
+            ExecutionTemplate::Decision(xybrid_core::execution::template::DecisionTemplate::new(
+                primary.filename.clone(),
+            ))
+        } else {
+            ExecutionTemplate::Gguf {
+                model_file: primary.filename.clone(),
+                chat_template: None,
+                context_length,
+                generation_params: None,
+            }
         },
         preprocessing: Vec::new(),
         postprocessing: Vec::new(),
@@ -1224,8 +1419,110 @@ fn build_qwen3vl_metadata(
             preprocessing_preset: VisionPreprocessingPreset::SigLip,
             image_size,
             patch_size: Some(patch_size),
+            max_image_tokens: None,
         }),
         description: Some(format!("{} (auto-generated Qwen3VL GGUF)", model_id)),
+        metadata,
+        voices: None,
+        max_chunk_chars: None,
+        trim_trailing_samples: None,
+    }
+}
+
+/// Metadata for a GGUF language model paired with an LFM3-VL projector
+/// (`lfm3vl`).
+///
+/// The projector reads images at native resolution, up to 4,096 tokens each,
+/// so one photo would fill the 4,096-token operational context. The image
+/// budget is capped at 1,024 tokens (about one megapixel). Sampling follows
+/// LiquidAI's recommendation for LFM3; thinking stays off because the
+/// metadata does not set `reasoning`.
+fn build_lfm3vl_metadata(
+    model_id: &str,
+    primary: &ModelFileInfo,
+    projector: &ModelFileInfo,
+    gguf_info: Option<&GgufInfo>,
+    projector_info: &GgufInfo,
+) -> ModelMetadata {
+    const DEFAULT_CONTEXT_LENGTH: usize = 4096;
+    const MAX_IMAGE_TOKENS: usize = 1024;
+
+    let max_context_length = gguf_info
+        .and_then(|info| info.context_length)
+        .and_then(|value| usize::try_from(value).ok());
+    let image_size = projector_info
+        .image_size
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(512);
+    let patch_size = projector_info
+        .patch_size
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(16);
+    let architecture = gguf_info
+        .and_then(|info| info.architecture.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    let quantization = gguf_info
+        .and_then(|info| info.quantization.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "task".to_string(),
+        serde_json::Value::String("vlm".to_string()),
+    );
+    metadata.insert(
+        "architecture".to_string(),
+        serde_json::Value::String(architecture),
+    );
+    metadata.insert(
+        "vision_architecture".to_string(),
+        serde_json::Value::String("lfm3vl".to_string()),
+    );
+    metadata.insert(
+        "backend".to_string(),
+        serde_json::Value::String("llamacpp".to_string()),
+    );
+    metadata.insert(
+        "context_length".to_string(),
+        serde_json::json!(DEFAULT_CONTEXT_LENGTH),
+    );
+    if let Some(max_context_length) = max_context_length {
+        metadata.insert(
+            "max_context_length".to_string(),
+            serde_json::json!(max_context_length),
+        );
+    }
+    metadata.insert(
+        "quantization".to_string(),
+        serde_json::Value::String(quantization),
+    );
+    metadata.insert("auto_generated".to_string(), serde_json::Value::Bool(true));
+
+    ModelMetadata {
+        model_id: model_id.to_string(),
+        version: "1.0".to_string(),
+        execution_template: ExecutionTemplate::VisionLanguage {
+            model_file: primary.filename.clone(),
+            chat_template: None,
+            context_length: DEFAULT_CONTEXT_LENGTH,
+            generation_params: Some(GenerationParams {
+                temperature: Some(0.1),
+                top_k: Some(50),
+                repetition_penalty: Some(1.1),
+                ..Default::default()
+            }),
+        },
+        preprocessing: Vec::new(),
+        postprocessing: Vec::new(),
+        files: vec![primary.filename.clone(), projector.filename.clone()],
+        vision_encoder: Some(VisionEncoderConfig {
+            file: projector.filename.clone(),
+            preprocessing_preset: VisionPreprocessingPreset::SigLip,
+            image_size,
+            patch_size: Some(patch_size),
+            max_image_tokens: Some(MAX_IMAGE_TOKENS),
+        }),
+        description: Some(format!("{} (auto-generated LFM3-VL GGUF)", model_id)),
         metadata,
         voices: None,
         max_chunk_chars: None,
@@ -2191,9 +2488,51 @@ mod tests {
 
         drop(f);
 
-        let info = read_gguf_metadata(&gguf_path).unwrap();
+        let info = read_gguf_metadata(&gguf_path).unwrap().unwrap();
         assert_eq!(info.architecture.as_deref(), Some("llama"));
         assert_eq!(info.context_length, Some(8192));
+    }
+
+    /// The projector type comes from `clip.projector_type`, then from
+    /// `clip.vision.projector_type`, whichever order the header lists them in.
+    #[test]
+    fn test_read_gguf_metadata_projector_type_falls_back_to_the_vision_key() {
+        fn projector(keys: &[(&str, &str)]) -> Option<String> {
+            let dir = TempDir::new().unwrap();
+            let gguf_path = dir.path().join("mmproj.gguf");
+            let mut f = std::fs::File::create(&gguf_path).unwrap();
+            f.write_all(b"GGUF").unwrap();
+            f.write_all(&3u32.to_le_bytes()).unwrap();
+            f.write_all(&0u64.to_le_bytes()).unwrap();
+            f.write_all(&(keys.len() as u64).to_le_bytes()).unwrap();
+            for (key, value) in keys {
+                write_gguf_test_string(&mut f, key);
+                f.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+                write_gguf_test_string(&mut f, value);
+            }
+            drop(f);
+            read_gguf_metadata(&gguf_path)
+                .unwrap()
+                .unwrap()
+                .projector_type
+        }
+
+        assert_eq!(
+            projector(&[("clip.vision.projector_type", "lfm3vl")]).as_deref(),
+            Some("lfm3vl")
+        );
+        for keys in [
+            [
+                ("clip.vision.projector_type", "lfm3vl"),
+                ("clip.projector_type", "qwen3vl_merger"),
+            ],
+            [
+                ("clip.projector_type", "qwen3vl_merger"),
+                ("clip.vision.projector_type", "lfm3vl"),
+            ],
+        ] {
+            assert_eq!(projector(&keys).as_deref(), Some("qwen3vl_merger"));
+        }
     }
 
     #[test]
@@ -2201,7 +2540,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("bad.gguf");
         std::fs::write(&path, b"NOT_GGUF_data").unwrap();
-        assert!(read_gguf_metadata(&path).is_none());
+        assert!(read_gguf_metadata(&path).unwrap().is_none());
     }
 
     #[test]
@@ -2271,6 +2610,390 @@ mod tests {
         let json = std::fs::read_to_string(&metadata_path).unwrap();
         let parsed: ModelMetadata = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.model_id, "test-model");
+    }
+
+    /// A text GGUF runs at its native context capped at 4,096 tokens, like the
+    /// vision builders: llama.cpp reserves the KV cache for the whole window
+    /// at load. The native value is kept as `max_context_length`.
+    #[test]
+    fn build_gguf_metadata_caps_context_and_keeps_native_value() {
+        let primary = ModelFileInfo {
+            filename: "model-Q4_K_M.gguf".to_string(),
+            format: ModelFormat::Gguf,
+            size_bytes: 0,
+        };
+        // (declared context, context_length, max_context_length)
+        let cases: [(Option<u64>, u64, Option<u64>); 5] = [
+            (Some(262_144), 4096, Some(262_144)),
+            (Some(4096), 4096, Some(4096)),
+            (Some(2048), 2048, Some(2048)),
+            (None, 4096, None),
+            (Some(0), 4096, None),
+        ];
+
+        for (declared, expected, expected_max) in cases {
+            let info = GgufInfo {
+                architecture: Some("lfm3".to_string()),
+                context_length: declared,
+                ..Default::default()
+            };
+            let metadata = build_gguf_metadata(
+                "model",
+                "org/model",
+                &primary,
+                "text-generation",
+                None,
+                Some(&info),
+            );
+
+            // The serialized form is what lands in `model_metadata.json`.
+            let json = serde_json::to_value(&metadata).unwrap();
+            assert_eq!(
+                json["execution_template"]["context_length"], expected,
+                "declared {declared:?}"
+            );
+            assert_eq!(
+                json["metadata"]["context_length"], expected,
+                "declared {declared:?}"
+            );
+            assert_eq!(
+                json["metadata"]["max_context_length"],
+                serde_json::json!(expected_max),
+                "declared {declared:?}"
+            );
+        }
+    }
+
+    /// `--model-file` and `fromModelFile` take the window from the GGUF
+    /// header, so LFM3 1.7B's declared 262,144 tokens must not become it.
+    #[test]
+    fn generate_metadata_for_gguf_file_caps_long_native_context() {
+        let dir = TempDir::new().unwrap();
+        let gguf_path = dir.path().join("LFM3-1.7B-QAD-Q4_0.gguf");
+        let mut f = std::fs::File::create(&gguf_path).unwrap();
+        f.write_all(b"GGUF").unwrap();
+        f.write_all(&3u32.to_le_bytes()).unwrap();
+        f.write_all(&0u64.to_le_bytes()).unwrap();
+        f.write_all(&2u64.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut f, "general.architecture");
+        f.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut f, "lfm3");
+        write_gguf_test_string(&mut f, "lfm3.context_length");
+        f.write_all(&GGUF_TYPE_UINT32.to_le_bytes()).unwrap();
+        f.write_all(&262_144u32.to_le_bytes()).unwrap();
+        drop(f);
+
+        let metadata = generate_metadata_for_gguf_file(&gguf_path).unwrap();
+
+        metadata.validate().unwrap();
+        assert!(matches!(
+            metadata.execution_template,
+            xybrid_core::execution::ExecutionTemplate::Gguf {
+                ref model_file,
+                context_length: 4096,
+                ..
+            } if model_file == "LFM3-1.7B-QAD-Q4_0.gguf"
+        ));
+        assert_eq!(
+            metadata
+                .metadata
+                .get("max_context_length")
+                .and_then(|value| value.as_u64()),
+            Some(262_144)
+        );
+    }
+
+    #[test]
+    fn decision_marker_after_context_never_becomes_a_generative_template() {
+        for marker in [
+            "tokenizer.chat_template.systemone",
+            "systemone.temperature",
+            "lfm3.decision.type",
+        ] {
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join("arbitrary-name.gguf");
+            let mut file = std::fs::File::create(&path).unwrap();
+            file.write_all(b"GGUF").unwrap();
+            file.write_all(&3u32.to_le_bytes()).unwrap();
+            file.write_all(&0u64.to_le_bytes()).unwrap();
+            file.write_all(&1005u64.to_le_bytes()).unwrap();
+            write_gguf_test_string(&mut file, "general.architecture");
+            file.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+            write_gguf_test_string(&mut file, "lfm3");
+            write_gguf_test_string(&mut file, "lfm3.context_length");
+            file.write_all(&GGUF_TYPE_UINT32.to_le_bytes()).unwrap();
+            file.write_all(&262_144u32.to_le_bytes()).unwrap();
+            // The legacy header sniff stopped after 1,000 metadata entries.
+            for index in 0..1001 {
+                write_gguf_test_string(&mut file, &format!("test.padding.{index}"));
+                file.write_all(&GGUF_TYPE_UINT8.to_le_bytes()).unwrap();
+                file.write_all(&[0]).unwrap();
+            }
+            // d1's vocabulary exceeds the old 100,000-element skip bound.
+            write_gguf_test_string(&mut file, "tokenizer.ggml.tokens");
+            file.write_all(&GGUF_TYPE_ARRAY.to_le_bytes()).unwrap();
+            file.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+            file.write_all(&125_000u64.to_le_bytes()).unwrap();
+            file.write_all(&vec![0; 125_000 * 8]).unwrap();
+            write_gguf_test_string(&mut file, marker);
+            file.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+            write_gguf_test_string(&mut file, "placeholder; validated by native loader");
+            drop(file);
+            let metadata = generate_metadata_for_gguf_file(&path).unwrap();
+            assert!(matches!(
+                metadata.execution_template,
+                ExecutionTemplate::Decision(_)
+            ));
+            assert_eq!(metadata.metadata["task"], "decision");
+            let mut projector = std::fs::File::create(dir.path().join("mmproj.gguf")).unwrap();
+            projector.write_all(b"GGUF").unwrap();
+            projector.write_all(&3u32.to_le_bytes()).unwrap();
+            projector.write_all(&0u64.to_le_bytes()).unwrap();
+            projector.write_all(&1u64.to_le_bytes()).unwrap();
+            write_gguf_test_string(&mut projector, "clip.vision.projector_type");
+            projector
+                .write_all(&GGUF_TYPE_STRING.to_le_bytes())
+                .unwrap();
+            write_gguf_test_string(&mut projector, "lfm3vl");
+            drop(projector);
+            let (metadata, _) = inspect_and_generate(dir.path(), "test/d1", None).unwrap();
+            assert!(matches!(
+                metadata.execution_template,
+                ExecutionTemplate::Decision(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn decision_classification_refuses_headers_beyond_the_inspection_limit() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("model.gguf");
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(b"GGUF").unwrap();
+        file.write_all(&3u32.to_le_bytes()).unwrap();
+        file.write_all(&0u64.to_le_bytes()).unwrap();
+        file.write_all(&65_537u64.to_le_bytes()).unwrap();
+        drop(file);
+
+        assert!(matches!(
+            generate_metadata_for_gguf_file(&path),
+            Err(SdkError::MetadataInvalid(_))
+        ));
+        assert!(matches!(
+            inspect_and_generate(dir.path(), "test/model", None),
+            Err(SdkError::MetadataInvalid(_))
+        ));
+    }
+
+    /// Counts the seeks that reach the file, each of which is a system call.
+    struct CountingSeeks<R> {
+        inner: R,
+        seeks: usize,
+    }
+
+    impl<R: Read> Read for CountingSeeks<R> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.inner.read(buf)
+        }
+    }
+
+    impl<R: Seek> Seek for CountingSeeks<R> {
+        fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+            self.seeks += 1;
+            self.inner.seek(pos)
+        }
+    }
+
+    #[test]
+    fn fixed_width_arrays_are_skipped_without_a_seek_per_element() {
+        // The scores of a 262,144-entry vocabulary, then the next value.
+        let mut value = Vec::new();
+        value.extend(GGUF_TYPE_FLOAT32.to_le_bytes());
+        value.extend(262_144u64.to_le_bytes());
+        value.resize(value.len() + 262_144 * 4, 0);
+        value.extend(0xfeed_u32.to_le_bytes());
+        let mut reader = std::io::BufReader::new(CountingSeeks {
+            inner: std::io::Cursor::new(value),
+            seeks: 0,
+        });
+
+        assert!(skip_gguf_value(&mut reader, GGUF_TYPE_ARRAY));
+        assert_eq!(read_u32_le(&mut reader), Some(0xfeed));
+        assert!(reader.get_ref().seeks <= 2, "{}", reader.get_ref().seeks);
+    }
+
+    #[test]
+    fn an_array_longer_than_any_file_ends_the_scan() {
+        // The byte count overflows for one, and exceeds a seek offset for the other.
+        for element_type in [GGUF_TYPE_UINT64, GGUF_TYPE_UINT8] {
+            let mut value = Vec::new();
+            value.extend(element_type.to_le_bytes());
+            value.extend(u64::MAX.to_le_bytes());
+            let mut reader = std::io::BufReader::new(std::io::Cursor::new(value));
+            assert!(!skip_gguf_value(&mut reader, GGUF_TYPE_ARRAY));
+        }
+    }
+
+    #[test]
+    fn decision_marker_is_found_after_a_long_fixed_width_array() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("model.gguf");
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(b"GGUF").unwrap();
+        file.write_all(&3u32.to_le_bytes()).unwrap();
+        file.write_all(&0u64.to_le_bytes()).unwrap();
+        file.write_all(&2u64.to_le_bytes()).unwrap();
+        // One element more than the bound that string arrays keep.
+        write_gguf_test_string(&mut file, "tokenizer.ggml.token_type");
+        file.write_all(&GGUF_TYPE_ARRAY.to_le_bytes()).unwrap();
+        file.write_all(&GGUF_TYPE_INT32.to_le_bytes()).unwrap();
+        file.write_all(&1_000_001u64.to_le_bytes()).unwrap();
+        file.write_all(&vec![0; 1_000_001 * 4]).unwrap();
+        write_gguf_test_string(&mut file, "lfm3.decision.type");
+        file.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut file, "lfm3-d1");
+        drop(file);
+
+        let metadata = generate_metadata_for_gguf_file(&path).unwrap();
+        assert!(matches!(
+            metadata.execution_template,
+            ExecutionTemplate::Decision(_)
+        ));
+    }
+
+    #[test]
+    fn a_decision_type_that_generates_text_stays_a_chat_model() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("granite-switch.gguf");
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(b"GGUF").unwrap();
+        file.write_all(&3u32.to_le_bytes()).unwrap();
+        file.write_all(&0u64.to_le_bytes()).unwrap();
+        file.write_all(&3u64.to_le_bytes()).unwrap();
+        // Granite Switch as upstream converts it: a decision adapter on a
+        // text model, with the decision template next to the chat one.
+        for (key, value) in [
+            ("general.architecture", "graniteswitch"),
+            ("tokenizer.chat_template.systemone", "{{ questions }}"),
+            ("graniteswitch.decision.type", "granite-switch"),
+        ] {
+            write_gguf_test_string(&mut file, key);
+            file.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+            write_gguf_test_string(&mut file, value);
+        }
+        drop(file);
+
+        let metadata = generate_metadata_for_gguf_file(&path).unwrap();
+        assert!(matches!(
+            metadata.execution_template,
+            ExecutionTemplate::Gguf { .. }
+        ));
+        assert_ne!(metadata.metadata.get("task"), Some(&"decision".into()));
+    }
+
+    #[test]
+    fn a_decision_marker_whose_value_cannot_be_read_still_marks_the_file() {
+        // A type whose string is cut off, and a value type this reader does
+        // not know: the scan ends there, and the file is still a decision one.
+        for (key, value_type) in [
+            ("lfm3.decision.type", GGUF_TYPE_STRING),
+            ("lfm3.decision.temperature.choice", 99),
+        ] {
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join("model.gguf");
+            let mut file = std::fs::File::create(&path).unwrap();
+            file.write_all(b"GGUF").unwrap();
+            file.write_all(&3u32.to_le_bytes()).unwrap();
+            file.write_all(&0u64.to_le_bytes()).unwrap();
+            file.write_all(&2u64.to_le_bytes()).unwrap();
+            write_gguf_test_string(&mut file, "general.architecture");
+            file.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+            write_gguf_test_string(&mut file, "lfm3");
+            write_gguf_test_string(&mut file, key);
+            file.write_all(&value_type.to_le_bytes()).unwrap();
+            drop(file);
+
+            let metadata = generate_metadata_for_gguf_file(&path).unwrap();
+            assert!(
+                matches!(metadata.execution_template, ExecutionTemplate::Decision(_)),
+                "{key}"
+            );
+            assert_eq!(metadata.metadata["architecture"], "lfm3", "{key}");
+        }
+    }
+
+    /// A header with the architecture, then a decision type when `decision`.
+    fn write_minimal_gguf(path: &Path, decision: bool) {
+        let mut file = std::fs::File::create(path).unwrap();
+        file.write_all(b"GGUF").unwrap();
+        file.write_all(&3u32.to_le_bytes()).unwrap();
+        file.write_all(&0u64.to_le_bytes()).unwrap();
+        file.write_all(&(1 + u64::from(decision)).to_le_bytes())
+            .unwrap();
+        write_gguf_test_string(&mut file, "general.architecture");
+        file.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut file, "lfm3");
+        if decision {
+            write_gguf_test_string(&mut file, "lfm3.decision.type");
+            file.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+            write_gguf_test_string(&mut file, "lfm3-d1");
+        }
+    }
+
+    #[test]
+    fn a_sidecar_generated_before_decisions_is_refreshed_for_a_decision_artifact() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("d1.gguf");
+        // What an SDK without decision support generated: a chat template.
+        write_minimal_gguf(&path, false);
+        let stale = generate_metadata_for_gguf_file(&path).unwrap();
+        assert!(matches!(
+            stale.execution_template,
+            ExecutionTemplate::Gguf { .. }
+        ));
+        assert_eq!(stale.metadata["auto_generated"], true);
+        write_metadata(dir.path(), &stale).unwrap();
+        write_minimal_gguf(&path, true);
+
+        let refreshed = refresh_generated_decision_sidecar(dir.path(), &stale).unwrap();
+
+        // The template a fresh generation gives, on the old sidecar's identity.
+        let fresh = generate_metadata_for_gguf_file(&path).unwrap();
+        assert_eq!(
+            serde_json::to_value(&refreshed.execution_template).unwrap(),
+            serde_json::to_value(&fresh.execution_template).unwrap()
+        );
+        assert_eq!(refreshed.metadata["task"], "decision");
+        assert_eq!(refreshed.model_id, stale.model_id);
+        // The file was replaced, so the next load reads a decision sidecar
+        // and has nothing left to refresh.
+        let on_disk: ModelMetadata = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("model_metadata.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            on_disk.execution_template,
+            ExecutionTemplate::Decision(_)
+        ));
+        assert!(refresh_generated_decision_sidecar(dir.path(), &on_disk).is_none());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn only_a_generated_chat_sidecar_of_a_decision_artifact_is_refreshed() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("model.gguf");
+        write_minimal_gguf(&path, false);
+        let generated = generate_metadata_for_gguf_file(&path).unwrap();
+        // A chat model keeps its generated sidecar.
+        assert!(refresh_generated_decision_sidecar(dir.path(), &generated).is_none());
+
+        // A sidecar a person wrote is theirs, even for a decision artifact.
+        write_minimal_gguf(&path, true);
+        let mut authored = generated;
+        authored.metadata.remove("auto_generated");
+        assert!(refresh_generated_decision_sidecar(dir.path(), &authored).is_none());
+        assert!(!dir.path().join("model_metadata.json").exists());
     }
 
     #[test]
@@ -2388,6 +3111,94 @@ mod tests {
                 .get("architecture")
                 .and_then(|value| value.as_str()),
             Some("qwen35")
+        );
+    }
+
+    /// An LFM3-VL repo (language GGUF plus `lfm3vl` projector) gets the
+    /// projector loaded and its image budget capped; without the cap one
+    /// photo would fill the context.
+    #[test]
+    fn generate_metadata_emits_capped_vision_language_for_lfm3vl_projector_pair() {
+        let dir = TempDir::new().unwrap();
+
+        let language_path = dir.path().join("LFM3-VL-2B-QAD-Q4_0.gguf");
+        let mut language = std::fs::File::create(language_path).unwrap();
+        language.write_all(b"GGUF").unwrap();
+        language.write_all(&3u32.to_le_bytes()).unwrap();
+        language.write_all(&0u64.to_le_bytes()).unwrap();
+        language.write_all(&2u64.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut language, "general.architecture");
+        language.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut language, "lfm3");
+        write_gguf_test_string(&mut language, "lfm3.context_length");
+        language.write_all(&GGUF_TYPE_UINT32.to_le_bytes()).unwrap();
+        language.write_all(&128_000u32.to_le_bytes()).unwrap();
+        drop(language);
+
+        // LiquidAI's mmproj names its projector under the vision key only.
+        let projector_path = dir.path().join("mmproj-LFM3-VL-2B-Q8_0.gguf");
+        let mut projector = std::fs::File::create(projector_path).unwrap();
+        projector.write_all(b"GGUF").unwrap();
+        projector.write_all(&3u32.to_le_bytes()).unwrap();
+        projector.write_all(&0u64.to_le_bytes()).unwrap();
+        projector.write_all(&3u64.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut projector, "clip.vision.projector_type");
+        projector
+            .write_all(&GGUF_TYPE_STRING.to_le_bytes())
+            .unwrap();
+        write_gguf_test_string(&mut projector, "lfm3vl");
+        write_gguf_test_string(&mut projector, "clip.vision.image_size");
+        projector
+            .write_all(&GGUF_TYPE_UINT32.to_le_bytes())
+            .unwrap();
+        projector.write_all(&512u32.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut projector, "clip.vision.patch_size");
+        projector
+            .write_all(&GGUF_TYPE_UINT32.to_le_bytes())
+            .unwrap();
+        projector.write_all(&16u32.to_le_bytes()).unwrap();
+        drop(projector);
+
+        let (metadata, _) = generate_metadata(dir.path(), "LiquidAI/LFM3-VL-2B-GGUF").unwrap();
+
+        metadata.validate().unwrap();
+        assert!(matches!(
+            metadata.execution_template,
+            xybrid_core::execution::ExecutionTemplate::VisionLanguage {
+                ref model_file,
+                ref generation_params,
+                context_length: 4096,
+                ..
+            } if model_file == "LFM3-VL-2B-QAD-Q4_0.gguf"
+                && generation_params
+                    == &Some(GenerationParams {
+                        temperature: Some(0.1),
+                        top_k: Some(50),
+                        repetition_penalty: Some(1.1),
+                        ..Default::default()
+                    })
+        ));
+        let encoder = metadata
+            .vision_encoder
+            .as_ref()
+            .expect("the projector is loaded as the vision encoder");
+        assert_eq!(encoder.file, "mmproj-LFM3-VL-2B-Q8_0.gguf");
+        assert_eq!(encoder.image_size, 512);
+        assert_eq!(encoder.patch_size, Some(16));
+        assert_eq!(encoder.max_image_tokens, Some(1024));
+        assert_eq!(
+            metadata
+                .metadata
+                .get("vision_architecture")
+                .and_then(|value| value.as_str()),
+            Some("lfm3vl")
+        );
+        assert_eq!(
+            metadata
+                .metadata
+                .get("max_context_length")
+                .and_then(|value| value.as_u64()),
+            Some(128_000)
         );
     }
 
@@ -2571,8 +3382,10 @@ mod tests {
     #[cfg(feature = "onnx-inspect")]
     fn test_inspect_onnx_model_mnist() {
         // The mnist fixture has input: Input3 [1,1,28,28] float32
-        let model_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../integration-tests/fixtures/models/mnist/model.onnx");
+        let model_path = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+        )
+        .join("../../integration-tests/fixtures/models/mnist/model.onnx");
         if !model_path.exists() {
             eprintln!(
                 "Skipping test: mnist fixture not found at {}",
@@ -3023,8 +3836,10 @@ mod tests {
     #[cfg(feature = "onnx-inspect")]
     fn test_generate_metadata_mnist_fixture() {
         // Integration test: run generate_metadata on the real mnist fixture
-        let fixture_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../integration-tests/fixtures/models/mnist");
+        let fixture_dir = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+        )
+        .join("../../integration-tests/fixtures/models/mnist");
         if !fixture_dir.exists() {
             eprintln!(
                 "Skipping test: mnist fixture not found at {}",

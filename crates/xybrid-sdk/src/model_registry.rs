@@ -111,6 +111,16 @@ fn lock_registry() -> MutexGuard<'static, Vec<RegisteredModel>> {
 }
 
 /// Milliseconds since the Unix epoch, saturating to 0 if the clock is before it.
+/// Serializes tests that release every registered model (`release_memory()`)
+/// with tests that rely on a loaded model staying resident until its first
+/// run (lazy materialization), since the registry is process-wide.
+#[cfg(test)]
+pub(crate) fn residency_test_lock() -> MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
