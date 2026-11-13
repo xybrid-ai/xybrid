@@ -29,8 +29,14 @@ const RUNTIME_METALLIB_ENV: &str = "XYBRID_MLX_METALLIB";
 const METALLIB_NAME: &str = "mlx.metallib";
 
 /// Ensure MLX can find `mlx.metallib` through its own lookup before the first
-/// FFI call touches Metal. Runs once per process; the outcome is cached.
+/// FFI call touches Metal, and that MLX errors come back as `Err`. Runs once
+/// per process; the outcome is cached.
+///
+/// Every entry point that can be a process's first MLX call goes through
+/// here. mlx-c's own error handler prints the message and exits the process,
+/// so ours must be in place before anything can fail.
 pub(crate) fn ensure_metallib_resource() -> MlxResult<()> {
+    ffi::ensure_error_handler();
     METALLIB_RESOURCE
         .get_or_init(|| {
             let image_dir = ffi::image_dir().ok_or_else(|| {
@@ -45,6 +51,12 @@ pub(crate) fn ensure_metallib_resource() -> MlxResult<()> {
         .as_ref()
         .map(|_| ())
         .map_err(|e| MlxError::MetalCompileFailure(e.clone()))
+}
+
+/// Whether MLX has been set up in this process. Until it has, MLX holds no
+/// memory, and a call into it would start the Metal runtime.
+pub(crate) fn metallib_ready() -> bool {
+    METALLIB_RESOURCE.get().is_some_and(Result::is_ok)
 }
 
 /// The two places MLX looks for a colocated library, in its order.

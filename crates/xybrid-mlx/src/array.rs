@@ -123,6 +123,9 @@ pub fn async_eval(outputs: &[&MlxArray]) -> MlxResult<()> {
         return Ok(());
     }
     let raws: Vec<_> = outputs.iter().map(|array| array.as_raw()).collect();
+    // Two threads evaluating at once crash inside MLX; reentrant for a
+    // caller that already holds the lock around its whole operation.
+    let _mlx = crate::exclusive();
     // SAFETY: each raw handle is backed by a live `&MlxArray`; the vector
     // retains its own handles and is freed before returning.
     let vec = unsafe { ffi::vector_array_from(&raws) };
@@ -331,6 +334,9 @@ impl MlxArray {
     /// `mlx_array_item_*` / `mlx_array_data_*` read forces it). Calling
     /// `eval` is idempotent: subsequent calls are cheap no-ops.
     pub fn eval(&self) -> MlxResult<()> {
+        // Two threads evaluating at once crash inside MLX; reentrant for a
+        // caller that already holds the lock around its whole operation.
+        let _mlx = crate::exclusive();
         // SAFETY: self.raw is live per struct invariant.
         let result = unsafe { ffi::array_eval(self.raw) };
         if result.is_ok() {

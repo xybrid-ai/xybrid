@@ -87,6 +87,47 @@ fn synthetic_bert_template_executor_routes_to_mlx_embedding_without_external_fix
     }
 }
 
+/// Unloading an embedding model gives its memory back: nothing of it stays
+/// in use, and nothing of it stays in MLX's pool waiting for a later run.
+#[test]
+fn synthetic_bert_unloaded_model_returns_its_memory() {
+    let _guard = mlx_test_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let prompt = "Hello";
+    write_synthetic_canonical_bert_bundle(tmp.path(), prompt);
+    let memory = || {
+        (
+            xybrid_mlx::active_memory().expect("active memory"),
+            xybrid_mlx::cache_memory().expect("cache memory"),
+        )
+    };
+
+    xybrid_mlx::clear_cache().expect("clear cache");
+    let (active_before, pooled_before) = memory();
+    let mut adapter =
+        MlxEmbeddingAdapter::load(tmp.path(), &MlxEmbeddingConfig::new(16)).expect("load bundle");
+    adapter.embed(prompt).expect("embed");
+    assert!(
+        memory().0 > active_before,
+        "a loaded model holds MLX memory"
+    );
+
+    adapter.unload();
+
+    let (active_after, pooled_after) = memory();
+    // The few bytes left are this thread's constant scalars, not the model.
+    assert!(
+        active_after <= active_before + 64,
+        "the unloaded model still holds {} bytes",
+        active_after - active_before
+    );
+    assert!(
+        pooled_after <= pooled_before,
+        "MLX still pools {} bytes of the unloaded model",
+        pooled_after - pooled_before
+    );
+}
+
 #[test]
 fn synthetic_bert_template_executor_marks_truncated_embedding() {
     let _guard = mlx_test_lock();

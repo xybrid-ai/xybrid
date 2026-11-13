@@ -354,6 +354,15 @@ struct LoadedState {
     /// config-driven stop set. Falls back to the historical hardcoded
     /// token-name scan when the bundle declares nothing.
     eos_token_ids: Vec<i64>,
+    /// Hands the weights' memory back to the system once they are dropped:
+    /// MLX would otherwise keep it pooled until some later generation. Keep
+    /// it the last field; fields drop in declaration order.
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    _pooled_memory: xybrid_mlx::ReleasePooledMemory,
 }
 
 /// MLX LLM adapter. The adapter is `Send + Sync` —
@@ -442,6 +451,15 @@ impl MlxLlmAdapter {
             target_arch = "aarch64"
         ))]
         let _mlx = xybrid_mlx::exclusive();
+        // Declared before the weights so it drops after them on every path:
+        // a load that fails partway must not leave what it had materialized
+        // in MLX's pool.
+        #[cfg(all(
+            feature = "llm-mlx-runtime",
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let _pooled_memory = xybrid_mlx::ReleasePooledMemory::default();
         #[cfg(all(
             feature = "llm-mlx-runtime",
             target_os = "macos",
@@ -519,6 +537,12 @@ impl MlxLlmAdapter {
             lfm35_runtime_weights,
             chat_template,
             eos_token_ids,
+            #[cfg(all(
+                feature = "llm-mlx-runtime",
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            _pooled_memory: xybrid_mlx::ReleasePooledMemory::default(),
         });
         Ok(())
     }

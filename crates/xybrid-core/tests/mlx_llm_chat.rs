@@ -475,6 +475,72 @@ fn assert_two_models_generate_at_once(dir_a: &Path, dir_b: &Path) {
     }
 }
 
+/// MLX bytes in use and pooled, in that order.
+fn mlx_memory() -> (usize, usize) {
+    (
+        xybrid_mlx::active_memory().expect("active memory"),
+        xybrid_mlx::cache_memory().expect("cache memory"),
+    )
+}
+
+/// Dropping a model gives its memory back: nothing of it stays in use, and
+/// nothing of it stays in MLX's pool waiting for a generation that may never
+/// come.
+fn assert_dropped_model_returns_its_memory(dir: &Path) {
+    xybrid_mlx::clear_cache().expect("clear cache");
+    let (active_before, pooled_before) = mlx_memory();
+
+    let adapter = MlxLlmAdapter::load(dir, &MlxLlmConfig::default()).expect("load bundle");
+    let (active_loaded, pooled_loaded) = mlx_memory();
+    let tokens = streamed_token_ids(&adapter, THREAD_PROMPT_A, &thread_test_config());
+    assert!(!tokens.is_empty());
+    let (active_generated, pooled_generated) = mlx_memory();
+    drop(adapter);
+    let (active_after, pooled_after) = mlx_memory();
+
+    eprintln!(
+        "mlx memory (active, pooled): before=({active_before}, {pooled_before}) \
+         loaded=({active_loaded}, {pooled_loaded}) \
+         generated=({active_generated}, {pooled_generated}) \
+         dropped=({active_after}, {pooled_after})"
+    );
+    assert!(
+        active_loaded > active_before,
+        "a loaded model holds MLX memory"
+    );
+    // A thread keeps a few constant scalars alive; they are not the model.
+    assert!(
+        active_after <= active_before + 64,
+        "the dropped model still holds {} bytes",
+        active_after - active_before
+    );
+    assert!(
+        pooled_after <= pooled_before,
+        "MLX still pools {} bytes of the dropped model",
+        pooled_after - pooled_before
+    );
+}
+
+#[test]
+fn synthetic_qwen_dropped_model_returns_its_memory() {
+    let _guard = mlx_test_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_synthetic_qwen_bundle(tmp.path());
+
+    assert_dropped_model_returns_its_memory(tmp.path());
+}
+
+#[test]
+fn real_qwen_dropped_model_returns_its_memory_when_staged() {
+    let Some(dir) = qwen_bundle_dir() else {
+        eprintln!("SKIP: XYBRID_MLX_QWEN_DIR not set");
+        return;
+    };
+    let _guard = mlx_test_lock();
+
+    assert_dropped_model_returns_its_memory(&dir);
+}
+
 #[test]
 fn synthetic_qwen_generates_off_the_loading_thread() {
     let _guard = mlx_test_lock();

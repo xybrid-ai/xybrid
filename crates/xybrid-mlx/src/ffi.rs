@@ -424,6 +424,59 @@ pub(crate) unsafe fn set_cache_limit(limit: usize) -> Result<usize, MlxError> {
     Ok(previous)
 }
 
+/// Wait for the work in flight on MLX's default GPU and CPU streams.
+///
+/// A scheduled evaluation keeps the arrays it reads alive until it completes,
+/// on MLX's own threads. After this returns, arrays that were dropped while
+/// it ran have been freed.
+///
+/// # Safety
+///
+/// The caller holds the MLX lock (`exclusive`): synchronizing ends the GPU
+/// stream's open command buffer, which no other thread may be encoding into.
+pub(crate) unsafe fn synchronize_default_streams() -> Result<(), MlxError> {
+    let mut first_error = None;
+    for stream in [
+        sys::mlx_default_gpu_stream_new(),
+        sys::mlx_default_cpu_stream_new(),
+    ] {
+        if let Err(error) = check_rc(sys::mlx_synchronize(stream), "mlx_synchronize") {
+            first_error.get_or_insert(error);
+        }
+        stream_free(stream);
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
+/// Bytes MLX currently holds for live arrays.
+///
+/// # Safety
+///
+/// Safe to call from any thread at any time: it reads an allocator counter
+/// under the allocator's own lock.
+pub(crate) unsafe fn active_memory() -> Result<usize, MlxError> {
+    let mut bytes = 0usize;
+    check_rc(
+        sys::mlx_get_active_memory(&mut bytes),
+        "mlx_get_active_memory",
+    )?;
+    Ok(bytes)
+}
+
+/// Bytes MLX keeps pooled for reuse: freed, but not returned to the system.
+///
+/// # Safety
+///
+/// Safe to call from any thread at any time, as [`active_memory`] is.
+pub(crate) unsafe fn cache_memory() -> Result<usize, MlxError> {
+    let mut bytes = 0usize;
+    check_rc(
+        sys::mlx_get_cache_memory(&mut bytes),
+        "mlx_get_cache_memory",
+    )?;
+    Ok(bytes)
+}
+
 /// Read the linked MLX library's version string (e.g. `"0.31.1"`).
 ///
 /// # Safety

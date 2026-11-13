@@ -10,12 +10,27 @@
 //! load (weights are materialized into MLX arrays), a generation, an embedding
 //! run. Concurrent operations queue; they never interleave.
 //!
+//! The evaluating calls of this crate ([`MlxArray::eval`](crate::MlxArray::eval),
+//! [`async_eval`](crate::async_eval) and the readbacks built on them) take the
+//! lock themselves, so no use of the safe API can evaluate from two threads at
+//! once. An operation that spans several evaluations, with lazy graphs in
+//! flight between them, still takes it once around the whole run.
+//!
 //! A generation holds the lock for its whole run, streaming callbacks
 //! included: it has the next token's graph in flight while a callback runs,
 //! so the lock cannot be dropped between tokens. A callback may start MLX
 //! work on its own thread (the lock is reentrant there). It must not block on
 //! MLX work that another thread has yet to start, which would wait for this
 //! lock forever.
+//!
+//! # Giving memory back
+//!
+//! MLX frees an array's memory into a pool it keeps for reuse, so a dropped
+//! model stays allocated to the process until the pool is cleared.
+//! [`release_pooled_memory`] clears it without ever waiting for the lock: at
+//! once when MLX is idle, otherwise as the operation in flight lets go.
+//! [`ReleasePooledMemory`] does that on drop, for the types that own a model's
+//! arrays.
 //!
 //! A static is the right owner here even though statics are otherwise avoided
 //! for correctness-relevant state: the state being protected is MLX's own
@@ -24,9 +39,13 @@
 
 use std::cell::Cell;
 use std::marker::PhantomData;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
 
 static MLX_WORK: Mutex<()> = Mutex::new(());
+
+/// Set by [`release_pooled_memory`]; cleared by whoever clears the pool.
+static POOL_RELEASE_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
     /// How many [`MlxExclusive`] guards this thread holds. Only the outermost
@@ -67,6 +86,86 @@ pub fn exclusive() -> MlxExclusive {
 impl Drop for MlxExclusive {
     fn drop(&mut self) {
         HELD.with(|held| held.set(held.get() - 1));
+        if let Some(lock) = self._lock.take() {
+            // Outermost guard: the operation is over. Clear the pool if a
+            // model was dropped while it ran.
+            clear_pool_if_requested();
+            drop(lock);
+            // A request can arrive after the check above and find the lock
+            // still held; it left the job to this thread.
+            release_pool_if_idle();
+        }
+    }
+}
+
+/// Return the memory MLX pools for reuse to the system, as soon as no MLX
+/// operation is running.
+///
+/// Never waits for the lock. When MLX is idle the pool is cleared before this
+/// returns, after any evaluation still completing in the background has
+/// let go of the arrays it read. When an operation is in flight, on this
+/// thread or another, the pool is cleared as that operation releases the
+/// lock, so dropping a model never blocks behind someone else's generation.
+pub fn release_pooled_memory() {
+    POOL_RELEASE_REQUESTED.store(true, Ordering::SeqCst);
+    release_pool_if_idle();
+}
+
+/// Clear the pool if that was requested and no MLX operation holds the lock.
+fn release_pool_if_idle() {
+    if !POOL_RELEASE_REQUESTED.load(Ordering::SeqCst) {
+        return;
+    }
+    // Inside this thread's own operation: its outermost guard clears on the
+    // way out. During thread teardown the count is gone; nothing is held.
+    if HELD.try_with(Cell::get).unwrap_or(0) > 0 {
+        return;
+    }
+    let _lock = match MLX_WORK.try_lock() {
+        Ok(lock) => lock,
+        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        // The operation in flight clears the pool when it lets go.
+        Err(TryLockError::WouldBlock) => return,
+    };
+    clear_pool_if_requested();
+}
+
+/// Clear the pool if that was requested. The caller holds [`MLX_WORK`].
+fn clear_pool_if_requested() {
+    if POOL_RELEASE_REQUESTED.swap(false, Ordering::SeqCst) {
+        // Nothing is pooled before MLX's first use (a load that failed
+        // validation, say), and clearing would start the Metal runtime.
+        if !crate::resources::metallib_ready() {
+            return;
+        }
+        // A model dropped right after its last evaluation is still held by
+        // that evaluation until it completes; wait, so its memory reaches
+        // the pool before the pool is cleared, not after.
+        // SAFETY: the caller holds the lock, as both calls require; live
+        // arrays are unaffected.
+        let released = unsafe {
+            crate::ffi::synchronize_default_streams().and_then(|()| crate::ffi::clear_cache())
+        };
+        if let Err(error) = released {
+            tracing::warn!(%error, "mlx.release_pooled_memory.failed");
+        }
+    }
+}
+
+/// Returns MLX's pooled memory to the system when dropped; see
+/// [`release_pooled_memory`].
+///
+/// Make it the **last** field of a type that owns a model's MLX arrays.
+/// Fields drop in declaration order, so the arrays are freed into the pool
+/// first and the pool is cleared after.
+#[derive(Debug, Default)]
+pub struct ReleasePooledMemory {
+    _private: (),
+}
+
+impl Drop for ReleasePooledMemory {
+    fn drop(&mut self) {
+        release_pooled_memory();
     }
 }
 

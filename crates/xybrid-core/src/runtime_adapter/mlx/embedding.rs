@@ -185,6 +185,15 @@ struct LoadedState {
         target_arch = "aarch64"
     ))]
     runtime_weights: std::sync::Mutex<super::arch::bert::runtime::BertWeights>,
+    /// Hands the weights' memory back to the system once they are dropped:
+    /// MLX would otherwise keep it pooled until some later run. Keep it the
+    /// last field; fields drop in declaration order.
+    #[cfg(all(
+        feature = "llm-mlx-runtime",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    _pooled_memory: xybrid_mlx::ReleasePooledMemory,
 }
 
 /// MLX-backed embedding adapter. The Apple runtime path keeps canonical BERT
@@ -243,6 +252,9 @@ impl MlxEmbeddingAdapter {
         ))]
         let runtime_weights = {
             let _mlx = xybrid_mlx::exclusive();
+            // A load that fails partway must not leave what it had
+            // materialized in MLX's pool.
+            let _pooled_memory = xybrid_mlx::ReleasePooledMemory::default();
             super::arch::bert::runtime::build(&bert_cfg, &weights)?
         };
 
@@ -256,6 +268,12 @@ impl MlxEmbeddingAdapter {
                 target_arch = "aarch64"
             ))]
             runtime_weights: std::sync::Mutex::new(runtime_weights),
+            #[cfg(all(
+                feature = "llm-mlx-runtime",
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            _pooled_memory: xybrid_mlx::ReleasePooledMemory::default(),
         });
         Ok(())
     }
