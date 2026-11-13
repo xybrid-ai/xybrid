@@ -171,6 +171,9 @@ int  llama_format_chat_with_model_c(
 llama_batch llama_batch_init_c(int n_tokens, int embd, int n_seq_max);
 void llama_batch_free_c(llama_batch batch);
 
+/* `banned_tokens` (NULL / 0 for none) are token ids the chain never picks:
+   their logits are set to -inf ahead of every other sampler. The generation
+   functions below take the same pair. */
 XYBRID_LLAMA_SAMPLER* llama_sampler_chain_create_c(
     const XYBRID_LLAMA_MODEL* model,
     float temperature,
@@ -181,7 +184,9 @@ XYBRID_LLAMA_SAMPLER* llama_sampler_chain_create_c(
     int penalty_last_n,
     uint32_t seed,
     const char* grammar,
-    const char* grammar_root);
+    const char* grammar_root,
+    const int32_t* banned_tokens,
+    int n_banned_tokens);
 void llama_sampler_free_c(XYBRID_LLAMA_SAMPLER* smpl);
 
 /* Streaming-callback token type (matches Rust's `TokenCallback`). */
@@ -203,6 +208,8 @@ int  llama_generate_c(
     uint32_t seed,
     const char* grammar,
     const char* grammar_root,
+    const int32_t* banned_tokens,
+    int n_banned_tokens,
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs);
@@ -223,6 +230,8 @@ int  llama_generate_streaming_c(
     uint32_t seed,
     const char* grammar,
     const char* grammar_root,
+    const int32_t* banned_tokens,
+    int n_banned_tokens,
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs,
@@ -245,6 +254,8 @@ int  llama_generate_from_current_logits_c(
     uint32_t seed,
     const char* grammar,
     const char* grammar_root,
+    const int32_t* banned_tokens,
+    int n_banned_tokens,
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs,

@@ -1233,6 +1233,8 @@ unsafe extern "C" {
         seed: u32,
         grammar: *const ::std::os::raw::c_char,
         grammar_root: *const ::std::os::raw::c_char,
+        banned_tokens: *const i32,
+        n_banned_tokens: ::std::os::raw::c_int,
     ) -> *mut ::std::os::raw::c_void;
 }
 unsafe extern "C" {
@@ -1261,6 +1263,8 @@ unsafe extern "C" {
         seed: u32,
         grammar: *const ::std::os::raw::c_char,
         grammar_root: *const ::std::os::raw::c_char,
+        banned_tokens: *const i32,
+        n_banned_tokens: ::std::os::raw::c_int,
         stop_seqs: *const i32,
         stop_lens: *const ::std::os::raw::c_int,
         n_stop_seqs: ::std::os::raw::c_int,
@@ -1282,6 +1286,8 @@ unsafe extern "C" {
         seed: u32,
         grammar: *const ::std::os::raw::c_char,
         grammar_root: *const ::std::os::raw::c_char,
+        banned_tokens: *const i32,
+        n_banned_tokens: ::std::os::raw::c_int,
         stop_seqs: *const i32,
         stop_lens: *const ::std::os::raw::c_int,
         n_stop_seqs: ::std::os::raw::c_int,
@@ -1304,6 +1310,8 @@ unsafe extern "C" {
         seed: u32,
         grammar: *const ::std::os::raw::c_char,
         grammar_root: *const ::std::os::raw::c_char,
+        banned_tokens: *const i32,
+        n_banned_tokens: ::std::os::raw::c_int,
         stop_seqs: *const i32,
         stop_lens: *const ::std::os::raw::c_int,
         n_stop_seqs: ::std::os::raw::c_int,

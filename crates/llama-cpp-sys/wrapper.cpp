@@ -42,6 +42,7 @@
 #endif
 #include <stdlib.h>
 #include <string.h>
+#include <limits>
 #include <thread>
 #include <vector>
 #include <atomic>
@@ -779,7 +780,9 @@ llama_sampler* llama_sampler_chain_create_c(
     int penalty_last_n,
     uint32_t seed,
     const char* grammar,
-    const char* grammar_root
+    const char* grammar_root,
+    const int32_t* banned_tokens,
+    int n_banned_tokens
 ) {
     // Create sampler chain with default params
     llama_sampler_chain_params chain_params = llama_sampler_chain_default_params();
@@ -788,7 +791,30 @@ llama_sampler* llama_sampler_chain_create_c(
         return nullptr;
     }
 
-    // Grammar constraint goes FIRST: it masks (sets logit = -inf) every token
+    // Banned tokens come before everything else: each gets logit = -inf, so
+    // no sampler after it (grammar, penalties, top_k/top_p/min_p, temp,
+    // dist/greedy) can pick one. llama_sampler_init_logit_bias copies the
+    // array. Ids outside the vocabulary are skipped, and a NULL/empty list
+    // (or missing model) bans nothing.
+    if (banned_tokens && n_banned_tokens > 0 && model) {
+        const int32_t n_vocab = llama_vocab_n_tokens(llama_model_get_vocab(model));
+        std::vector<llama_logit_bias> bans;
+        bans.reserve(n_banned_tokens);
+        for (int i = 0; i < n_banned_tokens; ++i) {
+            if (banned_tokens[i] >= 0 && banned_tokens[i] < n_vocab) {
+                bans.push_back({banned_tokens[i], -std::numeric_limits<float>::infinity()});
+            }
+        }
+        if (!bans.empty()) {
+            llama_sampler* ban_smpl = llama_sampler_init_logit_bias(
+                n_vocab, static_cast<int32_t>(bans.size()), bans.data());
+            if (ban_smpl) {
+                llama_sampler_chain_add(chain, ban_smpl);
+            }
+        }
+    }
+
+    // Grammar constraint goes next: it masks (sets logit = -inf) every token
     // the GBNF grammar would reject, so all downstream samplers (penalties,
     // top_k/top_p/min_p, temp, dist/greedy) only ever see grammar-valid
     // candidates. The chain's per-token llama_sampler_accept (below, in the
@@ -917,6 +943,8 @@ static bool check_stop_sequences(
  * @param top_k       Top-k sampling (0 = disabled)
  * @param repeat_penalty Repetition penalty (1.0 = disabled, > 1.0 = penalize)
  * @param seed        Random seed for sampling
+ * @param banned_tokens   Token IDs the sampler never picks (can be NULL)
+ * @param n_banned_tokens Number of banned tokens (0 if none)
  * @param stop_seqs   Flattened array of stop sequence token IDs (can be NULL)
  * @param stop_lens   Length of each stop sequence (can be NULL)
  * @param n_stop_seqs Number of stop sequences (0 if none)
@@ -937,6 +965,8 @@ int llama_generate_c(
     uint32_t seed,
     const char* grammar,
     const char* grammar_root,
+    const int32_t* banned_tokens,
+    int n_banned_tokens,
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs
@@ -960,7 +990,7 @@ int llama_generate_c(
     // penalty_last_n = 64 is a reasonable default (consider last 64 tokens for penalty)
     llama_sampler* sampler = llama_sampler_chain_create_c(
         model, temperature, top_p, min_p, top_k, repeat_penalty, 64, seed,
-        grammar, grammar_root
+        grammar, grammar_root, banned_tokens, n_banned_tokens
     );
     if (!sampler) {
         return -2;
@@ -1118,6 +1148,8 @@ int llama_generate_from_current_logits_c(
     uint32_t seed,
     const char* grammar,
     const char* grammar_root,
+    const int32_t* banned_tokens,
+    int n_banned_tokens,
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs,
@@ -1141,7 +1173,7 @@ int llama_generate_from_current_logits_c(
 
     llama_sampler* sampler = llama_sampler_chain_create_c(
         model, temperature, top_p, min_p, top_k, repeat_penalty, 64, seed,
-        grammar, grammar_root
+        grammar, grammar_root, banned_tokens, n_banned_tokens
     );
     if (!sampler) {
         return -2;
@@ -1266,6 +1298,8 @@ int llama_generate_from_current_logits_c(
  * @param top_k       Top-k sampling (0 = disabled)
  * @param repeat_penalty Repetition penalty (1.0 = disabled)
  * @param seed        Random seed for sampling
+ * @param banned_tokens   Token IDs the sampler never picks (can be NULL)
+ * @param n_banned_tokens Number of banned tokens (0 if none)
  * @param stop_seqs   Flattened array of stop sequence token IDs (can be NULL)
  * @param stop_lens   Length of each stop sequence (can be NULL)
  * @param n_stop_seqs Number of stop sequences (0 if none)
@@ -1288,6 +1322,8 @@ int llama_generate_streaming_c(
     uint32_t seed,
     const char* grammar,
     const char* grammar_root,
+    const int32_t* banned_tokens,
+    int n_banned_tokens,
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs,
@@ -1324,7 +1360,7 @@ int llama_generate_streaming_c(
     // Create sampler chain with repetition penalty
     llama_sampler* sampler = llama_sampler_chain_create_c(
         model, temperature, top_p, min_p, top_k, repeat_penalty, 64, seed,
-        grammar, grammar_root
+        grammar, grammar_root, banned_tokens, n_banned_tokens
     );
     if (!sampler) {
         return -2;
