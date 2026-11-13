@@ -37,11 +37,12 @@ xybrid run --pipeline <name> --dry-run
 
 在 dry-run 模式下，CLI 会像真实运行一样在当前设备快照下决策第一个阶段（策略与路由），但不执行推理。后续阶段标记为未知：它们的输入是上一阶段的输出，在未执行时并不存在。
 
-对于来自 Registry 的本地 LLM 阶段，`--backend mlx` 会请求
-SafeTensors 变体，并要求 Apple Silicon 构建启用了可用的
-`llm-mlx-runtime` 功能。`--backend llamacpp` 会为 LLM 阶段请求 GGUF
-变体。Registry Embedding 阶段目前会拒绝显式的非 MLX 本地后端，因为本地
-selector 还没有暴露非 MLX 的 Embedding 运行时。
+显式指定的后端是硬性要求：如果当前构建无法提供该后端，或该后端无法运行模型的
+格式，运行会失败。`mlx` 是面向 Apple Silicon Mac 的预览功能，需要启用了
+`llm-mlx-runtime` 功能的构建；它运行 SafeTensors 模型，并会拒绝需要工具、
+语法约束或图像的请求。对于 Registry 模型，`mlx` 会请求 SafeTensors 变体，
+`llamacpp` 会请求 GGUF 变体。Registry 目前还没有任何 SafeTensors 变体，因此
+`mlx` 目前只适用于本地模型目录。
 
 ## 示例
 
@@ -107,14 +108,15 @@ XYBRID_API_KEY="<your-xybrid-api-key>" xybrid run \
 `DEEPSEEK_API_KEY` 直接调用 DeepSeek，可用于手动检查提供商连接。
 自动化策略路由测试使用回环地址上的模拟 DeepSeek 端点和测试凭据。
 
-### 强制使用 MLX SafeTensors
+### 在 MLX 上运行本地 SafeTensors 模型
 
 ```bash
-xybrid run --model qwen3-4b --backend mlx --input-text "Summarize this."
+xybrid run --directory ./qwen3-mlx --backend mlx --input-text "Summarize this."
 ```
 
-当 Registry 模型同时发布 GGUF 和 MLX SafeTensors 变体，并且你希望走
-MLX 运行时而不是自动本地后端选择时，使用该选项。
+该目录包含模型的 SafeTensors 文件，以及一个指明受支持架构的
+`model_metadata.json`。不加 `--backend` 时，这样的目录同样会在 MLX 上运行；
+加上该参数后，MLX 不可用时会直接报错。
 
 ## 示例输出
 

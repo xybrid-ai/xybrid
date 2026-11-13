@@ -21,8 +21,9 @@ vendor/mlx-apple/
 │   │   └── Resources/          # iOS Metal libraries are absent with current pins
 │   ├── ios-arm64-simulator/
 │   │   └── ... (same layout)
-│   └── macos-arm64/
-│       └── ... (same layout)
+│   ├── macos-arm64/
+│   │   └── ... (same layout)
+│   └── Licenses/               # upstream LICENSE and ACKNOWLEDGMENTS of mlx and mlx-c
 ├── .installed-sha256         # tracks the SHA of the currently-installed artifact (gitignored)
 └── .installed-source-pin      # tracks local source-build pins when no release artifact is used
 ```
@@ -39,10 +40,11 @@ readiness.
 | [ml-explore/mlx](https://github.com/ml-explore/mlx) | Apple's array framework, Metal kernels, auto-diff engine | Produces `libmlx.a` + `*.metallib` |
 | [ml-explore/mlx-c](https://github.com/ml-explore/mlx-c) | C API shim over mlx's C++ surface | Produces `libmlxc.a` |
 
-Both are MIT-licensed. See the upstream `LICENSE` files for the canonical
-attribution text. This directory redistributes the compiled binaries under the
-same MIT terms; the license text travels with the xcframework's
-`Info.plist`/metadata produced by `xcodebuild -create-xcframework`.
+Both are MIT-licensed. The build scripts copy each project's `LICENSE` and
+`ACKNOWLEDGMENTS.md` (MLX's lists the third-party code it compiles in) into
+`mlx.xcframework/Licenses/`, so the notices travel with the binary. Anything
+that redistributes a binary linked against this xcframework ships those files
+too.
 
 ## Pinned Version
 
@@ -52,14 +54,14 @@ identifying the published download artifact. The source pins are sufficient for
 runtime CI and local Apple Silicon validation; the release fields are only
 needed for download-based installs through `fetch-mlx-xcframework.sh`.
 
-The initial pins are:
+The current pins are the commits of two upstream releases:
 
-- `mlx` at tag `v0.31.1`
-- `mlx-c` at tag `v0.6.0`
+- `mlx` v0.31.1 (`ce45c525`)
+- `mlx-c` v0.6.0 (`0726ca92`)
 
-These are starting points — bump them in a dedicated PR when a newer MLX source
-revision is required. CI can validate the runtime from source pins before a
-published xcframework artifact exists.
+Pin the commit a tag points at, never an annotated tag object's hash. Bump them
+in a dedicated PR when a newer MLX is required. CI can validate the runtime
+from source pins before a published xcframework artifact exists.
 
 ## Fresh-Clone Setup
 

@@ -437,12 +437,17 @@ MLX-compatible SafeTensors metadata will fail during load or execution rather
 than silently falling back.
 
 ```rust
-use xybrid_sdk::{BackendChoice, Xybrid};
+use xybrid_sdk::{BackendChoice, ModelLoader};
 
-let model = Xybrid::model("qwen3.5-0.8b")
+// A local SafeTensors bundle, required to run on MLX.
+let model = ModelLoader::from_directory("./qwen3-mlx")?
     .with_backend(BackendChoice::Mlx)
     .load()?;
 ```
+
+MLX is a preview for Apple Silicon Macs and needs a build with the
+`llm-mlx-runtime` feature; see [`docs/backends/mlx.md`](../backends/mlx.md)
+for what it runs and what it refuses (tools, grammars, images).
 
 ### Implementation Status
 

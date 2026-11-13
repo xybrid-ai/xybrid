@@ -40,12 +40,13 @@ xybrid run --directory <dir> --input-text <context> --choice <id>=<text>
 
 In dry-run mode the CLI decides the first stage (policy and route) exactly as a real run would, at the current device snapshot, without running inference. Later stages are reported as unknown: their input is the previous stage's output, which does not exist without execution.
 
-For registry-backed local LLM stages, `--backend mlx` requests the
-SafeTensors artifact variant and requires an Apple Silicon build with the
-`llm-mlx-runtime` feature available. `--backend llamacpp` requests the GGUF
-variant for LLM stages. Registry embedding stages currently reject explicit
-non-MLX local backends because no non-MLX embedding runtime is exposed through
-the local selector.
+An explicit backend is a hard requirement: the run fails if this build cannot
+provide it or it cannot run the model's format. `mlx` is a preview for Apple
+Silicon Macs that needs a build with the `llm-mlx-runtime` feature; it runs
+SafeTensors models, and refuses requests that need tools, grammars or images.
+For a registry model, `mlx` asks for the SafeTensors variant and `llamacpp`
+for the GGUF one. The registry lists no SafeTensors variants yet, so `mlx`
+applies to local model directories today.
 
 ## Examples
 
@@ -114,15 +115,15 @@ example uses `gpt-4o-mini`, which the platform must have configured upstream.
 automated policy-routing tests use a loopback fake DeepSeek endpoint with dummy
 credentials.
 
-### Force MLX SafeTensors
+### Run a local SafeTensors model on MLX
 
 ```bash
-xybrid run --model qwen3-4b --backend mlx --input-text "Summarize this."
+xybrid run --directory ./qwen3-mlx --backend mlx --input-text "Summarize this."
 ```
 
-Use this when a registry model publishes both GGUF and MLX SafeTensors
-variants and you want the MLX runtime path instead of automatic local backend
-selection.
+The directory holds the model's SafeTensors files and a `model_metadata.json`
+that names a supported architecture. Without `--backend`, such a directory
+runs on MLX too; the flag makes it an error if MLX is unavailable.
 
 ## Sample Output
 

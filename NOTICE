@@ -26,6 +26,27 @@ crates/llama-cpp-sys/NOTICE. Native redistributions must carry those texts.
 
 --------------------------------------------------------------------------------
 
+MLX and mlx-c (linked only by builds with the `llm-mlx-runtime` feature)
+Copyright (c) 2023 Apple Inc.
+Copyright (c) 2023 ml-explore
+Licensed under the MIT License
+https://github.com/ml-explore/mlx
+https://github.com/ml-explore/mlx-c
+
+The license texts, and the acknowledgments of the third-party code MLX
+compiles in, are staged in vendor/mlx-apple/mlx.xcframework/Licenses/ by the
+scripts that build it. A redistributed binary that links MLX must carry them.
+
+--------------------------------------------------------------------------------
+
+Qwen2.5 tokenizer (test fixture only, never part of a built artifact)
+Copyright 2024 Alibaba Cloud
+Licensed under the Apache License 2.0
+https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct
+See crates/xybrid-core/tests/fixtures/README.md.
+
+--------------------------------------------------------------------------------
+
 ONNX Runtime
 Copyright (c) Microsoft Corporation
 Licensed under the MIT License

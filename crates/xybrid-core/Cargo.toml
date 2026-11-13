@@ -8,6 +8,9 @@ homepage.workspace = true
 documentation.workspace = true
 description = "Core runtime for hybrid cloud-edge AI inference: model execution, pipeline orchestration, and routing primitives."
 readme = "README.md"
+# A 7 MB tokenizer that only the MLX tests read (tests/fixtures/README.md).
+# Nothing in a published build uses it.
+exclude = ["tests/fixtures/qwen_tokenizer.json"]
 # Upstream llama backend source lives at workspace `vendor/llama-cpp/`
 # (see `.gitmodules`), consumed by the `xybrid-llama-sys` crate's build
 # script. No tarball-exclude needed here — the source is not under this

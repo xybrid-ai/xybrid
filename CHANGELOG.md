@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **MLX backend (preview, Apple Silicon macOS):** SafeTensors LLM and
+  embedding models can run on Apple's MLX: Qwen 3, Gemma 4, LFM2 and LFM2.5
+  (full precision or MLX 4-bit), and BERT and nomic-embed-text embeddings. It
+  is an opt-in source build (`llm-mlx-runtime`, after
+  `tools/scripts/build-local-mlx-xcframework.sh`); no released SDK, CLI or
+  binding contains it, and the registry lists no SafeTensors variants yet. A
+  local SafeTensors bundle with one of those architectures runs on MLX. MLX
+  refuses a request that carries tools or a grammar instead of answering
+  without them, takes text only, and runs one operation at a time across the
+  process. See `docs/backends/mlx.md`.
+- **Backend override:** `backend:` on a pipeline stage, `--backend` on
+  `xybrid run`, `repl` and `fetch`, `ModelLoader::with_backend` in Rust and
+  `load(backend:)` in Flutter pin the local LLM or embedding backend to `mlx`,
+  `llamacpp` or `mistral`. It is a hard requirement: the load fails if this
+  build cannot provide the backend or the backend cannot run the model's
+  format. Swift, Kotlin, Python, Unity and React Native do not have it yet.
+- **Rust SDK:** `GenerationConfig::seed` (`with_seed`) makes sampled output
+  reproducible on the MLX backend; the llama.cpp and mistralrs backends ignore
+  it. `Xybrid::model(id)` is shorthand for `ModelLoader::from_registry(id)`.
+
 ### Fixed
 
 - **SDK:** a pipeline stage with no `target:` and no provider runs locally

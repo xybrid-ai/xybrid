@@ -1,263 +1,194 @@
 # MLX Backend
 
-[MLX](https://github.com/ml-explore/mlx) is Apple's array framework for machine learning on Apple Silicon. Xybrid uses MLX as a third LLM and embedding backend on Apple Silicon Macs, complementing the always-available llama.cpp path. iOS builds carry the non-linking `llm-mlx` tier today; the real `llm-mlx-runtime` path is not treated as iOS-ready until upstream MLX produces a Metal-enabled iOS xcframework slice.
+[MLX](https://github.com/ml-explore/mlx) is Apple's array framework for machine learning on Apple Silicon. Xybrid can run SafeTensors LLM and embedding models on it, next to the llama.cpp backend that runs GGUF.
 
-This document covers when MLX runs, how to opt in or out per pipeline, and how to troubleshoot common issues.
+The MLX backend is a **preview**:
 
-## When MLX is used
+- It runs on **Apple Silicon macOS** only. iOS builds compile the non-linking tier and cannot run MLX (see [iOS](#ios)).
+- It is an **opt-in source build** (`llm-mlx-runtime`). No released SDK, CLI or binding artifact contains it yet.
+- It does less than llama.cpp. Read [What MLX does not do](#what-mlx-does-not-do) before choosing it for a model.
 
-MLX is selected automatically for local SafeTensors LLM bundles when the metadata uses `backend: auto` (or omits `backend`) and the `execution_template.architecture` is one of the MLX text-generation families (`qwen3`, `gemma4`, `lfm2`, `lfm`, `lfm3`). Local embedding metadata with an embedding task and a supported BERT/nomic-BERT architecture follows the same automatic MLX path. Explicit `backend: mlx` still hard-requires MLX.
+## What it runs
 
-The lower-level runtime backend selector (`xybrid_core::runtime_adapter::selector`) also drives automatic SDK and CLI registry loading for backend-selectable LLM and embedding models. That selector can choose MLX when **all** of the following are true:
+| Architecture (`execution_template.architecture`) | Models | Evidence |
+|---|---|---|
+| `qwen3` | Qwen 3 | CI runs it on synthetic weights and on real ones (Qwen3 0.6B, MLX 4-bit). Full-precision Qwen3 0.6B passes the same tests locally. |
+| `gemma4` | Gemma 4 E2B / E4B | CI runs it on synthetic weights. The real-weight test passes locally when the bundle is staged. |
+| `lfm2`, `lfm`, `lfm3` | LFM2, LFM2.5 | CI runs it on synthetic weights. LFM2 350M and LFM2.5 1.2B pass the real-weight tests locally. No public LFM3 SafeTensors bundle has been tested. |
+| `bert`, `nomic_bert` | BERT, nomic-embed-text v1.5 (embeddings) | CI runs it on synthetic weights. nomic-embed-text v1.5 passes the real-weight tests locally. |
 
-1. The build includes the `llm-mlx-runtime` feature.
-2. The host is Apple Silicon (`aarch64-apple-darwin`; iOS is still staged behind a Metal-enabled upstream slice).
-3. The Metal runtime probe succeeds at process startup (a reachable Metal device and a functional `mlx.xcframework`).
-4. The registry model detail exposes a `format: safetensors` variant for the requested LLM or embedding model.
+Weights are SafeTensors: one `model.safetensors`, or a Hugging Face `model.safetensors.index.json` with its `model-*.safetensors` shards. LLM bundles can be full precision (F32, F16, BF16) or MLX affine-quantized (the `mlx-community/*-4bit` layout). Embedding bundles must be full precision.
 
-If any of these are false, LLM registry loaders can fall through to `llm-llamacpp` and request a `format: gguf` variant when the registry advertises one; embedding registry loaders keep the registry default, typically ONNX, instead of requesting GGUF because the local llama.cpp adapter does not currently produce embedding envelopes. The current `TemplateExecutor` path wires local SafeTensors MLX bundle routing. Explicit SDK/CLI backend overrides for registry LLM models still ask the registry for the matching artifact format (`mlx` -> `safetensors`, `llamacpp` -> `gguf`) before loading, and unavailable explicit backends fail with the selector's platform-specific error. Known registry embedding models reject explicit non-MLX local backends until a non-MLX embedding runtime exists. Outside Apple Silicon macOS, including current iOS builds, the non-linking `llm-mlx` tier can compile for metadata and selector checks, but `llm-mlx-runtime` is a compile-time error because the real runtime is validated only for `aarch64-apple-darwin`.
+A bundle whose architecture or quantization MLX cannot load fails at load with an error that says so; nothing falls back to another backend.
 
-### Model coverage
+## Getting an MLX build
 
-MLX only accelerates models with a registered MLX variant. The current implementation supports:
+MLX is behind two Cargo features:
 
-| Architecture | Status | Notes |
-|--------------|--------|-------|
-| Qwen 3 | 🟢 Runtime | SafeTensors load, persistent runtime weight residency, per-layer K/V cache append/read for incremental decode, chat formatting, tokenization, sampling, stop handling, GPU-default dispatch with CPU fallback, telemetry, and streaming callback path are wired. |
-| Gemma 4 (2B / 4B) | 🟡 Partial runtime | SafeTensors load, persistent runtime weight residency, per-layer K/V cache append/read for incremental decode, Gemma RMSNorm `(1 + weight)`, tanh-GeLU FFN, mixed local/global attention with per-layer head dimensions, tokenization, sampling, stop handling, telemetry, and streaming callback path are wired. Synthetic generation coverage is in-tree; nested `text_config`, `language_model.`-prefixed tensor layouts, `chat_template.jinja` fallback, macro-capable chat-template rendering, and indexed SafeTensors shards are supported. The public full Gemma BF16 bundle passes the env-gated real generation smoke locally when `XYBRID_MLX_GEMMA_DIR` points at the staged indexed SafeTensors shard bundle. Gemma 4 also has exact BF16 MLX/GGUF benchmark rows recorded as informational because current MLX decode throughput is below the parity floor. CI checks the staged fixture manifest and compiles the runtime harness; the real bundle smoke remains env-gated because the payload is too large for the repo. |
-| LFM 2 / 2.5 / 3.5 | 🟡 Partial runtime | SafeTensors load, persistent runtime weight residency, attention K/V append/read, short-conv recurrent state, hybrid short-conv/full-attention blocks, SwiGLU FFN, tokenization, sampling, stop handling, telemetry, and streaming callback path are wired. Synthetic generation coverage is in-tree, including the `lfm3` dispatcher shape. Public LFM2 350M and LFM2.5 1.2B Instruct BF16 bundles pass env-gated real generation smokes locally when staged; the LFM2.5 bundle also has exact BF16 MLX/GGUF benchmark rows recorded as informational because current MLX decode throughput is below the parity floor. No public LFM3.5 text-generation SafeTensors fixture was found during the current staging pass, so LFM3 remains synthetic-only evidence. CI checks the staged fixture manifest and compiles the runtime harness; real LFM bundle smoke remains env-gated because the payloads are too large for the repo. |
-| BERT / nomic-bert (embeddings) | 🟡 Partial runtime | Canonical BERT and the current `nomic-ai/nomic-embed-text-v1.5` SafeTensors layouts now materialize resident weights and execute encoder-block runtime paths, including both single-file and HuggingFace indexed shard manifests. `TemplateExecutor` routes embedding metadata through the cached `MlxEmbeddingStrategy`; runtime CI runs external-fixture-free synthetic BERT smokes through the core TemplateExecutor integration harness, the SDK `ModelLoader::from_directory(...).load().run(...)` path, and the CLI local-directory path for both supported SafeTensors layouts, so the checked-in tests prove real MLX encoder execution even when no staged Nomic bundle is present. Real Nomic fixture assertions pass locally when `XYBRID_MLX_NOMIC_DIR` points at the staged SafeTensors bundle. CI checks the staged fixture manifest and compiles the runtime harness plus `mlx_embedding` benchmark; measured embedding rows are still env-gated because the payload is too large for the repo. |
+| Feature | What it compiles | Where |
+|---|---|---|
+| `llm-mlx` | Everything except the calls into MLX: backend selection, registry formats, config and weight validation, chat templates, sampling. Running a model returns an error that names `llm-mlx-runtime`. | Every target. Included in `platform-macos` and `platform-ios`. |
+| `llm-mlx-runtime` | The MLX runtime itself. Links `mlx.xcframework`. | `aarch64-apple-darwin` only; a compile error anywhere else. Never part of a preset. |
 
-LLM models without a SafeTensors MLX variant continue to load through llama.cpp or the registry default; embedding models without a SafeTensors MLX variant keep the registry default. There is no change in behaviour for non-MLX variants.
+```sh
+# 1. Materialize the MLX xcframework (gitignored) under vendor/mlx-apple/.
+./tools/scripts/build-local-mlx-xcframework.sh    # from the pinned sources; needs Xcode and CMake
 
-## Runtime selection
+# 2. Build with the runtime.
+cargo build -p xybrid-cli --features platform-macos,llm-mlx-runtime
+```
 
-Local `model_metadata.json` routing is transparent once the bundle declares a supported MLX SafeTensors architecture. Existing `TemplateExecutor` / pipeline calls route `backend: mlx` and auto Qwen/Gemma/LFM SafeTensors bundles through `MlxLlmAdapter`; embedding metadata with `backend: mlx`, or `backend: auto` plus an embedding task and a supported BERT/nomic-BERT architecture, routes through `MlxEmbeddingAdapter`. Registry-driven `Xybrid.model(id).load()`, SDK pipeline loading, `xybrid run`, and `xybrid fetch` now use the selector for automatic LLM and embedding registry formats; on Apple Silicon with `llm-mlx-runtime` and a working Metal probe they request `format=safetensors`, LLM fallback requests `format=gguf` when available, and embedding fallback keeps the registry default. `Xybrid.model(id).with_backend(BackendChoice::Mlx).load()` and explicit CLI/pipeline `backend: mlx` overrides hard-require the MLX backend and request `safetensors` before loading. Explicit `llamacpp` / `mistral` overrides for known registry embedding tasks fail before artifact resolution because those adapters do not currently return embedding envelopes.
+The pins are in [`vendor/mlx-apple/UPSTREAM_VERSIONS.txt`](../../vendor/mlx-apple/UPSTREAM_VERSIONS.txt). No prebuilt xcframework is published yet (`release=unpublished`), so `fetch-mlx-xcframework.sh` has nothing to download and the source build is the only path; see [`vendor/mlx-apple/README.md`](../../vendor/mlx-apple/README.md). A build outside this repository sets `MLX_XCFRAMEWORK_PATH` to an `mlx.xcframework`.
 
-When the Apple runtime tier is enabled, Qwen, Gemma, and LFM weights are materialized into adapter state during model load and reused across generation calls. Each runtime resets resident generation state per call, writes prompt state during prefill, then forwards only the newest token at the absolute decode position. Qwen and Gemma keep per-layer K/V tensors. LFM keeps K/V tensors for attention layers and the previous `conv_L_cache - 1` `B * x` activations for short-conv layers. Embedding weights are held by the executor's cached `MlxEmbeddingStrategy`, so repeated local embedding calls reuse the loaded BERT/nomic-BERT adapter when the model path and embedding config match. The generation loop explicitly requests MLX's default GPU stream for prefill and decode. If that stream cannot be initialized, it logs `mlx.generate.gpu_stream_unavailable_falling_back_to_cpu` and retries on MLX's default CPU stream instead of aborting generation.
+### Shipping a binary that links MLX
 
-### Real bundle fixture staging
+MLX loads its Metal shader library, `mlx.metallib`, when it first uses the GPU. It looks next to the binary image it is linked into (the executable, or the dynamic library that embeds it): `mlx.metallib` in that directory, then `Resources/mlx.metallib`.
 
-The in-tree MLX LLM runtime tests always run synthetic Qwen/Gemma/LFM bundles, and the MLX embedding integration harness always runs synthetic canonical-BERT TemplateExecutor smokes for both single-file and indexed-shard SafeTensors layouts. The SDK runtime tests build both synthetic canonical-BERT layouts and run them through `ModelLoader::from_directory(...).load().run(...)`; the CLI runtime tests run both layouts through `xybrid run`'s local-directory handler and verify the saved embedding output. Real SafeTensors fixtures are manual/staged today; registry publication is separate from runtime validation and is not required for source-build CI or local Apple Silicon checks. The fixture manifest records the expected env var and files for each staged model, and `integration-tests/download.sh --list` / `--check` surfaces that state, including missing shards referenced by `model.safetensors.index.json`. Runtime loading accepts either a single `model.safetensors` file or a HuggingFace `model.safetensors.index.json` manifest with the referenced `model-*.safetensors` shard files present in the same directory. Registry passthrough fetches use the same contract: `xybrid fetch`, SDK registry loads, and pipeline fetches download the resolved file, every file listed in inline `model_metadata.json`, and every shard referenced by a downloaded SafeTensors index, while rejecting absolute or parent-directory shard paths. The MLX-vs-llama.cpp LLM benchmark and MLX embedding benchmark both honor these staged env vars, so large public fixtures can stay outside the repo checkout.
+- `cargo run` and `cargo test` from this repository need nothing: the first MLX call links the vendored library into `Resources/` beside the built binary.
+- A binary you distribute must ship `mlx.metallib` (from `mlx.xcframework/macos-arm64/Resources/`) at one of those two places, or the user sets `XYBRID_MLX_METALLIB` to a copy of it.
 
-| Model fixture | Runtime test env var | Required files |
-|---------------|----------------------|----------------|
-| `qwen3-4b-mlx` | `XYBRID_MLX_QWEN_4B_DIR` | `config.json`, `tokenizer.json`, `tokenizer_config.json`, `model.safetensors.index.json`, referenced `model-*.safetensors` shards |
-| `gemma4-2b` | `XYBRID_MLX_GEMMA_DIR` | `config.json`, `tokenizer.json`, `tokenizer_config.json`, `chat_template.jinja`, `model.safetensors.index.json`, referenced `model-*.safetensors` shards |
-| `lfm2-350m-bf16` | `XYBRID_MLX_LFM_DIR` | `config.json`, `tokenizer.json`, `model.safetensors` |
-| `lfm2.5-1.2b-instruct-mlx` | `XYBRID_MLX_LFM25_DIR` | `config.json`, `tokenizer.json`, `tokenizer_config.json`, `chat_template.jinja`, `model.safetensors.index.json`, referenced `model.safetensors` |
-| `nomic-embed-text-v1.5` | `XYBRID_MLX_NOMIC_DIR` | `config.json`, `tokenizer.json`, `model.safetensors` or `model.safetensors.index.json` plus referenced shard files |
+Without one, the first MLX call fails with an error that names the directory it searched.
 
-Use `./integration-tests/download.sh <fixture-id>` to print the exact local staging hint for a fixture. The script still returns non-zero for staged entries because it does not download them, and `--all` intentionally skips them.
+## How a model reaches MLX
 
-### Forcing a backend per pipeline
+### A local bundle
 
-To override the automatic selection, set `backend` on a model stage in your pipeline YAML:
+A directory or bundle whose `model_metadata.json` has a `SafeTensors` execution template and one of the architectures above runs on MLX. `backend: mlx` in the metadata pins it; so does leaving `backend` out or setting `auto`. An embedding bundle without `backend: mlx` must also declare an embedding task, so other SafeTensors BERT models are not taken over.
+
+### A registry model
+
+By default a registry model loads the registry's default variant, which is GGUF for LLMs. That is true on every build that cannot run MLX, and such a build makes no extra registry request.
+
+On a build that can run MLX (Apple Silicon, `llm-mlx-runtime`, Metal available), an LLM or embedding model for which the registry lists a `safetensors` variant loads that variant on MLX instead. The registry lists no SafeTensors variants today, so this changes nothing yet. When it does, a SafeTensors variant is a promise that MLX can load it: there is no fallback to GGUF if it cannot.
+
+A SafeTensors variant is cached separately from the default variant, so the two never shadow each other.
+
+### Choosing the backend yourself
+
+`backend` takes `auto` (the default), `mlx`, `llamacpp` or `mistral`. An explicit backend is a hard requirement: if this build or host cannot provide it, or it cannot run the model's format, the load fails with an error that names the target and the backends that are available. For a registry model, `mlx` asks the registry for the `safetensors` variant and `llamacpp` for the `gguf` one.
+
+Pipeline YAML, per stage:
 
 ```yaml
 name: llm-chat
 stages:
-  - model: qwen3-4b
-    backend: mlx          # "auto" | "mlx" | "llamacpp" | "mistral"
+  - model: qwen3.5-0.8b
+    backend: llamacpp
 ```
 
-- `auto` (default) — local SafeTensors LLM or embedding metadata routes to MLX when the architecture is supported; registry LLM and embedding loads use the selector to request SafeTensors on Apple Silicon runtime builds, while only LLM fallbacks request GGUF variants.
-- `mlx` — hard-require MLX. The pipeline fails to load on non-runtime targets, including current iOS non-linking builds, or when the Metal probe fails, with a pointed `SelectorError::ExplicitBackendUnavailable` error that names the target.
-- `llamacpp` — pin LLM registry loads to llama.cpp even on Apple Silicon (useful for parity testing or when a specific GGUF quantization is preferred). Known registry embedding models reject this override until a llama.cpp embedding path exists.
+CLI (`run`, `repl` and `fetch` take `--backend`; on `run --config` it applies to every local stage):
 
-For one-off CLI runs, use `--backend` with registry, bundle, directory,
-HuggingFace, GGUF file, or pipeline inputs:
-
-```bash
-xybrid run --directory ./qwen-mlx --backend mlx --input-text "Hello"
-xybrid run --config llm.yaml --backend llamacpp --input-text "Hello"
+```sh
+xybrid run --directory ./qwen3-mlx --backend mlx --input-text "Hello"
+xybrid run --model qwen3.5-0.8b --backend llamacpp --input-text "Hello"
 ```
 
-To pre-download the same backend-specific registry artifact, pass the backend
-to `fetch` as well. Pipeline fetches also honor per-stage `backend:` fields,
-with a CLI `--backend` override applying to all fetched device stages:
-
-```bash
-xybrid fetch --model qwen3-4b --backend mlx
-xybrid fetch llm.yaml
-```
-
-The same knob is exposed as a per-call override in the Rust SDK:
+Rust:
 
 ```rust
-use xybrid_sdk::{Xybrid, BackendChoice};
+use xybrid_sdk::{BackendChoice, ModelLoader};
 
-let model = Xybrid::model("qwen3-4b")
+let model = ModelLoader::from_directory("./qwen3-mlx")?
     .with_backend(BackendChoice::Mlx)
     .load()?;
 ```
 
-The binding layers expose the same override. Swift and Kotlin take it on the
-loader via UniFFI; Dart takes it as a named argument on `load()`:
-
-```swift
-let loader = XybridModelLoader.fromRegistry(modelId: "qwen3-4b")
-    .withBackend(backend: .mlx)
-let model = try loader.load()
-```
-
-```kotlin
-val model = XybridModelLoader.fromRegistry("qwen3-4b")
-    .withBackend(XybridBackend.MLX)
-    .load()
-```
+Flutter:
 
 ```dart
-final loader = XybridModelLoader.fromRegistry('qwen3-4b');
+final loader = XybridModelLoader.fromDirectory('/path/to/qwen3-mlx');
 final model = await loader.load(backend: XybridBackend.mlx);
 ```
 
-Passing `auto` (the default) preserves automatic selection; explicit backends
-that are unavailable on the host fail at load time with the selector's
-message (for example requesting `mlx` on Linux).
+The Swift, Kotlin, Python, Unity and React Native SDKs have no backend override yet.
 
-For registry LLM models this override requests a format-specific registry
-variant before loading (`mlx` -> `safetensors`, `llamacpp` -> `gguf`) and then
-pins the in-memory metadata backend. For known registry embedding tasks, MLX is
-the only explicit local backend accepted today. If the registry has no
-compatible SafeTensors variant, the MLX load fails instead of silently falling
-back to GGUF.
+Some pairs can never work and are rejected up front: `llamacpp` or `mistral` with a SafeTensors bundle or a registry embedding model, `mlx` with a GGUF model, and anything but `llamacpp` with a decision model.
 
-For local directories and bundles, explicit backend overrides are also checked
-against the artifact format before execution. `--backend mlx` is rejected for
-local GGUF metadata, and `--backend llamacpp` / `--backend mistral` are rejected
-for local SafeTensors metadata. Use `auto` when you want the metadata and runtime
-selector to choose the compatible local path.
+## What MLX does not do
 
-## Vendor xcframework
+A request for something on this list fails with an error; it is never answered without the feature.
 
-MLX native code lives in `vendor/mlx-apple/mlx.xcframework/`, materialized either by downloading a pinned artifact or by source-building the macOS runtime slice from the pinned SHAs in [`vendor/mlx-apple/UPSTREAM_VERSIONS.txt`](../../vendor/mlx-apple/UPSTREAM_VERSIONS.txt). The full packaging workflow [`build-mlx-xcframework.yml`](../../.github/workflows/build-mlx-xcframework.yml) compiles `ml-explore/mlx` + `ml-explore/mlx-c` into a fat xcframework with `iphoneos-arm64`, `iphonesimulator-arm64`, and `macos-arm64` slices.
+- **Tool calling.** A request with `tools` is refused. Run it on llama.cpp (`backend: llamacpp`).
+- **Grammars and JSON-schema output.** A request with `grammar` is refused, for the same reason.
+- **Images.** MLX runs text models only.
+- **Decision models.** They run on the llama.cpp decision runtime.
 
-The macOS slice is the runtime-critical slice and must include `Resources/mlx.metallib`. Current pinned upstream MLX forces `MLX_BUILD_METAL=OFF` for `CMAKE_SYSTEM_NAME=iOS`, so iOS slices are packaged for link-layout compatibility only and are expected to be CPU/no-Metal until that upstream gate changes. Do not describe iOS MLX runtime readiness from the presence of an iOS slice alone.
+Other differences from llama.cpp:
 
-For plain CLI and test binaries, `xybrid-mlx` resolves the vendored macOS `mlx.metallib` at build time and creates a `Resources/mlx.metallib` link next to the running binary before the first MLX FFI call. That keeps runtime execution independent of the disposable upstream source-build directory that produced `libmlx-combined.a`.
+- **One MLX operation at a time.** MLX does not tolerate two threads evaluating at once, so loads, generations and embedding runs are serialized across the whole process. Two MLX models never run in parallel; the second waits.
+- **No prompt reuse across turns.** Every call evaluates its whole prompt again. A long conversation costs more per turn than on llama.cpp, which keeps the shared prefix.
+- **Gemma reasoning.** A reasoning model's thinking is split off the answer and returned as `reasoning_content`, as on llama.cpp. Gemma 4 always answers directly, on both backends.
 
-Downstream consumers should not need CMake, Metal tooling, or a macOS host once a downloadable xcframework artifact pin is available. The download path is `tools/scripts/fetch-mlx-xcframework.sh`, which pulls the matching `mlx-v<version>.xcframework.zip` from the GitHub Release for the pinned commit and verifies its SHA256 against `UPSTREAM_VERSIONS.txt`. The script is idempotent: a matching `.installed-sha256` marker short-circuits the download.
+`seed` in the generation config is honored by MLX and makes sampled output reproducible. Without a seed, sampled output differs on every call, as on llama.cpp. Greedy decoding (temperature 0, the default) is deterministic either way.
 
-The runtime path is not blocked on a downloadable xcframework artifact. When `release=unpublished` / `sha256=unpublished`, CI builds the macOS arm64 runtime slice directly from the pinned `mlx=` and `mlx-c=` SHAs with `tools/scripts/build-local-mlx-xcframework.sh`, installs it into `vendor/mlx-apple/mlx.xcframework/`, and records `.installed-source-pin`. This source-build fallback is also the local Apple Silicon validation path while no download pin is available.
+## Testing
+
+CI runs the MLX runtime on Apple Silicon in two lanes, both only when something that reaches the runtime changed. The non-linking tier is checked on Linux for every code change.
+
+- `check (llm-mlx-runtime, macos)` in `ci.yml` uses synthetic, randomly initialized bundles written by the tests themselves, through the adapters, the executor, the SDK and the CLI.
+- `Test MLX (integration, real model)` in `test-mlx.yml` downloads one small real bundle, the `qwen3-0.6b-4bit-mlx` fixture (335 MB, pinned by revision and checksum), and runs the chat, streaming, cancellation and two-models-at-once tests on it, then the bundle through the CLI.
+
+The other real-weight tests are for bundles too large to download in CI. They run only when an environment variable points at a bundle staged on disk, and skip otherwise:
+
+| Fixture (`integration-tests/fixtures/models/models.json`) | Variable | Files |
+|---|---|---|
+| `qwen3-4b-mlx` (or any Qwen 3 bundle) | `XYBRID_MLX_QWEN_4B_DIR` / `XYBRID_MLX_QWEN_DIR` | `config.json`, `tokenizer.json`, `tokenizer_config.json`, weights |
+| an MLX 4-bit Qwen 3 bundle | `XYBRID_MLX_QWEN_4BIT_DIR` | same |
+| `gemma4-2b` | `XYBRID_MLX_GEMMA_DIR` | `config.json`, `tokenizer.json`, `tokenizer_config.json`, `chat_template.jinja`, weights |
+| `lfm2-350m-bf16` | `XYBRID_MLX_LFM_DIR` | `config.json`, `tokenizer.json`, weights |
+| `lfm2.5-1.2b-instruct-mlx` | `XYBRID_MLX_LFM25_DIR` | `config.json`, `tokenizer.json`, `tokenizer_config.json`, `chat_template.jinja`, weights |
+| `nomic-embed-text-v1.5` | `XYBRID_MLX_NOMIC_DIR` | `config.json`, `tokenizer.json`, weights |
 
 ```sh
-# Apple Silicon runtime validation path from source pins
-./tools/scripts/build-local-mlx-xcframework.sh
-
-# Download-based setup once release= and sha256= point at an artifact
-./tools/scripts/fetch-mlx-xcframework.sh
+XYBRID_MLX_QWEN_DIR=/path/to/Qwen3-0.6B \
+  cargo test -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp \
+  --test mlx_llm_chat
 ```
 
-The installed xcframework lives at `vendor/mlx-apple/mlx.xcframework/` and is gitignored. See [`vendor/mlx-apple/README.md`](../../vendor/mlx-apple/README.md) for refresh instructions and the upstream license attribution.
+`./integration-tests/download.sh qwen3-0.6b-4bit-mlx` downloads the CI fixture; point `XYBRID_MLX_QWEN_DIR` and `XYBRID_MLX_QWEN_4BIT_DIR` at `integration-tests/fixtures/models/qwen3-0.6b-4bit-mlx`. For a staged fixture, `download.sh <fixture-id>` prints where it comes from and does not download it.
 
-## Feature flags
-
-See [`FEATURE_MATRIX.md`](../FEATURE_MATRIX.md) for the full feature reference. MLX adds two flags:
-
-| Flag | Purpose | Default |
-|------|---------|---------|
-| `llm-mlx` | Non-linking MLX SafeTensors tier for config parsing, tokenizer/chat-template handling, weight validation, registry selection, and local adapter routing. It compiles on every target; forward-pass calls return a pointed runtime-gate error unless `llm-mlx-runtime` is also enabled on Apple Silicon macOS. | Included in `platform-macos` and `platform-ios` |
-| `llm-mlx-runtime` | Real MLX LLM and embedding forward pass via `xybrid-mlx` on Apple Silicon macOS. Requires `mlx.xcframework` on the link path. | Explicit opt-in |
-
-The two-tier split exists so that Linux / Windows / Android / iOS CI jobs can still build with `llm-mlx` in the feature set (for cross-platform config parsing, local routing checks, and registry round-trips) without linking against Metal. `llm-mlx-runtime` is the gate that pulls in `xybrid-mlx/bindings` and hard-requires the macOS arm64 xcframework slice.
-
-On macOS, `platform-macos` alone is not an MLX runtime build. Use
-`--features platform-macos,llm-mlx-runtime` when you need actual MLX
-SafeTensors execution through the SDK or CLI. From a local clone, populate
-`vendor/mlx-apple/mlx.xcframework/` with `./tools/scripts/fetch-mlx-xcframework.sh`
-when a download pin is available, or with
-`./tools/scripts/build-local-mlx-xcframework.sh` from pinned source SHAs. The
-runtime path and CI checks do not require a downloadable xcframework artifact
-while the pin remains unpublished. From an external build environment, set
-`MLX_XCFRAMEWORK_PATH` to the prebuilt `mlx.xcframework`.
-
-### Disabling MLX in a build
-
-```bash
-# Explicitly disable both flags
-cargo build --no-default-features --features "ort-download,llm-llamacpp"
-```
-
-Or, from a platform preset, use `platform-desktop` which intentionally omits MLX:
-
-```bash
-cargo build --features platform-desktop
-```
+`tools/scripts/capture-golden-tokens.sh --self` records the tokens a staged bundle decodes to at the current commit; `--test mlx_golden_parity` then fails if a later change alters them. Capture before changing decode code.
 
 ## Troubleshooting
 
-### `mlx_runtime_available` returns `false`
+### `MLX backend requested but not available on this platform`
 
-The Metal probe failed at startup. Common causes:
+`backend: mlx` is a hard requirement and this build or host cannot meet it. The error lists the backends that are available. The usual causes:
 
-- The build doesn't include `llm-mlx-runtime` — confirm with `cargo build -v 2>&1 | grep llm-mlx`.
-- The host is not Apple Silicon macOS — the shipping MLX runtime path requires `aarch64-apple-darwin`. Intel Macs (`x86_64-apple-darwin`) and current iOS non-linking builds fall through to llama.cpp; enabling `llm-mlx-runtime` for iOS is a compile-time error.
-- The `mlx.xcframework` is missing or corrupt — rerun `./tools/scripts/fetch-mlx-xcframework.sh` when a download pin is available, or `./tools/scripts/build-local-mlx-xcframework.sh` for the local source-build path. If the SHA256 check fails, delete `vendor/mlx-apple/mlx.xcframework/` and retry the fetch path.
-- The Metal device is unreachable — happens in some VM setups and certain CI runners. Check `ioreg -l | grep -i metal` returns a device.
+- the build has `llm-mlx` but not `llm-mlx-runtime` (every `platform-macos` build without the extra feature);
+- the host is not Apple Silicon macOS;
+- Metal is unreachable, which happens in some virtual machines.
 
-When the probe fails, automatic selection records the fallback decision and proceeds with llama.cpp; there is no crash.
+Use `backend: auto`, or build with the runtime.
 
-### Metal shader compile cache
+### `no MLX Metal library found`
 
-MLX caches compiled Metal kernels in `~/Library/Caches/com.apple.metal/` on macOS. A stale cache can cause first-run latency of 2–5 seconds as shaders recompile. To clear it:
+MLX could not find `mlx.metallib`. See [Shipping a binary that links MLX](#shipping-a-binary-that-links-mlx).
 
-```sh
-# macOS
-rm -rf ~/Library/Caches/com.apple.metal/
-```
+### `mlx.xcframework not found` at build time
 
-This is rarely needed in practice — the cache survives app updates and only invalidates on macOS upgrades.
+`llm-mlx-runtime` needs the xcframework under `vendor/mlx-apple/`, or `MLX_XCFRAMEWORK_PATH`. Run `./tools/scripts/build-local-mlx-xcframework.sh`.
 
-### iOS runtime status
+### `the MLX backend does not support tool calling` / `grammar-constrained generation`
 
-The current xcframework workflow can produce `iphoneos-arm64` and `iphonesimulator-arm64` static-library slices, but upstream MLX disables the Metal backend for `CMAKE_SYSTEM_NAME=iOS`. In local validation that produced `backend/metal/no_metal.cpp`, no `.metallib`, and availability warnings for Accelerate BLAS/LAPACK APIs below iOS 16.4.
+See [What MLX does not do](#what-mlx-does-not-do). Load the model with `backend: llamacpp`.
 
-Until a Metal-enabled iOS slice is available and verified on device, use llama.cpp GGUF variants for iOS LLM execution. Keep `llm-mlx` in the iOS preset for metadata, registry, and selector parity only; do not enable `llm-mlx-runtime` for iOS release builds.
+### `MLX sharded SafeTensors bundles require model.safetensors.index.json`
 
-Once upstream iOS Metal support lands, the iOS gate should be revalidated with a device run, a simulator link check, and memory-pressure tests for Qwen 0.8B before the docs call it ready.
+The directory has `model-*.safetensors` shards without the index that maps tensors to them. Download the index with the shards.
 
-### `ExplicitBackendUnavailable` on a non-Apple host
+### `unsupported quantization`
 
-Pipeline YAML with `backend: mlx` on a Linux / Windows / Android target will fail to load with:
+An embedding bundle is quantized, or an LLM bundle uses a quantization layout other than MLX affine. Use a full-precision bundle, or the model's GGUF variant on llama.cpp.
 
-```text
-MLX backend requested but not available on this platform (target: linux-x86_64)
-```
+## iOS
 
-This is intentional — `backend: mlx` is a hard constraint. Change the YAML to `backend: auto` (the default) or remove the field entirely to fall through to llama.cpp.
-
-### Sharded SafeTensors bundles
-
-MLX loading accepts both single-file `model.safetensors` bundles and HuggingFace indexed shard layouts:
-
-```text
-model.safetensors.index.json
-model-00001-of-00003.safetensors
-model-00002-of-00003.safetensors
-model-00003-of-00003.safetensors
-```
-
-The index is required because it maps tensor names to shard files. A directory that contains shard files without `model.safetensors.index.json` is rejected before runtime initialisation with:
-
-```text
-MLX sharded SafeTensors bundles require `model.safetensors.index.json`: found orphan shard `<path>` in `<dir>`.
-```
-
-### Quantized SafeTensors bundles
-
-MLX variants currently require dequantized SafeTensors weights. Bundles with `config.json` quantization metadata, including common 4-bit MLX-LM bundles, are rejected during header validation before Metal initialisation with:
-
-```text
-unsupported MLX quantization for `<model_type>`: <bits>-bit/group=<group_size>. <reason>. Register a GGUF fallback variant or republish this MLX variant as dequantized SafeTensors.
-```
-
-Use a GGUF llama.cpp variant for quantized distribution until `mlx_fast_quantized_matmul` is wired through `xybrid-mlx` and the architecture forward passes.
+Upstream MLX builds without its Metal backend for iOS, so there is nothing to run a model with. `platform-ios` carries `llm-mlx` so that metadata, selection and registry code compile the same on both Apple platforms; `llm-mlx-runtime` is a compile error for iOS. Use GGUF models on llama.cpp there.
 
 ## Further reading
 
-- [`vendor/mlx-apple/README.md`](../../vendor/mlx-apple/README.md) — xcframework sourcing and refresh.
-- [`FEATURE_MATRIX.md`](../FEATURE_MATRIX.md) — full feature reference and platform presets.
-- [`crates/xybrid-mlx/`](../../crates/xybrid-mlx/) — safe Rust wrapper around `mlx-c`.
-- [`crates/xybrid-core/src/runtime_adapter/mlx/`](../../crates/xybrid-core/src/runtime_adapter/mlx/) — `MlxLlmAdapter`, `MlxEmbeddingAdapter`, tokenizer, chat template, sampler, generate loop.
-- MLX upstream: [ml-explore/mlx](https://github.com/ml-explore/mlx), [ml-explore/mlx-c](https://github.com/ml-explore/mlx-c).
+- [`vendor/mlx-apple/README.md`](../../vendor/mlx-apple/README.md): where the xcframework comes from and how to refresh it.
+- [`FEATURE_MATRIX.md`](../FEATURE_MATRIX.md): every feature and platform preset.
+- [`crates/xybrid-mlx/`](../../crates/xybrid-mlx/): the safe Rust wrapper over `mlx-c`.
+- [`crates/xybrid-core/src/runtime_adapter/mlx/`](../../crates/xybrid-core/src/runtime_adapter/mlx/): the LLM and embedding adapters.
+- Upstream: [ml-explore/mlx](https://github.com/ml-explore/mlx), [ml-explore/mlx-c](https://github.com/ml-explore/mlx-c).
