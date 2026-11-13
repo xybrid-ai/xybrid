@@ -21,6 +21,7 @@ on:
       - 'vendor/mlx-apple/UPSTREAM_VERSIONS.txt'
       - 'tools/scripts/build-mlx-slice.sh'
       - 'tools/scripts/build-local-mlx-xcframework.sh'
+      - 'tools/scripts/run-mlx-real-tests.sh'
       - 'integration-tests/download.sh'
       - 'integration-tests/fixtures/models/models.json'
       - '.github/actions/mlx-xcframework/**'
@@ -42,6 +43,7 @@ on:
       - 'vendor/mlx-apple/UPSTREAM_VERSIONS.txt'
       - 'tools/scripts/build-mlx-slice.sh'
       - 'tools/scripts/build-local-mlx-xcframework.sh'
+      - 'tools/scripts/run-mlx-real-tests.sh'
       - 'integration-tests/download.sh'
       - 'integration-tests/fixtures/models/models.json'
       - '.github/actions/mlx-xcframework/**'
@@ -107,17 +109,16 @@ jobs:
 
       # The same bundle serves the full-precision and the quantized tests:
       # it is a chat model, and it is 4-bit. XYBRID_MLX_REQUIRE makes a test
-      # that cannot find it fail instead of skip. The name filters select the
-      # tests that need a Qwen bundle; the other families stay unstaged.
+      # that cannot find it fail instead of skip. The script runs each test in
+      # its own process: MLX aborts the process on some failures, and one
+      # abort must not hide the other tests or its own name.
       - name: Test MLX on real weights
         env:
           XYBRID_MLX_REQUIRE: XYBRID_MLX_QWEN_DIR,XYBRID_MLX_QWEN_4BIT_DIR
         run: |
           export XYBRID_MLX_QWEN_DIR="${GITHUB_WORKSPACE}/${MLX_FIXTURE}"
           export XYBRID_MLX_QWEN_4BIT_DIR="${GITHUB_WORKSPACE}/${MLX_FIXTURE}"
-          cargo test -p xybrid-core --no-default-features --features llm-mlx-runtime \
-            --test mlx_llm_chat -- --nocapture \
-            real_qwen four_turn_chat streaming_matches_non_streaming qwen35_quantized
+          ./tools/scripts/run-mlx-real-tests.sh llm-mlx-runtime
 
       # The bundle through the whole stack: metadata routing, the SDK loader,
       # the Metal library placed beside the binary, generation, CLI output.

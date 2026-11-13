@@ -431,6 +431,8 @@ jobs:
         run: bash tools/scripts/test-build-mlx-slice.sh
       - name: Test local MLX xcframework source-build script
         run: bash tools/scripts/test-build-local-mlx-xcframework.sh
+      - name: Test real-weight MLX test runner
+        run: bash tools/scripts/test-run-mlx-real-tests.sh
       - name: Test staged MLX fixture checks
         run: bash tools/scripts/test-integration-download-staged.sh
       - name: Test MLX benchmark wrapper host gates
