@@ -504,6 +504,7 @@ pub(crate) fn runtime_name(label: &str) -> &'static str {
         "ort" | "onnx" => "onnxruntime",
         "llamacpp" | "llama.cpp" => "llama.cpp",
         "mistralrs" | "mistral" => "mistral.rs",
+        "mlx" => "mlx",
         "whispercpp" => "whisper.cpp",
         "candle" => "candle",
         "zzz" => "zzz",
@@ -515,12 +516,13 @@ pub(crate) fn runtime_name(label: &str) -> &'static str {
 
 impl RunSubject {
     pub(crate) fn from_metadata(model_id: &str, metadata: &ModelMetadata) -> Self {
-        let hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
-        let runtime = xybrid_core::execution::template::backend_label_from_template(
-            &metadata.execution_template,
-            hint,
-        )
-        .map(runtime_name);
+        let runtime = xybrid_core::execution::template::backend_label_for_metadata(metadata)
+            .map(runtime_name);
+        // An MLX bundle is a chat model or an embedding model by its
+        // architecture, whether or not its metadata names a task.
+        let mlx_llm = xybrid_core::execution::template::is_mlx_llm_safetensors_metadata(metadata);
+        let mlx_embedding =
+            xybrid_core::execution::template::is_mlx_embedding_safetensors_metadata(metadata);
         let task = metadata
             .metadata
             .get("task")
@@ -581,6 +583,24 @@ impl RunSubject {
                     Vec::new(),
                     None,
                     Some("gguf"),
+                    false,
+                ),
+                ExecutionTemplate::SafeTensors { .. } if mlx_llm => (
+                    "chat",
+                    Some("text_generation".into()),
+                    vec![Modality::Text],
+                    vec![Modality::Text],
+                    None,
+                    Some("safetensors"),
+                    true,
+                ),
+                ExecutionTemplate::SafeTensors { .. } if mlx_embedding => (
+                    "embeddings",
+                    Some("embedding".into()),
+                    vec![Modality::Text],
+                    Vec::new(),
+                    None,
+                    Some("safetensors"),
                     false,
                 ),
                 template => {
@@ -1952,6 +1972,7 @@ pub fn stage_metadata_value(key: &str, value: &str) -> Option<String> {
                 | "llama.cpp"
                 | "mistralrs"
                 | "mistral"
+                | "mlx"
                 | "whispercpp"
                 | "candle"
                 | "zzz"
@@ -3549,6 +3570,46 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;
+
+    /// An MLX bundle is routed by its architecture, with or without a
+    /// `backend: mlx` hint, and SafeTensors is otherwise Candle's format: the
+    /// subject must name the runtime that runs it, and the label must pass
+    /// the reviewed vocabulary.
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn an_mlx_bundle_is_a_chat_or_embedding_subject_on_the_mlx_runtime() {
+        let llm = ModelMetadata::safetensors("qwen3-mlx", "1.0", "model.safetensors", "qwen3");
+        let subject = RunSubject::from_metadata("qwen3-mlx", &llm);
+        assert_eq!(
+            (
+                subject.operation,
+                subject.runtime,
+                subject.format,
+                subject.is_llm
+            ),
+            ("chat", Some("mlx"), Some("safetensors"), true)
+        );
+
+        let mut embed =
+            ModelMetadata::safetensors("nomic", "1.0", "model.safetensors", "nomic_bert");
+        embed
+            .metadata
+            .insert("task".into(), serde_json::json!("text-embedding"));
+        let subject = RunSubject::from_metadata("nomic", &embed);
+        assert_eq!(
+            (subject.operation, subject.runtime, subject.is_llm),
+            ("embeddings", Some("mlx"), false)
+        );
+
+        assert_eq!(
+            stage_metadata_value("backend", "mlx").as_deref(),
+            Some("mlx")
+        );
+        assert_eq!(
+            stage_metadata_value("execution_provider", "metal").as_deref(),
+            Some("metal")
+        );
+    }
 
     /// A chunk is timed on the operation's anchored clock, not the raw wall
     /// clock: an NTP step between the start of a stream and its first token

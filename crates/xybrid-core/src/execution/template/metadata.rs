@@ -849,16 +849,9 @@ pub fn is_mlx_llm_safetensors_metadata(metadata: &ModelMetadata) -> bool {
         return false;
     }
 
-    if let Some(hint) = explicit_llm_backend_hint(metadata) {
-        return hint.eq_ignore_ascii_case("mlx");
-    }
-
-    let raw_hint = raw_llm_backend_hint(metadata);
-    if raw_hint.is_some_and(|hint| !hint.eq_ignore_ascii_case("auto")) {
-        return false;
-    }
-
-    true
+    // An explicit backend pins the route; unset or `auto` leaves a supported
+    // architecture to MLX.
+    explicit_llm_backend_hint(metadata).is_none_or(|hint| hint.eq_ignore_ascii_case("mlx"))
 }
 
 /// True when SafeTensors metadata names an MLX embedding architecture that can
@@ -882,11 +875,6 @@ pub fn is_mlx_embedding_safetensors_metadata(metadata: &ModelMetadata) -> bool {
 
     if let Some(hint) = explicit_llm_backend_hint(metadata) {
         return hint.eq_ignore_ascii_case("mlx");
-    }
-
-    let raw_hint = raw_llm_backend_hint(metadata);
-    if raw_hint.is_some_and(|hint| !hint.eq_ignore_ascii_case("auto")) {
-        return false;
     }
 
     metadata
@@ -981,6 +969,28 @@ pub fn backend_label_from_template(
         | ExecutionTemplate::LiteRtLm { .. }
         | ExecutionTemplate::ModelGraph { .. } => None,
     }
+}
+
+/// The backend label ([`backend_label_from_template`]) of the runtime that
+/// executes `metadata` in this build.
+///
+/// The template and the bundle's backend hint decide it, with one case the
+/// template alone cannot express: SafeTensors is Candle's format, but a
+/// bundle whose architecture the MLX adapters run is routed to MLX when
+/// `llm-mlx` is compiled in, with or without a `backend: mlx` hint. Every
+/// span and telemetry site labels through here so they name the runtime the
+/// executor actually dispatches to.
+pub fn backend_label_for_metadata(metadata: &ModelMetadata) -> Option<&'static str> {
+    if cfg!(feature = "llm-mlx")
+        && (is_mlx_llm_safetensors_metadata(metadata)
+            || is_mlx_embedding_safetensors_metadata(metadata))
+    {
+        return Some("mlx");
+    }
+    backend_label_from_template(
+        &metadata.execution_template,
+        explicit_llm_backend_hint(metadata),
+    )
 }
 
 /// Normalise a quantization label to the canonical wire form.
@@ -1532,6 +1542,29 @@ mod tests {
             Some("mlx"),
             "MLX SafeTensors hints must surface the runtime label"
         );
+
+        // The metadata-level label follows the route the executor takes: an
+        // MLX-supported architecture runs on MLX with or without a hint when
+        // `llm-mlx` is compiled in, and an explicit other backend wins.
+        let qwen = ModelMetadata::safetensors("qwen3-mlx", "1.0", "m.safetensors", "qwen3");
+        assert_eq!(
+            backend_label_for_metadata(&qwen),
+            Some(if cfg!(feature = "llm-mlx") {
+                "mlx"
+            } else {
+                "candle"
+            })
+        );
+        let mut whisper = ModelMetadata::safetensors("w", "1.0", "m.safetensors", "whisper");
+        assert_eq!(backend_label_for_metadata(&whisper), Some("candle"));
+        whisper.backend = Some("mlx".into());
+        assert_eq!(
+            backend_label_for_metadata(&whisper),
+            Some("mlx"),
+            "an explicit hint still labels through the template"
+        );
+        let onnx = ModelMetadata::onnx("o", "1.0", "m.onnx");
+        assert_eq!(backend_label_for_metadata(&onnx), Some("ort"));
 
         // GGUF: llama.cpp is the universal runtime in this checkout
         // (the only one with Android support, the macOS/iOS/desktop

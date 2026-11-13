@@ -32,10 +32,9 @@ use super::template::is_mlx_embedding_safetensors_metadata;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use super::template::PostprocessingStep;
 use super::template::{
-    backend_label_from_template, explicit_llm_backend_hint, gguf_runtime_backend_hint,
-    is_mlx_llm_safetensors_metadata, quantization_label_from_metadata, raw_llm_backend_hint,
-    span_kind_from_template, stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata,
-    PipelineStage,
+    backend_label_for_metadata, explicit_llm_backend_hint, gguf_runtime_backend_hint,
+    is_mlx_llm_safetensors_metadata, quantization_label_from_metadata, span_kind_from_template,
+    stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage,
 };
 use crate::conversation::ConversationContext;
 use crate::ir::EnvelopeKind;
@@ -865,9 +864,7 @@ impl TemplateExecutor {
         // itself fixes the label. Omitted when the runtime isn't part of
         // the closed set yet (CoreML / TFLite / ModelGraph) so analytics
         // sees "absent" not "guessed".
-        let backend_hint = raw_llm_backend_hint(metadata);
-        if let Some(label) = backend_label_from_template(&metadata.execution_template, backend_hint)
-        {
+        if let Some(label) = backend_label_for_metadata(metadata) {
             xybrid_trace::add_metadata("backend", label);
         }
 

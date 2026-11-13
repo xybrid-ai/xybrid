@@ -9,7 +9,7 @@
 //! the 9 generation scalars the consuming analytics backend expects.
 
 use super::template::{
-    backend_label_from_template, quantization_label_from_metadata, ModelMetadata,
+    backend_label_for_metadata, quantization_label_from_metadata, ModelMetadata,
 };
 use crate::runtime_adapter::llm::LlmRuntimeAdapter;
 use crate::tracing as xybrid_trace;
@@ -32,8 +32,7 @@ pub(crate) fn stamp_llm_span_cost_attribution(metadata: &ModelMetadata) {
     // so both spans agree on the canonical wire label — including the
     // GGUF-defaults-to-llamacpp behaviour that lights up unannotated
     // bundles in the registry.
-    let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
-    if let Some(label) = backend_label_from_template(&metadata.execution_template, backend_hint) {
+    if let Some(label) = backend_label_for_metadata(metadata) {
         xybrid_trace::add_metadata("backend", label);
     }
     if let Some(quant) = quantization_label_from_metadata(metadata) {

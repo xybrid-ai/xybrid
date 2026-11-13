@@ -57,8 +57,11 @@ pub(crate) fn local_execution_provider(backend_name: &str) -> &'static str {
     }
 }
 
+/// MLX runs on the Metal GPU stream (it falls back to its CPU stream only
+/// when no Metal device is reachable). `metal` is the accelerator name the
+/// observability contract already carries for llama.cpp on Apple hardware.
 fn mlx_execution_provider() -> &'static str {
-    "mlx-metal"
+    "metal"
 }
 
 #[cfg(all(
@@ -946,7 +949,7 @@ mod tests {
         let mistral = local_execution_provider("mistral");
         assert!(!mistral.is_empty(), "mistral must map to a label");
         let mlx = local_execution_provider("mlx");
-        assert_eq!(mlx, "mlx-metal");
+        assert_eq!(mlx, "metal");
     }
 
     #[cfg(all(

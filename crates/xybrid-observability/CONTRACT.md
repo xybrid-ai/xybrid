@@ -85,8 +85,8 @@ enables nothing.
   attribute is absent (never `unknown`).
 - `xybrid.genai.runtime.name` (and `.version`) always names the execution
   runtime: `llama.cpp`, `whisper.cpp`, `onnxruntime`, `candle`, `mistral.rs`,
-  `transformers.js`, `litert`, `apple.foundation_models`, or an HTTP client for
-  remote calls (`http`).
+  `mlx`, `transformers.js`, `litert`, `apple.foundation_models`, or an HTTP
+  client for remote calls (`http`).
 - `xybrid.genai.execution.location` is `local` or `remote`.
 - `xybrid.genai.accelerator` is the compute device when known (`cpu`, `metal`,
   `cuda`, `webgpu`, `wasm`, `coreml`, `nnapi`, `npu`).
