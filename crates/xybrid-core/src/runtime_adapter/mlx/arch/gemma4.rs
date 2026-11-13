@@ -468,23 +468,30 @@ pub fn expected_weight_keys(cfg: &Gemma4Config) -> Vec<String> {
             &format!("{base}.self_attn.q_proj.weight"),
             cfg.is_quantized(),
         );
-        push_quantized_weight_key(
-            &mut keys,
-            &format!("{base}.self_attn.k_proj.weight"),
-            cfg.is_quantized(),
-        );
-        push_quantized_weight_key(
-            &mut keys,
-            &format!("{base}.self_attn.v_proj.weight"),
-            cfg.is_quantized(),
-        );
+        // A layer that reuses an earlier layer's keys and values never
+        // computes its own, and current exports omit these tensors for it.
+        let computes_own_kv = cfg.kv_shared_source_layer(l).is_none();
+        if computes_own_kv {
+            push_quantized_weight_key(
+                &mut keys,
+                &format!("{base}.self_attn.k_proj.weight"),
+                cfg.is_quantized(),
+            );
+            push_quantized_weight_key(
+                &mut keys,
+                &format!("{base}.self_attn.v_proj.weight"),
+                cfg.is_quantized(),
+            );
+        }
         push_quantized_weight_key(
             &mut keys,
             &format!("{base}.self_attn.o_proj.weight"),
             cfg.is_quantized(),
         );
         keys.push(format!("{base}.self_attn.q_norm.weight"));
-        keys.push(format!("{base}.self_attn.k_norm.weight"));
+        if computes_own_kv {
+            keys.push(format!("{base}.self_attn.k_norm.weight"));
+        }
         keys.push(format!("{base}.post_attention_layernorm.weight"));
         keys.push(format!("{base}.pre_feedforward_layernorm.weight"));
         keys.push(format!("{base}.post_feedforward_layernorm.weight"));
@@ -542,19 +549,26 @@ fn prefixed_weight_key(prefix: &str, key: &str) -> String {
     }
 }
 
+/// The tensor-name prefix a bundle uses: none for a text-only export,
+/// `language_model.` for a multimodal one. When neither layout is complete,
+/// the one missing the fewest tensors is returned, so the validation error
+/// names what that bundle actually lacks instead of every tensor under the
+/// other prefix.
 fn detect_weight_prefix(
     names: &std::collections::HashSet<String>,
     expected: &[String],
 ) -> &'static str {
-    for prefix in ["", LANGUAGE_MODEL_PREFIX] {
-        if expected.iter().all(|key| {
-            let candidate = prefixed_weight_key(prefix, key);
-            names.contains(candidate.as_str())
-        }) {
-            return prefix;
-        }
-    }
-    ""
+    let missing_under = |prefix: &str| {
+        expected
+            .iter()
+            .filter(|key| !names.contains(prefixed_weight_key(prefix, key).as_str()))
+            .count()
+    };
+    // `min_by_key` keeps the first of equal candidates: the unprefixed layout.
+    ["", LANGUAGE_MODEL_PREFIX]
+        .into_iter()
+        .min_by_key(|prefix| missing_under(prefix))
+        .unwrap_or("")
 }
 
 // =============================================================================
@@ -661,11 +675,15 @@ pub mod runtime {
     pub struct Gemma4Layer {
         pub input_layernorm: MlxArray,
         pub q_proj: LinearWeight,
-        pub k_proj: LinearWeight,
-        pub v_proj: LinearWeight,
+        /// `None`, like [`Self::v_proj`] and [`Self::k_norm`], for a layer that
+        /// reuses an earlier layer's keys and values
+        /// ([`Gemma4Config::kv_shared_source_layer`]): it never computes its
+        /// own, and current exports omit the tensors.
+        pub k_proj: Option<LinearWeight>,
+        pub v_proj: Option<LinearWeight>,
         pub o_proj: LinearWeight,
         pub q_norm: MlxArray,
-        pub k_norm: MlxArray,
+        pub k_norm: Option<MlxArray>,
         pub post_attention_layernorm: MlxArray,
         pub pre_feedforward_layernorm: MlxArray,
         pub post_feedforward_layernorm: MlxArray,
@@ -830,6 +848,8 @@ pub mod runtime {
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
         for l in 0..cfg.num_hidden_layers {
             let base = format!("model.layers.{l}");
+            // See `Gemma4Layer::k_proj`.
+            let computes_own_kv = cfg.kv_shared_source_layer(l).is_none();
             let (per_layer_input_gate, per_layer_projection, post_per_layer_input_norm) =
                 if cfg.has_per_layer_inputs() {
                     (
@@ -861,23 +881,35 @@ pub mod runtime {
                     &key(&format!("{base}.self_attn.q_proj.weight")),
                     quant,
                 )?,
-                k_proj: LinearWeight::load(
-                    weights,
-                    &key(&format!("{base}.self_attn.k_proj.weight")),
-                    quant,
-                )?,
-                v_proj: LinearWeight::load(
-                    weights,
-                    &key(&format!("{base}.self_attn.v_proj.weight")),
-                    quant,
-                )?,
+                k_proj: computes_own_kv
+                    .then(|| {
+                        LinearWeight::load(
+                            weights,
+                            &key(&format!("{base}.self_attn.k_proj.weight")),
+                            quant,
+                        )
+                    })
+                    .transpose()?,
+                v_proj: computes_own_kv
+                    .then(|| {
+                        LinearWeight::load(
+                            weights,
+                            &key(&format!("{base}.self_attn.v_proj.weight")),
+                            quant,
+                        )
+                    })
+                    .transpose()?,
                 o_proj: LinearWeight::load(
                     weights,
                     &key(&format!("{base}.self_attn.o_proj.weight")),
                     quant,
                 )?,
                 q_norm: load_rmsnorm(weights, &key(&format!("{base}.self_attn.q_norm.weight")))?,
-                k_norm: load_rmsnorm(weights, &key(&format!("{base}.self_attn.k_norm.weight")))?,
+                k_norm: computes_own_kv
+                    .then(|| {
+                        load_rmsnorm(weights, &key(&format!("{base}.self_attn.k_norm.weight")))
+                    })
+                    .transpose()?,
                 post_attention_layernorm: load_rmsnorm(
                     weights,
                     &key(&format!("{base}.post_attention_layernorm.weight")),
@@ -1469,12 +1501,14 @@ pub mod runtime {
         stream: Option<&MlxStream>,
     ) -> MlxLlmResult<(MlxArray, Option<(MlxArray, MlxArray)>)> {
         let layer_head_dim = head_norm_width(&layer.q_norm)?;
-        let k_head_dim = head_norm_width(&layer.k_norm)?;
-        if k_head_dim != layer_head_dim {
-            return Err(MlxLlmError::ConfigInvalid(format!(
-                "gemma4 q/k norm dimensions differ (q={}, k={})",
-                layer_head_dim, k_head_dim
-            )));
+        if let Some(k_norm) = layer.k_norm.as_ref() {
+            let k_head_dim = head_norm_width(k_norm)?;
+            if k_head_dim != layer_head_dim {
+                return Err(MlxLlmError::ConfigInvalid(format!(
+                    "gemma4 q/k norm dimensions differ (q={}, k={})",
+                    layer_head_dim, k_head_dim
+                )));
+            }
         }
         let layer_is_global = cfg.layer_is_global(layer_idx);
         let layer_scale = 1.0;
@@ -1510,13 +1544,23 @@ pub mod runtime {
         let (k, v, own_kv) = if let Some((keys, values)) = shared_kv {
             (keys.clone(), values.clone(), None)
         } else {
-            let k = layer.k_proj.forward(&hidden, stream)?;
-            let v = layer.v_proj.forward(&hidden, stream)?;
+            let (Some(k_proj), Some(v_proj), Some(k_norm)) = (
+                layer.k_proj.as_ref(),
+                layer.v_proj.as_ref(),
+                layer.k_norm.as_ref(),
+            ) else {
+                return Err(MlxLlmError::ConfigInvalid(format!(
+                    "gemma4 layer {layer_idx} computes its own keys and values but was loaded \
+                     without key/value projection weights"
+                )));
+            };
+            let k = k_proj.forward(&hidden, stream)?;
+            let v = v_proj.forward(&hidden, stream)?;
             let k = device_split_heads_with_rms_norm(
                 &k,
                 n_kv_heads,
                 layer_head_dim,
-                Some(&layer.k_norm),
+                Some(k_norm),
                 cfg.rms_norm_eps,
                 stream,
             )?;
@@ -2887,6 +2931,85 @@ mod tests {
         safetensors::serialize_to_file(tensors, &None, &path).unwrap();
 
         validate_safetensors(&path, &cfg).expect("prefixed manifest should validate");
+    }
+
+    /// Gemma 4 E2B's last layers reuse the keys and values of an earlier
+    /// layer, and current exports (`mlx-community/gemma-4-e2b-it-4bit`) omit
+    /// those layers' `k_proj`, `v_proj` and `k_norm`. Requiring them made the
+    /// bundle fail to load for 140 tensors the forward pass never reads.
+    #[test]
+    fn a_layer_that_shares_keys_and_values_needs_no_kv_weights() {
+        use safetensors::tensor::TensorView;
+        use safetensors::Dtype;
+
+        let mut cfg = dummy_config(4, true);
+        cfg.num_kv_shared_layers = Some(2);
+        let shares: Vec<bool> = (0..4)
+            .map(|layer| cfg.kv_shared_source_layer(layer).is_some())
+            .collect();
+        assert_eq!(shares, [false, false, true, true]);
+
+        let keys = expected_weight_keys(&cfg);
+        for (layer, shares) in shares.iter().enumerate() {
+            for tensor in ["k_proj.weight", "v_proj.weight", "k_norm.weight"] {
+                let key = format!("model.layers.{layer}.self_attn.{tensor}");
+                assert_eq!(keys.contains(&key), !shares, "{key}");
+            }
+            // Every layer still projects its own queries and outputs.
+            for tensor in ["q_proj.weight", "o_proj.weight", "q_norm.weight"] {
+                let key = format!("model.layers.{layer}.self_attn.{tensor}");
+                assert!(keys.contains(&key), "{key}");
+            }
+        }
+
+        // A manifest without the shared layers' tensors validates, under the
+        // multimodal prefix too.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let data = vec![0u8; 4];
+        let tensors: Vec<(String, TensorView<'_>)> = keys
+            .iter()
+            .map(|k| {
+                (
+                    format!("{LANGUAGE_MODEL_PREFIX}{k}"),
+                    TensorView::new(Dtype::F32, vec![1], &data).unwrap(),
+                )
+            })
+            .collect();
+        let path = tmp.path().join("model.safetensors");
+        safetensors::serialize_to_file(tensors, &None, &path).unwrap();
+        validate_safetensors(&path, &cfg).expect("a bundle without shared-layer KV weights");
+    }
+
+    /// When a bundle is incomplete, the error names what it lacks under the
+    /// prefix it actually uses, not every tensor under the other one.
+    #[test]
+    fn an_incomplete_prefixed_manifest_reports_its_own_missing_tensors() {
+        use safetensors::tensor::TensorView;
+        use safetensors::Dtype;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = dummy_config(2, true);
+        let dropped = "model.layers.1.self_attn.o_proj.weight";
+        let data = vec![0u8; 4];
+        let tensors: Vec<(String, TensorView<'_>)> = expected_weight_keys(&cfg)
+            .iter()
+            .filter(|k| k.as_str() != dropped)
+            .map(|k| {
+                (
+                    format!("{LANGUAGE_MODEL_PREFIX}{k}"),
+                    TensorView::new(Dtype::F32, vec![1], &data).unwrap(),
+                )
+            })
+            .collect();
+        let path = tmp.path().join("model.safetensors");
+        safetensors::serialize_to_file(tensors, &None, &path).unwrap();
+
+        let err = validate_safetensors(&path, &cfg).unwrap_err().to_string();
+        assert!(err.contains("missing 1 required tensor(s)"), "{err}");
+        assert!(
+            err.contains(&format!("{LANGUAGE_MODEL_PREFIX}{dropped}")),
+            "{err}"
+        );
     }
 
     #[test]

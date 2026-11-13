@@ -13,8 +13,8 @@ The MLX backend is a **preview**:
 | Architecture (`execution_template.architecture`) | Models | Evidence |
 |---|---|---|
 | `qwen3` | Qwen 3 | CI runs it on synthetic weights and on real ones (Qwen3 0.6B, MLX 4-bit). Full-precision Qwen3 0.6B passes the same tests locally. |
-| `gemma4` | Gemma 4 E2B / E4B | CI runs it on synthetic weights. The real-weight test passes locally when the bundle is staged. |
-| `lfm2`, `lfm`, `lfm3` | LFM2, LFM2.5 | CI runs it on synthetic weights. LFM2 350M and LFM2.5 1.2B pass the real-weight tests locally. No public LFM3 SafeTensors bundle has been tested. |
+| `gemma4` | Gemma 4 E2B | CI runs it on synthetic weights. Gemma 4 E2B (MLX 4-bit) passes the real-weight tests locally. E4B has the same architecture and has not been run. |
+| `lfm2`, `lfm`, `lfm3` | LFM2, LFM2.5 | CI runs it on synthetic weights. LFM2 350M (BF16) and LFM2.5 1.2B (MLX 4-bit) pass the real-weight tests locally. No LFM3 SafeTensors bundle has been run. |
 | `bert`, `nomic_bert` | BERT, nomic-embed-text v1.5 (embeddings) | CI runs it on synthetic weights. nomic-embed-text v1.5 passes the real-weight tests locally. |
 
 Weights are SafeTensors: one `model.safetensors`, or a Hugging Face `model.safetensors.index.json` with its `model-*.safetensors` shards. LLM bundles can be full precision (F32, F16, BF16) or MLX affine-quantized (the `mlx-community/*-4bit` layout). Embedding bundles must be full precision.
@@ -115,7 +115,7 @@ A request for something on this list fails with an error; it is never answered w
 
 Other differences from llama.cpp:
 
-- **One MLX operation at a time.** MLX does not tolerate two threads evaluating at once, so loads, generations and embedding runs are serialized across the whole process. Two MLX models never run in parallel; the second waits.
+- **One MLX operation at a time.** MLX does not tolerate two threads evaluating at once, so loads, generations and embedding runs are serialized across the whole process. Two MLX models never run in parallel; the second waits. A streaming generation holds its turn until it ends, so a token callback must not block on another thread's MLX call (an embedding of the text so far, say): that call is waiting for the stream to finish. Do such work on the callback's own thread, or after the stream.
 - **No prompt reuse across turns.** Every call evaluates its whole prompt again. A long conversation costs more per turn than on llama.cpp, which keeps the shared prefix.
 - **Gemma reasoning.** A reasoning model's thinking is split off the answer and returned as `reasoning_content`, as on llama.cpp. Gemma 4 always answers directly, on both backends.
 

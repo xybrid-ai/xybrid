@@ -10,6 +10,13 @@
 //! load (weights are materialized into MLX arrays), a generation, an embedding
 //! run. Concurrent operations queue; they never interleave.
 //!
+//! A generation holds the lock for its whole run, streaming callbacks
+//! included: it has the next token's graph in flight while a callback runs,
+//! so the lock cannot be dropped between tokens. A callback may start MLX
+//! work on its own thread (the lock is reentrant there). It must not block on
+//! MLX work that another thread has yet to start, which would wait for this
+//! lock forever.
+//!
 //! A static is the right owner here even though statics are otherwise avoided
 //! for correctness-relevant state: the state being protected is MLX's own
 //! process-global runtime, and `xybrid-mlx-sys`'s `links` key guarantees one copy
