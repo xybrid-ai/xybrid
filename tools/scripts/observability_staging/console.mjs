@@ -120,10 +120,12 @@ try {
           .then(() => true, () => false));
       await check.close();
       if (found) workspace = candidate;
-      // A loaded trace with other spans is another project's copy: never this one.
-      else if (loaded) {
+      // A loaded trace with other spans is another project's copy, and a 404 is a
+      // project without the trace: never retry either, since every probe costs
+      // staging analytics reads (its Tinybird workspace answers 429 when spent).
+      else if (loaded || response?.status() === 404) {
         rejected.add(candidate);
-        console.log(`${candidate} holds other spans under the probe trace id; open the launch project.`);
+        console.log(`${candidate} does not hold the launch's spans; open the launch project.`);
       }
     }
   }
