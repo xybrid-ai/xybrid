@@ -83,7 +83,7 @@ namespace XybridBolt
         /// closes. Blocks until the last chunk is transcribed, so call it off the
         /// UI thread.
         /// </summary>
-        public string Flush()
+        public global::XybridBolt.XybridTranscriptionResult Flush()
         {
             ThrowIfDisposed();
             FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridStreamingSessionFlush(this.Handle, out FfiBuf boltffiResultBuffer);
@@ -102,7 +102,7 @@ namespace XybridBolt
             try
             {
                 WireReader resultReader = new WireReader(boltffiResultBuffer);
-                return resultReader.ReadString();
+                return global::XybridBolt.XybridTranscriptionResult.Decode(resultReader);
             }
             finally
             {

@@ -186,6 +186,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         stream_turn(&mut executor, &metadata, &continuation, &context, &config)?;
 
     let final_text = match &final_response.kind {
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            return Err("Unexpected decision output".into());
+        }
         EnvelopeKind::Text(text) => text.trim().to_string(),
         other => return Err(format!("expected Text output, got {other:?}").into()),
     };

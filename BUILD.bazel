@@ -88,6 +88,51 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# Audited decision renderer closure from the same immutable upstream pin.
+# It links neither common/chat.cpp nor the server application. The model
+# runtime dependency remains selected by wrapper_cc (including Android DL).
+#
+# Only common/ reaches dependents (for jinja/*.h and json.h). wrapper_cc gets
+# ggml.h from the llama build it links; a second copy on its include path
+# redefines every ggml type, so ggml.h and nlohmann stay private below.
+# llama.cpp's src/ is never on the path: its unicode.h shadows common's.
+cc_library(
+    name = "llama_decision_jinja",
+    copts = ["-std=c++17"] + select({
+        "@rules_rs//rs/platforms/config:wasm32-unknown-emscripten": ["-fexceptions"],
+        "//conditions:default": [],
+    }),
+    srcs = [
+        "vendor/llama-cpp/common/jinja/lexer.cpp",
+        "vendor/llama-cpp/common/jinja/parser.cpp",
+        "vendor/llama-cpp/common/jinja/runtime.cpp",
+        "vendor/llama-cpp/common/jinja/value.cpp",
+        "vendor/llama-cpp/common/jinja/string.cpp",
+        "vendor/llama-cpp/common/json.cpp",
+        "vendor/llama-cpp/common/unicode.cpp",
+        "vendor/llama-cpp/common/unicode.h",
+    ],
+    hdrs = glob(["vendor/llama-cpp/common/jinja/*.h"]) + [
+        "vendor/llama-cpp/common/json.h",
+    ],
+    implementation_deps = [":llama_decision_jinja_private_headers"],
+    includes = ["vendor/llama-cpp/common"],
+    visibility = ["//visibility:public"],
+)
+
+# Headers only the Jinja closure's own sources compile against: ggml.h and
+# nlohmann, both for common/json.cpp.
+cc_library(
+    name = "llama_decision_jinja_private_headers",
+    hdrs = glob(["vendor/llama-cpp/vendor/nlohmann/*.hpp"]) + [
+        "vendor/llama-cpp/ggml/include/ggml.h",
+    ],
+    includes = [
+        "vendor/llama-cpp/ggml/include",
+        "vendor/llama-cpp/vendor",
+    ],
+)
+
 # The browser runtime uses the same pinned sources as //:llama. These sources
 # mirror ggml/src/{,ggml-cpu/}CMakeLists.txt and src/CMakeLists.txt. Keeping the
 # browser build in Bazel lets Emscripten's registered toolchain own compilation
@@ -216,10 +261,17 @@ genrule(
 # "graph node" llama target the evaluation's Option B describes.
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
 
+# CMake compiles absolute source paths, which __FILE__ retains in ggml's
+# assertion strings. Remap the execroot before Rust bundles the native objects
+# into a staticlib; rules_rust rejects artifacts containing that build path.
+_LLAMA_PATH_FLAGS = "-ffile-prefix-map=$$EXT_BUILD_ROOT=."
+
 # Base llama cmake configuration (CPU-only, hermetic on desktop: Metal OFF).
 # SDK builds omit the application and tools; vision adds standalone mtmd.
 _LLAMA_CACHE_ENTRIES = {
     "CMAKE_BUILD_TYPE": "Release",
+    "CMAKE_C_FLAGS": _LLAMA_PATH_FLAGS,
+    "CMAKE_CXX_FLAGS": _LLAMA_PATH_FLAGS,
     "BUILD_SHARED_LIBS": "OFF",
     "CMAKE_INSTALL_LIBDIR": "lib",
     "LLAMA_BUILD_EXAMPLES": "OFF",
@@ -458,8 +510,8 @@ cmake(
             # ANSI (glibc/bionic expose it by default — this bites only the
             # windows cross). rfcc maps these to CMAKE_*_FLAGS_INIT with
             # replace=False, so they APPEND to the toolchain-derived flags.
-            "CMAKE_C_FLAGS": "-D_USE_MATH_DEFINES",
-            "CMAKE_CXX_FLAGS": "-D_USE_MATH_DEFINES",
+            "CMAKE_C_FLAGS": _LLAMA_PATH_FLAGS + " -D_USE_MATH_DEFINES",
+            "CMAKE_CXX_FLAGS": _LLAMA_PATH_FLAGS + " -D_USE_MATH_DEFINES",
         },
         # Desktop Windows cross (MSVC ABI) — the Flutter/cargokit lane. Same
         # CMAKE_SYSTEM seeding and vision set as the GNU arm above, but the C++
@@ -478,8 +530,8 @@ cmake(
             "CMAKE_RC_COMPILER": "$$EXT_BUILD_ROOT/$(execpath @llvm//tools:llvm-rc)",
             # mtmd-audio's M_PI, same as the MinGW arm: Microsoft's math.h is
             # where _USE_MATH_DEFINES comes from in the first place.
-            "CMAKE_C_FLAGS": "-D_USE_MATH_DEFINES",
-            "CMAKE_CXX_FLAGS": "-D_USE_MATH_DEFINES",
+            "CMAKE_C_FLAGS": _LLAMA_PATH_FLAGS + " -D_USE_MATH_DEFINES",
+            "CMAKE_CXX_FLAGS": _LLAMA_PATH_FLAGS + " -D_USE_MATH_DEFINES",
         },
         # macOS cross from Linux RBE (the macOS-CPU lane): same rfcc gap as
         # windows — no darwin entry in rfcc's _TARGET_OS_PARAMS, so without
@@ -614,7 +666,7 @@ cmake(
     name = "llama_metal",
     # rfcc sanitizes PATH to /bin:/usr/bin:/usr/local/bin; the preinstalled
     # cmake/make/pkg-config (build:macos-metal --extra_toolchains) live in
-    # /opt/homebrew/bin on Apple silicon (incl. macos-14 runners).
+    # /opt/homebrew/bin on Apple silicon (incl. the macOS CI runners).
     env = {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"},
     build_data = [
         "@llvm//tools:llvm-install-name-tool",

@@ -1,0 +1,12 @@
+# Overlay for phoenix.yaml: adds the API key for Phoenix Cloud or an
+# authenticated Phoenix server.
+#
+#   otelcol-contrib --config phoenix.yaml --config phoenix-auth.yaml
+#
+# Environment:
+#   PHOENIX_API_KEY   the Phoenix API key
+
+exporters:
+  otlphttp/phoenix:
+    headers:
+      Authorization: "Bearer ${env:PHOENIX_API_KEY}"

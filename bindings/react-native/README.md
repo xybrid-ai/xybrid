@@ -3,7 +3,7 @@
 On-device AI for React Native — LLMs, speech recognition, text-to-speech,
 embeddings and vision — backed by the same Rust SDK as Xybrid's Swift, Kotlin,
 Flutter and Unity bindings. Runs offline with no account; add an API key to
-light up cloud fallback and telemetry.
+light up cloud fallback, and an observability config to export traces.
 
 ```ts
 import { Envelope, ModelLoader } from '@xybrid/react-native';
@@ -23,7 +23,7 @@ await model.release();
 |---|---|
 | React Native | 0.76 or newer, **New Architecture** (the default since 0.76; the only option since 0.82) |
 | iOS | 16.0+. Simulator builds need an Apple Silicon Mac (there is no x86_64 simulator slice) |
-| Android | API 29+ (Android 10; 0.15.0 and earlier: API 24+), `arm64-v8a`, `armeabi-v7a`, `x86_64`. Phonon / Kitten TTS 2 speech on `arm64-v8a` only ([below](#phonon-and-kitten-tts-2-android-arm64-v8a)) |
+| Android | API 29+ (Android 10; before 0.16.0: API 24+), `arm64-v8a`, `armeabi-v7a`, `x86_64`. Phonon / Kitten TTS 2 speech on `arm64-v8a` only ([below](#phonon-and-kitten-tts-2-android-arm64-v8a)) |
 | Expo | SDK 52+ with a [development build](https://docs.expo.dev/develop/development-builds/introduction/) — not Expo Go |
 
 ## Install
@@ -55,7 +55,7 @@ cd ios && pod install
 
 Local inference needs no setup. Call `initialize` first only when you have
 options — an API key enables the platform features on top of the same local
-runtime: cloud fallback, speculative cloud serving and dashboard telemetry.
+runtime: cloud fallback and speculative cloud serving.
 
 ```ts
 import { Xybrid } from '@xybrid/react-native';
@@ -65,6 +65,83 @@ await Xybrid.initialize({ apiKey: XYBRID_API_KEY });
 
 Options apply once per app process; calling again with different options
 rejects with `xybrid_config_error` (restart the app to change them).
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
+
+### Observability (OpenTelemetry)
+
+Export is off until you configure it; an API key alone does not enable it.
+Build a config from a preset and call `init()`:
+
+```ts
+import { Observability, ObservabilityConfig } from '@xybrid/react-native';
+
+// Traces to the Xybrid dashboard.
+await ObservabilityConfig.xybrid(XYBRID_API_KEY).setService('my-app', '1.4.0').init();
+
+// Or traces, metrics and logs to your own OpenTelemetry Collector.
+await ObservabilityConfig.otlp('http://collector:4318')
+  .setResourceAttribute('deployment.environment', 'staging')
+  .setMetadataOnly(true) // prompts and outputs are captured unless you opt out
+  .init();
+```
+
+Runs report where they were recorded, and accept a parent trace:
+
+```ts
+const result = await model.run(prompt, { traceparent, conversationId: chatId });
+if (result.observation) {
+  await Observability.recordFeedback(result.observation, { score: 1, comment: 'helpful' });
+}
+await Observability.flush(2000); // e.g. when the app backgrounds
+```
+
+`suppressTrace: true` skips a run's detailed trace (metrics are still
+recorded). For a camera or microphone loop, pass the same `frameSessionId` on
+every run of the loop: each frame is counted in metrics, and detailed traces
+are kept for roughly one frame per `liveTraceIntervalMs` per session, instead
+of one trace per frame. Feedback and evaluations (`Observability.recordEvaluation`) need a
+logs signal, so they resolve `false` with the Xybrid preset, which exports
+traces only. `Observability.stats()` reports accepted, exported, dropped,
+failed and pending counts per signal (`traces`, `logs`, `metrics`);
+`Observability.shutdown(timeoutMs)` flushes and stops export, after which
+`stats()` keeps the session's final counters (what the shutdown failed or
+dropped included) until the next `init()`. A flush or
+shutdown that cannot deliver everything rejects with
+`xybrid_telemetry_delivery`; the inference already succeeded, so do not rerun it.
+
+References (`result.observation`, pipeline and stage `observation`, a session's
+`flush()` result, `info().loadObservationRef`) use the portable
+`{ trace_id, span_id }` shape, so they can be passed to `@xybrid/observability`
+or your server unchanged. Pipelines, `ModelLoader.withObservation(...)`,
+`model.stream({ observation })` and `runTtsStreaming` take the same trace
+fields as `run`.
+
+Record work Xybrid does not run itself (a tool, another runtime's inference)
+with a manual operation, and pass its `context()` as a child's options. The
+first terminal call wins. Call `dispose()` when done: releasing an unfinished
+operation cancels it without flushing, and so does module teardown.
+
+```ts
+import { ToolObservation, WorkflowObservation } from '@xybrid/react-native';
+
+const workflow = await WorkflowObservation.start('answer-question');
+try {
+  const tool = await ToolObservation.start(
+    { name: 'search', argumentsJson: '{"q":"otel"}' },
+    await workflow.context(),
+  );
+  await tool.recordResult('{"hits":3}');
+  await tool.complete();
+  await tool.dispose();
+  await workflow.complete();
+} catch (error) {
+  await workflow.fail('application_error');
+  throw error;
+} finally {
+  await workflow.dispose();
+}
+```
 
 ### Load and run
 
@@ -218,7 +295,7 @@ const session = await asr.stream({ language: 'en' });
   for await (const partial of session.partials()) setCaption(partial.text);
 })();
 await session.feed(float32Samples);       // from your audio callback
-const transcript = await session.flush(); // when the user stops talking
+const { text } = await session.flush();  // when the user stops talking
 await session.release();
 ```
 

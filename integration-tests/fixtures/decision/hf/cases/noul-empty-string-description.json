@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "noul-empty-string-description",
+  "profile": "lfm3-d1/text/v1",
+  "title": "An empty-string description is not null: it prints, and the other prints None",
+  "covers": [
+    "noul-partial-criteria",
+    "description-falsy"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Refund?\", \"criteria\": {\"true\": \"\"}}}}",
+  "artifact": "d1-2b-hf"
+}

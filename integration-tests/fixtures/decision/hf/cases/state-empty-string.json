@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "state-empty-string",
+  "profile": "lfm3-d1/text/v1",
+  "title": "An empty text state keeps the preamble, unlike null",
+  "covers": [
+    "state-empty"
+  ],
+  "request_text": "{\"state\": \"\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which team should handle this?\", \"criteria\": {\"billing\": \"Charges, refunds, invoices\", \"technical\": \"App or site faults\", \"fraud\": \"Suspected unauthorised use\"}}}}",
+  "artifact": "d1-2b-hf"
+}

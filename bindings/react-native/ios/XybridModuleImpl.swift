@@ -15,10 +15,11 @@ import React
 // a member named like a global (`setBatteryLevel`, `cacheStatus`, …) shadows
 // it — "use of 'X' refers to instance method rather than global function" —
 // and the module name can't qualify it portably. At file scope no member is
-// in scope, so these bind to the globals.
+// in scope, so these bind to the globals. Annotated ones pin the overload,
+// should a wrapper in Xybrid.swift ever reuse the name.
 private let ffiSetBinding = setBinding
 private let ffiInitSdkCacheDir = initSdkCacheDir
-private let ffiConfigureRuntime = configureRuntime
+private let ffiConfigureRuntime: (String?, String?) -> Void = configureRuntime
 private let ffiVersion = version
 private let ffiHasApiKey = hasApiKey
 private let ffiSetProviderApiKey = setProviderApiKey
@@ -42,19 +43,26 @@ private let ffiCacheRemoveModel = cacheRemoveModel
 private let ffiCacheClear = cacheClear
 private let ffiJsonSchemaToGbnf = jsonSchemaToGbnf
 private let ffiToolResultsEnvelope = toolResultsEnvelope
+private let ffiObservabilityDefaultTracesEndpoint: () -> String = observabilityDefaultTracesEndpoint
+private let ffiObservabilityStats: () -> XybridObservabilityStats = observabilityStats
+private let ffiObservabilityFlush: (UInt32) throws -> Void = observabilityFlush
+private let ffiObservabilityShutdown: (UInt32) throws -> Void = observabilityShutdown
+private let ffiObservabilityRecordFeedback:
+  (XybridObservationRef, Double?, String?, String?) throws -> Bool = observabilityRecordFeedback
+private let ffiObservabilityRecordEvaluation:
+  (XybridObservationRef, String, Double?, String?, String?) throws -> Bool = observabilityRecordEvaluation
 
 /// Process-wide SDK setup. The Rust SDK's configuration is process-global
 /// (first-set-wins), and it outlives this module: a JS reload builds a new
 /// module instance but not a new process. So what has been applied is
-/// tracked process-wide too, which is what keeps a reload from starting a
-/// second telemetry exporter.
+/// tracked process-wide too, which is what lets a reload repeat
+/// `initialize` with the same options.
 private enum SdkSetup {
   struct Runtime: Equatable {
     var apiKey: String?
     var gatewayUrl: String?
-    var ingestUrl: String?
 
-    var isEmpty: Bool { apiKey == nil && gatewayUrl == nil && ingestUrl == nil }
+    var isEmpty: Bool { apiKey == nil && gatewayUrl == nil }
   }
 
   private static let lock = NSLock()
@@ -75,10 +83,10 @@ private enum SdkSetup {
       return
     }
     // First-set-wins in the SDK: claim the binding before Xybrid.initialize()
-    // registers "swift". Its own configureRuntime(nil, nil, nil) is a no-op;
+    // registers "swift". Its own configureRuntime(nil, nil) is a no-op;
     // what it adds is the UIDevice battery observer.
     ffiSetBinding("react-native")
-    Xybrid.initialize()
+    Xybrid.initialize(apiKey: nil, gatewayUrl: nil)
     let directory = try requested ?? defaultCacheDirectory()
     try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
     ffiInitSdkCacheDir(directory)
@@ -95,8 +103,65 @@ private enum SdkSetup {
       throw BridgeError.config(
         "Xybrid is already initialized with different options; they apply once per app process")
     }
-    ffiConfigureRuntime(runtime.apiKey, runtime.gatewayUrl, runtime.ingestUrl)
+    ffiConfigureRuntime(runtime.apiKey, runtime.gatewayUrl)
     appliedRuntime = runtime
+  }
+
+  /// A bolt observability config from the object src/observability.ts sends.
+  static func observabilityConfig(_ any: Any?) throws -> XybridObservabilityConfig {
+    let what = "observability config"
+    let object = try XybridCodec.object(any, what)
+    let kind = try XybridCodec.string(object, "kind", what)
+    let config: XybridObservabilityConfig
+    switch kind {
+    case "xybrid": config = XybridObservabilityConfig(xybrid: try XybridCodec.string(object, "apiKey", what))
+    case "otlp": config = XybridObservabilityConfig(otlp: try XybridCodec.string(object, "endpoint", what))
+    default: throw BridgeError.invalidArgument("unknown observability preset '\(kind)'")
+    }
+    if let endpoint = try XybridCodec.optionalString(object, "tracesEndpoint", what) {
+      config.setTracesEndpoint(endpoint: endpoint)
+    }
+    for (name, value) in try XybridCodec.stringMap(object, "headers", what) {
+      config.setHeader(name: name, value: value)
+    }
+    if let json = try XybridCodec.optionalBool(object, "jsonProtocol", what) {
+      config.setJsonProtocol(json: json)
+    }
+    if let service = try XybridCodec.optionalObject(object, "service", "\(what): 'service'") {
+      config.setService(name: try XybridCodec.string(service, "name", "\(what) service"),
+                        version: try XybridCodec.optionalString(service, "version", "\(what) service"))
+    }
+    for (key, value) in try XybridCodec.stringMap(object, "resourceAttributes", what) {
+      config.setResourceAttribute(key: key, value: value)
+    }
+    if let raw = XybridCodec.value(object, "providerOrigins") {
+      guard let origins = raw as? [String] else { throw BridgeError.invalidArgument("providerOrigins must be strings") }
+      for origin in origins { try config.allowProviderContext(origin: origin) }
+    }
+    if let id = try XybridCodec.optionalString(object, "deviceId", what) {
+      config.setDeviceId(id: id)
+    }
+    if let rawRules = XybridCodec.value(object, "redactionRules") {
+      guard let rules = rawRules as? [Any] else { throw BridgeError.invalidArgument("redactionRules must be an array") }
+      for raw in rules {
+        let rule = try XybridCodec.object(raw, "redaction rule")
+        switch try XybridCodec.string(rule, "kind", "redaction rule") {
+        case "replaceLiteral": try config.addLiteralRedaction(find: XybridCodec.string(rule, "find", "redaction rule"), replacement: XybridCodec.string(rule, "replacement", "redaction rule"))
+        case "omitAttribute": try config.omitContentAttribute(key: XybridCodec.string(rule, "key", "redaction rule"))
+        default: throw BridgeError.invalidArgument("unknown redaction rule")
+        }
+      }
+    }
+    if let metadataOnly = try XybridCodec.optionalBool(object, "metadataOnly", what) {
+      config.setMetadataOnly(metadataOnly: metadataOnly)
+    }
+    if let bytes = try XybridCodec.optionalUInt32(object, "maxContentBytes", what) {
+      config.setMaxContentBytes(bytes: bytes)
+    }
+    if let ms = try XybridCodec.optionalUInt32(object, "liveTraceIntervalMs", what) {
+      config.setLiveTraceIntervalMs(ms: ms)
+    }
+    return config
   }
 
   private static func defaultCacheDirectory() throws -> String {
@@ -190,8 +255,7 @@ public final class XybridModuleImpl: NSObject {
       try SdkSetup.ensureBase(cacheDir: cacheDir.map(XybridCodec.filePath))
       try SdkSetup.configure(SdkSetup.Runtime(
         apiKey: nonBlank(try XybridCodec.optionalString(object, "apiKey", what)),
-        gatewayUrl: nonBlank(try XybridCodec.optionalString(object, "gatewayUrl", what)),
-        ingestUrl: nonBlank(try XybridCodec.optionalString(object, "ingestUrl", what))
+        gatewayUrl: nonBlank(try XybridCodec.optionalString(object, "gatewayUrl", what))
       ))
       resolve(nil)
     } catch {
@@ -263,6 +327,140 @@ public final class XybridModuleImpl: NSObject {
   public func isAutoReleaseEnabled(_ resolve: @escaping RCTPromiseResolveBlock,
                                    reject: @escaping RCTPromiseRejectBlock) {
     now(resolve, reject) { ffiIsAutoReleaseEnabled() }
+  }
+
+  // MARK: - Observability
+
+  @objc(observabilityInit:resolve:reject:)
+  public func observabilityInit(_ config: NSDictionary,
+                                resolve: @escaping RCTPromiseResolveBlock,
+                                reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) {
+      try SdkSetup.observabilityConfig(config).`init`()
+      return nil
+    }
+  }
+
+  @objc(observabilityDefaultTracesEndpoint:reject:)
+  public func observabilityDefaultTracesEndpoint(_ resolve: @escaping RCTPromiseResolveBlock,
+                                                 reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { ffiObservabilityDefaultTracesEndpoint() }
+  }
+
+  @objc(observabilityStats:reject:)
+  public func observabilityStats(_ resolve: @escaping RCTPromiseResolveBlock,
+                                 reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { XybridCodec.encodeObservabilityStats(ffiObservabilityStats()) }
+  }
+
+  @objc(observabilityFlush:resolve:reject:)
+  public func observabilityFlush(_ timeoutMs: Double,
+                                 resolve: @escaping RCTPromiseResolveBlock,
+                                 reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) {
+      try ffiObservabilityFlush(try XybridCodec.uint32(timeoutMs, "flush timeout"))
+      return nil
+    }
+  }
+
+  @objc(observabilityShutdown:resolve:reject:)
+  public func observabilityShutdown(_ timeoutMs: Double,
+                                    resolve: @escaping RCTPromiseResolveBlock,
+                                    reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) {
+      try ffiObservabilityShutdown(try XybridCodec.uint32(timeoutMs, "shutdown timeout"))
+      return nil
+    }
+  }
+
+  @objc(observabilityRecordFeedback:feedback:resolve:reject:)
+  public func observabilityRecordFeedback(_ target: NSDictionary,
+                                          feedback: NSDictionary,
+                                          resolve: @escaping RCTPromiseResolveBlock,
+                                          reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      let what = "feedback"
+      let object = try XybridCodec.object(feedback, what)
+      return try ffiObservabilityRecordFeedback(
+        try XybridCodec.decodeObservationRef(target),
+        try XybridCodec.optionalDouble(object, "score", what),
+        try XybridCodec.optionalString(object, "label", what),
+        try XybridCodec.optionalString(object, "comment", what))
+    }
+  }
+
+  @objc(observabilityRecordEvaluation:evaluation:resolve:reject:)
+  public func observabilityRecordEvaluation(_ target: NSDictionary,
+                                            evaluation: NSDictionary,
+                                            resolve: @escaping RCTPromiseResolveBlock,
+                                            reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      let what = "evaluation"
+      let object = try XybridCodec.object(evaluation, what)
+      return try ffiObservabilityRecordEvaluation(
+        try XybridCodec.decodeObservationRef(target),
+        try XybridCodec.string(object, "name", what),
+        try XybridCodec.optionalDouble(object, "scoreValue", what),
+        try XybridCodec.optionalString(object, "scoreLabel", what),
+        try XybridCodec.optionalString(object, "explanation", what))
+    }
+  }
+
+  @objc(observationStart:descriptor:options:resolve:reject:)
+  public func observationStart(_ kind: String, descriptor: NSDictionary, options: NSDictionary?, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      let entry = try XybridObservationEntry.start(kind, try XybridCodec.object(descriptor, "observation"), try XybridCodec.decodeObservation(options))
+      return self.handles.insert(entry, kind: "observation")
+    }
+  }
+
+  @objc(observationContext:resolve:reject:)
+  public func observationContext(_ handle: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      return try self.handles.get(handle, as: XybridObservationEntry.self).context()
+    }
+  }
+
+  @objc(observationReference:resolve:reject:)
+  public func observationReference(_ handle: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      return try self.handles.get(handle, as: XybridObservationEntry.self).reference()
+    }
+  }
+
+  @objc(observationComplete:resolve:reject:)
+  public func observationComplete(_ handle: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      try self.handles.get(handle, as: XybridObservationEntry.self).complete(); return nil
+    }
+  }
+
+  @objc(observationFail:errorType:message:resolve:reject:)
+  public func observationFail(_ handle: String, errorType: String, message: String?, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      try self.handles.get(handle, as: XybridObservationEntry.self).fail(errorType, message); return nil
+    }
+  }
+
+  @objc(observationCancel:resolve:reject:)
+  public func observationCancel(_ handle: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      try self.handles.get(handle, as: XybridObservationEntry.self).cancel(); return nil
+    }
+  }
+
+  @objc(observationIsFinished:resolve:reject:)
+  public func observationIsFinished(_ handle: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      return try self.handles.get(handle, as: XybridObservationEntry.self).isFinished()
+    }
+  }
+
+  @objc(observationRecord:field:value:resolve:reject:)
+  public func observationRecord(_ handle: String, field: String, value: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      try self.handles.get(handle, as: XybridObservationEntry.self).record(field, try XybridCodec.object(value, "observation value")); return nil
+    }
   }
 
   // MARK: - Device state push
@@ -399,27 +597,17 @@ public final class XybridModuleImpl: NSObject {
       let what = "model source"
       let kind = try XybridCodec.string(object, "kind", what)
       let value = try XybridCodec.string(object, "value", what)
-      let model: XybridModel
+      let modelSource: XybridModelSource
       switch kind {
-      case "registry":
-        model = try XybridModel(fromRegistry: value)
-      case "registrySpeculative":
-        model = try XybridModel(fromRegistrySpeculative: value)
-      case "bundle":
-        model = try XybridModel(fromBundle: XybridCodec.filePath(value))
-      case "directory":
-        model = try XybridModel(fromDirectory: XybridCodec.filePath(value))
-      case "huggingFace":
-        if let revision = try XybridCodec.optionalString(object, "revision", what) {
-          model = try XybridModel(fromHuggingfaceWithRevision: value, revision: revision)
-        } else {
-          model = try XybridModel(fromHuggingface: value)
-        }
-      case "modelFile":
-        model = try XybridModel(fromModelFile: XybridCodec.filePath(value))
-      default:
-        throw BridgeError.invalidArgument("unknown model source kind '\(kind)'")
+      case "registry": modelSource = .registry(id: value, speculative: false)
+      case "registrySpeculative": modelSource = .registry(id: value, speculative: true)
+      case "bundle": modelSource = .bundle(path: XybridCodec.filePath(value))
+      case "directory": modelSource = .directory(path: XybridCodec.filePath(value))
+      case "huggingFace": modelSource = .huggingFace(repo: value, revision: try XybridCodec.optionalString(object, "revision", what))
+      case "modelFile": modelSource = .modelFile(path: XybridCodec.filePath(value))
+      default: throw BridgeError.invalidArgument("unknown model source kind '\(kind)'")
       }
+      let model = try XybridModel(load: modelSource, observation: XybridCodec.decodeObservation(object["observation"]))
       return handles.insert(model, kind: "model")
     }
   }
@@ -432,6 +620,7 @@ public final class XybridModuleImpl: NSObject {
       let m = try handles.get(model, as: XybridModel.self)
       let info: JSObject = [
         "modelId": m.modelId(),
+        "loadObservationRef": m.loadObservationRef().map { XybridCodec.encodeObservationRef($0) as Any } ?? NSNull(),
         "version": m.version(),
         "outputType": XybridCodec.encodeOutputType(m.outputType()),
         "isLlm": m.isLlm(),
@@ -617,7 +806,10 @@ public final class XybridModuleImpl: NSObject {
           handles.dispose(stream)
           return ["kind": "complete", "result": XybridCodec.encodeResult(result)] as JSObject
         case .audio:
-          throw BridgeError.invalidArgument("Token streams cannot deliver audio; use run for batch speech")
+          guard let packet = event.audio else {
+            throw XybridError.inferenceError(message: "stream returned an audio event without audio")
+          }
+          return ["kind": "audio", "audio": XybridCodec.encodeTtsAudio(packet)] as JSObject
         }
       } catch {
         // Dispose also aborts a stream rejected for an unsupported event.
@@ -856,7 +1048,7 @@ public final class XybridModuleImpl: NSObject {
                            resolve: @escaping RCTPromiseResolveBlock,
                            reject: @escaping RCTPromiseRejectBlock) {
     background(resolve, reject) { [handles] in
-      try handles.get(session, as: XybridSessionEntry.self).session.flush()
+      try XybridCodec.encodeTranscription(handles.get(session, as: XybridSessionEntry.self).session.flush())
     }
   }
 

@@ -24,6 +24,7 @@ import {
 } from '@xybrid/react-native';
 
 import { decodeAudio, resample, toWavBase64, transcribeLive } from './speech';
+import { runStagingIfRequested } from './staging';
 
 // Smoke test for @xybrid/react-native: runs once on launch (and again on the
 // button) through the SDK surface an app touches — version, load, model info,
@@ -56,6 +57,7 @@ export default function App() {
   const [modelId, setModelId] = useState(DEFAULT_MODEL);
   const [steps, setSteps] = useState<Step[]>([]);
   const [busy, setBusy] = useState(false);
+  const [staging, setStaging] = useState<string | null>(null);
   const started = useRef(false);
 
   const push = useCallback((step: Step) => {
@@ -243,8 +245,20 @@ export default function App() {
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    void run();
+    // A staging lane (tools/scripts/observability_staging) copies a config into
+    // the app's documents: run that scenario instead of the smoke test.
+    if (!runStagingIfRequested(setStaging)) void run();
   }, [run]);
+
+  if (staging !== null) {
+    return (
+      <SafeAreaView style={styles.root}>
+        <View style={styles.body}>
+          <Text style={styles.stepLabel}>{staging}</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.root}>

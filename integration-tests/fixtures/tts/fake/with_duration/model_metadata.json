@@ -1,0 +1,37 @@
+{
+  "model_id": "fake-tts-with-duration",
+  "version": "1.0",
+  "description": "Fake TTS for the phoneme-timing tests: per-token durations and a tone per phoneme",
+  "execution_template": {
+    "type": "Onnx",
+    "model_file": "model.onnx"
+  },
+  "preprocessing": [
+    {
+      "type": "Phonemize",
+      "tokens_file": "tokens.txt",
+      "backend": "MisakiDictionary",
+      "add_padding": true,
+      "normalize_text": true,
+      "silence_tokens": 2
+    }
+  ],
+  "postprocessing": [
+    {
+      "type": "TTSAudioEncode",
+      "sample_rate": 24000,
+      "apply_postprocessing": true
+    }
+  ],
+  "files": [
+    "model.onnx",
+    "tokens.txt",
+    "misaki/us_gold.json"
+  ],
+  "metadata": {
+    "task": "text-to-speech",
+    "sample_rate": 24000,
+    "notes": "Written by tools/conformance/gen_fake_tts.py; not a real voice"
+  },
+  "trim_trailing_samples": 240
+}

@@ -189,7 +189,7 @@ impl OnnxRuntimeAdapter {
     }
 
     /// Extracts model ID from file path (for internal tracking).
-    fn extract_model_id(&self, path: &str) -> String {
+    pub(crate) fn extract_model_id(&self, path: &str) -> String {
         Path::new(path)
             .file_stem()
             .and_then(|s| s.to_str())

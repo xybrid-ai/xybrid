@@ -9,6 +9,9 @@ fixtures/models/*/
 # ...except the ~1 KB fake scorers the choice-scoring contract tests load,
 # which provenance.json pins as committed fixtures.
 !fixtures/choice/fake/*.onnx
+# ...and the ~5 KB fake TTS models tts_phoneme_timings loads, written by
+# tools/conformance/gen_fake_tts.py.
+!fixtures/tts/fake/*/model.onnx
 *.safetensors
 *.bin
 *.pt

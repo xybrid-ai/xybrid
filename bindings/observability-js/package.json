@@ -1,0 +1,107 @@
+{
+  "name": "@xybrid/observability",
+  "version": "0.18.0",
+  "type": "module",
+  "description": "Portable GenAI observability on OpenTelemetry: inference, tool, workflow and model-load spans, metrics and events, with an optional OTLP/HTTP pipeline.",
+  "keywords": [
+    "opentelemetry",
+    "observability",
+    "genai",
+    "llm",
+    "tracing",
+    "otlp"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./otlp": {
+      "types": "./dist/otlp.d.ts",
+      "import": "./dist/otlp.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "bun run scripts/build.ts",
+    "bench": "node --expose-gc scripts/bench.mjs",
+    "example": "bun run examples/node-basic.ts",
+    "fixtures:dump": "bun run scripts/dump-fixtures.ts",
+    "lint": "biome check .",
+    "pack:release": "node scripts/check-pack.mjs",
+    "test": "bun test test/",
+    "typecheck": "tsc --noEmit",
+    "test:families": "node scripts/check-families.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xybrid-ai/xybrid.git",
+    "directory": "bindings/observability-js"
+  },
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/xybrid-ai/xybrid/tree/master/bindings/observability-js#readme",
+  "bugs": {
+    "url": "https://github.com/xybrid-ai/xybrid/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@opentelemetry/api-logs": "0.223.0"
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/core": "~3.0.0 || ~3.1.0",
+    "@opentelemetry/otlp-transformer": "~0.300.0 || ~0.301.0",
+    "@opentelemetry/resources": "~3.0.0 || ~3.1.0",
+    "@opentelemetry/sdk-logs": "~3.0.0 || ~3.1.0",
+    "@opentelemetry/sdk-metrics": "~3.0.0 || ~3.1.0",
+    "@opentelemetry/sdk-trace": "~3.0.0 || ~3.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@opentelemetry/core": {
+      "optional": true
+    },
+    "@opentelemetry/otlp-transformer": {
+      "optional": true
+    },
+    "@opentelemetry/resources": {
+      "optional": true
+    },
+    "@opentelemetry/sdk-logs": {
+      "optional": true
+    },
+    "@opentelemetry/sdk-metrics": {
+      "optional": true
+    },
+    "@opentelemetry/sdk-trace": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.3",
+    "@opentelemetry/api": "1.10.0",
+    "@opentelemetry/context-async-hooks": "3.0.0",
+    "@opentelemetry/core": "3.0.0",
+    "@opentelemetry/otlp-transformer": "0.300.0",
+    "@opentelemetry/resources": "3.0.0",
+    "@opentelemetry/sdk-logs": "3.0.0",
+    "@opentelemetry/sdk-metrics": "3.0.0",
+    "@opentelemetry/sdk-trace": "3.0.0",
+    "@types/bun": "^1.4.4",
+    "@types/node": "^24.19.2",
+    "tsdown": "^0.15.12",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.15.0"
+  }
+}

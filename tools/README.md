@@ -15,6 +15,7 @@ tools/
 │   │                         #   bindings (CI byte-compares with --check)
 │   ├── check_choice_provenance.py  # Verify the conformance fixture pins
 │   ├── version-sync.sh       # Read or set the version across every manifest
+│   ├── install_pins.py       # The docs' install-snippet pins version-sync owns
 │   ├── api-contract-check.sh # Soft-warning public SDK signature check
 │   ├── build-xcframework.sh  # Build XCFramework for Apple platforms
 │   └── build-android.sh      # Build AAR for Android

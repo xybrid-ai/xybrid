@@ -37,9 +37,9 @@ What it does:
         0.25.3 drops entirely -- run(), run_stream(), stream_result(), and the
         XybridEnvelope/EnvelopeKind/Result types) can
         extend it. That folder is hand-written and NOT touched by this script.
-     e. Keeps the generated model wrapper alive across blocking `StreamNext`,
-        preventing its finalizer from freeing the native model handle while
-        Rust is waiting for the next token.
+     e. Keeps the generated model wrapper alive across blocking `StreamNext`
+        and `Run`, plus the cancellation token across `Run`, preventing their
+        finalizers from freeing borrowed native handles during those calls.
      f. `NativeMemory.Alloc` (.NET 6) in FfiBuf.FromBytes -> fail closed. That
         method hands an owned buffer to Rust, which frees it with its global
         allocator in boltffi_free_buf (std::alloc::dealloc) — a free no C#
@@ -110,10 +110,19 @@ RECORD_STRUCT_RE = re.compile(
 # XybridToolResult), plus 2 for the live ASR session (XybridStreamingConfig /
 # XybridPartialResult), plus 2 for the pipeline result (XybridPipelineResult /
 # XybridStageResult), plus 2 for model cache management (XybridCacheEntry /
-# XybridCacheStatus).
+# XybridCacheStatus), plus 2 for observability (XybridObservationRef /
+# XybridObservabilityStats).
+# Observability v2 adds eight: per-signal stats (XybridSignalStats), observation
+# controls (XybridObservationOptions), the terminal ASR result
+# (XybridTranscriptionResult) and the manual-observation records
+# (XybridObservationContext / XybridToolCallInfo / XybridInferenceRequest /
+# XybridUsage / XybridModelLoadInfo).
+# Decisions add seven ordered records (Option / Level / Question / Request /
+# Score / Answer / Decisions), all using the same positional-struct lowering
+# reviewed below.
 # Bump this deliberately: the count is a tripwire for unreviewed boltffi output
 # drift, not a value to auto-sync.
-EXPECTED_RECORD_STRUCTS = 21
+EXPECTED_RECORD_STRUCTS = 38
 
 
 # --- Transform (g): Unsafe.SizeOf<T>() -> Marshal.SizeOf<T>(). boltffi's wire
@@ -159,8 +168,10 @@ CONTEXT_PARTIAL_REPLACEMENT = (
 )
 
 RESULT_FILE = "XybridResult.cs"
-RESULT_REASONING_TARGET = "string? ReasoningContent) {"
-RESULT_REASONING_REPLACEMENT = "string? ReasoningContent = null) {"
+RESULT_REASONING_TARGET = "string? ReasoningContent, XybridObservationRef? Observation = null) {"
+RESULT_REASONING_REPLACEMENT = (
+    "string? ReasoningContent = null, XybridObservationRef? Observation = null) {"
+)
 
 READER_REMAINING_TARGET = (
     "        internal WireReader(nint pointer, nuint length)\n"
@@ -189,7 +200,8 @@ RESULT_DECODER_TARGET = """        internal static XybridResult Decode(WireReade
                 (XybridExecutionTarget)reader.ReadI32(),
                 XybridInferenceMetrics.Decode(reader),
                 reader.ReadArray(reader => XybridToolCall.Decode(reader)),
-                reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
+                reader.ReadU8() == 0 ? default(XybridObservationRef?) : XybridObservationRef.Decode(reader)
             );
 """
 RESULT_DECODER_REPLACEMENT = """        internal static XybridResult Decode(WireReader reader)
@@ -204,6 +216,9 @@ RESULT_DECODER_REPLACEMENT = """        internal static XybridResult Decode(Wire
             string? reasoningContent = reader.HasRemaining
                 ? reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
                 : ReasoningFromMetadata(envelope);
+            XybridObservationRef? observation = reader.HasRemaining
+                ? reader.ReadU8() == 0 ? default(XybridObservationRef?) : XybridObservationRef.Decode(reader)
+                : null;
             return new XybridResult(
                 envelope,
                 outputType,
@@ -212,7 +227,8 @@ RESULT_DECODER_REPLACEMENT = """        internal static XybridResult Decode(Wire
                 executionTarget,
                 metrics,
                 toolCalls,
-                reasoningContent
+                reasoningContent,
+                observation
             );
         }
 
@@ -226,27 +242,47 @@ RESULT_DECODER_REPLACEMENT = """        internal static XybridResult Decode(Wire
         }
 """
 
-# --- Transform (e): keep the managed model alive across blocking StreamNext.
-# Anchored on the 0.29 body, which returns the error and result buffers through
-# separate out-params rather than one tagged buffer.
-STREAM_NEXT_FREE_TARGET = (
-    "            finally\n"
-    "            {\n"
-    "                NativeMethods.FreeBuf(boltffiResultBuffer);\n"
-    "            }\n"
-    "        }\n"
+# --- Transform (e): retain managed wrappers across blocking native calls.
+# Anchor each exact pinned call, not a generic result-buffer finally block that
+# can match an unrelated getter. Conversion and result ownership are unchanged.
+MODEL_BLOCKING_CALLS = (
+    (
+        "FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelStreamNext(this.Handle, streamId, out FfiBuf boltffiResultBuffer);",
+        "boltffiErrorBuffer = NativeMethods.NativeXybridModelStreamNext(this.Handle, streamId, out boltffiResultBuffer);",
+        ("this",),
+    ),
+    (
+        "FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRun(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, cancel.Handle, out FfiBuf boltffiResultBuffer);",
+        "boltffiErrorBuffer = NativeMethods.NativeXybridModelRun(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, cancel.Handle, out boltffiResultBuffer);",
+        ("this", "cancel"),
+    ),
 )
-STREAM_NEXT_FREE_REPLACEMENT = (
-    "            finally\n"
-    "            {\n"
-    "                NativeMethods.FreeBuf(boltffiResultBuffer);\n"
-    "                // StreamNext can block for the full inter-token gap. Keep\n"
-    "                // this wrapper alive so its finalizer cannot free the\n"
-    "                // native handle while the call is still using it.\n"
-    "                global::System.GC.KeepAlive(this);\n"
-    "            }\n"
-    "        }\n"
-)
+
+
+def _retain_model_blocking_calls(content: str) -> str:
+    for target, call, owners in MODEL_BLOCKING_CALLS:
+        target = "            " + target
+        _drift(content.count(target) == 1, f"expected one blocking native call: {call}")
+        keep_alive = "".join(
+            f"                global::System.GC.KeepAlive({owner});\n"
+            for owner in owners
+        )
+        replacement = (
+            "            FfiBuf boltffiErrorBuffer;\n"
+            "            FfiBuf boltffiResultBuffer;\n"
+            "            try\n"
+            "            {\n"
+            f"                {call}\n"
+            "            }\n"
+            "            finally\n"
+            "            {\n"
+            "                // Native code borrows these handles for the full call.\n"
+            + keep_alive
+            + "            }"
+        )
+        content = content.replace(target, replacement, 1)
+    return content
+
 
 # --- Transform (i): un-collide the `Text` envelope variant. boltffi emits
 # `sealed record Text(string Text)`, but C# forbids a member sharing its
@@ -259,6 +295,19 @@ TEXT_VARIANT_REWRITES = (
     (
         "public sealed record Text(string Text) : XybridEnvelopeKind;",
         "public sealed record Text(string Value) : XybridEnvelopeKind;",
+    ),
+    ("writer.WriteString(value.Text);", "writer.WriteString(value.Value);"),
+    (
+        "public sealed record Decisions(global::XybridBolt.XybridDecisions Decisions) : XybridEnvelopeKind;",
+        "public sealed record Decisions(global::XybridBolt.XybridDecisions Value) : XybridEnvelopeKind;",
+    ),
+    ("value.Decisions.Encode(writer);", "value.Value.Encode(writer);"),
+)
+DECISION_CONTENT_FILE = "XybridDecisionContent.cs"
+DECISION_CONTENT_REWRITES = (
+    (
+        "public sealed record Text(string Text) : XybridDecisionContent;",
+        "public sealed record Text(string Value) : XybridDecisionContent;",
     ),
     ("writer.WriteString(value.Text);", "writer.WriteString(value.Value);"),
 )
@@ -305,8 +354,8 @@ BOLT_CLASS_REPLACEMENT = "public static partial class XybridBolt"
 ENTRY_PARTIAL_TARGETS = {
     "XybridDownload.cs": "public sealed class XybridDownload : global::System.IDisposable",
     "XybridPipeline.cs": "public sealed class XybridPipeline : global::System.IDisposable",
-    "XybridTelemetryConfig.cs": (
-        "public sealed class XybridTelemetryConfig : global::System.IDisposable"
+    "XybridObservabilityConfig.cs": (
+        "public sealed class XybridObservabilityConfig : global::System.IDisposable"
     ),
 }
 
@@ -339,7 +388,13 @@ def _downlevel_record_structs(content: str) -> tuple[str, int]:
             for p in match.group("params").split(",")
             if p.strip()
         ]
-        ctor_params = ", ".join(f"{ty} {pn}" for ty, pn in fields)
+        ctor_params = ", ".join(
+            f"{ty} {pn}" + (
+                " = null" if pn in ("Observation", "DecoderObservation")
+                and ty in ("XybridObservationRef?", "XybridObservationOptions?") else ""
+            )
+            for ty, pn in fields
+        )
         assigns = " ".join(f"this.{pn} = {pn};" for _, pn in fields)
         props = "\n".join(f"        public {ty} {pn} {{ get; }}" for ty, pn in fields)
         return (
@@ -433,6 +488,7 @@ def generate() -> dict[str, str]:
     unsafe_sizeof = 0
     bolt_class_renamed = False
     text_variant_fixed = False
+    decision_content_fixed = False
     guid_fenced = False
     model_made_partial = False
     entry_partials_made = 0
@@ -440,7 +496,7 @@ def generate() -> dict[str, str]:
     result_defaulted = False
     reader_remaining_added = False
     result_compatibility_added = False
-    stream_next_kept_alive = False
+    blocking_calls_kept_alive = False
     native_library_selected = False
     for src in sources:
         content = src.read_text(encoding="utf-8")
@@ -456,6 +512,14 @@ def generate() -> dict[str, str]:
                 )
                 content = content.replace(target, replacement, 1)
             text_variant_fixed = True
+        if src.name == DECISION_CONTENT_FILE:
+            for target, replacement in DECISION_CONTENT_REWRITES:
+                _drift(
+                    content.count(target) == 1,
+                    f"expected `{target}` in {src.name}",
+                )
+                content = content.replace(target, replacement, 1)
+            decision_content_fixed = True
         if src.name == BOLT_CLASS_FILE:
             _drift(
                 content.count(NATIVE_LIBRARY_TARGET) == 1,
@@ -502,14 +566,8 @@ def generate() -> dict[str, str]:
                 MODEL_PARTIAL_TARGET, MODEL_PARTIAL_REPLACEMENT, 1
             )
             model_made_partial = True
-            _drift(
-                STREAM_NEXT_FREE_TARGET in content,
-                f"expected StreamNext body not found in {src.name}",
-            )
-            content = content.replace(
-                STREAM_NEXT_FREE_TARGET, STREAM_NEXT_FREE_REPLACEMENT, 1
-            )
-            stream_next_kept_alive = True
+            content = _retain_model_blocking_calls(content)
+            blocking_calls_kept_alive = True
         if src.name == CONTEXT_FILE:
             _drift(
                 CONTEXT_PARTIAL_TARGET in content,
@@ -561,13 +619,14 @@ def generate() -> dict[str, str]:
     _drift(
         text_variant_fixed, f"{ENVELOPE_KIND_FILE} not found in boltffi output"
     )
+    _drift(decision_content_fixed, f"{DECISION_CONTENT_FILE} not found in boltffi output")
     _drift(model_made_partial, f"{MODEL_FILE} not found in boltffi output")
     _drift(
         entry_partials_made == len(ENTRY_PARTIAL_TARGETS),
         f"made {entry_partials_made} entry types partial, expected "
         f"{len(ENTRY_PARTIAL_TARGETS)}",
     )
-    _drift(stream_next_kept_alive, f"StreamNext not found in {MODEL_FILE}")
+    _drift(blocking_calls_kept_alive, f"blocking calls not found in {MODEL_FILE}")
     _drift(context_made_partial, f"{CONTEXT_FILE} not found in boltffi output")
     _drift(result_defaulted, f"{RESULT_FILE} not found in boltffi output")
     _drift(result_compatibility_added, f"decoder not found in {RESULT_FILE}")

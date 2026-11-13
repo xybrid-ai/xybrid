@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xybrid"
-version = "0.15.0"
+version = "0.18.0"
 description = "Python SDK for local-first xybrid inference"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -18,6 +18,10 @@ Documentation = "https://docs.xybrid.dev"
 
 [project.optional-dependencies]
 dev = ["pytest"]
+
+[tool.setuptools]
+# Retain the complete native dependency licenses in wheels and source archives.
+license-files = ["NOTICE"]
 
 [tool.setuptools.packages.find]
 where = ["."]

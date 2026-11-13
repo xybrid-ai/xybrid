@@ -21,6 +21,7 @@ use crate::context::LlamaContext;
 use crate::error::{LlamaError, LlamaResult};
 use crate::ffi;
 use crate::model::LlamaModel;
+use crate::utf8::Utf8Decoder;
 
 /// Closure type alias for per-token callbacks. The signature deliberately
 /// boxes the error so any `Send + Sync` error (notably
@@ -41,6 +42,36 @@ where
 {
     callback: &'a mut F,
     error: Option<Box<dyn StdError + Send + Sync>>,
+    /// Decodes each token's piece after the bytes of a character an earlier
+    /// token started, so a character split across tokens is not lost.
+    text: Utf8Decoder,
+}
+
+impl<'a, F> StreamingContext<'a, F>
+where
+    F: FnMut(i32, &str) -> Result<(), Box<dyn StdError + Send + Sync>>,
+{
+    fn new(callback: &'a mut F) -> Self {
+        Self {
+            callback,
+            error: None,
+            text: Utf8Decoder::default(),
+        }
+    }
+
+    /// Drop the leading bytes of a character the generation ended inside,
+    /// as when the budget runs out between its bytes. They have no text, and
+    /// [`LlamaModel::detokenize`] drops them from the same tokens too.
+    fn drop_unfinished_character(&mut self) {
+        let bytes = self.text.discard_unfinished();
+        if bytes > 0 {
+            tracing::debug!(
+                target: "xybrid_llama",
+                unfinished_bytes = bytes,
+                "generation ended inside a multi-byte character"
+            );
+        }
+    }
 }
 
 /// C-compatible trampoline that bridges llama.cpp's token callback into
@@ -74,13 +105,22 @@ where
     // around the raw-pointer derefs.
     let ctx = &mut *(user_data as *mut StreamingContext<F>);
 
-    let text = if token_text.is_null() {
-        ""
+    // A token's piece is raw bytes: decoding it alone dropped any character
+    // a byte-level vocabulary splits across tokens. The callback gets each
+    // character once its last byte arrives, and "" for a token that only
+    // started one. The piece arrives as a C string from the native loop's
+    // 1023-byte buffer, so a longer piece arrives empty and a NUL byte ends
+    // one early, while `LlamaModel::detokenize` reads every piece whole. No
+    // real vocabulary has such pieces; carrying the piece's length instead
+    // would take a native change.
+    let piece = if token_text.is_null() {
+        &[][..]
     } else {
-        CStr::from_ptr(token_text).to_str().unwrap_or("")
+        CStr::from_ptr(token_text).to_bytes()
     };
+    let text = ctx.text.push(piece);
 
-    match (ctx.callback)(token_id, text) {
+    match (ctx.callback)(token_id, &text) {
         Ok(()) => 0,
         Err(e) => {
             ctx.error = Some(e);
@@ -221,6 +261,101 @@ fn stop_array_ptrs(stop_tokens: &[i32], stop_lens: &[c_int]) -> (*const i32, *co
     }
 }
 
+/// Why a native generation loop ended.
+///
+/// The loop stores each sampled token, then ends on the first check that
+/// passes: the token is an end-of-generation token, the output now ends with
+/// a stop sequence, or the output has reached the token budget.
+/// [`generation_end`] reads the cause back from the returned tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum GenerationEnd {
+    /// The last token is an end-of-generation token (EOS, `<|im_end|>`,
+    /// `<end_of_turn>`, ...). The loop keeps it in the output.
+    EndOfGeneration,
+    /// The output ends with the tokens of a stop sequence.
+    StopSequence,
+    /// The token budget ran out.
+    MaxTokens,
+    /// The loop ended before the budget with neither. [`generate_with_stops`]
+    /// and [`generate_streaming`] end this way, without an error code, when
+    /// `llama_decode` fails on a generated token.
+    Interrupted,
+}
+
+/// Read why a generation ended from the tokens it returned.
+///
+/// Pass the `max_tokens` and `stop_sequences` the generation ran with. The
+/// stop sequences are tokenized exactly as the generate functions tokenize
+/// them, so one that tokenizes to nothing, like `""`, never matches. A stop
+/// matches only when the output's last tokens are its tokens, the check the
+/// native loop makes after every token. The decoded text plays no part: text
+/// that merely contains a stop, such as `"he"` inside a `"The"` token, is not
+/// one, and trimming the text cannot hide one.
+///
+/// # Errors
+///
+/// The errors the generate functions return for the same stop sequences:
+/// [`LlamaError::InvalidInput`] for one exceeding the native length limit, and
+/// [`LlamaError::TokenizationFailed`] when llama.cpp cannot tokenize one.
+pub fn generation_end(
+    model: &LlamaModel,
+    output_tokens: &[i32],
+    max_tokens: usize,
+    stop_sequences: &[String],
+) -> LlamaResult<GenerationEnd> {
+    let (stop_tokens, stop_lens) = build_stop_token_arrays(model, stop_sequences)?;
+    Ok(classify_generation_end(
+        output_tokens,
+        max_tokens,
+        &stop_tokens,
+        &stop_lens,
+        |token| model.vocab_is_eog(token),
+    ))
+}
+
+/// [`generation_end`] on stop sequences already in the flattened
+/// `(tokens, lens)` form the native loop receives. The checks run in the
+/// loop's order: end-of-generation, then stop sequence, then budget.
+fn classify_generation_end(
+    output_tokens: &[i32],
+    max_tokens: usize,
+    stop_tokens: &[i32],
+    stop_lens: &[c_int],
+    is_eog: impl Fn(i32) -> bool,
+) -> GenerationEnd {
+    if output_tokens.last().is_some_and(|&token| is_eog(token)) {
+        GenerationEnd::EndOfGeneration
+    } else if ends_with_stop_sequence(output_tokens, stop_tokens, stop_lens) {
+        GenerationEnd::StopSequence
+    } else if output_tokens.len() >= max_tokens {
+        GenerationEnd::MaxTokens
+    } else {
+        GenerationEnd::Interrupted
+    }
+}
+
+/// Whether `output_tokens` ends with one of the flattened stop sequences,
+/// the match `check_stop_sequences` makes in `wrapper.cpp`. An empty
+/// sequence never matches.
+fn ends_with_stop_sequence(
+    output_tokens: &[i32],
+    stop_tokens: &[i32],
+    stop_lens: &[c_int],
+) -> bool {
+    let mut rest = stop_tokens;
+    for &len in stop_lens {
+        // Each length is a token count `build_stop_token_arrays` recorded
+        // for the tokens it appended, so the split stays in bounds.
+        let (sequence, tail) = rest.split_at(len as usize);
+        if !sequence.is_empty() && output_tokens.ends_with(sequence) {
+            return true;
+        }
+        rest = tail;
+    }
+    false
+}
+
 /// Autoregressive generation without streaming. Returns the generated
 /// token IDs.
 ///
@@ -340,10 +475,7 @@ where
     let grammar_cstr = grammar_cstring(grammar)?;
     let grammar_ptr = grammar_cstr.as_ref().map_or(ptr::null(), |c| c.as_ptr());
 
-    let mut streaming_ctx = StreamingContext {
-        callback: &mut on_token,
-        error: None,
-    };
+    let mut streaming_ctx = StreamingContext::new(&mut on_token);
 
     let callback: Option<TokenCallback> = Some(streaming_trampoline::<F>);
 
@@ -374,6 +506,7 @@ where
             n_past_in,
         )
     };
+    streaming_ctx.drop_unfinished_character();
 
     let (n_generated, stopped_by_callback) =
         interpret_streaming_result(result, streaming_ctx.error.take(), -4..=-1, |code| {
@@ -425,10 +558,7 @@ where
     let grammar_cstr = grammar_cstring(grammar)?;
     let grammar_ptr = grammar_cstr.as_ref().map_or(ptr::null(), |c| c.as_ptr());
 
-    let mut streaming_ctx = StreamingContext {
-        callback: &mut on_token,
-        error: None,
-    };
+    let mut streaming_ctx = StreamingContext::new(&mut on_token);
 
     let callback: Option<TokenCallback> = Some(streaming_trampoline::<F>);
 
@@ -457,6 +587,7 @@ where
             n_past,
         )
     };
+    streaming_ctx.drop_unfinished_character();
 
     let (n_generated, stopped_by_callback) =
         interpret_streaming_result(result, streaming_ctx.error.take(), -5..=-1, |code| {
@@ -592,13 +723,14 @@ fn prompt_from_template_bytes(buf: &[u8], len: usize) -> LlamaResult<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        chat_template_render_failed, decode_hard_error, interpret_streaming_result,
-        prompt_from_template_bytes, streaming_trampoline, LlamaError, StreamingContext,
+        chat_template_render_failed, classify_generation_end, decode_hard_error,
+        interpret_streaming_result, prompt_from_template_bytes, streaming_trampoline,
+        GenerationEnd, LlamaError, StreamingContext,
     };
     use std::error::Error;
     use std::ffi::CString;
     use std::fmt;
-    use std::os::raw::c_void;
+    use std::os::raw::{c_int, c_void};
     use std::time::{Duration, Instant};
 
     #[derive(Debug)]
@@ -710,13 +842,109 @@ mod tests {
         assert_eq!(count, 2);
     }
 
+    // A synthetic vocabulary for the end-cause tests: each id stands for the
+    // piece in its comment, and `EOG` is the only end-of-generation token.
+    const EOG: i32 = 1;
+    const THE: i32 = 10; // "The"
+    const REST: i32 = 11; // " rest"
+    const HE: i32 = 12; // "he", which "The" contains as text but not as a token
+    const NEWLINE: i32 = 13; // "\n"
+
+    /// The end cause of `output` under `max_tokens`, given each stop
+    /// sequence's tokens, flattened the way the native loop receives them.
+    fn end_of(output: &[i32], max_tokens: usize, stops: &[&[i32]]) -> GenerationEnd {
+        let stop_tokens = stops.concat();
+        let stop_lens: Vec<c_int> = stops.iter().map(|stop| stop.len() as c_int).collect();
+        classify_generation_end(output, max_tokens, &stop_tokens, &stop_lens, |token| {
+            token == EOG
+        })
+    }
+
+    #[test]
+    fn a_budget_that_runs_out_without_eog_or_stop_is_max_tokens() {
+        assert_eq!(end_of(&[THE, REST], 2, &[]), GenerationEnd::MaxTokens);
+    }
+
+    /// `build_stop_token_arrays` drops a stop that tokenizes to nothing, so
+    /// `""` never reaches the matcher; an empty entry still never matches,
+    /// and it does not shift where the next stop's tokens start.
+    #[test]
+    fn empty_stop_sequences_never_match() {
+        assert_eq!(end_of(&[THE, REST], 2, &[&[]]), GenerationEnd::MaxTokens);
+        assert_eq!(
+            end_of(&[THE, REST], 2, &[&[], &[REST]]),
+            GenerationEnd::StopSequence
+        );
+    }
+
+    #[test]
+    fn a_stop_inside_a_longer_token_is_not_a_stop() {
+        assert_eq!(end_of(&[THE, REST], 2, &[&[HE]]), GenerationEnd::MaxTokens);
+    }
+
+    #[test]
+    fn a_multi_token_stop_matches_only_as_a_whole_suffix() {
+        let stop: &[i32] = &[THE, REST];
+        assert_eq!(
+            end_of(&[THE, REST], 2, &[stop]),
+            GenerationEnd::StopSequence
+        );
+        assert_eq!(end_of(&[HE, REST], 2, &[stop]), GenerationEnd::MaxTokens);
+        assert_eq!(end_of(&[REST], 1, &[stop]), GenerationEnd::MaxTokens);
+    }
+
+    #[test]
+    fn later_stops_are_read_at_their_own_offsets() {
+        assert_eq!(
+            end_of(&[THE, REST], 2, &[&[HE, HE], &[NEWLINE], &[REST]]),
+            GenerationEnd::StopSequence
+        );
+        assert_eq!(
+            end_of(&[THE, REST], 2, &[&[HE, REST], &[NEWLINE]]),
+            GenerationEnd::MaxTokens
+        );
+    }
+
+    /// The native loop checks for a stop before it checks the budget, so a
+    /// stop on the last allowed token is a stop, whitespace included.
+    #[test]
+    fn a_stop_on_the_last_budgeted_token_is_a_stop() {
+        assert_eq!(
+            end_of(&[THE, REST], 2, &[&[REST]]),
+            GenerationEnd::StopSequence
+        );
+        assert_eq!(
+            end_of(&[NEWLINE], 1, &[&[NEWLINE]]),
+            GenerationEnd::StopSequence
+        );
+    }
+
+    #[test]
+    fn an_eog_on_the_last_budgeted_token_is_an_eog() {
+        assert_eq!(end_of(&[THE, EOG], 2, &[]), GenerationEnd::EndOfGeneration);
+        assert_eq!(end_of(&[EOG], 4, &[]), GenerationEnd::EndOfGeneration);
+        // The loop tests for an end-of-generation token first.
+        assert_eq!(
+            end_of(&[THE, EOG], 2, &[&[EOG]]),
+            GenerationEnd::EndOfGeneration
+        );
+    }
+
+    #[test]
+    fn an_early_stop_ends_before_the_budget() {
+        assert_eq!(end_of(&[THE], 2, &[&[THE]]), GenerationEnd::StopSequence);
+    }
+
+    #[test]
+    fn an_early_end_without_eog_or_stop_is_interrupted() {
+        assert_eq!(end_of(&[THE], 2, &[&[REST]]), GenerationEnd::Interrupted);
+        assert_eq!(end_of(&[], 2, &[]), GenerationEnd::Interrupted);
+    }
+
     #[test]
     fn streaming_trampoline_preserves_boxed_error_marker() {
         let mut callback: Callback = abort_callback;
-        let mut ctx = StreamingContext {
-            callback: &mut callback,
-            error: None,
-        };
+        let mut ctx = StreamingContext::new(&mut callback);
         let token_text = CString::new("token").unwrap();
 
         let started = Instant::now();
@@ -828,5 +1056,65 @@ mod tests {
             }
             other => panic!("expected ChatTemplateFailed, got {other:?}"),
         }
+    }
+
+    /// Run the trampoline the way the native loop does, one token's piece
+    /// per call, and return what the callback received.
+    fn stream_pieces(pieces: &[&[u8]]) -> Vec<(i32, String)> {
+        let mut received = Vec::new();
+        let mut callback =
+            |token_id: i32, text: &str| -> Result<(), Box<dyn Error + Send + Sync>> {
+                received.push((token_id, text.to_string()));
+                Ok(())
+            };
+        let mut ctx = StreamingContext::new(&mut callback);
+        for (token_id, piece) in (1..).zip(pieces) {
+            let piece = CString::new(*piece).expect("test pieces hold no NUL byte");
+            assert_eq!(call_trampoline(&mut ctx, token_id, &piece), 0);
+        }
+        received
+    }
+
+    fn call_trampoline<F>(
+        ctx: &mut StreamingContext<'_, F>,
+        token_id: i32,
+        piece: &CString,
+    ) -> std::os::raw::c_int
+    where
+        F: FnMut(i32, &str) -> Result<(), Box<dyn Error + Send + Sync>>,
+    {
+        // SAFETY: `ctx` is a live, exclusive `StreamingContext<F>` for the
+        // whole call, and `piece` is a live C string.
+        unsafe {
+            streaming_trampoline::<F>(
+                token_id,
+                piece.as_ptr(),
+                ctx as *mut StreamingContext<'_, F> as *mut c_void,
+            )
+        }
+    }
+
+    /// A byte-level vocabulary splits a character across tokens: qwen3
+    /// writes "🙂" as byte tokens, none of them UTF-8 alone. The callback
+    /// gets the character with the token that finishes it, and "" for the
+    /// tokens before that.
+    #[test]
+    fn streaming_trampoline_joins_a_character_split_across_tokens() {
+        assert_eq!(
+            stream_pieces(&[b"\xF0\x9F", b"\x99\x82", b" ok"]),
+            [
+                (1, String::new()),
+                (2, "🙂".to_string()),
+                (3, " ok".to_string())
+            ]
+        );
+        assert_eq!(
+            stream_pieces(&[b"\xE6", b"\x97\xA5\xE6\x9C", b"\xAC"]),
+            [
+                (1, String::new()),
+                (2, "日".to_string()),
+                (3, "本".to_string())
+            ]
+        );
     }
 }

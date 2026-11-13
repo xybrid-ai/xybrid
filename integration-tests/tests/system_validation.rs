@@ -295,7 +295,9 @@ fn test_trace_latest_command() -> Result<(), Box<dyn std::error::Error>> {
 /// Helper function to get the CLI binary path for testing
 fn get_cli_binary_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
     // Try to find the binary in the target directory
-    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut path = PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").ok_or("CARGO_MANIFEST_DIR is not set")?,
+    );
 
     // Go up to workspace root
     path.pop(); // xybrid-core -> workspace root

@@ -1,0 +1,6 @@
+dist/
+LICENSE
+NOTICE
+node_modules/
+test-results/
+*.tsbuildinfo

@@ -113,6 +113,8 @@ jobs:
       dry_run: ${{ steps.meta.outputs.dry_run }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0   # the Flutter precompile check reads the full history
 
       - name: Parse branch / version
         id: meta
@@ -188,6 +190,21 @@ jobs:
           fi
           [ "$FAILED" -eq 0 ] || exit 1
 
+      # cargokit names the Flutter precompiled release after a hash of
+      # bindings/flutter/rust alone, and the precompile jobs skip every target
+      # that release already holds. A native change that lands after the bump
+      # (v0.16.0: llama.cpp v0.8.0, via a master merge) leaves the hash alone,
+      # so those jobs would ship libraries built without it. Fail before any
+      # build starts; the log names the files and the one-line fix. The
+      # release lookup (read-only) catches a rebased or re-cut branch, whose
+      # history no longer shows what the release was built from. Skipped in a
+      # rehearsal, which builds no Flutter libraries.
+      - name: Check Flutter precompiled libraries are current
+        if: steps.meta.outputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 tools/scripts/check_flutter_precompiled_inputs.py --github-repo "$GITHUB_REPOSITORY"
+
   # =========================================================================
   # Build the web package at the release version, including both Rust runtimes.
   # Chromium tests serve the extracted npm tarball and check the actual Rust
@@ -219,7 +236,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .context/bazel-disk-cache
-          key: web-wasm-${{ runner.os }}-${{ hashFiles('Cargo.toml', '.bazelversion', 'MODULE.bazel', 'emsdk.patch', 'rules_rs.patch', 'BUILD.bazel', 'bindings/web/runtime/**', 'crates/xybrid-llama/**', 'crates/llama-cpp-sys/**') }}
+          key: web-wasm-${{ runner.os }}-${{ hashFiles('Cargo.toml', '.bazelversion', 'MODULE.bazel', 'emsdk.patch', 'rules_rust.patch', 'BUILD.bazel', 'bindings/web/runtime/**', 'crates/xybrid-llama/**', 'crates/llama-cpp-sys/**') }}
           restore-keys: web-wasm-${{ runner.os }}-
 
       - name: Bound the browser build cache
@@ -240,9 +257,25 @@ jobs:
           corepack enable
           corepack prepare pnpm@11.2.2 --activate
 
+      - name: Install Observability SDK dependencies
+        working-directory: bindings/observability-js
+        run: pnpm install --frozen-lockfile
+
+      - name: Test and pack the Observability SDK
+        working-directory: bindings/observability-js
+        run: |
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+          pnpm pack:release
+
       - name: Install Web SDK dependencies
         working-directory: bindings/web
         run: pnpm install --frozen-lockfile
+
+      - name: Test package verification from a clean checkout
+        working-directory: bindings/web
+        run: pnpm test:release
 
       - name: Build CPU and WebGPU Rust runtimes and Web SDK
         working-directory: bindings/web
@@ -250,6 +283,8 @@ jobs:
 
       - name: Pack and verify the Web SDK as an isolated npm consumer
         working-directory: bindings/web
+        env:
+          XYBRID_OBSERVABILITY_ARCHIVE: ${{ github.workspace }}/bindings/observability-js/test-results/npm/xybrid-observability-${{ needs.check-release-branch.outputs.version }}.tgz
         run: pnpm pack:release
 
       - name: Cache Web example model assets
@@ -284,17 +319,32 @@ jobs:
           VERSION: ${{ needs.check-release-branch.outputs.version }}
         run: sha256sum "xybrid-web-${VERSION}.tgz" > "xybrid-web-${VERSION}.tgz.sha256"
 
+      - name: Checksum the Observability npm release archive
+        working-directory: bindings/observability-js/test-results/npm
+        env:
+          VERSION: ${{ needs.check-release-branch.outputs.version }}
+        run: sha256sum "xybrid-observability-${VERSION}.tgz" > "xybrid-observability-${VERSION}.tgz.sha256"
+
+      - name: Upload Observability SDK release package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: observability-npm
+          path: |
+            bindings/observability-js/test-results/npm/*.tgz
+            bindings/observability-js/test-results/npm/*.tgz.sha256
+          if-no-files-found: error
+
       - name: Upload Web SDK release package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: web-npm
           path: |
-            bindings/web/test-results/npm/*.tgz
-            bindings/web/test-results/npm/*.tgz.sha256
+            bindings/web/test-results/npm/xybrid-web-*.tgz
+            bindings/web/test-results/npm/xybrid-web-*.tgz.sha256
           if-no-files-found: error
 
   # =========================================================================
-  # Apple builds split into three parallel macos-14 jobs.
+  # Apple builds split into three parallel macOS jobs.
   #
   # Previously these ran sequentially on one runner to amortize sccache /
   # toolchain setup. The bundled job was the critical-path long pole
@@ -312,7 +362,7 @@ jobs:
     # Skipped in a dry-run rehearsal (which validates only the CLI release path).
     if: needs.check-release-branch.outputs.dry_run != 'true'
     needs: [check-release-branch]
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       contents: read       # actions/checkout
       id-token: write      # Sigstore OIDC for attest-build-provenance
@@ -387,7 +437,7 @@ jobs:
     permissions:
       contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-release-branch]
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -439,6 +489,10 @@ jobs:
       # full shipped feature surface, and the iOS slices must be the right
       # platform (device vs simulator). Mach-O symbols carry a leading
       # underscore; LC_BUILD_VERSION platform: 1=macOS, 2=iOS, 7=iOS-sim.
+      # No object may need a newer OS than its podspec's s.platform, or an app
+      # at the declared minimum builds and then cannot load the library. The
+      # macOS floor is hermetic-llvm's default (no --macos_minimum_os), so an
+      # llvm bump can raise it; this is the check that notices.
       - name: Verify Flutter darwin payloads
         run: |
           set -euo pipefail
@@ -463,6 +517,13 @@ jobs:
           check_lib aarch64-apple-darwin 1
           check_lib aarch64-apple-ios 2
           check_lib aarch64-apple-ios-sim 7
+          python3 tools/scripts/verify_apple_min_os.py \
+            --podspec bindings/flutter/macos/xybrid_flutter.podspec \
+            prebuilt/aarch64-apple-darwin/libxybrid_flutter_ffi.a
+          python3 tools/scripts/verify_apple_min_os.py \
+            --podspec bindings/flutter/ios/xybrid_flutter.podspec \
+            prebuilt/aarch64-apple-ios/libxybrid_flutter_ffi.a \
+            prebuilt/aarch64-apple-ios-sim/libxybrid_flutter_ffi.a
 
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
 
@@ -500,7 +561,7 @@ jobs:
     # anything ships; artifact name, attestation, and downstream unchanged.
     name: Build CLI (macos-arm64, Bazel)
     needs: [check-release-branch]
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       contents: read       # actions/checkout
       id-token: write      # Sigstore OIDC for attest-build-provenance
@@ -511,7 +572,7 @@ jobs:
           submodules: true
 
       # build:macos-metal uses the host's preinstalled cmake/make/pkg-config
-      # for rfcc's exec tools (macos-14 images ship them; guard just in case).
+      # for rfcc's exec tools (the runner images ship them; guard just in case).
       - name: Ensure rfcc host tools
         run: |
           which cmake >/dev/null || brew install cmake
@@ -557,6 +618,7 @@ jobs:
           mkdir -p dist-cli
           BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=macos-metal -c opt)
           cp "$BIN" dist-cli/xybrid-${TAG}-macos-arm64
+          cp crates/llama-cpp-sys/NOTICE dist-cli/xybrid-${TAG}-macos-arm64.NOTICE
           chmod +w dist-cli/xybrid-${TAG}-macos-arm64   # bazel outputs are read-only
           strip dist-cli/xybrid-${TAG}-macos-arm64
           chmod +x dist-cli/xybrid-${TAG}-macos-arm64
@@ -711,8 +773,9 @@ jobs:
             --readelf readelf --speech --min-sdk 29
 
       # The release zip: the AAR's jni/<abi>/ directories at the root (the
-      # bindings/kotlin/libs/ layout publish-kotlin stages from) plus
-      # assets/xybrid/zzz/, gated again as the exact bytes that ship.
+      # bindings/kotlin/libs/ layout publish-kotlin stages from) plus the
+      # notices (assets/xybrid/llama/NOTICE and assets/xybrid/zzz/), gated
+      # again as the exact bytes that ship.
       - name: Prepare artifact with version
         shell: bash
         env:
@@ -1181,6 +1244,7 @@ jobs:
           ARTIFACT="dist/xybrid-${TAG}-linux-x86_64"
           BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote -c opt)
           cp "$BIN" "$ARTIFACT"
+          cp crates/llama-cpp-sys/NOTICE "${ARTIFACT}.NOTICE"
           chmod +w "$ARTIFACT"   # bazel-bin outputs are read-only
           strip "$ARTIFACT"
           chmod +x "$ARTIFACT"
@@ -1272,6 +1336,7 @@ jobs:
           ARTIFACT="dist/xybrid-${TAG}-windows-x86_64.exe"
           EXE=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=windows -c opt)
           cp "$EXE" "$ARTIFACT"
+          cp crates/llama-cpp-sys/NOTICE "${ARTIFACT}.NOTICE"
           echo "artifact_path=$ARTIFACT" >> "$GITHUB_OUTPUT"
 
       - name: Attest CLI provenance (windows-x86_64)
@@ -1433,7 +1498,7 @@ jobs:
             echo
             echo "**Android**"
             echo "- Maven Central: \`ai.xybrid:xybrid-kotlin:${TAG#v}\` (minSdk 29, Android 10); arm64-v8a includes Phonon/Kitten TTS 2 speech"
-            echo "- \`xybrid-android-${TAG}.zip\` — Native .so files for arm64-v8a (with Phonon/Kitten TTS 2 speech), armeabi-v7a and x86_64 (without speech), plus the speech engine's notices under \`assets/xybrid/zzz/\`. Copy only the ABI directories into \`jniLibs\`, ship \`assets/xybrid/zzz/\` with your app's assets, and set minSdk 29 (Android 10)"
+            echo "- \`xybrid-android-${TAG}.zip\` — Native .so files for arm64-v8a (with Phonon/Kitten TTS 2 speech), armeabi-v7a and x86_64 (without speech), plus the third-party notices under \`assets/xybrid/\`: \`llama/NOTICE\` for llama.cpp and \`zzz/\` for the speech engine. Copy only the ABI directories into \`jniLibs\`, ship all of \`assets/xybrid/\` with your app's assets, and set minSdk 29 (Android 10)"
             echo
             echo "**Flutter**"
             echo "- Precompiled native libraries auto-downloaded by cargokit"
@@ -1447,10 +1512,13 @@ jobs:
             echo
             echo "**CLI**"
             echo "- Cross-platform binaries for macOS (arm64), Linux (x86_64), and Windows (x86_64)"
+            echo "- Each CLI binary has a matching .NOTICE asset containing its llama.cpp/Jinja and JSON dependency licenses; retain it when redistributing the binary"
             echo
             echo "**Web (GGUF preview)**"
             echo "- \`xybrid-web-${TAG#v}.tgz\` — ESM, TypeScript declarations, worker, CPU/WASM SIMD and experimental WebGPU runtimes"
-            echo "- Matching \`.tgz.sha256\` checksum; install the tarball directly or use \`@xybrid/web\` after npm approval"
+            echo "- Matching \`.tgz.sha256\` checksum; use \`@xybrid/web\` after npm approval"
+            echo "- \`xybrid-observability-${TAG#v}.tgz\` and matching checksum — the validated \`@xybrid/observability\` dependency; approve it on npm before web"
+            echo "- Before npm approval, verify both checksums and install together: \`npm install ./xybrid-observability-${TAG#v}.tgz ./xybrid-web-${TAG#v}.tgz @opentelemetry/api\`"
             echo
             echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}"
           } > CHANGELOG_RELEASE.md

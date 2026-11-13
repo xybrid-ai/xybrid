@@ -143,13 +143,29 @@ rust_test(
     crate = ":xybrid-sdk",
     # The registry load tests read the committed CUA-S1-FORMS scorer spec.
     data = ["//integration-tests:choice_fixtures"],
-    deps = ["@crates//:httpmock"],
+    # opentelemetry/opentelemetry_sdk: in-memory span, metric and log capture
+    # in the observability tests (application-owned providers).
+    deps = [
+        "@crates//:httpmock",
+        "@crates//:opentelemetry",
+        "@crates//:opentelemetry_sdk",
+    ],
 )
 
 # Integration tests: each tests/*.rs is its own binary, so each gets its own
 # target with `srcs` + an explicit dep on whichever library it links as an
 # external crate (some reach xybrid-core directly, not through the sdk).
 _SDK_INTEGRATION_TESTS = {
+    "load_observability": [
+        ":xybrid-sdk",
+        "//crates/xybrid-core:xybrid-core",
+        "@crates//:httpmock",
+        "@crates//:opentelemetry",
+        "@crates//:opentelemetry_sdk",
+        "@crates//:serde_json",
+        "@crates//:sha2",
+        "@crates//:tempfile",
+    ],
     "async_test": [
         ":xybrid-sdk",
         "@crates//:tokio",
@@ -164,6 +180,12 @@ _SDK_INTEGRATION_TESTS = {
         "@crates//:tempfile",
         "@crates//:tokio",
         "@crates//:tokio-stream",
+    ],
+    # The decision IR built and read from outside xybrid-core, through the
+    # sdk's re-exports (non_exhaustive variants via constructors/accessors).
+    "decision_ir": [
+        ":xybrid-sdk",
+        "@crates//:serde_json",
     ],
     # NOTE: no cloud_fallback_e2e. Cargo declares it
     # `required-features = ["dev-tools"]`, so a default `cargo test -p xybrid-sdk`
@@ -186,6 +208,7 @@ _SDK_INTEGRATION_TESTS = {
         ":xybrid-sdk",
         "@crates//:httpmock",
         "@crates//:serde_json",
+        "@crates//:tempfile",
     ],
     "metadata_gen_test": [
         ":xybrid-sdk",
@@ -209,11 +232,18 @@ _SDK_TEST_DATA = {
     "from_directory_test": ["//integration-tests:model_metadata_fixtures"],
 }
 
+# Shared OTLP collector source is an action input for both integration binaries.
+_SDK_TEST_SUPPORT = {
+    "choice_scoring": ["tests/support/otlp.rs"],
+    "telemetry_integration": ["tests/support/otlp.rs"],
+}
+
 [
     rust_test(
         name = name,
         version = XYBRID_VERSION,
-        srcs = ["tests/{}.rs".format(name)],
+        crate_root = "tests/{}.rs".format(name),
+        srcs = ["tests/{}.rs".format(name)] + _SDK_TEST_SUPPORT.get(name, []),
         data = _SDK_TEST_DATA.get(name, []),
         edition = "2021",
         # macro_test exercises the `xybrid_model!` proc-macro the sdk re-exports,

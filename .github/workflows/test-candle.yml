@@ -64,7 +64,7 @@ env:
 jobs:
   test-candle:
     name: Test Candle
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
@@ -73,6 +73,9 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: candle
+          # Per-image cache: ort-sys's build-script output records this image's
+          # Xcode clang-runtime path, which other images may lack.
+          env-vars: ImageOS
       - name: Test Candle (xybrid-core only)
         run: cargo test -p xybrid-core --features "ort-download,candle" --lib --tests
 
@@ -83,7 +86,7 @@ jobs:
   # which is what keeps a silently failed download from leaving the suite green.
   test-candle-integration:
     name: Test Candle (integration, real model)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -93,6 +96,9 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: candle-integration
+          # Per-image cache: ort-sys's build-script output records this image's
+          # Xcode clang-runtime path, which other images may lack.
+          env-vars: ImageOS
 
       # The registry bundle is a zstd tarball and download.sh parses the
       # resolve response with jq, so both have to exist before it runs. Present

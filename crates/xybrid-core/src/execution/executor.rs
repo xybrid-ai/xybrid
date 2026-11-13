@@ -45,6 +45,7 @@ use std::sync::Arc;
 
 use super::choice::onnx::OnnxChoiceScorer;
 use super::choice::{ensure_no_choice_kinds, validate_choice_request, EntryPoint};
+use super::decision::{ensure_no_decision_kinds, validate_decision_request};
 use super::listener::ExecutionGuard;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use super::llm_telemetry::{
@@ -60,7 +61,7 @@ use super::tool_continuation::{
 use crate::ir::ChoiceRequest;
 
 fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
-    if error.cloud_fallback_abort_reason().is_some() {
+    if error.cloud_fallback_abort_reason().is_some() || matches!(error, AdapterError::Cancelled) {
         guard.set_controlled_abort();
     } else {
         guard.set_failed(error.to_string());
@@ -180,15 +181,25 @@ use crate::runtime_adapter::llm::LlmRuntimeAdapter;
 
 use super::modes::{
     execute_autoregressive_stage, execute_bert_inference, execute_single_shot_stage,
-    execute_tts_inference, execute_whisper_decoder_stage, tts_waveform_output,
+    execute_tts_inference, execute_whisper_decoder_stage, tts_duration_output, tts_waveform_output,
 };
 use super::path::{file_identity, FileIdentity};
 use super::postprocessing;
 use super::preprocessing;
 use super::session_cache::OnnxSessionCache;
 use super::tokenizer_cache::TokenizerCache;
+use super::tts_timing::{self, PhonemeSpan};
 use super::types::{ExecutorResult, PreprocessedData, RawOutputs};
 use super::voice_loader::TtsVoiceLoader;
+
+/// One synthesized TTS chunk, before postprocessing.
+struct SynthesizedChunk {
+    /// The waveform, trailing artifact samples already cut off.
+    audio: Vec<f32>,
+    /// The chunk's phonemes as sample spans on `audio`, when the model
+    /// reported token durations that match its phoneme ids.
+    spans: Option<Vec<PhonemeSpan>>,
+}
 
 /// A choice scorer's ONNX session and the spec bound to it, reused across
 /// runs. Keyed by the model file's path and `(len, mtime)`, and also by the
@@ -264,6 +275,8 @@ pub struct TemplateExecutor {
     /// [`ChoiceScorerCache`]). Lives for the executor's lifetime, like the
     /// session above.
     choice_scorer_cache: Option<ChoiceScorerCache>,
+    #[cfg(feature = "llm-llamacpp")]
+    decision_cache: Option<super::decision::runtime::DecisionRuntime>,
     /// Parsed `tokenizer.json` files for the `Tokenize` and `WhisperDecode`
     /// steps (see [`TokenizerCache`]). Lives for the executor's lifetime, like
     /// the caches above, so each tokenizer is parsed once per loaded model.
@@ -274,6 +287,24 @@ pub struct TemplateExecutor {
     /// multimodal messages through their backend-owned mtmd path. This registry
     /// exists for backends that expose a separate image-encoder tensor seam.
     vision_encoders: HashMap<String, Box<dyn VisionEncoder>>,
+}
+
+/// Runtime wire label for a load of `path` that would actually load weights,
+/// or `None` when the runtime already holds them or cannot tell.
+///
+/// Only runtimes that report their cache are asked, so a runtime without one
+/// never reports a load it may not perform.
+pub(crate) fn pending_load_label(runtime: &dyn ModelRuntime, path: &Path) -> Option<&'static str> {
+    if let Some(onnx) = runtime.as_any().downcast_ref::<OnnxRuntime>() {
+        return (!onnx.has_session(path)).then_some("ort");
+    }
+    let label = match runtime.name() {
+        "whispercpp" => "whispercpp",
+        "zzz" => "zzz",
+        "candle" => "candle",
+        _ => return None,
+    };
+    (!runtime.is_loaded(path)).then_some(label)
 }
 
 impl TemplateExecutor {
@@ -329,6 +360,8 @@ impl TemplateExecutor {
             llm_adapter_cache: None,
             onnx_session_cache: OnnxSessionCache::default(),
             choice_scorer_cache: None,
+            #[cfg(feature = "llm-llamacpp")]
+            decision_cache: None,
             tokenizer_cache: TokenizerCache::default(),
             vision_encoders: HashMap::new(),
         }
@@ -373,6 +406,8 @@ impl TemplateExecutor {
             | EnvelopeKind::Text(_)
             | EnvelopeKind::Embedding(_)
             | EnvelopeKind::ChoiceRequest(_)
+            | EnvelopeKind::DecisionRequest(_)
+            | EnvelopeKind::Decisions(_)
             | EnvelopeKind::ChoiceScores(_) => false,
         }
     }
@@ -518,6 +553,12 @@ impl TemplateExecutor {
     /// browser-only templates) — read it as "an execution would pay a load".
     pub fn is_model_loaded(&self, metadata: &ModelMetadata) -> bool {
         let (runtime_type, model_file) = match &metadata.execution_template {
+            #[cfg(feature = "llm-llamacpp")]
+            ExecutionTemplate::Decision(spec) => {
+                return self.decision_cache.as_ref().is_some_and(|runtime| {
+                    runtime.matches(&Path::new(&self.base_path).join(&spec.model_file), spec)
+                })
+            }
             #[cfg(feature = "candle")]
             ExecutionTemplate::SafeTensors { model_file, .. } => ("candle", model_file),
             ExecutionTemplate::Onnx { model_file } => ("onnx", model_file),
@@ -542,24 +583,108 @@ impl TemplateExecutor {
             .unwrap_or(false)
     }
 
+    /// Executes with cooperative cancellation across decision preparation and passes.
+    /// Other templates ignore `abort` and keep their batch execution behavior.
+    pub fn execute_controlled(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        config: Option<&GenerationConfig>,
+        abort: Option<&std::sync::atomic::AtomicBool>,
+    ) -> ExecutorResult<Envelope> {
+        let guard = ExecutionGuard::new_silent(&metadata.model_id, "execute");
+        let result = self.execute_controlled_impl(metadata, input, config, abort);
+        if let Err(error) = &result {
+            mark_execution_terminal(&guard, error);
+        }
+        result
+    }
+
+    fn execute_controlled_impl(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        config: Option<&GenerationConfig>,
+        abort: Option<&std::sync::atomic::AtomicBool>,
+    ) -> ExecutorResult<Envelope> {
+        let decision = matches!(metadata.execution_template, ExecutionTemplate::Decision(_));
+        if decision && abort.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire)) {
+            return Err(AdapterError::Cancelled);
+        }
+        validate_decision_request(metadata, input, EntryPoint::Batch)?;
+        if decision {
+            if config.is_some() {
+                return Err(super::decision::unsupported(
+                    &metadata.model_id,
+                    "decision generation options",
+                ));
+            }
+            self.load_decision(metadata)?;
+            #[cfg(feature = "llm-llamacpp")]
+            if let (Some(runtime), EnvelopeKind::DecisionRequest(request)) =
+                (&mut self.decision_cache, &input.kind)
+            {
+                return runtime.run(request, abort);
+            }
+            return Err(super::decision::unsupported(
+                &metadata.model_id,
+                "decision runtime unavailable",
+            ));
+        }
+        self.execute_impl(metadata, input, config)
+    }
+
+    /// Loads and validates a decision model eagerly; other templates are unchanged.
+    pub fn load_decision(&mut self, metadata: &ModelMetadata) -> ExecutorResult<()> {
+        let ExecutionTemplate::Decision(spec) = &metadata.execution_template else {
+            return Ok(());
+        };
+        if cfg!(target_arch = "wasm32") {
+            return Err(super::decision::unsupported(
+                &metadata.model_id,
+                "browser decision execution",
+            ));
+        }
+        spec.validate()?;
+        if !metadata.preprocessing.is_empty() || !metadata.postprocessing.is_empty() {
+            return Err(super::decision::unsupported(
+                &metadata.model_id,
+                "decision preprocessing or postprocessing",
+            ));
+        }
+        #[cfg(feature = "llm-llamacpp")]
+        {
+            let path = Path::new(&self.base_path).join(&spec.model_file);
+            if !self
+                .decision_cache
+                .as_ref()
+                .is_some_and(|runtime| runtime.matches(&path, spec))
+            {
+                self.decision_cache = None;
+                self.decision_cache = Some(super::decision::runtime::DecisionRuntime::load(
+                    &metadata.model_id,
+                    &path,
+                    spec,
+                )?);
+            }
+            Ok(())
+        }
+        #[cfg(not(feature = "llm-llamacpp"))]
+        Err(super::decision::unsupported(
+            &metadata.model_id,
+            "decision execution requires llm-llamacpp",
+        ))
+    }
+
     pub fn execute(
         &mut self,
         metadata: &ModelMetadata,
         input: &Envelope,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
-        // Silent guard: the SDK's `XybridModel::run` / `run_async` wrappers
-        // around this method emit `ModelComplete` with full attribution
-        // (model_id, backend, latency, etc.). Emitting an outer
-        // `Started` / `Completed` pair from here would surface as
-        // duplicate noise rows on the Traces dashboard. Failed-path
-        // emission via `mark_execution_terminal` is preserved.
-        let guard = ExecutionGuard::new_silent(&metadata.model_id, "execute");
-        let result = self.execute_impl(metadata, input, config);
-        if let Err(e) = &result {
-            mark_execution_terminal(&guard, e);
-        }
-        result
+        // The controlled wrapper retains the existing silent listener guard,
+        // including content-free failure events for both SDK execution paths.
+        self.execute_controlled(metadata, input, config, None)
     }
 
     /// Internal implementation of execute — no telemetry listener events.
@@ -856,7 +981,7 @@ impl TemplateExecutor {
                         .to_string(),
                 ));
             }
-            ExecutionTemplate::ChoiceScorer { .. } => {
+            ExecutionTemplate::ChoiceScorer { .. } | ExecutionTemplate::Decision(_) => {
                 return Err(AdapterError::RuntimeError(
                     "ChoiceScorer execution should dispatch before the single-model path"
                         .to_string(),
@@ -999,9 +1124,14 @@ impl TemplateExecutor {
 
             // Ensure model is loaded (runtime handles caching)
             debug!(target: "xybrid_core", "Loading model: {:?}", model_full_path);
-            runtime
-                .load(&model_full_path)
-                .map_err(|e| AdapterError::RuntimeError(format!("Load failed: {}", e)))?;
+            {
+                let _load = pending_load_label(&**runtime, &model_full_path)
+                    .map(xybrid_trace::model_load_stage);
+                runtime
+                    .load(&model_full_path)
+                    .inspect_err(|_| xybrid_trace::mark_stage_failed())
+                    .map_err(|e| AdapterError::RuntimeError(format!("Load failed: {}", e)))?;
+            }
 
             debug!(target: "xybrid_core", "Running inference");
             runtime.execute(&runtime_input)?
@@ -1153,7 +1283,15 @@ impl TemplateExecutor {
     ) -> ExecutorResult<Envelope> {
         // History is never scored, so a choice kind there is refused like one
         // in the input — for every model, scorers included.
+        validate_decision_request(metadata, input, EntryPoint::Conversation)?;
         validate_choice_request(metadata, input, EntryPoint::Conversation)?;
+        ensure_no_decision_kinds(
+            &metadata.model_id,
+            context
+                .system_envelope()
+                .into_iter()
+                .chain(context.history()),
+        )?;
         ensure_no_choice_kinds(
             &metadata.model_id,
             context
@@ -1381,6 +1519,7 @@ impl TemplateExecutor {
         #[allow(unused_variables)] on_token: StreamingCallback<'_>,
         #[allow(unused_variables)] config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        validate_decision_request(metadata, input, EntryPoint::Streaming)?;
         validate_choice_request(metadata, input, EntryPoint::Streaming)?;
 
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -1560,7 +1699,15 @@ impl TemplateExecutor {
         on_token: StreamingCallback<'_>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        validate_decision_request(metadata, input, EntryPoint::Streaming)?;
         validate_choice_request(metadata, input, EntryPoint::Streaming)?;
+        ensure_no_decision_kinds(
+            &metadata.model_id,
+            context
+                .system_envelope()
+                .into_iter()
+                .chain(context.history()),
+        )?;
         ensure_no_choice_kinds(
             &metadata.model_id,
             context
@@ -1790,7 +1937,10 @@ impl TemplateExecutor {
             }
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            adapter.load_model_with_config(&config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
@@ -1854,7 +2004,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -1925,7 +2075,10 @@ impl TemplateExecutor {
             }
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            adapter.load_model_with_config(&config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
@@ -1967,7 +2120,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2078,7 +2231,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2147,7 +2300,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2170,6 +2323,9 @@ impl TemplateExecutor {
             let vision_encoder_path = Path::new(&self.base_path).join(&vision_encoder.file);
             llm_config =
                 llm_config.with_vision_encoder(vision_encoder_path.to_string_lossy().to_string());
+            if let Some(tokens) = vision_encoder.max_image_tokens {
+                llm_config = llm_config.with_max_image_tokens(tokens);
+            }
         }
         llm_config
     }
@@ -2222,7 +2378,10 @@ impl TemplateExecutor {
                 context_length,
             );
 
-            adapter.load_model_with_config(&llm_config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&llm_config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key, adapter));
         }
 
@@ -2296,7 +2455,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             registered_image_preprocess_ms,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2414,7 +2573,10 @@ impl TemplateExecutor {
                 context_length,
             );
 
-            adapter.load_model_with_config(&llm_config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&llm_config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
@@ -2444,7 +2606,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             registered_image_preprocess_ms,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2517,7 +2679,10 @@ impl TemplateExecutor {
             }
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            adapter.load_model_with_config(&config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
@@ -2560,7 +2725,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2649,7 +2814,10 @@ impl TemplateExecutor {
 
             // Create adapter with the appropriate backend based on hint
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            adapter.load_model_with_config(&config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
 
             // Cache the adapter
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
@@ -2710,7 +2878,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
-            !gen_config.tools.is_empty(),
+            &gen_config.tools,
         ))
     }
 
@@ -2875,15 +3043,29 @@ impl TemplateExecutor {
         }
     }
 
-    /// Run postprocessing steps from metadata.
+    /// Run postprocessing steps from metadata and convert the result to an
+    /// envelope.
     fn run_postprocessing(
         &mut self,
         metadata: &ModelMetadata,
         outputs: RawOutputs,
     ) -> ExecutorResult<Envelope> {
+        self.run_postprocessing_raw(metadata, outputs)?
+            .to_envelope()
+    }
+
+    /// Run postprocessing steps from metadata, returning the last step's raw
+    /// output (`outputs` itself when there are no steps). Callers that need
+    /// more than the envelope, such as the TTS batch path reading the range of
+    /// samples `TTSAudioEncode` kept, convert it themselves.
+    fn run_postprocessing_raw(
+        &mut self,
+        metadata: &ModelMetadata,
+        outputs: RawOutputs,
+    ) -> ExecutorResult<RawOutputs> {
         if metadata.postprocessing.is_empty() {
             debug!(target: "xybrid_core", "No postprocessing steps configured");
-            return outputs.to_envelope();
+            return Ok(outputs);
         }
 
         info!(
@@ -2922,7 +3104,7 @@ impl TemplateExecutor {
         }
 
         debug!(target: "xybrid_core", "Postprocessing complete");
-        data.to_envelope()
+        Ok(data)
     }
 
     /// Get or load an ONNX session.
@@ -2934,9 +3116,14 @@ impl TemplateExecutor {
             let runtime = self.runtimes.get_mut("onnx").ok_or_else(|| {
                 AdapterError::RuntimeError("ONNX runtime not configured".to_string())
             })?;
-            runtime.load(&model_full_path).map_err(|e| {
-                AdapterError::RuntimeError(format!("Failed to load session: {}", e))
-            })?;
+            let _load = pending_load_label(&**runtime, &model_full_path)
+                .map(xybrid_trace::model_load_stage);
+            runtime
+                .load(&model_full_path)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())
+                .map_err(|e| {
+                    AdapterError::RuntimeError(format!("Failed to load session: {}", e))
+                })?;
         }
 
         // Get session (immutable borrow)
@@ -3091,13 +3278,19 @@ impl TemplateExecutor {
         // identical for every chunk, so load it once here.
         let session = self.onnx_session_cache.get_or_build(model_path)?;
         let waveform_output = tts_waveform_output(session.output_names())?;
+        let duration_output = tts_duration_output(session.output_names(), waveform_output);
         let speed = extract_tts_speed(input);
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
 
         let mut audio_chunks: Vec<Vec<f32>> = Vec::new();
+        // Spans of each pushed chunk, in `audio_chunks` order. Timings are
+        // reported only when every chunk was timed, so that when present they
+        // cover the whole clip rather than stopping partway through.
+        let mut timed_chunks: Option<Vec<Vec<PhonemeSpan>>> =
+            duration_output.map(|_| Vec::with_capacity(chunks.len()));
         for (i, chunk) in chunks.iter().enumerate() {
             debug!(target: "xybrid_core", "TTS: Processing chunk {}/{}: {} chars", i + 1, chunks.len(), chunk.len());
-            let chunk_audio = self.synthesize_chunk(
+            let synthesized = self.synthesize_chunk(
                 &session,
                 metadata,
                 input,
@@ -3105,29 +3298,45 @@ impl TemplateExecutor {
                 &voice_embedding,
                 speed,
                 waveform_output,
+                duration_output,
             )?;
             // Inference always yields a waveform; guard the degenerate empty case
             // so it can't enter the crossfade (matches the pre-refactor skip).
-            if chunk_audio.is_empty() {
+            if synthesized.audio.is_empty() {
                 continue;
             }
-            audio_chunks.push(chunk_audio);
+            audio_chunks.push(synthesized.audio);
+            timed_chunks = match (timed_chunks, synthesized.spans) {
+                (Some(mut all), Some(spans)) => {
+                    all.push(spans);
+                    Some(all)
+                }
+                _ => None,
+            };
         }
 
         // Concatenate chunks with crossfading
-        let all_audio =
-            postprocessing::audio::crossfade_audio_chunks(&audio_chunks, CROSSFADE_SAMPLES);
+        let (all_audio, starts) = postprocessing::audio::crossfade_audio_chunks_with_starts(
+            &audio_chunks,
+            CROSSFADE_SAMPLES,
+        );
 
         debug!(target: "xybrid_core", "TTS: Total audio samples: {}", all_audio.len());
 
-        // Convert concatenated audio to envelope, keyed by the waveform output's
-        // name. The postprocessing will handle conversion to bytes
-        let mut combined_outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
-        let audio_array = ndarray::Array1::from_vec(all_audio).into_dyn();
-        combined_outputs.insert(waveform_output.to_string(), audio_array);
+        // Move each chunk's spans to where the chunk starts in the joined audio.
+        let spans = timed_chunks.map(|per_chunk| {
+            per_chunk
+                .into_iter()
+                .zip(starts)
+                .flat_map(|(mut spans, start)| {
+                    tts_timing::shift(&mut spans, start);
+                    spans
+                })
+                .collect()
+        });
 
-        // Run postprocessing on combined audio
-        self.run_postprocessing(metadata, RawOutputs::TensorMap(combined_outputs))
+        // Postprocessing turns the joined waveform into PCM bytes.
+        self.finish_tts_batch(metadata, waveform_output, all_audio, spans)
     }
 
     /// Execute TTS for a single (short) text input.
@@ -3141,6 +3350,7 @@ impl TemplateExecutor {
         // the graph load + Level-3 optimization (the dominant short-TTS latency).
         let session = self.onnx_session_cache.get_or_build(model_path)?;
         let waveform_output = tts_waveform_output(session.output_names())?;
+        let duration_output = tts_duration_output(session.output_names(), waveform_output);
         let speed = extract_tts_speed(input);
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
         let text = match &input.kind {
@@ -3154,7 +3364,7 @@ impl TemplateExecutor {
 
         // The whole (short) text is one chunk; the synthesis body is shared with
         // the chunked/streaming paths via synthesize_chunk.
-        let audio = self.synthesize_chunk(
+        let synthesized = self.synthesize_chunk(
             &session,
             metadata,
             input,
@@ -3162,16 +3372,63 @@ impl TemplateExecutor {
             &voice_embedding,
             speed,
             waveform_output,
+            duration_output,
         )?;
 
-        // Wrap the already-trimmed waveform for postprocessing (mirrors the
-        // chunked path's single-tensor map keyed by the waveform output's name).
+        self.finish_tts_batch(
+            metadata,
+            waveform_output,
+            synthesized.audio,
+            synthesized.spans,
+        )
+    }
+
+    /// Postprocess a batch TTS waveform (one chunk, or the crossfaded chunks
+    /// of a long text) into the audio envelope.
+    ///
+    /// The waveform goes through postprocessing as a single-tensor map keyed
+    /// by the waveform output's name. When `spans` (phoneme sample spans on
+    /// that waveform) are given and `TTSAudioEncode` reports which samples it
+    /// kept, they become [`PhonemeTiming`](crate::ir::PhonemeTiming)s on the
+    /// returned PCM, stored as JSON under
+    /// [`Envelope::PHONEME_TIMINGS_METADATA_KEY`]. Otherwise, or when no
+    /// phoneme is left once the audio is trimmed, the envelope is exactly what
+    /// [`Self::run_postprocessing`] returns.
+    fn finish_tts_batch(
+        &mut self,
+        metadata: &ModelMetadata,
+        waveform_output: &str,
+        audio: Vec<f32>,
+        spans: Option<Vec<PhonemeSpan>>,
+    ) -> ExecutorResult<Envelope> {
         let mut outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
         outputs.insert(
             waveform_output.to_string(),
             ndarray::Array1::from_vec(audio).into_dyn(),
         );
-        self.run_postprocessing(metadata, RawOutputs::TensorMap(outputs))
+        let raw = self.run_postprocessing_raw(metadata, RawOutputs::TensorMap(outputs))?;
+        match (raw, spans) {
+            (RawOutputs::TtsAudio { pcm, kept }, Some(spans)) => {
+                let sample_rate = Self::tts_output_sample_rate(metadata);
+                let timings = tts_timing::finish(spans, kept, sample_rate);
+                debug!(
+                    target: "xybrid_core",
+                    "TTS: {} phoneme timing(s) over {} PCM samples",
+                    timings.len(),
+                    pcm.len() / 2
+                );
+                // The same envelope `RawOutputs::to_envelope` builds, without
+                // copying the PCM.
+                let mut envelope = Envelope::new(EnvelopeKind::Audio(pcm));
+                if let Some(json) = tts_timing::metadata_json(&timings) {
+                    envelope
+                        .metadata
+                        .insert(Envelope::PHONEME_TIMINGS_METADATA_KEY.to_string(), json);
+                }
+                Ok(envelope)
+            }
+            (raw, _) => raw.to_envelope(),
+        }
     }
 
     /// Resolve Phonon template defaults and request overrides before opening or reusing a session.
@@ -3332,8 +3589,11 @@ impl TemplateExecutor {
                 .runtimes
                 .get_mut("zzz")
                 .expect("zzz runtime was present above");
+            let _load =
+                pending_load_label(&**runtime, &primary).map(xybrid_trace::model_load_stage);
             runtime
                 .load(&primary)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())
                 .map_err(|error| AdapterError::RuntimeError(format!("Load failed: {error}")))?;
             Ok(())
         }
@@ -3360,6 +3620,11 @@ impl TemplateExecutor {
     /// edge-fade) is left to the caller — the batch and streaming paths differ
     /// there. Shared by `execute_tts_single` / `_chunked` / `_streaming` so the
     /// synthesis body lives in one place instead of being copy-pasted three ways.
+    ///
+    /// With a `duration_output` (picked by `tts_duration_output`), the chunk's
+    /// phonemes also come back as sample spans on the returned waveform. They
+    /// are `None` without one, or when the model's durations do not match the
+    /// phoneme ids; the audio is the same either way.
     fn synthesize_chunk(
         &mut self,
         session: &ONNXSession,
@@ -3369,7 +3634,8 @@ impl TemplateExecutor {
         voice_embedding: &[f32],
         speed: f32,
         waveform_output: &str,
-    ) -> ExecutorResult<Vec<f32>> {
+        duration_output: Option<&str>,
+    ) -> ExecutorResult<SynthesizedChunk> {
         let chunk_input = Envelope {
             kind: crate::ir::EnvelopeKind::Text(chunk.to_string()),
             metadata: input.metadata.clone(),
@@ -3378,19 +3644,40 @@ impl TemplateExecutor {
         let phoneme_ids = preprocessed
             .as_phoneme_ids()
             .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
-        let waveform = execute_tts_inference(
+        let inference = execute_tts_inference(
             session,
             phoneme_ids,
             voice_embedding.to_vec(),
             speed,
             waveform_output,
+            duration_output,
         )?;
-        let mut audio: Vec<f32> = waveform.iter().copied().collect();
+        let mut audio: Vec<f32> = inference.waveform.iter().copied().collect();
+        // Durations describe the waveform as the model returned it, before the
+        // trailing artifact samples are cut off.
+        let raw_len = audio.len();
         let trim_count = metadata.trim_trailing_samples.unwrap_or(0);
         if trim_count > 0 && audio.len() > trim_count {
             audio.truncate(audio.len() - trim_count);
         }
-        Ok(audio)
+
+        let spans = match (inference.durations, preprocessed.as_phoneme_symbols()) {
+            (Some(durations), Some(symbols)) => {
+                let spans = tts_timing::chunk_spans(symbols, &durations, raw_len, audio.len());
+                if spans.is_none() {
+                    debug!(
+                        target: "xybrid_core",
+                        "TTS: {} duration(s) for {} phoneme id(s) over {} samples do not describe the waveform; no phoneme timings",
+                        durations.len(),
+                        symbols.len(),
+                        raw_len
+                    );
+                }
+                spans
+            }
+            _ => None,
+        };
+        Ok(SynthesizedChunk { audio, spans })
     }
 
     /// Check if this model is a TTS model (has Phonemize preprocessing).
@@ -3544,6 +3831,7 @@ impl TemplateExecutor {
         };
         use crate::ir::EnvelopeKind;
 
+        validate_decision_request(metadata, input, EntryPoint::Streaming)?;
         validate_choice_request(metadata, input, EntryPoint::Streaming)?;
 
         const DEFAULT_MAX_TTS_CHARS: usize = 350;
@@ -3576,15 +3864,19 @@ impl TemplateExecutor {
                 break;
             }
             debug!(target: "xybrid_core", "TTS stream: chunk {}/{} ({} chars)", i + 1, chunks.len(), chunk.len());
-            let chunk_audio = self.synthesize_chunk(
-                &session,
-                metadata,
-                input,
-                chunk,
-                &voice_embedding,
-                speed,
-                waveform_output,
-            )?;
+            // Streamed chunks carry no phoneme timings, so durations are not read.
+            let chunk_audio = self
+                .synthesize_chunk(
+                    &session,
+                    metadata,
+                    input,
+                    chunk,
+                    &voice_embedding,
+                    speed,
+                    waveform_output,
+                    None,
+                )?
+                .audio;
             if chunk_audio.is_empty() {
                 continue; // degenerate empty inference output — skip (pre-refactor behavior)
             }
@@ -3712,10 +4004,11 @@ fn insert_image_preprocess_metric(
 /// current span. `image_preprocess_ms` is `None` for text-only paths and carries
 /// the vision timing for multimodal paths (the insert is a no-op when `None`).
 ///
-/// `tools_requested` is true when the request's `GenerationConfig.tools` was
-/// non-empty: the output text is then scanned for tool-call blocks (both the
-/// LFM2 and gemma-4 protocols) and any parsed calls ride the metadata
-/// side-channel as a `tool_calls` JSON array (same channel as `finish_reason`). The text itself stays intact —
+/// `tools` are the request's `GenerationConfig.tools`. When there are any,
+/// the output text is scanned for tool-call blocks (every supported
+/// protocol, LFM3 arguments typed against these tools' schemas) and any
+/// parsed calls ride the metadata side-channel as a `tool_calls` JSON array
+/// (same channel as `finish_reason`). The text itself stays intact —
 /// callers strip the blocks for display via `tool_call::strip_tool_calls`.
 /// Malformed blocks are untrusted model output and simply parse to nothing.
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -3724,7 +4017,7 @@ fn build_llm_response_envelope(
     backend_name: &str,
     cached_prefix: Option<usize>,
     image_preprocess_ms: Option<u32>,
-    tools_requested: bool,
+    tools: &[crate::gateway::Tool],
 ) -> Envelope {
     let mut response_metadata = std::collections::HashMap::new();
     response_metadata.insert(
@@ -3744,8 +4037,9 @@ fn build_llm_response_envelope(
     mirror_llm_metrics_to_span(&output, backend_name, cached_prefix);
 
     let mut emitted_tool_calls = false;
-    if tools_requested {
-        let calls = crate::runtime_adapter::tool_call::parse_tool_calls(&output.text);
+    if !tools.is_empty() {
+        let calls =
+            crate::runtime_adapter::tool_call::parse_tool_calls_with_tools(&output.text, tools);
         if !calls.is_empty() {
             emitted_tool_calls = true;
             response_metadata.insert(
@@ -3901,6 +4195,20 @@ mod tests {
             image_preprocess_ms: None,
             reasoning_content: None,
         }
+    }
+
+    /// The tools a tool-bearing request offers in the envelope tests.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn requested_tools() -> Vec<crate::gateway::Tool> {
+        vec![crate::gateway::Tool::function(
+            "get_temperature",
+            "Current temperature of a room",
+            serde_json::json!({
+                "type": "object",
+                "properties": {"room": {"type": "string"}},
+                "required": ["room"]
+            }),
+        )]
     }
 
     fn test_model_metadata(execution_template: ExecutionTemplate) -> ModelMetadata {
@@ -4161,7 +4469,7 @@ mod tests {
     #[test]
     fn build_llm_response_envelope_text_path_omits_image_metric() {
         let env =
-            build_llm_response_envelope(sample_generation_output(7), "llamacpp", None, None, false);
+            build_llm_response_envelope(sample_generation_output(7), "llamacpp", None, None, &[]);
         match &env.kind {
             EnvelopeKind::Text(t) => assert_eq!(t, "hello"),
             _ => panic!("expected a text envelope"),
@@ -4188,7 +4496,7 @@ mod tests {
             "llamacpp",
             None,
             Some(42),
-            false,
+            &[],
         );
         assert_eq!(
             env.metadata.get("image_preprocess_ms").map(String::as_str),
@@ -4204,7 +4512,7 @@ mod tests {
         output.text =
             "checking<|tool_call_start|>[get_temperature(room=\"kitchen\")]<|tool_call_end|>"
                 .to_string();
-        let env = build_llm_response_envelope(output, "llamacpp", None, None, true);
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, &requested_tools());
 
         let raw = env
             .metadata
@@ -4227,12 +4535,33 @@ mod tests {
         }
     }
 
+    /// LFM3 writes argument values as raw text; the envelope types them with
+    /// the request's schemas, so a string parameter keeps digits as text.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn build_llm_response_envelope_types_lfm3_arguments_with_the_request_tools() {
+        let mut output = sample_generation_output(7);
+        output.text = "<tool_call>\n<function=get_temperature>\n<parameter=room>\n12\n</parameter>\n</function>\n</tool_call>".to_string();
+
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, &requested_tools());
+
+        let calls: Vec<crate::gateway::ToolCall> =
+            serde_json::from_str(env.metadata.get("tool_calls").expect("tool_calls stamped"))
+                .unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function.arguments, r#"{"room":"12"}"#);
+        assert_eq!(
+            env.metadata.get("finish_reason").map(String::as_str),
+            Some("tool_calls")
+        );
+    }
+
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     #[test]
     fn build_llm_response_envelope_omits_tool_calls_when_none_emitted() {
         let mut output = sample_generation_output(7);
         output.finish_reason = "length".to_string();
-        let env = build_llm_response_envelope(output, "llamacpp", None, None, true);
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, &requested_tools());
         assert!(
             !env.metadata.contains_key("tool_calls"),
             "a tools-bearing request whose output has no call block stamps nothing"
@@ -4584,7 +4913,7 @@ mod tests {
         output.text =
             "prose<|tool_call_start|>[get_temperature(room=\"kitchen\")]<|tool_call_end|>"
                 .to_string();
-        let env = build_llm_response_envelope(output, "llamacpp", None, None, false);
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, &[]);
         assert!(
             !env.metadata.contains_key("tool_calls"),
             "tool-call parsing only runs when the request offered tools"
@@ -4733,6 +5062,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::Gemma3Vision,
                 image_size: 896,
                 patch_size: Some(14),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -4853,6 +5183,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -4932,6 +5263,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5006,6 +5338,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5066,6 +5399,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5149,6 +5483,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5241,6 +5576,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 512,
                 patch_size: Some(16),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: bundle_metadata,
@@ -5337,7 +5673,6 @@ mod tests {
     #[test]
     fn vision_language_streaming_uses_multimodal_streaming_span() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
-        let _trace_lock = crate::tracing::test_lock();
 
         let metadata = ModelMetadata {
             model_id: "gemma-3n-e2b".to_string(),
@@ -5356,6 +5691,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::Gemma3Vision,
                 image_size: 896,
                 patch_size: Some(14),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5379,8 +5715,7 @@ mod tests {
         let image = Envelope::image(image_bytes, "png").unwrap();
         let input = Envelope::user_message("Describe this image", vec![image]).unwrap();
 
-        crate::tracing::init_tracing(true);
-        crate::tracing::reset_tracing();
+        let stage_trace = crate::tracing::capture();
 
         let mut executor = TemplateExecutor::with_base_path("/models");
         cache_text_only_boundary_backend(
@@ -5393,8 +5728,7 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("does not support vision input"));
 
-        let json = crate::tracing::get_stages_json();
-        crate::tracing::reset_tracing();
+        let json = stage_trace.stages_json();
         let spans = json["spans"].as_array().unwrap();
         assert!(
             spans
@@ -5414,7 +5748,6 @@ mod tests {
         };
         use ndarray::{ArrayD, IxDyn};
         use std::sync::{Arc, Mutex};
-        let _trace_lock = crate::tracing::test_lock();
 
         struct SpyVisionEncoder {
             events: Arc<Mutex<Vec<&'static str>>>,
@@ -5522,6 +5855,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::SigLip,
                 image_size: 2,
                 patch_size: Some(1),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5545,8 +5879,7 @@ mod tests {
         let image = Envelope::image(image_bytes, "png").unwrap();
         let input = Envelope::user_message("Describe this image", vec![image]).unwrap();
 
-        crate::tracing::init_tracing(true);
-        crate::tracing::reset_tracing();
+        let stage_trace = crate::tracing::capture();
 
         let events = Arc::new(Mutex::new(Vec::new()));
         let observed_shape = Arc::new(Mutex::new(None));
@@ -5589,8 +5922,7 @@ mod tests {
         assert_eq!(*image_count.lock().unwrap(), Some(1));
         assert_eq!(*events.lock().unwrap(), vec!["encoder", "llm"]);
 
-        let spans = crate::tracing::get_stages_json();
-        crate::tracing::reset_tracing();
+        let spans = stage_trace.stages_json();
         let vision_encoder_metadata = spans["spans"]
             .as_array()
             .and_then(|spans| {
@@ -5736,6 +6068,7 @@ mod tests {
                 preprocessing_preset: VisionPreprocessingPreset::Gemma3Vision,
                 image_size: 896,
                 patch_size: Some(14),
+                max_image_tokens: None,
             }),
             description: None,
             metadata: HashMap::new(),
@@ -5762,6 +6095,21 @@ mod tests {
             config.vision_encoder_path.as_deref(),
             Some("/models/mmproj.gguf")
         );
+        assert_eq!(config.max_image_tokens, None);
+
+        let mut capped = metadata;
+        capped
+            .vision_encoder
+            .as_mut()
+            .expect("fixture declares a vision encoder")
+            .max_image_tokens = Some(1024);
+        let config = executor.vision_language_llm_config(
+            &capped,
+            "/models/model.gguf".to_string(),
+            Some("chat_template.json"),
+            8192,
+        );
+        assert_eq!(config.max_image_tokens, Some(1024));
     }
 
     #[test]
@@ -5795,6 +6143,139 @@ mod tests {
     fn test_get_runtime_not_found() {
         let executor = TemplateExecutor::new("/test");
         assert!(executor.get_runtime("nonexistent").is_none());
+    }
+
+    // ============================================================================
+    // TTS batch finish (phoneme timings) Tests
+    // ============================================================================
+
+    /// A 220 Hz tone at 24 kHz between `lead` and `tail` silent samples.
+    fn padded_tone(lead: usize, voiced: usize, tail: usize) -> Vec<f32> {
+        let step = 2.0 * std::f32::consts::PI * 220.0 / 24_000.0;
+        let mut samples = vec![0.0; lead];
+        samples.extend((0..voiced).map(|i| 0.5 * (i as f32 * step).sin()));
+        samples.extend(vec![0.0; tail]);
+        samples
+    }
+
+    fn tts_encode_metadata() -> ModelMetadata {
+        ModelMetadata::onnx("test-tts", "1.0", "model.onnx").with_postprocessing(
+            super::super::template::PostprocessingStep::TTSAudioEncode {
+                sample_rate: 24_000,
+                apply_postprocessing: true,
+                trim_trailing_silence: false,
+            },
+        )
+    }
+
+    fn span(symbol: char, start: usize, end: usize) -> PhonemeSpan {
+        PhonemeSpan { symbol, start, end }
+    }
+
+    #[test]
+    fn tts_batch_without_spans_is_the_plain_postprocessed_audio() {
+        let metadata = tts_encode_metadata();
+        let audio = padded_tone(4800, 12_000, 7200);
+        let mut executor = TemplateExecutor::with_base_path("/models");
+
+        let mut outputs: HashMap<String, ArrayD<f32>> = HashMap::new();
+        outputs.insert(
+            "audio".to_string(),
+            ndarray::Array1::from_vec(audio.clone()).into_dyn(),
+        );
+        let plain = executor
+            .run_postprocessing(&metadata, RawOutputs::TensorMap(outputs))
+            .unwrap();
+        let finished = executor
+            .finish_tts_batch(&metadata, "audio", audio, None)
+            .unwrap();
+
+        assert!(matches!(plain.kind, EnvelopeKind::Audio(_)));
+        assert_eq!(finished.kind, plain.kind);
+        assert!(!finished
+            .metadata
+            .contains_key(Envelope::PHONEME_TIMINGS_METADATA_KEY));
+    }
+
+    #[test]
+    fn tts_batch_maps_spans_onto_the_trimmed_pcm() {
+        let metadata = tts_encode_metadata();
+        let audio = padded_tone(4800, 12_000, 7200);
+        let (_, kept) = crate::phonemizer::postprocess_tts_audio_with_range(&audio, 24_000);
+        assert!(kept.start > 2400 && kept.end < audio.len(), "{kept:?}");
+
+        let spans = vec![
+            span('x', 0, 2400), // in the leading silence: trimmed off
+            span('a', 4800, 10_800),
+            span('b', 10_800, 16_800),
+            span('y', 22_000, 24_000), // in the trailing silence: trimmed off
+        ];
+        let mut executor = TemplateExecutor::with_base_path("/models");
+        let envelope = executor
+            .finish_tts_batch(&metadata, "audio", audio, Some(spans))
+            .unwrap();
+
+        let EnvelopeKind::Audio(pcm) = &envelope.kind else {
+            panic!("expected audio, got {:?}", envelope.kind);
+        };
+        assert_eq!(pcm.len() / 2, kept.len());
+        let timings: Vec<crate::ir::PhonemeTiming> = serde_json::from_str(
+            envelope
+                .metadata
+                .get(Envelope::PHONEME_TIMINGS_METADATA_KEY)
+                .expect("phoneme timings"),
+        )
+        .unwrap();
+        let seconds = |sample: usize| ((sample - kept.start) as f64 / 24_000.0) as f32;
+        assert_eq!(
+            timings,
+            vec![
+                crate::ir::PhonemeTiming {
+                    phoneme: "a".to_string(),
+                    start: seconds(4800),
+                    end: seconds(10_800),
+                },
+                crate::ir::PhonemeTiming {
+                    phoneme: "b".to_string(),
+                    start: seconds(10_800),
+                    end: seconds(16_800),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn tts_batch_reports_no_timings_when_none_survive_the_trim() {
+        let metadata = tts_encode_metadata();
+        let audio = padded_tone(4800, 12_000, 7200);
+        let mut executor = TemplateExecutor::with_base_path("/models");
+        let envelope = executor
+            .finish_tts_batch(&metadata, "audio", audio, Some(vec![span('x', 0, 2400)]))
+            .unwrap();
+
+        assert!(matches!(envelope.kind, EnvelopeKind::Audio(_)));
+        assert!(!envelope
+            .metadata
+            .contains_key(Envelope::PHONEME_TIMINGS_METADATA_KEY));
+    }
+
+    #[test]
+    fn tts_batch_without_an_audio_encode_step_reports_no_timings() {
+        // No TTSAudioEncode: there is no PCM for timings to describe.
+        let metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx");
+        let mut executor = TemplateExecutor::with_base_path("/models");
+        let envelope = executor
+            .finish_tts_batch(
+                &metadata,
+                "audio",
+                padded_tone(0, 2400, 0),
+                Some(vec![span('a', 0, 2400)]),
+            )
+            .unwrap();
+
+        assert!(!envelope
+            .metadata
+            .contains_key(Envelope::PHONEME_TIMINGS_METADATA_KEY));
     }
 
     // ============================================================================

@@ -46,7 +46,7 @@ jobs:
     name: Build macOS Libraries
     needs: [check-version]
     if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -54,7 +54,7 @@ jobs:
 
       # Unity's macOS native is built by Bazel — the same
       # //crates/xybrid-bolt:xybrid_bolt_cdylib target every other binding uses —
-      # on this macos-14 runner because --config=macos-metal compiles the
+      # on this macOS runner because --config=macos-metal compiles the
       # llama.cpp Metal shaders locally (no Mac RBE; same as build-apple.yml).
       # bazelisk ships on macos runners and honors .bazelversion; local_tools
       # (rules_foreign_cc) needs cmake + pkg-config.
@@ -473,13 +473,13 @@ jobs:
     name: Build iOS Libraries
     needs: [check-version]
     if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true
 
-      # iOS bolt STATICLIB (.a) is built by Bazel on this macos-14 runner —
+      # iOS bolt STATICLIB (.a) is built by Bazel on this macOS runner —
       # --config=ios is Mac-local (iphoneos SDK + llama.cpp Metal shaders; no Mac
       # RBE), the SAME //crates/xybrid-bolt:xybrid_bolt_staticlib the Apple
       # xcframework already ships. ORT links statically (vendored), so no separate

@@ -8,8 +8,10 @@ use xybrid_core::runtime_adapter::{CoreMLRuntimeAdapter, RuntimeAdapter, Runtime
 fn model_path() -> PathBuf {
     const FIXTURE: &str = "integration-tests/fixtures/coreml/xybrid_linear.mlpackage";
 
-    let cargo_path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/coreml/xybrid_linear.mlpackage");
+    let cargo_path = PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+    )
+    .join("fixtures/coreml/xybrid_linear.mlpackage");
     if cargo_path.exists() {
         return cargo_path;
     }

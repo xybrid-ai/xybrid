@@ -1,14 +1,18 @@
 import { InferenceError, RuntimeInitializationError } from "../errors.ts";
-import type { GenerateOptions } from "../types.ts";
 import { abortReason, throwIfAborted } from "./loading.ts";
 import { loadModelBytes } from "./model-download.ts";
+import { observeSafely } from "./observability.ts";
 import type { LoadMetrics, Memory, Request, Response, RunMetrics } from "./protocol.ts";
 import {
   AcceleratorUnavailableError,
+  type EngineGenerateOptions,
+  type GenerationTelemetry,
   type LlmEngine,
   type LlmGeneration,
   type LlmRuntime,
 } from "./runtime.ts";
+
+export const DEFAULT_MAX_OUTPUT_TOKENS = 64;
 
 type GgufBytes = { bytes: Uint8Array<ArrayBuffer>; downloadMs: number };
 type Pending = { resolve(response: Response): void; reject(error: unknown): void };
@@ -18,10 +22,12 @@ class WorkerEngine implements LlmEngine {
   loaded: LoadMetrics | undefined;
   lastRun: RunMetrics | undefined;
   releasedMemory: Memory | undefined;
+  readonly reportsTiming = true;
   #worker: Worker;
   #id = 0;
   #pending = new Map<number, Pending>();
   #tokens: ((text: string) => void) | undefined;
+  #telemetry: GenerationTelemetry | undefined;
   #generation: Promise<Response> | undefined;
   #failure: Error | undefined;
 
@@ -30,8 +36,16 @@ class WorkerEngine implements LlmEngine {
     this.#worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
     this.#worker.onmessage = ({ data }: MessageEvent<Response>) => {
       if (data.type === "token") {
+        if (data.atMs !== undefined) {
+          const atMs = data.atMs;
+          observeSafely(() => this.#telemetry?.onToken(atMs, data.text));
+        }
         this.#tokens?.(data.text);
         return;
+      }
+      if (data.type === "complete" && data.completedAtMs !== undefined) {
+        const atMs = data.completedAtMs;
+        observeSafely(() => this.#telemetry?.onComplete(atMs));
       }
       if (data.type === "progress") return;
       const pending = this.#pending.get(data.id);
@@ -86,7 +100,7 @@ class WorkerEngine implements LlmEngine {
     }
   }
 
-  async generate(prompt: string, options: GenerateOptions): Promise<LlmGeneration> {
+  async generate(prompt: string, options: EngineGenerateOptions): Promise<LlmGeneration> {
     const queue: string[] = [];
     let wake: (() => void) | undefined;
     let done = false;
@@ -95,11 +109,14 @@ class WorkerEngine implements LlmEngine {
       queue.push(text);
       wake?.();
     };
+    this.#telemetry = options.telemetry;
     const operation = this.#request({
       type: "generate",
       id: ++this.#id,
       prompt,
-      maxTokens: options.maxOutputTokens ?? 64,
+      maxTokens: options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+      // Only observed runs carry a context, which also turns on the worker's timestamps.
+      ...(options.telemetry === undefined ? {} : { observation: options.telemetry.context }),
     });
     this.#generation = operation;
     void operation.then(
@@ -133,6 +150,7 @@ class WorkerEngine implements LlmEngine {
         if (this.#generation === operation) {
           this.#generation = undefined;
           this.#tokens = undefined;
+          this.#telemetry = undefined;
         }
       },
     };

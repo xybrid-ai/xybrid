@@ -1,0 +1,89 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "Model loading records a load_model span with format, size, cache status and gen_ai.client.operation.duration.",
+  "expect": {
+    "logs": [],
+    "metrics": [
+      {
+        "name": "gen_ai.client.operation.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "load_model",
+              "gen_ai.provider.name": "whisper.cpp",
+              "gen_ai.request.model": "whisper-tiny"
+            },
+            "count": 1,
+            "sum": 0.85
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "load_model",
+          "gen_ai.provider.name": "whisper.cpp",
+          "gen_ai.request.model": "whisper-tiny",
+          "xybrid.genai.model.cache_hit": true,
+          "xybrid.genai.model.format": "gguf",
+          "xybrid.genai.model.size_bytes": 77691713,
+          "xybrid.genai.resource.cpu.utilization": 0.35,
+          "xybrid.genai.resource.memory.used_bytes": 4000000000,
+          "xybrid.genai.resource.process.rss_bytes": 150000000,
+          "xybrid.genai.resource.thermal.state": "nominal",
+          "xybrid.genai.runtime.name": "whisper.cpp"
+        },
+        "end_ms": 850,
+        "id": "load",
+        "kind": "INTERNAL",
+        "name": "load_model whisper-tiny",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      }
+    ]
+  },
+  "name": "model_load",
+  "steps": [
+    {
+      "at_ms": 0,
+      "format": "gguf",
+      "id": "load",
+      "model": "whisper-tiny",
+      "op": "start_model_load",
+      "provider": "whisper.cpp",
+      "runtime": "whisper.cpp",
+      "size_bytes": 77691713
+    },
+    {
+      "at_ms": 2,
+      "id": "load",
+      "op": "model_cache_hit",
+      "value": true
+    },
+    {
+      "at_ms": 2,
+      "cpu_utilization": 0.35,
+      "id": "load",
+      "memory_used_bytes": 4000000000,
+      "op": "resource",
+      "process_rss_bytes": 150000000,
+      "thermal_state": "nominal"
+    },
+    {
+      "at_ms": 850,
+      "id": "load",
+      "op": "end"
+    }
+  ]
+}

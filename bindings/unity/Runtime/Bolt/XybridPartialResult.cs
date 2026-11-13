@@ -19,18 +19,20 @@ namespace XybridBolt
     /// <param name="AudioDurationMs">Audio covered so far, in milliseconds.</param>
     public readonly struct XybridPartialResult
     {
-        public XybridPartialResult(string Text, bool IsStable, ulong ChunkSequence, ulong AudioDurationMs) { this.Text = Text; this.IsStable = IsStable; this.ChunkSequence = ChunkSequence; this.AudioDurationMs = AudioDurationMs; }
+        public XybridPartialResult(string Text, bool IsStable, ulong ChunkSequence, ulong AudioDurationMs, XybridObservationRef? DecoderObservation = null) { this.Text = Text; this.IsStable = IsStable; this.ChunkSequence = ChunkSequence; this.AudioDurationMs = AudioDurationMs; this.DecoderObservation = DecoderObservation; }
         public string Text { get; }
         public bool IsStable { get; }
         public ulong ChunkSequence { get; }
         public ulong AudioDurationMs { get; }
+        public XybridObservationRef? DecoderObservation { get; }
 
         internal static XybridPartialResult Decode(WireReader reader) =>
             new XybridPartialResult(
                 reader.ReadString(),
                 reader.ReadBool(),
                 reader.ReadU64(),
-                reader.ReadU64()
+                reader.ReadU64(),
+                reader.ReadU8() == 0 ? default(XybridObservationRef?) : XybridObservationRef.Decode(reader)
             );
 
         internal void Encode(WireWriter writer)
@@ -46,6 +48,17 @@ namespace XybridBolt
             }
             {
                 writer.WriteU64(this.AudioDurationMs);
+            }
+            {
+                if (this.DecoderObservation is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    boltffiValue0.Encode(writer);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
             }
         }
 

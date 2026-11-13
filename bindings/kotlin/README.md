@@ -12,13 +12,20 @@ Add to your `build.gradle.kts`:
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.6.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.18.0")
 }
 ```
 
-Releases after 0.15.0 require Android 10 (API 29): set `minSdk = 29` or higher
-in your app's `defaultConfig`, or the build fails at the manifest merge.
-0.15.0 and earlier require API 24.
+Releases 0.16.0 and later require Android 10 (API 29): set `minSdk = 29` or
+higher in your app's `defaultConfig`, or the build fails at the manifest merge.
+Releases before 0.16.0 require API 24.
+
+Downloading models from the registry needs network access, and the SDK
+declares no permissions. Add this to your app's `AndroidManifest.xml`:
+
+```xml
+<uses-permission android:name="android.permission.INTERNET" />
+```
 
 ### Local Development
 
@@ -192,6 +199,77 @@ result.text?.let { println("Answer: $it") }
 result.reasoningContent?.let { println("Reasoning: $it") }
 ```
 
+### Observability (OpenTelemetry)
+
+Export is off until you start it; an API key passed to `Xybrid.init` does not
+enable it. Once started, each run is exported as an OpenTelemetry trace, with
+prompts and outputs included unless you call `.metadataOnly()`.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
+
+```kotlin
+import ai.xybrid.metadataOnly
+import ai.xybrid.runOptions
+import ai.xybrid.service
+import ai.xybrid.start
+
+// Traces to Xybrid (get a key at console.xybrid.dev)
+Xybrid.Observability.xybrid(apiKey)
+    .service("MyApp", version = BuildConfig.VERSION_NAME)
+    .start()
+
+// Or traces, metrics, and logs to any OTLP/HTTP endpoint (OpenTelemetry Collector)
+Xybrid.Observability.otlp("http://collector:4318")
+    .metadataOnly()
+    .start()
+
+// Join your own trace, and tag the run with your conversation id
+val result = model.runAsync(
+    envelope,
+    runOptions(traceparent = currentTraceparent, conversationId = chatId),
+)
+
+// Link user feedback to the run's trace (needs the OTLP preset's logs signal)
+result.observation?.let {
+    Xybrid.Observability.recordFeedback(it, score = 1.0, label = "thumbs_up")
+}
+
+// Before the app goes to the background
+Xybrid.Observability.flushAsync()
+```
+
+`Xybrid.Observability.stats` reports accepted, exported, dropped, failed, and
+pending counts per signal (`traces`, `logs`, `metrics`); after `shutdown` they are
+the session's final counters (what the shutdown failed or dropped included)
+until the next `start()`. A flush or shutdown that
+cannot deliver everything throws `XybridError.TelemetryDelivery`; the inference
+already succeeded, so do not rerun it. `suppressTrace = true` in `runOptions`
+skips the detailed trace for one run. For a camera or microphone loop, pass
+the same `frameSessionId` on every run of the loop: each frame is counted in
+metrics, and detailed traces are kept for roughly one frame per
+`setLiveTraceIntervalMs` per session. Pipelines take the same trace fields and
+return `observation` references for the workflow and each stage; ASR sessions
+take them through `streamingConfigWithVad(..., observation = ...)` or the
+config's `observation`.
+
+Record work Xybrid does not run itself (a tool, another runtime's inference)
+with a manual operation. Pass `context()?.childOptions` to its children. The
+first terminal call wins, and closing an unfinished one cancels it without
+flushing:
+
+```kotlin
+Xybrid.Observability.withWorkflow("answer-question") { workflow ->
+    val call = XybridToolCallInfo("search", null, null, null, "{\"q\":\"otel\"}")
+    Xybrid.Observability.startTool(call, workflow.context()?.childOptions).use { tool ->
+        tool.recordResult("{\"hits\":3}")
+        tool.complete()
+    }
+}
+```
+
+`withWorkflow` completes on return, cancels on `CancellationException`, and
+fails with the label `application_error` (never the exception text) otherwise.
+
 ### Error Handling
 
 ```kotlin
@@ -260,6 +338,7 @@ Creating a source or loader is always cheap. Only `load()` and
 | `audioBytes` | `ByteArray?` | Audio output (for TTS) |
 | `embedding` | `List<Float>?` | Embedding output |
 | `latencyMs` | `UInt` | Inference latency in milliseconds |
+| `observation` | `XybridObservationRef?` | Trace/span ids of the run, when it was traced |
 
 ## Directory Structure
 
@@ -465,8 +544,8 @@ for armeabi-v7a and x86_64.
 
 | Android API | Version Name | SDK releases |
 |-------------|--------------|--------------|
-| API 29+ | Android 10 | after 0.15.0 |
-| API 24+ | Android 7.0 (Nougat) | 0.15.0 and earlier |
+| API 29+ | Android 10 | 0.16.0 and later |
+| API 24+ | Android 7.0 (Nougat) | before 0.16.0 |
 
 ## NDK ABIs
 

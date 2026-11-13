@@ -55,6 +55,181 @@ public struct XybridEnvelope: Hashable, Equatable, Sendable {
     }
 }
 
+/// Foreign DecisionOption; field order is frozen.
+public struct XybridDecisionOption: Hashable, Equatable, Sendable {
+    public var key: String
+    public var description: XybridDecisionContent?
+
+    public init(key: String, description: XybridDecisionContent?) {
+        self.key = key
+        self.description = description
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionOption {
+        XybridDecisionOption(key: reader.readString(), description: reader.readOptional { reader in XybridDecisionContent.decode(from: &reader) })
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.key)
+        writer.writeOptional(self.description) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+    }
+}
+
+/// Foreign DecisionLevel; field order is frozen.
+public struct XybridDecisionLevel: Hashable, Equatable, Sendable {
+    public var description: XybridDecisionContent?
+
+    public init(description: XybridDecisionContent?) {
+        self.description = description
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionLevel {
+        XybridDecisionLevel(description: reader.readOptional { reader in XybridDecisionContent.decode(from: &reader) })
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeOptional(self.description) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+    }
+}
+
+/// Foreign DecisionQuestion; field order is frozen.
+public struct XybridDecisionQuestion: Hashable, Equatable, Sendable {
+    public var id: String
+    public var instructions: XybridDecisionContent?
+    public var kind: XybridDecisionQuestionKind
+
+    public init(id: String, instructions: XybridDecisionContent?, kind: XybridDecisionQuestionKind) {
+        self.id = id
+        self.instructions = instructions
+        self.kind = kind
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionQuestion {
+        XybridDecisionQuestion(id: reader.readString(), instructions: reader.readOptional { reader in XybridDecisionContent.decode(from: &reader) }, kind: XybridDecisionQuestionKind.decode(from: &reader))
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.id)
+        writer.writeOptional(self.instructions) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        self.kind.encode(to: &writer)
+    }
+}
+
+/// Foreign DecisionRequest; field order is frozen.
+public struct XybridDecisionRequest: Hashable, Equatable, Sendable {
+    public var state: XybridDecisionContent?
+    public var questions: [XybridDecisionQuestion]
+
+    public init(state: XybridDecisionContent?, questions: [XybridDecisionQuestion]) {
+        self.state = state
+        self.questions = questions
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionRequest {
+        XybridDecisionRequest(state: reader.readOptional { reader in XybridDecisionContent.decode(from: &reader) }, questions: reader.readArray { reader in XybridDecisionQuestion.decode(from: &reader) })
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeOptional(self.state) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        writer.writeArray(self.questions) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+    }
+}
+
+/// Foreign DecisionScore; field order is frozen.
+public struct XybridDecisionScore: Hashable, Equatable, Sendable {
+    public var key: String
+    public var rawScore: Float
+    public var probability: Double
+    public var origin: XybridDecisionOrigin
+
+    public init(
+        key: String,
+        rawScore: Float,
+        probability: Double,
+        origin: XybridDecisionOrigin
+    ) {
+        self.key = key
+        self.rawScore = rawScore
+        self.probability = probability
+        self.origin = origin
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionScore {
+        XybridDecisionScore(
+            key: reader.readString(),
+            rawScore: reader.readF32(),
+            probability: reader.readF64(),
+            origin: XybridDecisionOrigin(rawValue: reader.readI32())!
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.key)
+        writer.writeF32(self.rawScore)
+        writer.writeF64(self.probability)
+        writer.writeI32(self.origin.rawValue)
+    }
+}
+
+/// Foreign DecisionAnswer; field order is frozen.
+public struct XybridDecisionAnswer: Hashable, Equatable, Sendable {
+    public var questionId: String
+    public var distribution: [XybridDecisionScore]
+    public var value: XybridDecisionValue
+    public var confidence: Double?
+
+    public init(
+        questionId: String,
+        distribution: [XybridDecisionScore],
+        value: XybridDecisionValue,
+        confidence: Double?
+    ) {
+        self.questionId = questionId
+        self.distribution = distribution
+        self.value = value
+        self.confidence = confidence
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionAnswer {
+        XybridDecisionAnswer(
+            questionId: reader.readString(),
+            distribution: reader.readArray { reader in XybridDecisionScore.decode(from: &reader) },
+            value: XybridDecisionValue.decode(from: &reader),
+            confidence: reader.readOptional { reader in reader.readF64() }
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.questionId)
+        writer.writeArray(self.distribution) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        self.value.encode(to: &writer)
+        writer.writeOptional(self.confidence) { writer, boltffiValue0 in writer.writeF64(boltffiValue0) }
+    }
+}
+
+/// Foreign Decisions; field order is frozen.
+public struct XybridDecisions: Hashable, Equatable, Sendable {
+    public var answers: [XybridDecisionAnswer]
+    public var passes: UInt32
+    public var inputTokens: UInt64
+
+    public init(answers: [XybridDecisionAnswer], passes: UInt32, inputTokens: UInt64) {
+        self.answers = answers
+        self.passes = passes
+        self.inputTokens = inputTokens
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisions {
+        XybridDecisions(answers: reader.readArray { reader in XybridDecisionAnswer.decode(from: &reader) }, passes: reader.readU32(), inputTokens: reader.readU64())
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeArray(self.answers) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        writer.writeU32(self.passes)
+        writer.writeU64(self.inputTokens)
+    }
+}
+
 /// A tool (function) the model may ask to call.
 ///
 /// `parameters_json` is the JSON Schema for the arguments, carried as a JSON
@@ -206,19 +381,43 @@ public struct XybridRunOptions: Hashable, Equatable, Sendable {
     public var fallbackToCloud: Bool
     public var maxGraceTokens: UInt32
     public var correlationId: String?
+    /// W3C `traceparent` of the caller's span: the run becomes its child.
+    public var traceparent: String?
+    /// W3C `tracestate` accompanying `traceparent`.
+    public var tracestate: String?
+    /// Caller-owned conversation id recorded on the run.
+    public var conversationId: String?
+    /// Skip the detailed trace for this run; metrics are still recorded.
+    public var suppressTrace: Bool
+    /// Your id for one continuous live-capture session (a camera or
+    /// microphone loop). Every run of the session is counted in metrics, and
+    /// detailed traces are kept for roughly one run per live trace interval
+    /// per session (`set_live_trace_interval_ms`). Blank values are ignored.
+    /// Applies to model runs: a pipeline run ignores it.
+    public var frameSessionId: String?
 
     public init(
         generationConfig: XybridGenerationConfig?,
         abortOn: [XybridAbortSignal],
         fallbackToCloud: Bool,
         maxGraceTokens: UInt32,
-        correlationId: String?
+        correlationId: String?,
+        traceparent: String?,
+        tracestate: String?,
+        conversationId: String?,
+        suppressTrace: Bool,
+        frameSessionId: String?
     ) {
         self.generationConfig = generationConfig
         self.abortOn = abortOn
         self.fallbackToCloud = fallbackToCloud
         self.maxGraceTokens = maxGraceTokens
         self.correlationId = correlationId
+        self.traceparent = traceparent
+        self.tracestate = tracestate
+        self.conversationId = conversationId
+        self.suppressTrace = suppressTrace
+        self.frameSessionId = frameSessionId
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridRunOptions {
@@ -227,7 +426,12 @@ public struct XybridRunOptions: Hashable, Equatable, Sendable {
             abortOn: reader.readArray { reader in XybridAbortSignal(rawValue: reader.readI32())! },
             fallbackToCloud: reader.readBool(),
             maxGraceTokens: reader.readU32(),
-            correlationId: reader.readOptional { reader in reader.readString() }
+            correlationId: reader.readOptional { reader in reader.readString() },
+            traceparent: reader.readOptional { reader in reader.readString() },
+            tracestate: reader.readOptional { reader in reader.readString() },
+            conversationId: reader.readOptional { reader in reader.readString() },
+            suppressTrace: reader.readBool(),
+            frameSessionId: reader.readOptional { reader in reader.readString() }
         )
     }
 
@@ -237,6 +441,32 @@ public struct XybridRunOptions: Hashable, Equatable, Sendable {
         writer.writeBool(self.fallbackToCloud)
         writer.writeU32(self.maxGraceTokens)
         writer.writeOptional(self.correlationId) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.traceparent) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.tracestate) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.conversationId) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeBool(self.suppressTrace)
+        writer.writeOptional(self.frameSessionId) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+    }
+}
+
+/// Trace and span ids (lowercase hex) of a recorded run, for linking
+/// feedback and evaluation results.
+public struct XybridObservationRef: Hashable, Equatable, Sendable {
+    public var traceId: String
+    public var spanId: String
+
+    public init(traceId: String, spanId: String) {
+        self.traceId = traceId
+        self.spanId = spanId
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridObservationRef {
+        XybridObservationRef(traceId: reader.readString(), spanId: reader.readString())
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.traceId)
+        writer.writeString(self.spanId)
     }
 }
 
@@ -328,6 +558,8 @@ public struct XybridResult: Hashable, Equatable, Sendable {
     /// Model reasoning emitted separately from the final answer text.
     /// Appended last because `#[data]` fields serialize in declaration order.
     public var reasoningContent: String?
+    /// The run's trace reference, when it was traced.
+    public var observation: XybridObservationRef?
 
     public init(
         envelope: XybridEnvelope,
@@ -337,7 +569,8 @@ public struct XybridResult: Hashable, Equatable, Sendable {
         executionTarget: XybridExecutionTarget,
         metrics: XybridInferenceMetrics,
         toolCalls: [XybridToolCall],
-        reasoningContent: String? = nil
+        reasoningContent: String? = nil,
+        observation: XybridObservationRef? = nil
     ) {
         self.envelope = envelope
         self.outputType = outputType
@@ -347,6 +580,7 @@ public struct XybridResult: Hashable, Equatable, Sendable {
         self.metrics = metrics
         self.toolCalls = toolCalls
         self.reasoningContent = reasoningContent
+        self.observation = observation
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridResult {
@@ -360,6 +594,9 @@ public struct XybridResult: Hashable, Equatable, Sendable {
         let reasoningContent = reader.position < reader.data.count
             ? reader.readOptional { reader in reader.readString() }
             : envelope.metadata.first { $0.key == "reasoning_content" }?.value
+        let observation = reader.position < reader.data.count
+            ? reader.readOptional { reader in XybridObservationRef.decode(from: &reader) }
+            : nil
         return XybridResult(
             envelope: envelope,
             outputType: outputType,
@@ -368,7 +605,8 @@ public struct XybridResult: Hashable, Equatable, Sendable {
             executionTarget: executionTarget,
             metrics: metrics,
             toolCalls: toolCalls,
-            reasoningContent: reasoningContent
+            reasoningContent: reasoningContent,
+            observation: observation
         )
     }
 
@@ -381,6 +619,7 @@ public struct XybridResult: Hashable, Equatable, Sendable {
         self.metrics.encode(to: &writer)
         writer.writeArray(self.toolCalls) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
         writer.writeOptional(self.reasoningContent) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.observation) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
     }
 }
 
@@ -447,6 +686,8 @@ public struct XybridStageResult: Hashable, Equatable, Sendable {
     /// Generation figures (TTFT, tokens per second) when this stage is a
     /// language model; `total_ms` is the stage latency.
     public var metrics: XybridInferenceMetrics
+    /// The logical inference performed by this stage, when observed.
+    public var observation: XybridObservationRef?
 
     public init(
         stageId: String,
@@ -454,7 +695,8 @@ public struct XybridStageResult: Hashable, Equatable, Sendable {
         outputType: XybridOutputType,
         latencyMs: UInt32,
         executionTarget: XybridExecutionTarget,
-        metrics: XybridInferenceMetrics
+        metrics: XybridInferenceMetrics,
+        observation: XybridObservationRef? = nil
     ) {
         self.stageId = stageId
         self.envelope = envelope
@@ -462,6 +704,7 @@ public struct XybridStageResult: Hashable, Equatable, Sendable {
         self.latencyMs = latencyMs
         self.executionTarget = executionTarget
         self.metrics = metrics
+        self.observation = observation
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridStageResult {
@@ -471,7 +714,8 @@ public struct XybridStageResult: Hashable, Equatable, Sendable {
             outputType: XybridOutputType(rawValue: reader.readI32())!,
             latencyMs: reader.readU32(),
             executionTarget: XybridExecutionTarget(rawValue: reader.readI32())!,
-            metrics: XybridInferenceMetrics.decode(from: &reader)
+            metrics: XybridInferenceMetrics.decode(from: &reader),
+            observation: reader.readOptional { reader in XybridObservationRef.decode(from: &reader) }
         )
     }
 
@@ -482,6 +726,7 @@ public struct XybridStageResult: Hashable, Equatable, Sendable {
         writer.writeU32(self.latencyMs)
         writer.writeI32(self.executionTarget.rawValue)
         self.metrics.encode(to: &writer)
+        writer.writeOptional(self.observation) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
     }
 }
 
@@ -497,17 +742,21 @@ public struct XybridPipelineResult: Hashable, Equatable, Sendable {
     public var latencyMs: UInt32
     /// Every executed stage, in order.
     public var stages: [XybridStageResult]
+    /// The workflow enclosing this execution, when observed.
+    public var observation: XybridObservationRef?
 
     public init(
         envelope: XybridEnvelope,
         outputType: XybridOutputType,
         latencyMs: UInt32,
-        stages: [XybridStageResult]
+        stages: [XybridStageResult],
+        observation: XybridObservationRef? = nil
     ) {
         self.envelope = envelope
         self.outputType = outputType
         self.latencyMs = latencyMs
         self.stages = stages
+        self.observation = observation
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridPipelineResult {
@@ -515,7 +764,8 @@ public struct XybridPipelineResult: Hashable, Equatable, Sendable {
             envelope: XybridEnvelope.decode(from: &reader),
             outputType: XybridOutputType(rawValue: reader.readI32())!,
             latencyMs: reader.readU32(),
-            stages: reader.readArray { reader in XybridStageResult.decode(from: &reader) }
+            stages: reader.readArray { reader in XybridStageResult.decode(from: &reader) },
+            observation: reader.readOptional { reader in XybridObservationRef.decode(from: &reader) }
         )
     }
 
@@ -524,6 +774,7 @@ public struct XybridPipelineResult: Hashable, Equatable, Sendable {
         writer.writeI32(self.outputType.rawValue)
         writer.writeU32(self.latencyMs)
         writer.writeArray(self.stages) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        writer.writeOptional(self.observation) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
     }
 }
 
@@ -790,19 +1041,22 @@ public struct XybridStreamingConfig: Hashable, Equatable, Sendable {
     public var language: String?
     /// Whisper encoder context in mel frames; null uses the model default.
     public var audioCtx: UInt32?
+    public var observation: XybridObservationOptions?
 
     public init(
         sampleRate: UInt32,
         vad: XybridVadMode,
         vadThreshold: Float,
         language: String?,
-        audioCtx: UInt32?
+        audioCtx: UInt32?,
+        observation: XybridObservationOptions? = nil
     ) {
         self.sampleRate = sampleRate
         self.vad = vad
         self.vadThreshold = vadThreshold
         self.language = language
         self.audioCtx = audioCtx
+        self.observation = observation
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridStreamingConfig {
@@ -811,7 +1065,8 @@ public struct XybridStreamingConfig: Hashable, Equatable, Sendable {
             vad: XybridVadMode.decode(from: &reader),
             vadThreshold: reader.readF32(),
             language: reader.readOptional { reader in reader.readString() },
-            audioCtx: reader.readOptional { reader in reader.readU32() }
+            audioCtx: reader.readOptional { reader in reader.readU32() },
+            observation: reader.readOptional { reader in XybridObservationOptions.decode(from: &reader) }
         )
     }
 
@@ -821,6 +1076,43 @@ public struct XybridStreamingConfig: Hashable, Equatable, Sendable {
         writer.writeF32(self.vadThreshold)
         writer.writeOptional(self.language) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
         writer.writeOptional(self.audioCtx) { writer, boltffiValue0 in writer.writeU32(boltffiValue0) }
+        writer.writeOptional(self.observation) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+    }
+}
+
+/// W3C parent, suppression and conversation controls shared by execution APIs.
+public struct XybridObservationOptions: Hashable, Equatable, Sendable {
+    public var traceparent: String?
+    public var tracestate: String?
+    public var conversationId: String?
+    public var suppressTrace: Bool
+
+    public init(
+        traceparent: String?,
+        tracestate: String?,
+        conversationId: String?,
+        suppressTrace: Bool
+    ) {
+        self.traceparent = traceparent
+        self.tracestate = tracestate
+        self.conversationId = conversationId
+        self.suppressTrace = suppressTrace
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridObservationOptions {
+        XybridObservationOptions(
+            traceparent: reader.readOptional { reader in reader.readString() },
+            tracestate: reader.readOptional { reader in reader.readString() },
+            conversationId: reader.readOptional { reader in reader.readString() },
+            suppressTrace: reader.readBool()
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeOptional(self.traceparent) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.tracestate) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.conversationId) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeBool(self.suppressTrace)
     }
 }
 
@@ -835,17 +1127,20 @@ public struct XybridPartialResult: Hashable, Equatable, Sendable {
     public var chunkSequence: UInt64
     /// Audio covered so far, in milliseconds.
     public var audioDurationMs: UInt64
+    public var decoderObservation: XybridObservationRef?
 
     public init(
         text: String,
         isStable: Bool,
         chunkSequence: UInt64,
-        audioDurationMs: UInt64
+        audioDurationMs: UInt64,
+        decoderObservation: XybridObservationRef? = nil
     ) {
         self.text = text
         self.isStable = isStable
         self.chunkSequence = chunkSequence
         self.audioDurationMs = audioDurationMs
+        self.decoderObservation = decoderObservation
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridPartialResult {
@@ -853,7 +1148,8 @@ public struct XybridPartialResult: Hashable, Equatable, Sendable {
             text: reader.readString(),
             isStable: reader.readBool(),
             chunkSequence: reader.readU64(),
-            audioDurationMs: reader.readU64()
+            audioDurationMs: reader.readU64(),
+            decoderObservation: reader.readOptional { reader in XybridObservationRef.decode(from: &reader) }
         )
     }
 
@@ -862,6 +1158,359 @@ public struct XybridPartialResult: Hashable, Equatable, Sendable {
         writer.writeBool(self.isStable)
         writer.writeU64(self.chunkSequence)
         writer.writeU64(self.audioDurationMs)
+        writer.writeOptional(self.decoderObservation) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+    }
+}
+
+/// Final transcript and its ASR session workflow.
+public struct XybridTranscriptionResult: Hashable, Equatable, Sendable {
+    public var text: String
+    public var durationMs: UInt64
+    public var chunksProcessed: UInt64
+    public var observation: XybridObservationRef?
+
+    public init(
+        text: String,
+        durationMs: UInt64,
+        chunksProcessed: UInt64,
+        observation: XybridObservationRef? = nil
+    ) {
+        self.text = text
+        self.durationMs = durationMs
+        self.chunksProcessed = chunksProcessed
+        self.observation = observation
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridTranscriptionResult {
+        XybridTranscriptionResult(
+            text: reader.readString(),
+            durationMs: reader.readU64(),
+            chunksProcessed: reader.readU64(),
+            observation: reader.readOptional { reader in XybridObservationRef.decode(from: &reader) }
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.text)
+        writer.writeU64(self.durationMs)
+        writer.writeU64(self.chunksProcessed)
+        writer.writeOptional(self.observation) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+    }
+}
+
+/// Delivery counts for a single signal. Pending includes queued and in-flight items.
+public struct XybridSignalStats: Hashable, Equatable, Sendable {
+    public var accepted: UInt64
+    public var exported: UInt64
+    public var dropped: UInt64
+    public var failed: UInt64
+    public var pending: UInt64
+
+    public init(
+        accepted: UInt64,
+        exported: UInt64,
+        dropped: UInt64,
+        failed: UInt64,
+        pending: UInt64
+    ) {
+        self.accepted = accepted
+        self.exported = exported
+        self.dropped = dropped
+        self.failed = failed
+        self.pending = pending
+    }
+
+    @usableFromInline init(fromC c: ___XybridSignalStats) {
+        self.init(
+            accepted: c.accepted,
+            exported: c.exported,
+            dropped: c.dropped,
+            failed: c.failed,
+            pending: c.pending
+        )
+    }
+
+    @usableFromInline var cValue: ___XybridSignalStats {
+        ___XybridSignalStats(
+            accepted: accepted,
+            exported: exported,
+            dropped: dropped,
+            failed: failed,
+            pending: pending
+        )
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridSignalStats {
+        XybridSignalStats(
+            accepted: reader.readU64(),
+            exported: reader.readU64(),
+            dropped: reader.readU64(),
+            failed: reader.readU64(),
+            pending: reader.readU64()
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeU64(self.accepted)
+        writer.writeU64(self.exported)
+        writer.writeU64(self.dropped)
+        writer.writeU64(self.failed)
+        writer.writeU64(self.pending)
+    }
+}
+
+/// Delivery counters of the observability pipeline.
+public struct XybridObservabilityStats: Hashable, Equatable, Sendable {
+    public var enabled: Bool
+    public var traces: XybridSignalStats
+    public var logs: XybridSignalStats
+    public var metrics: XybridSignalStats
+
+    public init(
+        enabled: Bool,
+        traces: XybridSignalStats,
+        logs: XybridSignalStats,
+        metrics: XybridSignalStats
+    ) {
+        self.enabled = enabled
+        self.traces = traces
+        self.logs = logs
+        self.metrics = metrics
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridObservabilityStats {
+        XybridObservabilityStats(
+            enabled: reader.readBool(),
+            traces: XybridSignalStats.decode(from: &reader),
+            logs: XybridSignalStats.decode(from: &reader),
+            metrics: XybridSignalStats.decode(from: &reader)
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeBool(self.enabled)
+        self.traces.encode(to: &writer)
+        self.logs.encode(to: &writer)
+        self.metrics.encode(to: &writer)
+    }
+}
+
+/// Typed metadata for manual observations.
+public struct XybridObservationContext: Hashable, Equatable, Sendable {
+    public var traceparent: String
+    public var tracestate: String?
+
+    public init(traceparent: String, tracestate: String?) {
+        self.traceparent = traceparent
+        self.tracestate = tracestate
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridObservationContext {
+        XybridObservationContext(traceparent: reader.readString(), tracestate: reader.readOptional { reader in reader.readString() })
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.traceparent)
+        writer.writeOptional(self.tracestate) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+    }
+}
+
+/// Typed metadata for manual observations.
+public struct XybridInferenceRequest: Hashable, Equatable, Sendable {
+    public var operation: String
+    public var provider: String
+    public var model: String?
+    public var location: XybridExecutionLocation
+    public var runtime: String?
+    public var task: String?
+    public var stream: Bool
+    public var maxTokens: Int64?
+    public var temperature: Double?
+    public var topP: Double?
+    public var serverAddress: String?
+    public var serverPort: Int64?
+
+    public init(
+        operation: String,
+        provider: String,
+        model: String?,
+        location: XybridExecutionLocation,
+        runtime: String?,
+        task: String?,
+        stream: Bool,
+        maxTokens: Int64?,
+        temperature: Double?,
+        topP: Double?,
+        serverAddress: String?,
+        serverPort: Int64?
+    ) {
+        self.operation = operation
+        self.provider = provider
+        self.model = model
+        self.location = location
+        self.runtime = runtime
+        self.task = task
+        self.stream = stream
+        self.maxTokens = maxTokens
+        self.temperature = temperature
+        self.topP = topP
+        self.serverAddress = serverAddress
+        self.serverPort = serverPort
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridInferenceRequest {
+        XybridInferenceRequest(
+            operation: reader.readString(),
+            provider: reader.readString(),
+            model: reader.readOptional { reader in reader.readString() },
+            location: XybridExecutionLocation(rawValue: reader.readI32())!,
+            runtime: reader.readOptional { reader in reader.readString() },
+            task: reader.readOptional { reader in reader.readString() },
+            stream: reader.readBool(),
+            maxTokens: reader.readOptional { reader in reader.readI64() },
+            temperature: reader.readOptional { reader in reader.readF64() },
+            topP: reader.readOptional { reader in reader.readF64() },
+            serverAddress: reader.readOptional { reader in reader.readString() },
+            serverPort: reader.readOptional { reader in reader.readI64() }
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.operation)
+        writer.writeString(self.provider)
+        writer.writeOptional(self.model) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeI32(self.location.rawValue)
+        writer.writeOptional(self.runtime) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.task) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeBool(self.stream)
+        writer.writeOptional(self.maxTokens) { writer, boltffiValue0 in writer.writeI64(boltffiValue0) }
+        writer.writeOptional(self.temperature) { writer, boltffiValue0 in writer.writeF64(boltffiValue0) }
+        writer.writeOptional(self.topP) { writer, boltffiValue0 in writer.writeF64(boltffiValue0) }
+        writer.writeOptional(self.serverAddress) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.serverPort) { writer, boltffiValue0 in writer.writeI64(boltffiValue0) }
+    }
+}
+
+/// Typed metadata for manual observations.
+public struct XybridToolCallInfo: Hashable, Equatable, Sendable {
+    public var name: String
+    public var callId: String?
+    public var toolType: String?
+    public var description: String?
+    public var argumentsJson: String?
+
+    public init(
+        name: String,
+        callId: String?,
+        toolType: String?,
+        description: String?,
+        argumentsJson: String?
+    ) {
+        self.name = name
+        self.callId = callId
+        self.toolType = toolType
+        self.description = description
+        self.argumentsJson = argumentsJson
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridToolCallInfo {
+        XybridToolCallInfo(
+            name: reader.readString(),
+            callId: reader.readOptional { reader in reader.readString() },
+            toolType: reader.readOptional { reader in reader.readString() },
+            description: reader.readOptional { reader in reader.readString() },
+            argumentsJson: reader.readOptional { reader in reader.readString() }
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.name)
+        writer.writeOptional(self.callId) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.toolType) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.description) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.argumentsJson) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+    }
+}
+
+/// Typed metadata for manual observations.
+public struct XybridUsage: Hashable, Equatable, Sendable {
+    public var inputTokens: UInt64?
+    public var outputTokens: UInt64?
+    public var cacheReadInputTokens: UInt64?
+    public var cacheWriteInputTokens: UInt64?
+    public var reasoningOutputTokens: UInt64?
+
+    public init(
+        inputTokens: UInt64?,
+        outputTokens: UInt64?,
+        cacheReadInputTokens: UInt64?,
+        cacheWriteInputTokens: UInt64?,
+        reasoningOutputTokens: UInt64?
+    ) {
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheReadInputTokens = cacheReadInputTokens
+        self.cacheWriteInputTokens = cacheWriteInputTokens
+        self.reasoningOutputTokens = reasoningOutputTokens
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridUsage {
+        XybridUsage(
+            inputTokens: reader.readOptional { reader in reader.readU64() },
+            outputTokens: reader.readOptional { reader in reader.readU64() },
+            cacheReadInputTokens: reader.readOptional { reader in reader.readU64() },
+            cacheWriteInputTokens: reader.readOptional { reader in reader.readU64() },
+            reasoningOutputTokens: reader.readOptional { reader in reader.readU64() }
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeOptional(self.inputTokens) { writer, boltffiValue0 in writer.writeU64(boltffiValue0) }
+        writer.writeOptional(self.outputTokens) { writer, boltffiValue0 in writer.writeU64(boltffiValue0) }
+        writer.writeOptional(self.cacheReadInputTokens) { writer, boltffiValue0 in writer.writeU64(boltffiValue0) }
+        writer.writeOptional(self.cacheWriteInputTokens) { writer, boltffiValue0 in writer.writeU64(boltffiValue0) }
+        writer.writeOptional(self.reasoningOutputTokens) { writer, boltffiValue0 in writer.writeU64(boltffiValue0) }
+    }
+}
+
+/// Typed metadata for manual observations.
+public struct XybridModelLoadInfo: Hashable, Equatable, Sendable {
+    public var model: String
+    public var provider: String?
+    public var runtime: String?
+    public var format: String?
+    public var sizeBytes: UInt64?
+
+    public init(
+        model: String,
+        provider: String?,
+        runtime: String?,
+        format: String?,
+        sizeBytes: UInt64?
+    ) {
+        self.model = model
+        self.provider = provider
+        self.runtime = runtime
+        self.format = format
+        self.sizeBytes = sizeBytes
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridModelLoadInfo {
+        XybridModelLoadInfo(
+            model: reader.readString(),
+            provider: reader.readOptional { reader in reader.readString() },
+            runtime: reader.readOptional { reader in reader.readString() },
+            format: reader.readOptional { reader in reader.readString() },
+            sizeBytes: reader.readOptional { reader in reader.readU64() }
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.model)
+        writer.writeOptional(self.provider) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.runtime) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.format) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.sizeBytes) { writer, boltffiValue0 in writer.writeU64(boltffiValue0) }
     }
 }
 
@@ -905,6 +1554,8 @@ public enum XybridError: Hashable, Equatable, Sendable, Error {
     case invalidImage(message: String)
     /// The host called `cancel` — today, on a model download.
     case cancelled(message: String)
+    /// Telemetry delivery is incomplete or unknown; do not rerun inference.
+    case telemetryDelivery(message: String)
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridError {
         let tag = reader.readU32()
@@ -955,6 +1606,8 @@ public enum XybridError: Hashable, Equatable, Sendable, Error {
             return .invalidImage(message: reader.readString())
         case 22:
             return .cancelled(message: reader.readString())
+        case 23:
+            return .telemetryDelivery(message: reader.readString())
         default:
             fatalError("Invalid XybridError tag: \(tag)")
         }
@@ -1029,6 +1682,9 @@ public enum XybridError: Hashable, Equatable, Sendable, Error {
         case let .cancelled(message):
             writer.writeU32(22)
             writer.writeString(message)
+        case let .telemetryDelivery(message):
+            writer.writeU32(23)
+            writer.writeString(message)
         }
     }
 }
@@ -1039,6 +1695,8 @@ public enum XybridEnvelopeKind: Hashable, Equatable, Sendable {
     case embedding(values: [Float])
     case image(bytes: Data, format: String)
     case multiPart(parts: [XybridEnvelope])
+    case decisionRequest(request: XybridDecisionRequest)
+    case decisions(decisions: XybridDecisions)
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridEnvelopeKind {
         let tag = reader.readU32()
@@ -1053,6 +1711,10 @@ public enum XybridEnvelopeKind: Hashable, Equatable, Sendable {
             return .image(bytes: reader.readBytes(), format: reader.readString())
         case 4:
             return .multiPart(parts: reader.readArray { reader in XybridEnvelope.decode(from: &reader) })
+        case 5:
+            return .decisionRequest(request: XybridDecisionRequest.decode(from: &reader))
+        case 6:
+            return .decisions(decisions: XybridDecisions.decode(from: &reader))
         default:
             fatalError("Invalid XybridEnvelopeKind tag: \(tag)")
         }
@@ -1076,6 +1738,12 @@ public enum XybridEnvelopeKind: Hashable, Equatable, Sendable {
         case let .multiPart(parts):
             writer.writeU32(4)
             writer.writeArray(parts) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        case let .decisionRequest(request):
+            writer.writeU32(5)
+            request.encode(to: &writer)
+        case let .decisions(decisions):
+            writer.writeU32(6)
+            decisions.encode(to: &writer)
         }
     }
 }
@@ -1091,6 +1759,135 @@ public enum XybridMessageRole: Int32, Hashable, Sendable, CaseIterable {
 
     @usableFromInline var cValue: Int32 {
         rawValue
+    }
+}
+
+/// Foreign DecisionContent; variants are append-only.
+public enum XybridDecisionContent: Hashable, Equatable, Sendable {
+    case text(text: String)
+    case json(jsonText: String)
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionContent {
+        let tag = reader.readU32()
+        switch tag {
+        case 0:
+            return .text(text: reader.readString())
+        case 1:
+            return .json(jsonText: reader.readString())
+        default:
+            fatalError("Invalid XybridDecisionContent tag: \(tag)")
+        }
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        switch self {
+        case let .text(text):
+            writer.writeU32(0)
+            writer.writeString(text)
+        case let .json(jsonText):
+            writer.writeU32(1)
+            writer.writeString(jsonText)
+        }
+    }
+}
+
+/// Foreign DecisionQuestionKind; variants are append-only.
+public enum XybridDecisionQuestionKind: Hashable, Equatable, Sendable {
+    case choice(options: [XybridDecisionOption])
+    case yesNo(yes: XybridDecisionContent?, no: XybridDecisionContent?)
+    case score(levels: [XybridDecisionLevel])
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionQuestionKind {
+        let tag = reader.readU32()
+        switch tag {
+        case 0:
+            return .choice(options: reader.readArray { reader in XybridDecisionOption.decode(from: &reader) })
+        case 1:
+            return .yesNo(yes: reader.readOptional { reader in XybridDecisionContent.decode(from: &reader) }, no: reader.readOptional { reader in XybridDecisionContent.decode(from: &reader) })
+        case 2:
+            return .score(levels: reader.readArray { reader in XybridDecisionLevel.decode(from: &reader) })
+        default:
+            fatalError("Invalid XybridDecisionQuestionKind tag: \(tag)")
+        }
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        switch self {
+        case let .choice(options):
+            writer.writeU32(0)
+            writer.writeArray(options) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        case let .yesNo(yes, no):
+            writer.writeU32(1)
+            writer.writeOptional(yes) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+            writer.writeOptional(no) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        case let .score(levels):
+            writer.writeU32(2)
+            writer.writeArray(levels) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        }
+    }
+}
+
+/// Foreign DecisionOrigin; variants are append-only.
+public enum XybridDecisionOrigin: Int32, Hashable, Sendable, CaseIterable {
+    case caller = 0
+    case fixed = 1
+
+    @usableFromInline init(fromC c: Int32) {
+        self = XybridDecisionOrigin(rawValue: c)!
+    }
+
+    @usableFromInline var cValue: Int32 {
+        rawValue
+    }
+}
+
+/// Foreign ScoreStatistic; variants are append-only.
+public enum XybridScoreStatistic: Int32, Hashable, Sendable, CaseIterable {
+    case median = 0
+    case expected = 1
+
+    @usableFromInline init(fromC c: Int32) {
+        self = XybridScoreStatistic(rawValue: c)!
+    }
+
+    @usableFromInline var cValue: Int32 {
+        rawValue
+    }
+}
+
+/// Foreign DecisionValue; variants are append-only.
+public enum XybridDecisionValue: Hashable, Equatable, Sendable {
+    case choice(key: String)
+    case yesNo(pYes: Double)
+    case score(value: Double, statistic: XybridScoreStatistic)
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDecisionValue {
+        let tag = reader.readU32()
+        switch tag {
+        case 0:
+            return .choice(key: reader.readString())
+        case 1:
+            return .yesNo(pYes: reader.readF64())
+        case 2:
+            return .score(value: reader.readF64(), statistic: XybridScoreStatistic(rawValue: reader.readI32())!)
+        default:
+            fatalError("Invalid XybridDecisionValue tag: \(tag)")
+        }
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        switch self {
+        case let .choice(key):
+            writer.writeU32(0)
+            writer.writeString(key)
+        case let .yesNo(pYes):
+            writer.writeU32(1)
+            writer.writeF64(pYes)
+        case let .score(value, statistic):
+            writer.writeU32(2)
+            writer.writeF64(value)
+            writer.writeI32(statistic.rawValue)
+        }
     }
 }
 
@@ -1114,6 +1911,7 @@ public enum XybridOutputType: Int32, Hashable, Sendable, CaseIterable {
     case audio = 1
     case embedding = 2
     case unknown = 3
+    case decisions = 4
 
     @usableFromInline init(fromC c: Int32) {
         self = XybridOutputType(rawValue: c)!
@@ -1235,6 +2033,68 @@ public enum XybridVadMode: Hashable, Equatable, Sendable {
             writer.writeU32(1)
             writer.writeString(modelDir)
         }
+    }
+}
+
+/// Model source for the options-enabled load surface.
+public enum XybridModelSource: Hashable, Equatable, Sendable {
+    case registry(id: String, speculative: Bool)
+    case directory(path: String)
+    case bundle(path: String)
+    case huggingFace(repo: String, revision: String?)
+    case modelFile(path: String)
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridModelSource {
+        let tag = reader.readU32()
+        switch tag {
+        case 0:
+            return .registry(id: reader.readString(), speculative: reader.readBool())
+        case 1:
+            return .directory(path: reader.readString())
+        case 2:
+            return .bundle(path: reader.readString())
+        case 3:
+            return .huggingFace(repo: reader.readString(), revision: reader.readOptional { reader in reader.readString() })
+        case 4:
+            return .modelFile(path: reader.readString())
+        default:
+            fatalError("Invalid XybridModelSource tag: \(tag)")
+        }
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        switch self {
+        case let .registry(id, speculative):
+            writer.writeU32(0)
+            writer.writeString(id)
+            writer.writeBool(speculative)
+        case let .directory(path):
+            writer.writeU32(1)
+            writer.writeString(path)
+        case let .bundle(path):
+            writer.writeU32(2)
+            writer.writeString(path)
+        case let .huggingFace(repo, revision):
+            writer.writeU32(3)
+            writer.writeString(repo)
+            writer.writeOptional(revision) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        case let .modelFile(path):
+            writer.writeU32(4)
+            writer.writeString(path)
+        }
+    }
+}
+
+public enum XybridExecutionLocation: Int32, Hashable, Sendable, CaseIterable {
+    case local = 0
+    case remote = 1
+
+    @usableFromInline init(fromC c: Int32) {
+        self = XybridExecutionLocation(rawValue: c)!
+    }
+
+    @usableFromInline var cValue: Int32 {
+        rawValue
     }
 }
 
@@ -1361,7 +2221,7 @@ public final class XybridStreamingSession {
     /// The session is over afterwards — `feed` fails and the partial stream
     /// closes. Blocks until the last chunk is transcribed, so call it off the
     /// UI thread.
-    public func flush() throws -> String {
+    public func flush() throws -> XybridTranscriptionResult {
         var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
         let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_streaming_session_flush(self.handle, &boltffiResult)
         if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
@@ -1369,7 +2229,7 @@ public final class XybridStreamingSession {
             throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
         }
         defer { boltffi_free_buf(boltffiResult) }
-        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readString() }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridTranscriptionResult.decode(from: &boltffiReader) }
     }
 
     /// Reset to transcribe fresh audio without reloading the model.
@@ -1433,6 +2293,30 @@ public final class XybridModel {
 
     deinit {
         boltffi_release_class_xybrid_bolt_xybrid_model(handle)
+    }
+
+    /// Load any supported source with explicit observation controls.
+    public init(load source: XybridModelSource, observation: XybridObservationOptions?) throws {
+        let boltffiSourceBytes = boltffiEncode { boltffiSourceWriter in source.encode(to: &boltffiSourceWriter) }
+        let boltffiHandle = try boltffiSourceBytes.withUnsafeBufferPointer { boltffiSourceBuffer in
+            let boltffiObservationBytes = boltffiEncode { boltffiObservationWriter in boltffiObservationWriter.writeOptional(observation) { boltffiObservationWriter, boltffiValue0 in boltffiValue0.encode(to: &boltffiObservationWriter) } }
+            return try boltffiObservationBytes.withUnsafeBufferPointer { boltffiObservationBuffer in
+                var boltffiResult: UInt64 = UInt64()
+                let boltffiError = boltffi_init_class_xybrid_bolt_xybrid_model_load(
+                    boltffiSourceBuffer.baseAddress!,
+                    UInt(boltffiSourceBuffer.count),
+                    boltffiObservationBuffer.baseAddress!,
+                    UInt(boltffiObservationBuffer.count),
+                    &boltffiResult
+                )
+                if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                    defer { boltffi_free_buf(boltffiError) }
+                    throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+                }
+                return boltffiResult
+            }
+        }
+        self.handle = boltffiHandle
     }
 
     /// Load from the xybrid registry. Recommended path.
@@ -1556,6 +2440,13 @@ public final class XybridModel {
             return boltffiResult
         }
         self.handle = boltffiHandle
+    }
+
+    /// The immutable observation of the load that created this model.
+    public func loadObservationRef() -> XybridObservationRef? {
+        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_ref(self.handle)
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in XybridObservationRef.decode(from: &boltffiReader) } }
     }
 
     public func modelId() -> String {
@@ -1746,6 +2637,10 @@ public final class XybridModel {
     }
 
     /// Forget a streaming session.
+    ///
+    /// Closing a session before its terminal event cancels its run: the run
+    /// stops at its next token and is recorded as a user cancellation
+    /// (`error.type` `cancelled`), not as an error.
     public func streamClose(streamId: UInt64) {
         boltffi_method_class_xybrid_bolt_xybrid_model_stream_close(self.handle, streamId)
     }
@@ -1902,7 +2797,7 @@ public final class XybridPipeline {
     /// Execute every stage, downloading any missing models first, and return
     /// each stage's output alongside the final one.
     ///
-    /// Of `options`, only `correlation_id` applies to a pipeline run. Setting
+    /// Observation controls and `correlation_id` apply to a pipeline run. Setting
     /// `generation_config` or `abort_on` fails with `ConfigError` rather than
     /// being ignored; per-stage generation settings belong in the YAML.
     public func run(envelope: XybridEnvelope, options: XybridRunOptions?) throws -> XybridPipelineResult {
@@ -2034,7 +2929,7 @@ public final class XybridConversationContext {
     }
 }
 
-public final class XybridTelemetryConfig {
+public final class XybridObservabilityConfig {
     @usableFromInline let handle: UInt64
 
     @usableFromInline init(handle: UInt64) {
@@ -2042,49 +2937,82 @@ public final class XybridTelemetryConfig {
     }
 
     deinit {
-        boltffi_release_class_xybrid_bolt_xybrid_telemetry_config(handle)
+        boltffi_release_class_xybrid_bolt_xybrid_observability_config(handle)
     }
 
-    /// A new config bound to the default ingest endpoint and the given API key.
-    public init(apiKey: String) {
+    /// Traces to the Xybrid dashboard, authenticated with `api_key`.
+    public init(xybrid apiKey: String) {
         let boltffiApiKeyBytes = boltffiEncode { boltffiApiKeyWriter in boltffiApiKeyWriter.writeString(apiKey) }
         let boltffiHandle = boltffiApiKeyBytes.withUnsafeBufferPointer { boltffiApiKeyBuffer in
-            return boltffi_init_class_xybrid_bolt_xybrid_telemetry_config_new(boltffiApiKeyBuffer.baseAddress!, UInt(boltffiApiKeyBuffer.count))
+            return boltffi_init_class_xybrid_bolt_xybrid_observability_config_xybrid(boltffiApiKeyBuffer.baseAddress!, UInt(boltffiApiKeyBuffer.count))
         }
         self.handle = boltffiHandle
     }
 
-    /// Override the ingest endpoint (self-hosted collector / non-prod).
-    public func setEndpoint(endpoint: String) {
+    /// Traces, metrics, and logs to an OTLP/HTTP endpoint
+    /// (`http://host:4318`).
+    public init(otlp endpoint: String) {
+        let boltffiEndpointBytes = boltffiEncode { boltffiEndpointWriter in boltffiEndpointWriter.writeString(endpoint) }
+        let boltffiHandle = boltffiEndpointBytes.withUnsafeBufferPointer { boltffiEndpointBuffer in
+            return boltffi_init_class_xybrid_bolt_xybrid_observability_config_otlp(boltffiEndpointBuffer.baseAddress!, UInt(boltffiEndpointBuffer.count))
+        }
+        self.handle = boltffiHandle
+    }
+
+    /// Override the full trace endpoint URL (staging, self-hosted).
+    public func setTracesEndpoint(endpoint: String) {
         let boltffiEndpointBytes = boltffiEncode { boltffiEndpointWriter in boltffiEndpointWriter.writeString(endpoint) }
         boltffiEndpointBytes.withUnsafeBufferPointer { boltffiEndpointBuffer -> Void in
-            boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_endpoint(self.handle, boltffiEndpointBuffer.baseAddress!, UInt(boltffiEndpointBuffer.count))
+            boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_traces_endpoint(self.handle, boltffiEndpointBuffer.baseAddress!, UInt(boltffiEndpointBuffer.count))
         }
     }
 
-    /// Set the app version reported with every event.
-    public func setAppVersion(version: String) {
-        let boltffiVersionBytes = boltffiEncode { boltffiVersionWriter in boltffiVersionWriter.writeString(version) }
-        boltffiVersionBytes.withUnsafeBufferPointer { boltffiVersionBuffer -> Void in
-            boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_app_version(self.handle, boltffiVersionBuffer.baseAddress!, UInt(boltffiVersionBuffer.count))
+    /// Add an HTTP header sent with every export request.
+    public func setHeader(name: String, value: String) {
+        let boltffiNameBytes = boltffiEncode { boltffiNameWriter in boltffiNameWriter.writeString(name) }
+        boltffiNameBytes.withUnsafeBufferPointer { boltffiNameBuffer -> Void in
+            let boltffiValueBytes = boltffiEncode { boltffiValueWriter in boltffiValueWriter.writeString(value) }
+            boltffiValueBytes.withUnsafeBufferPointer { boltffiValueBuffer -> Void in
+                boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_header(
+                    self.handle,
+                    boltffiNameBuffer.baseAddress!,
+                    UInt(boltffiNameBuffer.count),
+                    boltffiValueBuffer.baseAddress!,
+                    UInt(boltffiValueBuffer.count)
+                )
+            }
         }
     }
 
-    /// Set the human-friendly device label reported with every event.
-    public func setDeviceLabel(label: String) {
-        let boltffiLabelBytes = boltffiEncode { boltffiLabelWriter in boltffiLabelWriter.writeString(label) }
-        boltffiLabelBytes.withUnsafeBufferPointer { boltffiLabelBuffer -> Void in
-            boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_device_label(self.handle, boltffiLabelBuffer.baseAddress!, UInt(boltffiLabelBuffer.count))
+    /// Send OTLP JSON instead of protobuf.
+    public func setJsonProtocol(json: Bool) {
+        boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_json_protocol(self.handle, json)
+    }
+
+    /// Set the reported service (app) name and version.
+    public func setService(name: String, version: String?) {
+        let boltffiNameBytes = boltffiEncode { boltffiNameWriter in boltffiNameWriter.writeString(name) }
+        boltffiNameBytes.withUnsafeBufferPointer { boltffiNameBuffer -> Void in
+            let boltffiVersionBytes = boltffiEncode { boltffiVersionWriter in boltffiVersionWriter.writeOptional(version) { boltffiVersionWriter, boltffiValue0 in boltffiVersionWriter.writeString(boltffiValue0) } }
+            boltffiVersionBytes.withUnsafeBufferPointer { boltffiVersionBuffer -> Void in
+                boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_service(
+                    self.handle,
+                    boltffiNameBuffer.baseAddress!,
+                    UInt(boltffiNameBuffer.count),
+                    boltffiVersionBuffer.baseAddress!,
+                    UInt(boltffiVersionBuffer.count)
+                )
+            }
         }
     }
 
-    /// Attach an app-provided device attribute (stored under `device.custom`).
-    public func setDeviceAttribute(key: String, value: String) {
+    /// Attach a resource attribute (for example `deployment.environment`).
+    public func setResourceAttribute(key: String, value: String) {
         let boltffiKeyBytes = boltffiEncode { boltffiKeyWriter in boltffiKeyWriter.writeString(key) }
         boltffiKeyBytes.withUnsafeBufferPointer { boltffiKeyBuffer -> Void in
             let boltffiValueBytes = boltffiEncode { boltffiValueWriter in boltffiValueWriter.writeString(value) }
             boltffiValueBytes.withUnsafeBufferPointer { boltffiValueBuffer -> Void in
-                boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_device_attribute(
+                boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_resource_attribute(
                     self.handle,
                     boltffiKeyBuffer.baseAddress!,
                     UInt(boltffiKeyBuffer.count),
@@ -2095,29 +3023,92 @@ public final class XybridTelemetryConfig {
         }
     }
 
-    /// Set the number of events buffered before a flush.
-    public func setBatchSize(batchSize: UInt32) {
-        boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_batch_size(self.handle, batchSize)
+    /// Record metadata only: no prompts, outputs, or tool payloads.
+    public func setMetadataOnly(metadataOnly: Bool) {
+        boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_metadata_only(self.handle, metadataOnly)
     }
 
-    /// Set the background flush interval, in seconds.
-    public func setFlushIntervalSecs(secs: UInt32) {
-        boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_flush_interval_secs(self.handle, secs)
+    /// Maximum bytes per captured content attribute, clamped to at most
+    /// 416 KiB (208 KiB when exporting OTLP/JSON, which can double content)
+    /// so that a span's content leaves 64 KiB of the 480 KiB export request
+    /// for its other data.
+    public func setMaxContentBytes(bytes: UInt32) {
+        boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_max_content_bytes(self.handle, bytes)
     }
 
-    /// Start the process-global telemetry exporter from this config.
-    ///
-    /// Consumes the config: subsequent setters no-op and a second `init` on the
-    /// same handle errors. Modeled as a method (not a free `telemetry_init`)
-    /// because boltffi 0.25.3 drops free functions that take a handle
-    /// parameter, but lowers a handle self-method fine (same reason the
-    /// generated `run` lives on `XybridModel`).
+    /// Allows context propagation to one exact third-party HTTP(S) origin.
+    public func allowProviderContext(origin: String) throws {
+        let boltffiOriginBytes = boltffiEncode { boltffiOriginWriter in boltffiOriginWriter.writeString(origin) }
+        try boltffiOriginBytes.withUnsafeBufferPointer { boltffiOriginBuffer -> Void in
+            let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_observability_config_allow_provider_context(self.handle, boltffiOriginBuffer.baseAddress!, UInt(boltffiOriginBuffer.count))
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+            }
+        }
+    }
+
+    /// Sets a caller-owned device identifier.
+    public func setDeviceId(id: String) {
+        let boltffiIdBytes = boltffiEncode { boltffiIdWriter in boltffiIdWriter.writeString(id) }
+        boltffiIdBytes.withUnsafeBufferPointer { boltffiIdBuffer -> Void in
+            boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_device_id(self.handle, boltffiIdBuffer.baseAddress!, UInt(boltffiIdBuffer.count))
+        }
+    }
+
+    /// Appends an ordered literal replacement of content string values.
     ///
     /// # Errors
-    /// Errors if this config was already consumed, or if telemetry is already
-    /// initialized without an intervening [`telemetry_shutdown`].
+    /// For an empty search string.
+    public func addLiteralRedaction(find: String, replacement: String) throws {
+        let boltffiFindBytes = boltffiEncode { boltffiFindWriter in boltffiFindWriter.writeString(find) }
+        try boltffiFindBytes.withUnsafeBufferPointer { boltffiFindBuffer -> Void in
+            let boltffiReplacementBytes = boltffiEncode { boltffiReplacementWriter in boltffiReplacementWriter.writeString(replacement) }
+            try boltffiReplacementBytes.withUnsafeBufferPointer { boltffiReplacementBuffer -> Void in
+                let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_observability_config_add_literal_redaction(
+                    self.handle,
+                    boltffiFindBuffer.baseAddress!,
+                    UInt(boltffiFindBuffer.count),
+                    boltffiReplacementBuffer.baseAddress!,
+                    UInt(boltffiReplacementBuffer.count)
+                )
+                if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                    defer { boltffi_free_buf(boltffiError) }
+                    throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+                }
+            }
+        }
+    }
+
+    /// Omits an exact governed content attribute key.
+    ///
+    /// # Errors
+    /// For an empty key.
+    public func omitContentAttribute(key: String) throws {
+        let boltffiKeyBytes = boltffiEncode { boltffiKeyWriter in boltffiKeyWriter.writeString(key) }
+        try boltffiKeyBytes.withUnsafeBufferPointer { boltffiKeyBuffer -> Void in
+            let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_observability_config_omit_content_attribute(self.handle, boltffiKeyBuffer.baseAddress!, UInt(boltffiKeyBuffer.count))
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+            }
+        }
+    }
+
+    /// Minimum interval between traced frames of one live session.
+    public func setLiveTraceIntervalMs(ms: UInt32) {
+        boltffi_method_class_xybrid_bolt_xybrid_observability_config_set_live_trace_interval_ms(self.handle, ms)
+    }
+
+    /// Start exporting with this configuration, replacing any previous one.
+    /// Consumes the config: later setters no-op and a second `init` errors.
+    /// A method rather than a free function because boltffi drops free
+    /// functions that take a handle parameter.
+    ///
+    /// # Errors
+    /// If this config was already consumed or is rejected.
     public func `init`() throws {
-        let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_init(self.handle)
+        let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_observability_config_init(self.handle)
         if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
             defer { boltffi_free_buf(boltffiError) }
             throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
@@ -2234,6 +3225,479 @@ public final class XybridBundle {
     }
 }
 
+public final class XybridWorkflowObservation {
+    @usableFromInline let handle: UInt64
+
+    @usableFromInline init(handle: UInt64) {
+        self.handle = handle
+    }
+
+    deinit {
+        boltffi_release_class_xybrid_bolt_xybrid_workflow_observation(handle)
+    }
+
+    /// Starts an operation using the configured SDK session and explicit parent controls.
+    public init(name: String, options: XybridObservationOptions?) throws {
+        let boltffiNameBytes = boltffiEncode { boltffiNameWriter in boltffiNameWriter.writeString(name) }
+        let boltffiHandle = try boltffiNameBytes.withUnsafeBufferPointer { boltffiNameBuffer in
+            let boltffiOptionsBytes = boltffiEncode { boltffiOptionsWriter in boltffiOptionsWriter.writeOptional(options) { boltffiOptionsWriter, boltffiValue0 in boltffiValue0.encode(to: &boltffiOptionsWriter) } }
+            return try boltffiOptionsBytes.withUnsafeBufferPointer { boltffiOptionsBuffer in
+                var boltffiResult: UInt64 = UInt64()
+                let boltffiError = boltffi_init_class_xybrid_bolt_xybrid_workflow_observation_new(
+                    boltffiNameBuffer.baseAddress!,
+                    UInt(boltffiNameBuffer.count),
+                    boltffiOptionsBuffer.baseAddress!,
+                    UInt(boltffiOptionsBuffer.count),
+                    &boltffiResult
+                )
+                if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                    defer { boltffi_free_buf(boltffiError) }
+                    throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+                }
+                return boltffiResult
+            }
+        }
+        self.handle = boltffiHandle
+    }
+
+    /// Context for child operations, including valid unsampled spans.
+    public func context() -> XybridObservationContext? {
+        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_context(self.handle)
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in XybridObservationContext.decode(from: &boltffiReader) } }
+    }
+
+    /// Reference to this operation's own span.
+    public func observationRef() -> XybridObservationRef? {
+        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_observation_ref(self.handle)
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in XybridObservationRef.decode(from: &boltffiReader) } }
+    }
+
+    /// Ends successfully. The first terminal call wins.
+    public func complete() {
+        boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_complete(self.handle)
+    }
+
+    /// Ends with a governed error message.
+    public func fail(errorType: String, message: String?) {
+        let boltffiErrorTypeBytes = boltffiEncode { boltffiErrorTypeWriter in boltffiErrorTypeWriter.writeString(errorType) }
+        boltffiErrorTypeBytes.withUnsafeBufferPointer { boltffiErrorTypeBuffer -> Void in
+            let boltffiMessageBytes = boltffiEncode { boltffiMessageWriter in boltffiMessageWriter.writeOptional(message) { boltffiMessageWriter, boltffiValue0 in boltffiMessageWriter.writeString(boltffiValue0) } }
+            boltffiMessageBytes.withUnsafeBufferPointer { boltffiMessageBuffer -> Void in
+                boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_fail(
+                    self.handle,
+                    boltffiErrorTypeBuffer.baseAddress!,
+                    UInt(boltffiErrorTypeBuffer.count),
+                    boltffiMessageBuffer.baseAddress!,
+                    UInt(boltffiMessageBuffer.count)
+                )
+            }
+        }
+    }
+
+    /// Cancels without flushing.
+    public func cancel() {
+        boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_cancel(self.handle)
+    }
+
+    /// Whether any terminal transition has happened.
+    public func isFinished() -> Bool {
+        return boltffi_method_class_xybrid_bolt_xybrid_workflow_observation_is_finished(self.handle)
+    }
+}
+
+public final class XybridToolObservation {
+    @usableFromInline let handle: UInt64
+
+    @usableFromInline init(handle: UInt64) {
+        self.handle = handle
+    }
+
+    deinit {
+        boltffi_release_class_xybrid_bolt_xybrid_tool_observation(handle)
+    }
+
+    /// Starts an operation using the configured SDK session and explicit parent controls.
+    public init(call: XybridToolCallInfo, options: XybridObservationOptions?) throws {
+        let boltffiCallBytes = boltffiEncode { boltffiCallWriter in call.encode(to: &boltffiCallWriter) }
+        let boltffiHandle = try boltffiCallBytes.withUnsafeBufferPointer { boltffiCallBuffer in
+            let boltffiOptionsBytes = boltffiEncode { boltffiOptionsWriter in boltffiOptionsWriter.writeOptional(options) { boltffiOptionsWriter, boltffiValue0 in boltffiValue0.encode(to: &boltffiOptionsWriter) } }
+            return try boltffiOptionsBytes.withUnsafeBufferPointer { boltffiOptionsBuffer in
+                var boltffiResult: UInt64 = UInt64()
+                let boltffiError = boltffi_init_class_xybrid_bolt_xybrid_tool_observation_new(
+                    boltffiCallBuffer.baseAddress!,
+                    UInt(boltffiCallBuffer.count),
+                    boltffiOptionsBuffer.baseAddress!,
+                    UInt(boltffiOptionsBuffer.count),
+                    &boltffiResult
+                )
+                if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                    defer { boltffi_free_buf(boltffiError) }
+                    throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+                }
+                return boltffiResult
+            }
+        }
+        self.handle = boltffiHandle
+    }
+
+    /// Context for child operations, including valid unsampled spans.
+    public func context() -> XybridObservationContext? {
+        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_tool_observation_context(self.handle)
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in XybridObservationContext.decode(from: &boltffiReader) } }
+    }
+
+    /// Reference to this operation's own span.
+    public func observationRef() -> XybridObservationRef? {
+        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_tool_observation_observation_ref(self.handle)
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in XybridObservationRef.decode(from: &boltffiReader) } }
+    }
+
+    /// Ends successfully. The first terminal call wins.
+    public func complete() {
+        boltffi_method_class_xybrid_bolt_xybrid_tool_observation_complete(self.handle)
+    }
+
+    /// Ends with a governed error message.
+    public func fail(errorType: String, message: String?) {
+        let boltffiErrorTypeBytes = boltffiEncode { boltffiErrorTypeWriter in boltffiErrorTypeWriter.writeString(errorType) }
+        boltffiErrorTypeBytes.withUnsafeBufferPointer { boltffiErrorTypeBuffer -> Void in
+            let boltffiMessageBytes = boltffiEncode { boltffiMessageWriter in boltffiMessageWriter.writeOptional(message) { boltffiMessageWriter, boltffiValue0 in boltffiMessageWriter.writeString(boltffiValue0) } }
+            boltffiMessageBytes.withUnsafeBufferPointer { boltffiMessageBuffer -> Void in
+                boltffi_method_class_xybrid_bolt_xybrid_tool_observation_fail(
+                    self.handle,
+                    boltffiErrorTypeBuffer.baseAddress!,
+                    UInt(boltffiErrorTypeBuffer.count),
+                    boltffiMessageBuffer.baseAddress!,
+                    UInt(boltffiMessageBuffer.count)
+                )
+            }
+        }
+    }
+
+    /// Cancels without flushing.
+    public func cancel() {
+        boltffi_method_class_xybrid_bolt_xybrid_tool_observation_cancel(self.handle)
+    }
+
+    /// Whether any terminal transition has happened.
+    public func isFinished() -> Bool {
+        return boltffi_method_class_xybrid_bolt_xybrid_tool_observation_is_finished(self.handle)
+    }
+
+    /// Records structured tool output through the content policy.
+    public func recordResult(resultJson: String) throws {
+        let boltffiResultJsonBytes = boltffiEncode { boltffiResultJsonWriter in boltffiResultJsonWriter.writeString(resultJson) }
+        try boltffiResultJsonBytes.withUnsafeBufferPointer { boltffiResultJsonBuffer -> Void in
+            let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_tool_observation_record_result(self.handle, boltffiResultJsonBuffer.baseAddress!, UInt(boltffiResultJsonBuffer.count))
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+            }
+        }
+    }
+}
+
+public final class XybridInferenceObservation {
+    @usableFromInline let handle: UInt64
+
+    @usableFromInline init(handle: UInt64) {
+        self.handle = handle
+    }
+
+    deinit {
+        boltffi_release_class_xybrid_bolt_xybrid_inference_observation(handle)
+    }
+
+    /// Starts an operation using the configured SDK session and explicit parent controls.
+    public init(request: XybridInferenceRequest, options: XybridObservationOptions?) throws {
+        let boltffiRequestBytes = boltffiEncode { boltffiRequestWriter in request.encode(to: &boltffiRequestWriter) }
+        let boltffiHandle = try boltffiRequestBytes.withUnsafeBufferPointer { boltffiRequestBuffer in
+            let boltffiOptionsBytes = boltffiEncode { boltffiOptionsWriter in boltffiOptionsWriter.writeOptional(options) { boltffiOptionsWriter, boltffiValue0 in boltffiValue0.encode(to: &boltffiOptionsWriter) } }
+            return try boltffiOptionsBytes.withUnsafeBufferPointer { boltffiOptionsBuffer in
+                var boltffiResult: UInt64 = UInt64()
+                let boltffiError = boltffi_init_class_xybrid_bolt_xybrid_inference_observation_new(
+                    boltffiRequestBuffer.baseAddress!,
+                    UInt(boltffiRequestBuffer.count),
+                    boltffiOptionsBuffer.baseAddress!,
+                    UInt(boltffiOptionsBuffer.count),
+                    &boltffiResult
+                )
+                if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                    defer { boltffi_free_buf(boltffiError) }
+                    throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+                }
+                return boltffiResult
+            }
+        }
+        self.handle = boltffiHandle
+    }
+
+    /// Context for child operations, including valid unsampled spans.
+    public func context() -> XybridObservationContext? {
+        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_context(self.handle)
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in XybridObservationContext.decode(from: &boltffiReader) } }
+    }
+
+    /// Reference to this operation's own span.
+    public func observationRef() -> XybridObservationRef? {
+        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_observation_ref(self.handle)
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in XybridObservationRef.decode(from: &boltffiReader) } }
+    }
+
+    /// Ends successfully. The first terminal call wins.
+    public func complete() {
+        boltffi_method_class_xybrid_bolt_xybrid_inference_observation_complete(self.handle)
+    }
+
+    /// Ends with a governed error message.
+    public func fail(errorType: String, message: String?) {
+        let boltffiErrorTypeBytes = boltffiEncode { boltffiErrorTypeWriter in boltffiErrorTypeWriter.writeString(errorType) }
+        boltffiErrorTypeBytes.withUnsafeBufferPointer { boltffiErrorTypeBuffer -> Void in
+            let boltffiMessageBytes = boltffiEncode { boltffiMessageWriter in boltffiMessageWriter.writeOptional(message) { boltffiMessageWriter, boltffiValue0 in boltffiMessageWriter.writeString(boltffiValue0) } }
+            boltffiMessageBytes.withUnsafeBufferPointer { boltffiMessageBuffer -> Void in
+                boltffi_method_class_xybrid_bolt_xybrid_inference_observation_fail(
+                    self.handle,
+                    boltffiErrorTypeBuffer.baseAddress!,
+                    UInt(boltffiErrorTypeBuffer.count),
+                    boltffiMessageBuffer.baseAddress!,
+                    UInt(boltffiMessageBuffer.count)
+                )
+            }
+        }
+    }
+
+    /// Cancels without flushing.
+    public func cancel() {
+        boltffi_method_class_xybrid_bolt_xybrid_inference_observation_cancel(self.handle)
+    }
+
+    /// Whether any terminal transition has happened.
+    public func isFinished() -> Bool {
+        return boltffi_method_class_xybrid_bolt_xybrid_inference_observation_is_finished(self.handle)
+    }
+
+    /// Records governed structured content.
+    public func recordSystemInstructions(partsJson: String) throws {
+        let boltffiPartsJsonBytes = boltffiEncode { boltffiPartsJsonWriter in boltffiPartsJsonWriter.writeString(partsJson) }
+        try boltffiPartsJsonBytes.withUnsafeBufferPointer { boltffiPartsJsonBuffer -> Void in
+            let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_system_instructions(self.handle, boltffiPartsJsonBuffer.baseAddress!, UInt(boltffiPartsJsonBuffer.count))
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+            }
+        }
+    }
+
+    /// Records governed structured content.
+    public func recordInputMessages(messagesJson: String) throws {
+        let boltffiMessagesJsonBytes = boltffiEncode { boltffiMessagesJsonWriter in boltffiMessagesJsonWriter.writeString(messagesJson) }
+        try boltffiMessagesJsonBytes.withUnsafeBufferPointer { boltffiMessagesJsonBuffer -> Void in
+            let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_input_messages(self.handle, boltffiMessagesJsonBuffer.baseAddress!, UInt(boltffiMessagesJsonBuffer.count))
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+            }
+        }
+    }
+
+    /// Records governed structured content.
+    public func recordOutputMessages(messagesJson: String) throws {
+        let boltffiMessagesJsonBytes = boltffiEncode { boltffiMessagesJsonWriter in boltffiMessagesJsonWriter.writeString(messagesJson) }
+        try boltffiMessagesJsonBytes.withUnsafeBufferPointer { boltffiMessagesJsonBuffer -> Void in
+            let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_output_messages(self.handle, boltffiMessagesJsonBuffer.baseAddress!, UInt(boltffiMessagesJsonBuffer.count))
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+            }
+        }
+    }
+
+    /// Records governed structured content.
+    public func recordToolDefinitions(definitionsJson: String) throws {
+        let boltffiDefinitionsJsonBytes = boltffiEncode { boltffiDefinitionsJsonWriter in boltffiDefinitionsJsonWriter.writeString(definitionsJson) }
+        try boltffiDefinitionsJsonBytes.withUnsafeBufferPointer { boltffiDefinitionsJsonBuffer -> Void in
+            let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_tool_definitions(self.handle, boltffiDefinitionsJsonBuffer.baseAddress!, UInt(boltffiDefinitionsJsonBuffer.count))
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+            }
+        }
+    }
+
+    /// Records a chunk arrival; this does not estimate first-token time.
+    public func recordChunk() {
+        boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_chunk(self.handle)
+    }
+
+    /// Records a runtime-measured first token (epoch milliseconds, or now).
+    public func recordFirstToken(atEpochMs: UInt64?) throws {
+        let boltffiAtEpochMsBytes = boltffiEncode { boltffiAtEpochMsWriter in boltffiAtEpochMsWriter.writeOptional(atEpochMs) { writer, value in writer.writeU64(value) } }
+        try boltffiAtEpochMsBytes.withUnsafeBufferPointer { boltffiAtEpochMsBuffer -> Void in
+            let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_first_token(self.handle, boltffiAtEpochMsBuffer.baseAddress!, UInt(boltffiAtEpochMsBuffer.count))
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+            }
+        }
+    }
+
+    /// Replaces the cumulative usage snapshot, preserving unknown fields.
+    public func recordUsage(usage: XybridUsage) {
+        let boltffiUsageBytes = boltffiEncode { boltffiUsageWriter in usage.encode(to: &boltffiUsageWriter) }
+        boltffiUsageBytes.withUnsafeBufferPointer { boltffiUsageBuffer -> Void in
+            boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_usage(self.handle, boltffiUsageBuffer.baseAddress!, UInt(boltffiUsageBuffer.count))
+        }
+    }
+
+    /// Records measured finish reasons.
+    public func recordFinishReasons(reasons: [String]) {
+        let boltffiReasonsBytes = boltffiEncode { boltffiReasonsWriter in boltffiReasonsWriter.writeArray(reasons) { boltffiReasonsWriter, boltffiValue0 in boltffiReasonsWriter.writeString(boltffiValue0) } }
+        boltffiReasonsBytes.withUnsafeBufferPointer { boltffiReasonsBuffer -> Void in
+            boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_finish_reasons(self.handle, boltffiReasonsBuffer.baseAddress!, UInt(boltffiReasonsBuffer.count))
+        }
+    }
+
+    /// Records provider-assigned response identifiers.
+    public func recordResponse(responseId: String?, model: String?) {
+        let boltffiResponseIdBytes = boltffiEncode { boltffiResponseIdWriter in boltffiResponseIdWriter.writeOptional(responseId) { boltffiResponseIdWriter, boltffiValue0 in boltffiResponseIdWriter.writeString(boltffiValue0) } }
+        boltffiResponseIdBytes.withUnsafeBufferPointer { boltffiResponseIdBuffer -> Void in
+            let boltffiModelBytes = boltffiEncode { boltffiModelWriter in boltffiModelWriter.writeOptional(model) { boltffiModelWriter, boltffiValue0 in boltffiModelWriter.writeString(boltffiValue0) } }
+            boltffiModelBytes.withUnsafeBufferPointer { boltffiModelBuffer -> Void in
+                boltffi_method_class_xybrid_bolt_xybrid_inference_observation_record_response(
+                    self.handle,
+                    boltffiResponseIdBuffer.baseAddress!,
+                    UInt(boltffiResponseIdBuffer.count),
+                    boltffiModelBuffer.baseAddress!,
+                    UInt(boltffiModelBuffer.count)
+                )
+            }
+        }
+    }
+}
+
+public final class XybridModelLoadObservation {
+    @usableFromInline let handle: UInt64
+
+    @usableFromInline init(handle: UInt64) {
+        self.handle = handle
+    }
+
+    deinit {
+        boltffi_release_class_xybrid_bolt_xybrid_model_load_observation(handle)
+    }
+
+    /// Starts an operation using the configured SDK session and explicit parent controls.
+    public init(info: XybridModelLoadInfo, options: XybridObservationOptions?) throws {
+        let boltffiInfoBytes = boltffiEncode { boltffiInfoWriter in info.encode(to: &boltffiInfoWriter) }
+        let boltffiHandle = try boltffiInfoBytes.withUnsafeBufferPointer { boltffiInfoBuffer in
+            let boltffiOptionsBytes = boltffiEncode { boltffiOptionsWriter in boltffiOptionsWriter.writeOptional(options) { boltffiOptionsWriter, boltffiValue0 in boltffiValue0.encode(to: &boltffiOptionsWriter) } }
+            return try boltffiOptionsBytes.withUnsafeBufferPointer { boltffiOptionsBuffer in
+                var boltffiResult: UInt64 = UInt64()
+                let boltffiError = boltffi_init_class_xybrid_bolt_xybrid_model_load_observation_new(
+                    boltffiInfoBuffer.baseAddress!,
+                    UInt(boltffiInfoBuffer.count),
+                    boltffiOptionsBuffer.baseAddress!,
+                    UInt(boltffiOptionsBuffer.count),
+                    &boltffiResult
+                )
+                if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                    defer { boltffi_free_buf(boltffiError) }
+                    throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+                }
+                return boltffiResult
+            }
+        }
+        self.handle = boltffiHandle
+    }
+
+    /// Context for child operations, including valid unsampled spans.
+    public func context() -> XybridObservationContext? {
+        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_context(self.handle)
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in XybridObservationContext.decode(from: &boltffiReader) } }
+    }
+
+    /// Reference to this operation's own span.
+    public func observationRef() -> XybridObservationRef? {
+        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_observation_ref(self.handle)
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in XybridObservationRef.decode(from: &boltffiReader) } }
+    }
+
+    /// Ends successfully. The first terminal call wins.
+    public func complete() {
+        boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_complete(self.handle)
+    }
+
+    /// Ends with a governed error message.
+    public func fail(errorType: String, message: String?) {
+        let boltffiErrorTypeBytes = boltffiEncode { boltffiErrorTypeWriter in boltffiErrorTypeWriter.writeString(errorType) }
+        boltffiErrorTypeBytes.withUnsafeBufferPointer { boltffiErrorTypeBuffer -> Void in
+            let boltffiMessageBytes = boltffiEncode { boltffiMessageWriter in boltffiMessageWriter.writeOptional(message) { boltffiMessageWriter, boltffiValue0 in boltffiMessageWriter.writeString(boltffiValue0) } }
+            boltffiMessageBytes.withUnsafeBufferPointer { boltffiMessageBuffer -> Void in
+                boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_fail(
+                    self.handle,
+                    boltffiErrorTypeBuffer.baseAddress!,
+                    UInt(boltffiErrorTypeBuffer.count),
+                    boltffiMessageBuffer.baseAddress!,
+                    UInt(boltffiMessageBuffer.count)
+                )
+            }
+        }
+    }
+
+    /// Cancels without flushing.
+    public func cancel() {
+        boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_cancel(self.handle)
+    }
+
+    /// Whether any terminal transition has happened.
+    public func isFinished() -> Bool {
+        return boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_is_finished(self.handle)
+    }
+
+    /// Records the measured cache outcome.
+    public func recordCacheHit(hit: Bool) {
+        boltffi_method_class_xybrid_bolt_xybrid_model_load_observation_record_cache_hit(self.handle, hit)
+    }
+}
+
+/// Validate ordered typed decision data and build input for the existing run API.
+public func decisionRequestEnvelope(request: XybridDecisionRequest) throws -> XybridEnvelope {
+    let boltffiRequestBytes = boltffiEncode { boltffiRequestWriter in request.encode(to: &boltffiRequestWriter) }
+    return try boltffiRequestBytes.withUnsafeBufferPointer { boltffiRequestBuffer in
+        var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+        let boltffiError = boltffi_function_xybrid_bolt_decision_request_envelope(boltffiRequestBuffer.baseAddress!, UInt(boltffiRequestBuffer.count), &boltffiResult)
+        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+            defer { boltffi_free_buf(boltffiError) }
+            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+        }
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridEnvelope.decode(from: &boltffiReader) }
+    }
+}
+
+/// Decode bounded Liquid SystemOne JSON without foreign dictionary conversion.
+public func decisionRequestJsonEnvelope(json: String) throws -> XybridEnvelope {
+    let boltffiJsonBytes = boltffiEncode { boltffiJsonWriter in boltffiJsonWriter.writeString(json) }
+    return try boltffiJsonBytes.withUnsafeBufferPointer { boltffiJsonBuffer in
+        var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+        let boltffiError = boltffi_function_xybrid_bolt_decision_request_json_envelope(boltffiJsonBuffer.baseAddress!, UInt(boltffiJsonBuffer.count), &boltffiResult)
+        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+            defer { boltffi_free_buf(boltffiError) }
+            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+        }
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridEnvelope.decode(from: &boltffiReader) }
+    }
+}
+
 /// Build the continuation envelope for the turn after the model asked for
 /// tools.
 ///
@@ -2306,27 +3770,23 @@ public func clearBatteryLevel() {
     boltffi_function_xybrid_bolt_clear_battery_level()
 }
 
-/// One-stop SDK initialization: API key + gateway/ingest URL overrides in
-/// one call. Delegates to [`facade::configure_runtime`]; blank strings are
-/// treated as absent. This is the canonical init the Swift
-/// `Xybrid.initialize(apiKey:gatewayUrl:ingestUrl:)` and Kotlin
-/// `Xybrid.init(context, apiKey, gatewayUrl, ingestUrl)` wrappers call.
-public func configureRuntime(apiKey: String?, gatewayUrl: String?, ingestUrl: String?) {
+/// One-stop SDK initialization: API key + gateway URL override in one call.
+/// Delegates to [`facade::configure_runtime`]; blank strings are treated as
+/// absent. This is the canonical init the Swift
+/// `Xybrid.initialize(apiKey:gatewayUrl:)` and Kotlin
+/// `Xybrid.init(context, apiKey, gatewayUrl)` wrappers call. Observability
+/// export is configured separately with [`XybridObservabilityConfig`].
+public func configureRuntime(apiKey: String?, gatewayUrl: String?) {
     let boltffiApiKeyBytes = boltffiEncode { boltffiApiKeyWriter in boltffiApiKeyWriter.writeOptional(apiKey) { boltffiApiKeyWriter, boltffiValue0 in boltffiApiKeyWriter.writeString(boltffiValue0) } }
     boltffiApiKeyBytes.withUnsafeBufferPointer { boltffiApiKeyBuffer -> Void in
         let boltffiGatewayUrlBytes = boltffiEncode { boltffiGatewayUrlWriter in boltffiGatewayUrlWriter.writeOptional(gatewayUrl) { boltffiGatewayUrlWriter, boltffiValue0 in boltffiGatewayUrlWriter.writeString(boltffiValue0) } }
         boltffiGatewayUrlBytes.withUnsafeBufferPointer { boltffiGatewayUrlBuffer -> Void in
-            let boltffiIngestUrlBytes = boltffiEncode { boltffiIngestUrlWriter in boltffiIngestUrlWriter.writeOptional(ingestUrl) { boltffiIngestUrlWriter, boltffiValue0 in boltffiIngestUrlWriter.writeString(boltffiValue0) } }
-            boltffiIngestUrlBytes.withUnsafeBufferPointer { boltffiIngestUrlBuffer -> Void in
-                boltffi_function_xybrid_bolt_configure_runtime(
-                    boltffiApiKeyBuffer.baseAddress!,
-                    UInt(boltffiApiKeyBuffer.count),
-                    boltffiGatewayUrlBuffer.baseAddress!,
-                    UInt(boltffiGatewayUrlBuffer.count),
-                    boltffiIngestUrlBuffer.baseAddress!,
-                    UInt(boltffiIngestUrlBuffer.count)
-                )
-            }
+            boltffi_function_xybrid_bolt_configure_runtime(
+                boltffiApiKeyBuffer.baseAddress!,
+                UInt(boltffiApiKeyBuffer.count),
+                boltffiGatewayUrlBuffer.baseAddress!,
+                UInt(boltffiGatewayUrlBuffer.count)
+            )
         }
     }
 }
@@ -2535,21 +3995,133 @@ public func isAutoReleaseEnabled() -> Bool {
     return boltffi_function_xybrid_bolt_is_auto_release_enabled()
 }
 
-/// The SDK's default telemetry ingest endpoint (for display alongside a config).
-public func telemetryDefaultEndpoint() -> String {
-    let boltffiResult = boltffi_function_xybrid_bolt_telemetry_default_endpoint()
+/// The default Xybrid OTLP trace endpoint.
+public func observabilityDefaultTracesEndpoint() -> String {
+    let boltffiResult = boltffi_function_xybrid_bolt_observability_default_traces_endpoint()
     defer { boltffi_free_buf(boltffiResult) }
     return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readString() }
 }
 
-/// Flush pending telemetry events. Safe before init / after shutdown.
-public func telemetryFlush() {
-    boltffi_function_xybrid_bolt_telemetry_flush()
+/// Delivery counters: live while export runs, the final ones after shutdown until the next init.
+public func observabilityStats() -> XybridObservabilityStats {
+    let boltffiResult = boltffi_function_xybrid_bolt_observability_stats()
+    defer { boltffi_free_buf(boltffiResult) }
+    return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridObservabilityStats.decode(from: &boltffiReader) }
 }
 
-/// Shut down the telemetry exporter. Idempotent.
-public func telemetryShutdown() {
-    boltffi_function_xybrid_bolt_telemetry_shutdown()
+/// Export queued telemetry, waiting at most `timeout_ms`.
+///
+/// # Errors
+/// When the bound is exceeded.
+public func observabilityFlush(timeoutMs: UInt32) throws {
+    let boltffiError = boltffi_function_xybrid_bolt_observability_flush(timeoutMs)
+    if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+        defer { boltffi_free_buf(boltffiError) }
+        throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+    }
+}
+
+/// Flush and stop exporting, waiting at most `timeout_ms`. Idempotent.
+///
+/// # Errors
+/// When the bound is exceeded.
+public func observabilityShutdown(timeoutMs: UInt32) throws {
+    let boltffiError = boltffi_function_xybrid_bolt_observability_shutdown(timeoutMs)
+    if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+        defer { boltffi_free_buf(boltffiError) }
+        throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+    }
+}
+
+/// Record end-user feedback on a run (`XybridResult::observation`). Returns
+/// `false` when no logs signal is configured (the Xybrid preset sends traces
+/// only).
+///
+/// # Errors
+/// When `target` is not a valid trace/span id pair.
+public func observabilityRecordFeedback(
+    target: XybridObservationRef,
+    score: Double?,
+    label: String?,
+    comment: String?
+) throws -> Bool {
+    let boltffiTargetBytes = boltffiEncode { boltffiTargetWriter in target.encode(to: &boltffiTargetWriter) }
+    return try boltffiTargetBytes.withUnsafeBufferPointer { boltffiTargetBuffer in
+        let boltffiScoreBytes = boltffiEncode { boltffiScoreWriter in boltffiScoreWriter.writeOptional(score) { writer, value in writer.writeF64(value) } }
+        return try boltffiScoreBytes.withUnsafeBufferPointer { boltffiScoreBuffer in
+            let boltffiLabelBytes = boltffiEncode { boltffiLabelWriter in boltffiLabelWriter.writeOptional(label) { boltffiLabelWriter, boltffiValue0 in boltffiLabelWriter.writeString(boltffiValue0) } }
+            return try boltffiLabelBytes.withUnsafeBufferPointer { boltffiLabelBuffer in
+                let boltffiCommentBytes = boltffiEncode { boltffiCommentWriter in boltffiCommentWriter.writeOptional(comment) { boltffiCommentWriter, boltffiValue0 in boltffiCommentWriter.writeString(boltffiValue0) } }
+                return try boltffiCommentBytes.withUnsafeBufferPointer { boltffiCommentBuffer in
+                    var boltffiResult: Bool = Bool()
+                    let boltffiError = boltffi_function_xybrid_bolt_observability_record_feedback(
+                        boltffiTargetBuffer.baseAddress!,
+                        UInt(boltffiTargetBuffer.count),
+                        boltffiScoreBuffer.baseAddress!,
+                        UInt(boltffiScoreBuffer.count),
+                        boltffiLabelBuffer.baseAddress!,
+                        UInt(boltffiLabelBuffer.count),
+                        boltffiCommentBuffer.baseAddress!,
+                        UInt(boltffiCommentBuffer.count),
+                        &boltffiResult
+                    )
+                    if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                        defer { boltffi_free_buf(boltffiError) }
+                        throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+                    }
+                    return boltffiResult
+                }
+            }
+        }
+    }
+}
+
+/// Record an evaluation result on a run. Returns `false` when no logs signal
+/// is configured.
+///
+/// # Errors
+/// When `target` is not a valid trace/span id pair.
+public func observabilityRecordEvaluation(
+    target: XybridObservationRef,
+    name: String,
+    scoreValue: Double?,
+    scoreLabel: String?,
+    explanation: String?
+) throws -> Bool {
+    let boltffiTargetBytes = boltffiEncode { boltffiTargetWriter in target.encode(to: &boltffiTargetWriter) }
+    return try boltffiTargetBytes.withUnsafeBufferPointer { boltffiTargetBuffer in
+        let boltffiNameBytes = boltffiEncode { boltffiNameWriter in boltffiNameWriter.writeString(name) }
+        return try boltffiNameBytes.withUnsafeBufferPointer { boltffiNameBuffer in
+            let boltffiScoreValueBytes = boltffiEncode { boltffiScoreValueWriter in boltffiScoreValueWriter.writeOptional(scoreValue) { writer, value in writer.writeF64(value) } }
+            return try boltffiScoreValueBytes.withUnsafeBufferPointer { boltffiScoreValueBuffer in
+                let boltffiScoreLabelBytes = boltffiEncode { boltffiScoreLabelWriter in boltffiScoreLabelWriter.writeOptional(scoreLabel) { boltffiScoreLabelWriter, boltffiValue0 in boltffiScoreLabelWriter.writeString(boltffiValue0) } }
+                return try boltffiScoreLabelBytes.withUnsafeBufferPointer { boltffiScoreLabelBuffer in
+                    let boltffiExplanationBytes = boltffiEncode { boltffiExplanationWriter in boltffiExplanationWriter.writeOptional(explanation) { boltffiExplanationWriter, boltffiValue0 in boltffiExplanationWriter.writeString(boltffiValue0) } }
+                    return try boltffiExplanationBytes.withUnsafeBufferPointer { boltffiExplanationBuffer in
+                        var boltffiResult: Bool = Bool()
+                        let boltffiError = boltffi_function_xybrid_bolt_observability_record_evaluation(
+                            boltffiTargetBuffer.baseAddress!,
+                            UInt(boltffiTargetBuffer.count),
+                            boltffiNameBuffer.baseAddress!,
+                            UInt(boltffiNameBuffer.count),
+                            boltffiScoreValueBuffer.baseAddress!,
+                            UInt(boltffiScoreValueBuffer.count),
+                            boltffiScoreLabelBuffer.baseAddress!,
+                            UInt(boltffiScoreLabelBuffer.count),
+                            boltffiExplanationBuffer.baseAddress!,
+                            UInt(boltffiExplanationBuffer.count),
+                            &boltffiResult
+                        )
+                        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                            defer { boltffi_free_buf(boltffiError) }
+                            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+                        }
+                        return boltffiResult
+                    }
+                }
+            }
+        }
+    }
 }
 
 

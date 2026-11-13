@@ -118,8 +118,9 @@ public class XybridDemo : MonoBehaviour
 {
     async void Start()
     {
-        // Runs locally with no key. Pass an apiKey to light up the
-        // dashboard: XybridClient.Initialize(apiKey: "xy_live_...")
+        // Runs locally with no key. An apiKey adds cloud features:
+        // XybridClient.Initialize(apiKey: "sk_live_..."). Trace export is
+        // a separate opt-in (XybridClient.InitializeObservability).
         XybridClient.Initialize();
 
         // Load a model from the registry
@@ -282,7 +283,7 @@ Make sure you're using Unity 2022.3 LTS or later. The project uses features that
 
 - **[SDK API Reference](../../../docs/sdk/API_REFERENCE.md)** - Complete API specification
 - **[Unity SDK Docs](../../../docs/sdk/unity.md)** - Unity-specific documentation (planned)
-- **[Online Documentation](https://docs.xybrid.dev/sdk/unity)** - Full guides and tutorials
+- **[Online Documentation](https://docs.xybrid.dev/docs/sdks/unity)** - Full guides and tutorials
 
 ## Related
 

@@ -57,6 +57,9 @@ fn run(
         println!("  [telemetry] {diag:?}");
     }
     match out.kind {
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            Err("Unexpected decision output".into())
+        }
         EnvelopeKind::Text(t) => Ok(t),
         other => Err(format!("expected Text output, got {other:?}").into()),
     }

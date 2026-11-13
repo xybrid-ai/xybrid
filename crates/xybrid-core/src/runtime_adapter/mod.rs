@@ -55,7 +55,7 @@ pub mod traits;
 // Always-available types for FFI/bindings (NOT feature-gated)
 pub mod types;
 
-// Always-compiled tool-call text protocols, LFM2- and gemma-4-family
+// Always-compiled tool-call text protocols, LFM2-, LFM3- and gemma-4-family
 // (parser + continuation composer).
 pub mod tool_call;
 
@@ -199,6 +199,9 @@ pub enum AdapterError {
     RuntimeError(String),
     #[error("Aborted for cloud fallback: {reason}")]
     AbortedForCloudFallback { reason: crate::abort::AbortReason },
+    /// Cooperative cancellation; no partial result is returned.
+    #[error("Execution cancelled")]
+    Cancelled,
 }
 
 impl AdapterError {
@@ -237,6 +240,7 @@ impl From<xybrid_llama::LlamaError> for AdapterError {
     fn from(err: xybrid_llama::LlamaError) -> Self {
         use xybrid_llama::LlamaError;
         match err {
+            LlamaError::DecisionCancelled => Self::Cancelled,
             LlamaError::InvalidInput(msg) => Self::InvalidInput(msg),
             LlamaError::LoadFailed(path) => {
                 Self::RuntimeError(format!("Failed to load model from {path}"))

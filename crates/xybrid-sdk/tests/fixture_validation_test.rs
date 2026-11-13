@@ -15,7 +15,9 @@ use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
 /// Path to integration-tests/fixtures/models/ from the workspace root.
 #[cfg(feature = "onnx-inspect")]
 fn fixtures_dir() -> PathBuf {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest = PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+    );
     // crates/xybrid-sdk/ → ../../integration-tests/fixtures/models/
     manifest
         .join("../../integration-tests/fixtures/models")
@@ -369,12 +371,21 @@ fn test_generate_metadata_writes_valid_json_for_gguf() {
         serde_json::from_str(&std::fs::read_to_string(&metadata_path).unwrap())
             .expect("Written model_metadata.json should parse");
 
+    // The window is capped at 4,096 tokens; the GGUF's 32,768 is kept as
+    // `max_context_length`.
     match &parsed.execution_template {
         ExecutionTemplate::Gguf { context_length, .. } => {
-            assert_eq!(*context_length, 32768);
+            assert_eq!(*context_length, 4096);
         }
         other => panic!("Expected Gguf template, got {:?}", other),
     }
+    assert_eq!(
+        parsed
+            .metadata
+            .get("max_context_length")
+            .and_then(|v| v.as_u64()),
+        Some(32768)
+    );
 
     assert!(parsed.preprocessing.is_empty());
     assert!(parsed.postprocessing.is_empty());

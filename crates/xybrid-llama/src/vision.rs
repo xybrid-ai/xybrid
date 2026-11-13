@@ -42,6 +42,11 @@ impl MtmdContext {
     }
 
     /// Load an mtmd projector for `model` from `path`.
+    ///
+    /// `max_image_tokens` caps how many tokens one image becomes; the
+    /// projector scales larger images down to fit. `None` keeps the
+    /// projector's own limit, which for native-resolution encoders such as
+    /// LFM3-VL's is thousands of tokens.
     pub fn from_file(
         path: &str,
         model: &LlamaModel,
@@ -49,6 +54,7 @@ impl MtmdContext {
         warmup: bool,
         n_threads: usize,
         flash_attn: bool,
+        max_image_tokens: Option<usize>,
     ) -> LlamaResult<Self> {
         let c_path = ffi::cstring(path, "mtmd projector path")?;
         // SAFETY: c_path lives for the call; model.as_ptr() is a live
@@ -61,6 +67,7 @@ impl MtmdContext {
                 warmup,
                 n_threads,
                 flash_attn,
+                max_image_tokens,
             )
         };
         if ptr.is_null() {

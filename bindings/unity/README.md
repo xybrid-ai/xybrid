@@ -42,7 +42,7 @@ Or edit `Packages/manifest.json` directly:
     }
   ],
   "dependencies": {
-    "ai.xybrid.sdk": "0.15.0"
+    "ai.xybrid.sdk": "0.18.0"
   }
 }
 ```
@@ -59,7 +59,7 @@ https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 Pin a version by appending a tag:
 
 ```
-https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity#v0.15.0
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity#v0.18.0
 ```
 
 (**Window → Package Manager → + → Add package from git URL**, or add it under
@@ -113,8 +113,8 @@ public class XybridExample : MonoBehaviour
 
     void Start()
     {
-        // Runs locally with no key. Pass an apiKey to light up the
-        // dashboard: XybridClient.Initialize(apiKey: "xy_live_...")
+        // Runs locally with no key. Observability export is opt-in;
+        // see "Observability" below.
         XybridClient.Initialize();
 
         // Load a model from the registry
@@ -149,9 +149,42 @@ using var model = XybridClient.LoadModel("kokoro-82m");
 using var result = model.Run(Envelope.Text("Welcome, traveler. The road ahead is dangerous."));
 result.ThrowIfFailed();
 
-// result.Text contains the audio output
+// result.AudioBytes holds raw PCM: 16-bit signed little-endian, 24 kHz mono for Kokoro
 Debug.Log($"Inference completed in {result.LatencyMs}ms");
 ```
+
+### Phoneme Timings for Lip Sync
+
+A TTS model with a per-token duration output also reports when each phoneme is
+spoken. KittenTTS 0.8 has one; for Kokoro-82M, add it with
+`tools/conformance/expose_tts_duration.py` (see
+[`TTSAudioEncode`](../../docs/sdk/MODEL_METADATA.md#ttsaudioencode)). Times are
+seconds from the first sample of `AudioBytes`, so you can match them against
+`AudioSource.time` while the clip plays.
+
+```csharp
+using System.IO;
+using UnityEngine;
+using Xybrid;
+
+using var model = ModelLoader.FromDirectory(
+    Path.Combine(Application.streamingAssetsPath, "kokoro-82m-timed")).Load();
+
+using var r = model.Run(Envelope.Text(text, voiceId, speed));
+r.ThrowIfFailed();
+var pcm = r.AudioBytes;
+
+// Empty (never null) when the model has no duration output.
+foreach (var t in r.PhonemeTimings)
+    Debug.Log($"{t.Phoneme}: {t.Start:F3}-{t.End:F3} s");
+```
+
+Spaces, punctuation and stress marks (`ˈ`, `ˌ`) get their own entries; pads
+and silence tokens do not, so there can be gaps between entries. On KittenTTS
+0.8 the clip can also run on up to about 0.1 s after the last entry, where its
+audible end pad was kept; Kokoro's last entry ends with the clip. Streaming TTS
+(`RunTtsStreaming`) reports no timings, and Kitten TTS 2 and Phonon models and
+cloud results return an empty list.
 
 ### Speech Recognition
 
@@ -359,7 +392,9 @@ bindings/unity/
 │   │   ├── Model.cs             # Model inference (Run, RunText, RunAudio)
 │   │   ├── ModelLoader.cs       # Model loading (FromRegistry, FromBundle)
 │   │   ├── Envelope.cs          # Input data (Text, Audio, Image, UserMessage)
-│   │   ├── InferenceResult.cs   # Output container (Text, Success, LatencyMs)
+│   │   ├── InferenceResult.cs   # Output container (Text, Success, LatencyMs, Observation)
+│   │   ├── ObservabilityConfig.cs # OpenTelemetry export presets + setters
+│   │   ├── ObservationOptions.cs  # Per-run trace context
 │   │   ├── ConversationContext.cs # Multi-turn LLM state
 │   │   ├── MessageRole.cs       # Role enum (System, User, Assistant)
 │   │   └── XybridException.cs   # Exception types
@@ -401,7 +436,102 @@ bindings/unity/
 
 See the [full API documentation](https://docs.xybrid.dev/en/docs/sdks/unity) for detailed reference.
 
-## Telemetry
+## Observability
+
+Model loads, runs, and pipelines can be exported as OpenTelemetry (OTLP/HTTP)
+traces. Export is off until you configure it; an API key passed to
+`XybridClient.Initialize` does not enable it.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
+
+```csharp
+// Traces to Xybrid (get a key at console.xybrid.dev)...
+XybridClient.InitializeObservability(
+    ObservabilityConfig.Xybrid("sk_live_...")
+        .WithService(Application.productName, Application.version));
+
+// ...or traces, metrics, and logs to an OpenTelemetry Collector.
+XybridClient.InitializeObservability(
+    ObservabilityConfig.Otlp("http://localhost:4318")
+        .WithMetadataOnly());   // drop prompts and outputs
+
+// Parent a run to your own trace and tag the conversation.
+var result = model.Run(envelope, observation: new ObservationOptions
+{
+    Traceparent = traceparent,
+    ConversationId = "chat-42",
+});
+
+// Link end-user feedback to the run (needs a logs signal: Otlp preset).
+if (result.Observation is XybridBolt.XybridObservationRef run)
+    XybridClient.RecordFeedback(run, score: 1.0, label: "helpful");
+
+// On OnApplicationPause(true) / OnApplicationQuit:
+XybridClient.FlushObservability(TimeSpan.FromSeconds(2));
+XybridClient.ShutdownObservability();
+```
+
+Prompts and outputs are captured once export is enabled. Other setters:
+`WithTracesEndpoint`, `WithHeader`, `WithJsonProtocol`,
+`WithResourceAttribute`, `WithMaxContentBytes`, `WithLiveTraceInterval`,
+`AllowProviderContext`, `WithDeviceId`, `WithLiteralRedaction`,
+`WithoutContentAttribute`.
+
+For a camera or microphone loop, set `ObservationOptions.FrameSessionId` to
+the same id on every run of the loop: each frame is counted in metrics, and
+detailed traces are kept for roughly one frame per `WithLiveTraceInterval` per
+session.
+
+The same `ObservationOptions` go to `Pipeline.Run(envelope, observation)`
+(`PipelineResult.Observation` and each `StageResult.Observation` hold the
+references), `ModelLoader.Load(observation)` (`Model.LoadObservation`),
+`Model.Stream(config, observation)` for live ASR (`Flush()` returns the
+session's reference) and `RunTtsStreaming(..., observation)`.
+
+Record work Xybrid does not run itself with a manual operation. Each is
+`IDisposable`: the first terminal call wins, and disposing an unfinished one
+cancels it without flushing.
+
+```csharp
+using (var workflow = WorkflowObservation.Start("answer-question"))
+{
+    var children = workflow.Context is XybridBolt.XybridObservationContext context
+        ? new ObservationOptions { Traceparent = context.Traceparent, Tracestate = context.Tracestate }
+        : null;
+    using (var tool = ToolObservation.Start(
+               new XybridBolt.XybridToolCallInfo("search", null, null, null, "{\"q\":\"otel\"}"), children))
+    {
+        tool.RecordResult("{\"hits\":3}");
+        tool.Complete();
+    }
+    workflow.Complete();
+}
+```
+
+`XybridClient.ObservabilityStats()` reports delivery counters per signal
+(`Traces`, `Logs`, `Metrics`); after `ShutdownObservability` they are the
+session's final counters (what the shutdown failed or dropped included) until
+the next `InitializeObservability`. See
+[examples/unity/Observability](../../examples/unity/Observability/README.md)
+for the mobile lifecycle wiring.
+
+For contributors: `Tests/Editor/ObservabilityRuntimeScenarioTests.cs` runs the
+repository's shared observability scenario
+([`tools/scripts/observability_capture/scenario.md`](../../tools/scripts/observability_capture/scenario.md))
+through this API in the Editor. It is ignored unless it is given a receiver,
+through `XYBRID_SCENARIO_*` environment variables or `-xybridScenario*` Editor
+arguments. `.github/workflows/unity-editor.yml` runs it on Linux. To run it on
+your machine, stage the host native as that workflow does, then let the driver
+start the receiver, launch the Editor and check the capture:
+
+```bash
+python3 tools/scripts/observability_capture/run_scenario.py --binding unity --out-dir out/unity -- \
+  <path-to-Unity-editor> -batchmode -projectPath tools/unity-runtime-smoke \
+  -runTests -testPlatform EditMode -testCategory ObservabilityRuntimeScenario \
+  -testResults "$PWD/out/unity/editmode-results.xml"
+```
+
+## Registry Telemetry
 
 The Unity binding reports `binding=unity` in a small `X-Xybrid-Client` header attached to registry metadata calls. See [docs/telemetry/registry.md](../../docs/telemetry/registry.md) for the exact wire format and the opt-out switch (`XYBRID_TELEMETRY_OPTOUT=1`).
 

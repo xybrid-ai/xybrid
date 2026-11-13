@@ -1,0 +1,22 @@
+# Overlay for any profile: sends metrics and the log events the profile does
+# not route to its destination to your own OTLP stores, instead of discarding
+# them.
+#
+#   otelcol-contrib --config <profile>.yaml --config sinks.yaml
+#
+# Environment:
+#   METRICS_OTLP_ENDPOINT   e.g. Prometheus/Mimir OTLP, Grafana Cloud, Datadog
+#   LOGS_OTLP_ENDPOINT      e.g. Loki OTLP, Elastic, Datadog
+
+exporters:
+  otlphttp/metrics:
+    endpoint: ${env:METRICS_OTLP_ENDPOINT}
+  otlphttp/logs:
+    endpoint: ${env:LOGS_OTLP_ENDPOINT}
+
+service:
+  pipelines:
+    metrics:
+      exporters: [otlphttp/metrics]
+    logs:
+      exporters: [otlphttp/logs]

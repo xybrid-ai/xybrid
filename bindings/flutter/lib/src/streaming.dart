@@ -8,9 +8,11 @@ library;
 import 'dart:typed_data';
 
 import 'model_loader.dart';
+import 'observability.dart';
 import 'rust/api/streaming.dart';
 
-export 'rust/api/streaming.dart' show FfiPartialResult, FfiVadMode;
+export 'rust/api/streaming.dart'
+    show FfiPartialResult, FfiTranscriptionResult, FfiVadMode;
 
 /// A live speech-to-text session that transcribes audio as it is fed.
 ///
@@ -22,7 +24,7 @@ export 'rust/api/streaming.dart' show FfiPartialResult, FfiVadMode;
 /// final asr = await XybridStreamSession.fromModel(model);
 /// asr.partials.listen((p) => print(p.text)); // listen before feeding
 /// asr.feed(samples);                          // call repeatedly from the mic
-/// final transcript = await asr.flush();       // finalize
+/// final transcript = (await asr.flush()).text; // finalize
 /// ```
 class XybridStreamSession {
   final FfiStreamSession _inner;
@@ -41,6 +43,7 @@ class XybridStreamSession {
     FfiVadMode vad = const FfiVadMode.off(),
     String? language,
     int? audioCtx,
+    ObservationOptions? observation,
   }) async {
     final inner = await model.inner.stream(
       config: FfiStreamingConfig(
@@ -48,6 +51,7 @@ class XybridStreamSession {
         vad: vad,
         language: language,
         audioCtx: audioCtx,
+        observation: observation?.toFfi(),
       ),
     );
     return XybridStreamSession._(inner);
@@ -69,7 +73,7 @@ class XybridStreamSession {
   /// Finalize the stream and return the complete transcript.
   ///
   /// After this the session is finalized; further [feed] calls throw.
-  Future<String> flush() => _inner.flush();
+  Future<FfiTranscriptionResult> flush() => _inner.flush();
 
   /// Reset the session to transcribe fresh audio without reloading the model.
   Future<void> reset() => _inner.reset();

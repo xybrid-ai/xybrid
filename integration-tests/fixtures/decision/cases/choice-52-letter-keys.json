@@ -1,0 +1,389 @@
+{
+  "schema_version": 1,
+  "id": "choice-52-letter-keys",
+  "profile": "lfm3-d1/text/v1",
+  "title": "All 52 ASCII letters as keys: more than 26 options, and the keys are still the codes",
+  "covers": ["choice-letter-keys", "choice-lowercase-keys", "choice-27"],
+  "artifact": "d1-2b-q4km",
+  "settings": "cpu-t4-fa-off",
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"a\": \"Letter a\", \"b\": \"Letter b\", \"c\": \"Letter c\", \"d\": \"Letter d\", \"e\": \"Letter e\", \"f\": \"Letter f\", \"g\": \"Letter g\", \"h\": \"Letter h\", \"i\": \"Letter i\", \"j\": \"Letter j\", \"k\": \"Letter k\", \"l\": \"Letter l\", \"m\": \"Letter m\", \"n\": \"Letter n\", \"o\": \"Letter o\", \"p\": \"Letter p\", \"q\": \"Letter q\", \"r\": \"Letter r\", \"s\": \"Letter s\", \"t\": \"Letter t\", \"u\": \"Letter u\", \"v\": \"Letter v\", \"w\": \"Letter w\", \"x\": \"Letter x\", \"y\": \"Letter y\", \"z\": \"Letter z\", \"A\": \"Letter A\", \"B\": \"Letter B\", \"C\": \"Letter C\", \"D\": \"Letter D\", \"E\": \"Letter E\", \"F\": \"Letter F\", \"G\": \"Letter G\", \"H\": \"Letter H\", \"I\": \"Letter I\", \"J\": \"Letter J\", \"K\": \"Letter K\", \"L\": \"Letter L\", \"M\": \"Letter M\", \"N\": \"Letter N\", \"O\": \"Letter O\", \"P\": \"Letter P\", \"Q\": \"Letter Q\", \"R\": \"Letter R\", \"S\": \"Letter S\", \"T\": \"Letter T\", \"U\": \"Letter U\", \"V\": \"Letter V\", \"W\": \"Letter W\", \"X\": \"Letter X\", \"Y\": \"Letter Y\", \"Z\": \"Letter Z\"}}}}",
+  "upstream": {
+    "parse": {
+      "questions": [
+        {
+          "id": "q",
+          "type": "choice",
+          "keys": ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
+        }
+      ]
+    },
+    "prepare": {
+      "passes": [
+        {
+          "question": "q",
+          "prompt": "<|startoftext|><|im_start|>user\nI was charged twice this month, please refund one of them.\n\n\nQUESTION:\nWhich option fits best?\n\nOptions:\na Letter a\nb Letter b\nc Letter c\nd Letter d\ne Letter e\nf Letter f\ng Letter g\nh Letter h\ni Letter i\nj Letter j\nk Letter k\nl Letter l\nm Letter m\nn Letter n\no Letter o\np Letter p\nq Letter q\nr Letter r\ns Letter s\nt Letter t\nu Letter u\nv Letter v\nw Letter w\nx Letter x\ny Letter y\nz Letter z\nA Letter A\nB Letter B\nC Letter C\nD Letter D\nE Letter E\nF Letter F\nG Letter G\nH Letter H\nI Letter I\nJ Letter J\nK Letter K\nL Letter L\nM Letter M\nN Letter N\nO Letter O\nP Letter P\nQ Letter Q\nR Letter R\nS Letter S\nT Letter T\nU Letter U\nV Letter V\nW Letter W\nX Letter X\nY Letter Y\nZ Letter Z\n\nReply with the option code only.<|im_end|>\n<|im_start|>assistant\n<think></think>",
+          "token_ids": [124894, 124899, 5922, 207, 49, 452, 14917, 10625, 532, 5304, 20, 8193, 52966, 734, 302, 876, 64673, 63509, 833, 28327, 7331, 24612, 1737, 64929, 13314, 833, 73, 32935, 267, 207, 74, 32935, 293, 207, 75, 32935, 280, 207, 76, 32935, 277, 207, 77, 32935, 320, 207, 78, 32935, 291, 207, 79, 32935, 335, 207, 80, 32935, 311, 207, 81, 32935, 723, 207, 82, 32935, 495, 207, 83, 32935, 442, 207, 84, 32935, 308, 207, 85, 32935, 295, 207, 86, 32935, 316, 207, 87, 32935, 286, 207, 88, 32935, 283, 207, 89, 32935, 8616, 207, 90, 32935, 376, 207, 91, 32935, 274, 207, 92, 32935, 265, 207, 93, 32935, 331, 207, 94, 32935, 346, 207, 95, 32935, 288, 207, 96, 32935, 2552, 207, 97, 32935, 382, 207, 98, 32935, 556, 207, 41, 32935, 334, 207, 42, 32935, 378, 207, 43, 32935, 340, 207, 44, 32935, 388, 207, 45, 32935, 407, 207, 46, 32935, 410, 207, 47, 32935, 417, 207, 48, 32935, 403, 207, 49, 32935, 358, 207, 50, 32935, 461, 207, 51, 32935, 483, 207, 52, 32935, 402, 207, 53, 32935, 356, 207, 54, 32935, 427, 207, 55, 32935, 480, 207, 56, 32935, 372, 207, 57, 32935, 1392, 207, 58, 32935, 408, 207, 59, 32935, 325, 207, 60, 32935, 336, 207, 61, 32935, 502, 207, 62, 32935, 518, 207, 63, 32935, 422, 207, 64, 32935, 1549, 207, 65, 32935, 766, 207, 66, 32935, 895, 8, 57922, 415, 278, 7331, 4713, 1049, 22, 124900, 207, 124899, 63514, 207, 124901, 124902],
+          "output_index": 247,
+          "select": [73, 267, 74, 293, 75, 280, 76, 277, 77, 320, 78, 291, 79, 335, 80, 311, 81, 723, 82, 495, 83, 442, 84, 308, 85, 295, 86, 316, 87, 286, 88, 283, 89, 8616, 90, 376, 91, 274, 92, 265, 93, 331, 94, 346, 95, 288, 96, 2552, 97, 382, 98, 556, 41, 334, 42, 378, 43, 340, 44, 388, 45, 407, 46, 410, 47, 417, 48, 403, 49, 358, 50, 461, 51, 483, 52, 402, 53, 356, 54, 427, 55, 480, 56, 372, 57, 1392, 58, 408, 59, 325, 60, 336, 61, 502, 62, 518, 63, 422, 64, 1549, 65, 766, 66, 895]
+        }
+      ],
+      "answers": [
+        {
+          "question": "q",
+          "type": "choice",
+          "pass": 0,
+          "groups": [
+            {
+              "key": "a",
+              "code": "a",
+              "range": [0, 2]
+            },
+            {
+              "key": "b",
+              "code": "b",
+              "range": [2, 4]
+            },
+            {
+              "key": "c",
+              "code": "c",
+              "range": [4, 6]
+            },
+            {
+              "key": "d",
+              "code": "d",
+              "range": [6, 8]
+            },
+            {
+              "key": "e",
+              "code": "e",
+              "range": [8, 10]
+            },
+            {
+              "key": "f",
+              "code": "f",
+              "range": [10, 12]
+            },
+            {
+              "key": "g",
+              "code": "g",
+              "range": [12, 14]
+            },
+            {
+              "key": "h",
+              "code": "h",
+              "range": [14, 16]
+            },
+            {
+              "key": "i",
+              "code": "i",
+              "range": [16, 18]
+            },
+            {
+              "key": "j",
+              "code": "j",
+              "range": [18, 20]
+            },
+            {
+              "key": "k",
+              "code": "k",
+              "range": [20, 22]
+            },
+            {
+              "key": "l",
+              "code": "l",
+              "range": [22, 24]
+            },
+            {
+              "key": "m",
+              "code": "m",
+              "range": [24, 26]
+            },
+            {
+              "key": "n",
+              "code": "n",
+              "range": [26, 28]
+            },
+            {
+              "key": "o",
+              "code": "o",
+              "range": [28, 30]
+            },
+            {
+              "key": "p",
+              "code": "p",
+              "range": [30, 32]
+            },
+            {
+              "key": "q",
+              "code": "q",
+              "range": [32, 34]
+            },
+            {
+              "key": "r",
+              "code": "r",
+              "range": [34, 36]
+            },
+            {
+              "key": "s",
+              "code": "s",
+              "range": [36, 38]
+            },
+            {
+              "key": "t",
+              "code": "t",
+              "range": [38, 40]
+            },
+            {
+              "key": "u",
+              "code": "u",
+              "range": [40, 42]
+            },
+            {
+              "key": "v",
+              "code": "v",
+              "range": [42, 44]
+            },
+            {
+              "key": "w",
+              "code": "w",
+              "range": [44, 46]
+            },
+            {
+              "key": "x",
+              "code": "x",
+              "range": [46, 48]
+            },
+            {
+              "key": "y",
+              "code": "y",
+              "range": [48, 50]
+            },
+            {
+              "key": "z",
+              "code": "z",
+              "range": [50, 52]
+            },
+            {
+              "key": "A",
+              "code": "A",
+              "range": [52, 54]
+            },
+            {
+              "key": "B",
+              "code": "B",
+              "range": [54, 56]
+            },
+            {
+              "key": "C",
+              "code": "C",
+              "range": [56, 58]
+            },
+            {
+              "key": "D",
+              "code": "D",
+              "range": [58, 60]
+            },
+            {
+              "key": "E",
+              "code": "E",
+              "range": [60, 62]
+            },
+            {
+              "key": "F",
+              "code": "F",
+              "range": [62, 64]
+            },
+            {
+              "key": "G",
+              "code": "G",
+              "range": [64, 66]
+            },
+            {
+              "key": "H",
+              "code": "H",
+              "range": [66, 68]
+            },
+            {
+              "key": "I",
+              "code": "I",
+              "range": [68, 70]
+            },
+            {
+              "key": "J",
+              "code": "J",
+              "range": [70, 72]
+            },
+            {
+              "key": "K",
+              "code": "K",
+              "range": [72, 74]
+            },
+            {
+              "key": "L",
+              "code": "L",
+              "range": [74, 76]
+            },
+            {
+              "key": "M",
+              "code": "M",
+              "range": [76, 78]
+            },
+            {
+              "key": "N",
+              "code": "N",
+              "range": [78, 80]
+            },
+            {
+              "key": "O",
+              "code": "O",
+              "range": [80, 82]
+            },
+            {
+              "key": "P",
+              "code": "P",
+              "range": [82, 84]
+            },
+            {
+              "key": "Q",
+              "code": "Q",
+              "range": [84, 86]
+            },
+            {
+              "key": "R",
+              "code": "R",
+              "range": [86, 88]
+            },
+            {
+              "key": "S",
+              "code": "S",
+              "range": [88, 90]
+            },
+            {
+              "key": "T",
+              "code": "T",
+              "range": [90, 92]
+            },
+            {
+              "key": "U",
+              "code": "U",
+              "range": [92, 94]
+            },
+            {
+              "key": "V",
+              "code": "V",
+              "range": [94, 96]
+            },
+            {
+              "key": "W",
+              "code": "W",
+              "range": [96, 98]
+            },
+            {
+              "key": "X",
+              "code": "X",
+              "range": [98, 100]
+            },
+            {
+              "key": "Y",
+              "code": "Y",
+              "range": [100, 102]
+            },
+            {
+              "key": "Z",
+              "code": "Z",
+              "range": [102, 104]
+            }
+          ],
+          "temperature": "1.337398",
+          "temperature_f32": "0x3fab2fdc"
+        }
+      ]
+    },
+    "evaluate": {
+      "source": "model",
+      "raw_scores": [
+        ["0x407ea784", "0xbe0574e0", "0x40954599", "0x3f6de38a", "0x40811e86", "0x3e0bece0", "0x407a908c", "0x3eab03e4", "0x4081438a", "0x3f052bf4", "0x40942802", "0x3fa024da", "0x4091d9c7", "0x3fa8f99a", "0x408cb81c", "0x3fb1c7c6", "0x40a81e6d", "0x3fc2f11d", "0x407024ac", "0x3e9683d0", "0x409173f3", "0x3f9d20b0", "0x409aab20", "0x3f9ccf58", "0x4096a55a", "0x3f9c636a", "0x409f3f8c", "0x3fa3cc12", "0x4069e21b", "0x3f7ff3c0", "0x40982b7d", "0x3f93e584", "0x4080c1ba", "0x3fab0141", "0x409c843f", "0x3fce20ab", "0x4099214c", "0x3fc341a7", "0x40a6e0fb", "0x3ff3e52c", "0x409366d5", "0x4001216c", "0x4088878e", "0x3f285a97", "0x40a35ea0", "0x3fc4c489", "0x408d6cc4", "0x3f93bf57", "0x4095ac40", "0x40015796", "0x407eac45", "0x3f934832", "0x40a76972", "0x3ef1fa48", "0x40a67822", "0x3f13147d", "0x40992328", "0x3dc2e720", "0x409be917", "0x3f35935b", "0x40a50e63", "0x3f656383", "0x40a80bea", "0x3f93c1e2", "0x40a6605f", "0x3f843907", "0x40a34cf4", "0x3f2a2278", "0x40dcb2c8", "0x4016b25f", "0x408bba19", "0x3edf75f4", "0x409d976f", "0x3f6dd074", "0x40bac19b", "0x3fab73b0", "0x40a7935c", "0x3ef62d38", "0x40ad2abb", "0x3f911022", "0x40b202fc", "0x3fb50c7e", "0x40af50a0", "0x3f8ea4de", "0x409b820e", "0x3fa64d8b", "0x40c857c1", "0x40013abb", "0x40c480bf", "0x3fe5f48e", "0x40bdff26", "0x3fbe793a", "0x40baa71a", "0x3ffabb6a", "0x40a7f634", "0x3f544170", "0x40bce2fc", "0x401f515a", "0x40a917be", "0x3f9f6e38", "0x40bb7fd2", "0x400c0204", "0x40a71385", "0x3fe33b62"]
+      ],
+      "scores": [
+        ["0x407ea784", "0x40954599", "0x40811e86", "0x407a908c", "0x4081438a", "0x40942802", "0x4091d9c7", "0x408cb81c", "0x40a81e6d", "0x407024ac", "0x409173f3", "0x409aab20", "0x4096a55a", "0x409f3f8c", "0x4069e21b", "0x40982b7d", "0x4080c1ba", "0x409c843f", "0x4099214c", "0x40a6e0fb", "0x409366d5", "0x4088878e", "0x40a35ea0", "0x408d6cc4", "0x4095ac40", "0x407eac45", "0x40a76972", "0x40a67822", "0x40992328", "0x409be917", "0x40a50e63", "0x40a80bea", "0x40a6605f", "0x40a34cf4", "0x40dcb2c8", "0x408bba19", "0x409d976f", "0x40bac19b", "0x40a7935c", "0x40ad2abb", "0x40b202fc", "0x40af50a0", "0x409b820e", "0x40c857c1", "0x40c480bf", "0x40bdff26", "0x40baa71a", "0x40a7f634", "0x40bce2fc", "0x40a917be", "0x40bb7fd2", "0x40a71385"]
+      ]
+    },
+    "finalize": {
+      "answers": {
+        "q": {
+          "type": "choice",
+          "choice": "I",
+          "probabilities": {
+            "a": 0.008086816737827917,
+            "b": 0.013504197810822424,
+            "c": 0.0084326305250484283,
+            "d": 0.0077095082761196119,
+            "e": 0.0084611690409911473,
+            "f": 0.013156731403089608,
+            "g": 0.012466693173715709,
+            "h": 0.011058022476623153,
+            "i": 0.02097611200950036,
+            "j": 0.0068257345095746767,
+            "k": 0.012351360670691649,
+            "l": 0.015319074890036229,
+            "m": 0.01394480086756561,
+            "n": 0.017049331152085328,
+            "o": 0.0063443410833052714,
+            "p": 0.014450315778150216,
+            "q": 0.0083615078869121416,
+            "r": 0.015995103734108902,
+            "s": 0.014778188137267532,
+            "t": 0.020377056996104707,
+            "u": 0.012926784832293765,
+            "v": 0.010026777944762305,
+            "w": 0.018772868867234355,
+            "x": 0.011241873205817033,
+            "y": 0.013631320534328492,
+            "z": 0.0080885714047966052,
+            "A": 0.020632455973110593,
+            "B": 0.020182980414757939,
+            "C": 0.014780696407949448,
+            "D": 0.015770180594212063,
+            "E": 0.019527456653593095,
+            "F": 0.020940699699598133,
+            "G": 0.020139254223731324,
+            "H": 0.018742612802690913,
+            "I": 0.071662759565174969,
+            "J": 0.010804593770810529,
+            "K": 0.016401950405185915,
+            "L": 0.032423102682773874,
+            "M": 0.020711540415229733,
+            "N": 0.023602171156458993,
+            "O": 0.026431123520301626,
+            "P": 0.024817028327260293,
+            "Q": 0.015622565450300668,
+            "R": 0.044537761677792762,
+            "S": 0.040715704537846432,
+            "T": 0.034973384104148734,
+            "U": 0.032344761770093114,
+            "V": 0.020899243556359109,
+            "W": 0.034077944658822912,
+            "X": 0.021458921772933241,
+            "Y": 0.032990939907779085,
+            "Z": 0.020471272002311094
+          },
+          "confidence": 0.071662759565174969
+        }
+      },
+      "usage": {
+        "input_tokens": 248,
+        "output_tokens": 0
+      }
+    },
+    "server": {
+      "status": 200,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": "match",
+    "prepare": "match",
+    "evaluate": "reference",
+    "finalize": "match"
+  }
+}

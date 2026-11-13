@@ -54,8 +54,8 @@ mod session;
 
 pub use audio_buffer::{AudioBuffer, AudioBufferConfig, AudioBufferStats, AudioChunk};
 pub use session::{
-    PartialResult, StreamConfig, StreamError, StreamResult, StreamSession, StreamState,
-    StreamStats, VadStreamConfig,
+    DecoderObservation, DecoderObserver, PartialResult, StreamConfig, StreamError, StreamResult,
+    StreamSession, StreamState, StreamStats, VadStreamConfig,
 };
 
 pub mod manager;

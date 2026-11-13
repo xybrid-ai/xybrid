@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "parse-missing-state",
+  "profile": "lfm3-d1/text/v1",
+  "title": "No state",
+  "covers": ["transport", "refusal-parse"],
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "request_text": "{\"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}}",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "invalid_argument",
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "\"state\" must be provided"
+      }
+    },
+    "server": {
+      "status": 400,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": {
+      "refuse": "missing_state"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

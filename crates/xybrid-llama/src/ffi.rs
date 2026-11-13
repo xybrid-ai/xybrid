@@ -187,8 +187,8 @@ pub(crate) unsafe fn state_seq_set_data(ctx: *mut c_void, src: &[u8], seq_id: i3
 /// a negative count carrying the required buffer length.
 pub(crate) unsafe fn tokenize_probe(
     model: *const c_void,
-    text: &CString,
-    text_len: usize,
+    text: &str,
+    text_len: c_int,
     add_special: bool,
     parse_special: bool,
 ) -> c_int {
@@ -196,8 +196,8 @@ pub(crate) unsafe fn tokenize_probe(
     record_native_call();
     sys::llama_tokenize_c(
         model,
-        text.as_ptr(),
-        text_len as c_int,
+        text.as_ptr().cast(),
+        text_len,
         std::ptr::null_mut(),
         0,
         add_special,
@@ -213,10 +213,10 @@ pub(crate) unsafe fn tokenize_probe(
 /// `capacity` `i32` elements.
 pub(crate) unsafe fn tokenize_into(
     model: *const c_void,
-    text: &CString,
-    text_len: usize,
+    text: &str,
+    text_len: c_int,
     out_tokens: *mut i32,
-    capacity: usize,
+    capacity: c_int,
     add_special: bool,
     parse_special: bool,
 ) -> c_int {
@@ -224,10 +224,10 @@ pub(crate) unsafe fn tokenize_into(
     record_native_call();
     sys::llama_tokenize_c(
         model,
-        text.as_ptr(),
-        text_len as c_int,
+        text.as_ptr().cast(),
+        text_len,
         out_tokens,
-        capacity as c_int,
+        capacity,
         add_special,
         parse_special,
     )
@@ -269,6 +269,11 @@ pub(crate) unsafe fn token_eos(model: *const c_void) -> i32 {
 /// # Safety: `model` must be a live, non-null model pointer.
 pub(crate) unsafe fn vocab_is_eog(model: *const c_void, token: i32) -> bool {
     sys::llama_vocab_is_eog_c(model, token)
+}
+
+/// # Safety: `model` must be a live, non-null model pointer.
+pub(crate) unsafe fn vocab_get_add_bos(model: *const c_void) -> bool {
+    sys::llama_vocab_get_add_bos_c(model)
 }
 
 /// # Safety: `model` must be a live, non-null model pointer. The returned
@@ -631,6 +636,7 @@ pub(crate) unsafe fn mtmd_init_from_file(
     warmup: bool,
     n_threads: usize,
     flash_attn: bool,
+    max_image_tokens: Option<usize>,
 ) -> *mut MtmdContextRaw {
     sys::mtmd_init_from_file_c(
         path.as_ptr(),
@@ -639,6 +645,8 @@ pub(crate) unsafe fn mtmd_init_from_file(
         warmup,
         n_threads.min(c_int::MAX as usize) as c_int,
         flash_attn,
+        // 0 keeps the projector's own limit.
+        max_image_tokens.map_or(0, |tokens| tokens.min(c_int::MAX as usize) as c_int),
     )
 }
 

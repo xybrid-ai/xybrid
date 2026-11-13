@@ -13,8 +13,9 @@ namespace Xybrid
     /// </remarks>
     public static class XybridClient
     {
+        private static readonly TimeSpan DefaultObservabilityTimeout = TimeSpan.FromSeconds(5);
+
         private static bool _initialized;
-        private static bool _telemetryInitialized;
         private static readonly object _lock = new object();
 
         /// <summary>
@@ -90,7 +91,8 @@ namespace Xybrid
         /// </summary>
         /// <remarks>
         /// Inference runs on-device without one; this reports whether the optional
-        /// platform features (cloud routing, telemetry) can engage.
+        /// platform features (cloud routing) can engage. A key does not enable
+        /// observability export; see <see cref="InitializeObservability"/>.
         /// </remarks>
         public static bool HasApiKey => XybridBolt.XybridBolt.HasApiKey();
 
@@ -135,32 +137,21 @@ namespace Xybrid
         /// Initializes the Xybrid SDK.
         /// </summary>
         /// <param name="apiKey">
-        /// Optional Xybrid API key. When provided, the platform telemetry exporter
-        /// starts automatically and your inference runs show up on the dashboard.
-        /// Omit it to run anonymously — inference still runs fully on-device, and
-        /// the first inference logs a one-shot hint pointing at the dashboard
-        /// (suppress with the <c>XYBRID_QUIET=1</c> environment variable). Get a
-        /// free key at https://dashboard.xybrid.dev.
+        /// Optional Xybrid API key for cloud routing and the LLM gateway. It does
+        /// not enable observability export &#x2014; build an
+        /// <see cref="ObservabilityConfig"/> and call
+        /// <see cref="InitializeObservability"/> for that. Omit it to run
+        /// anonymously; inference still runs fully on-device. Get a key at
+        /// https://console.xybrid.dev.
         /// </param>
-        /// <param name="ingestUrl">
-        /// Optional override for the telemetry ingest URL (for a self-hosted
-        /// dashboard). Ignored when <paramref name="apiKey"/> is null or blank.
-        /// </param>
-        /// <param name="gatewayUrl">
-        /// Optional override for the LLM gateway URL. Declared last so existing
-        /// positional <c>Initialize(apiKey, ingestUrl)</c> call sites keep compiling;
-        /// Swift and Kotlin order it before <paramref name="ingestUrl"/>.
-        /// </param>
+        /// <param name="gatewayUrl">Optional override for the LLM gateway URL.</param>
         /// <remarks>
         /// This method should be called once at application startup, before using
         /// any other SDK features. It is safe to call multiple times - subsequent
         /// calls are no-ops, so configuration is applied on the first call only.
         /// </remarks>
         /// <exception cref="XybridException">Thrown if initialization fails.</exception>
-        public static void Initialize(
-            string apiKey = null,
-            string ingestUrl = null,
-            string gatewayUrl = null)
+        public static void Initialize(string apiKey = null, string gatewayUrl = null)
         {
             lock (_lock)
             {
@@ -170,38 +161,17 @@ namespace Xybrid
                 }
 
                 // Runtime init runs on bolt: set the binding tag (used for
-                // telemetry attribution). The pre-bolt xybrid_init() was a no-op.
-                // Telemetry now runs entirely through bolt (A2.2), so there is no
-                // longer a second C-ABI binding state to keep in sync.
+                // registry and observability attribution).
                 XybridBolt.XybridBolt.SetBinding("unity");
 
-                // One call configures the whole runtime, exactly as the Swift
-                // `Xybrid.initialize(apiKey:gatewayUrl:ingestUrl:)` and Kotlin
-                // `Xybrid.init(context, apiKey, …)` wrappers do. Unity used to
-                // build a TelemetryConfig here instead, which started the
-                // exporter but never registered the key with the runtime — so
-                // `HasApiKey` stayed false and cloud routing (including
-                // ModelLoader.FromRegistrySpeculative) silently fell back to the
-                // local path unless XYBRID_API_KEY happened to be set in the
-                // environment. ConfigureRuntime gates both, from one key.
-                //
-                // A non-blank apiKey makes ConfigureRuntime start the telemetry
-                // exporter, so do NOT also call InitializeTelemetry here: the
-                // two paths are mutually exclusive and the second would throw.
-                XybridBolt.XybridBolt.ConfigureRuntime(apiKey, gatewayUrl, ingestUrl);
+                // One call registers the key and gateway with the runtime, exactly
+                // as the Swift `Xybrid.initialize(apiKey:gatewayUrl:)` and Kotlin
+                // `Xybrid.init(context, apiKey, gatewayUrl)` wrappers do, so
+                // `HasApiKey` and cloud routing (including
+                // ModelLoader.FromRegistrySpeculative) see it.
+                XybridBolt.XybridBolt.ConfigureRuntime(apiKey, gatewayUrl);
 
                 _initialized = true;
-
-                // Kept inside the lock so a concurrent caller that observes
-                // _initialized == true (and returns) is guaranteed the exporter
-                // is already running. Recording it here keeps FlushTelemetry and
-                // ShutdownTelemetry working after the apiKey-only init path, and
-                // makes a later InitializeTelemetry(config) fail loudly rather
-                // than double-starting the exporter.
-                if (!string.IsNullOrWhiteSpace(apiKey))
-                {
-                    _telemetryInitialized = true;
-                }
             }
         }
 
@@ -345,110 +315,184 @@ namespace Xybrid
         }
 
         /// <summary>
-        /// Initializes the Xybrid telemetry sender from a prepared configuration.
+        /// Starts OpenTelemetry export with a prepared configuration, replacing
+        /// any previous one.
         /// </summary>
         /// <param name="config">
-        /// The telemetry configuration. Ownership of the underlying native handle is
-        /// transferred: on both success and failure, <paramref name="config"/> is
-        /// detached and must not be reused. Disposing it afterwards is a safe no-op.
+        /// The observability configuration. Ownership of the underlying native
+        /// handle is transferred: on both success and failure,
+        /// <paramref name="config"/> is detached and must not be reused.
+        /// Disposing it afterwards is a safe no-op.
         /// </param>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="config"/> is null.</exception>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown if the SDK has not been initialized (call <see cref="Initialize"/> first),
-        /// or if telemetry has already been initialized without an intervening
-        /// <see cref="ShutdownTelemetry"/>.
+        /// <exception cref="ObjectDisposedException">
+        /// Thrown if <paramref name="config"/> was already disposed or handed off.
         /// </exception>
-        /// <exception cref="XybridException">Thrown if native telemetry initialization fails.</exception>
+        /// <exception cref="XybridException">Thrown if the configuration is rejected.</exception>
         /// <remarks>
-        /// Advanced entry point. For the common case, pass an <c>apiKey</c> to
-        /// <see cref="Initialize(string, string)"/> instead — that starts the
-        /// exporter as part of SDK init. Use this overload only when you need the
-        /// extra knobs on <see cref="TelemetryConfig"/> (batch size, flush
-        /// interval, device label/attributes); both paths share the same
-        /// process-wide once-guard.
-        /// Thread-safe: serialized via the SDK's initialization lock. Call
-        /// <see cref="ShutdownTelemetry"/> before re-initializing.
+        /// Export is off until this is called; an API key passed to
+        /// <see cref="Initialize"/> does not enable it. It does not depend on
+        /// <see cref="Initialize"/> and may run before or after it. Call
+        /// <see cref="ShutdownObservability"/> before the app exits so queued
+        /// spans are delivered.
         /// </remarks>
-        public static void InitializeTelemetry(TelemetryConfig config)
+        public static void InitializeObservability(ObservabilityConfig config)
         {
             if (config == null)
             {
                 throw new ArgumentNullException(nameof(config));
             }
 
-            EnsureInitialized();
-
-            lock (_lock)
+            // Ownership transfers here: DetachHandle neutralizes `config` so a
+            // later Dispose() is a no-op. Init() consumes the config's inner
+            // state; we dispose the (now-empty) bolt handle on every path.
+            XybridBolt.XybridObservabilityConfig bolt = config.DetachHandle();
+            try
             {
-                if (_telemetryInitialized)
-                {
-                    throw new InvalidOperationException(
-                        "Xybrid telemetry is already initialized. Call XybridClient.ShutdownTelemetry() before re-initializing.");
-                }
-
-                // Ownership transfers here: DetachHandle neutralizes `config` so a
-                // later Dispose() is a no-op. Init() consumes the config's inner
-                // state; we dispose the (now-empty) bolt handle on every path.
-                XybridBolt.XybridTelemetryConfig bolt = config.DetachHandle();
-                try
-                {
-                    bolt.Init();
-                }
-                catch (Exception ex) when (
-                    ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
-                {
-                    throw BoltErrors.Translate(ex);
-                }
-                finally
-                {
-                    bolt.Dispose();
-                }
-
-                _telemetryInitialized = true;
+                bolt.Init();
+            }
+            catch (Exception ex) when (
+                ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
+            {
+                throw BoltErrors.Translate(ex);
+            }
+            finally
+            {
+                bolt.Dispose();
             }
         }
 
         /// <summary>
-        /// Flushes any pending telemetry events to the collector.
+        /// Gets whether observability export is running.
         /// </summary>
-        /// <remarks>
-        /// Thread-safe. No-op if telemetry has never been initialized or has been
-        /// shut down. Safe to call from lifecycle hooks such as
-        /// <c>OnApplicationPause(true)</c>.
-        /// </remarks>
-        public static void FlushTelemetry()
-        {
-            lock (_lock)
-            {
-                if (!_telemetryInitialized)
-                {
-                    return;
-                }
+        public static bool IsObservabilityEnabled => ObservabilityStats().Enabled;
 
-                XybridBolt.XybridBolt.TelemetryFlush();
-            }
+        /// <summary>
+        /// Returns the export pipeline's delivery counters: live while export
+        /// runs; after <see cref="ShutdownObservability"/>, the final ones (what
+        /// the shutdown failed or dropped included) until the next
+        /// initialization; all zero before any.
+        /// </summary>
+        public static XybridBolt.XybridObservabilityStats ObservabilityStats() =>
+            XybridBolt.XybridBolt.ObservabilityStats();
+
+        /// <summary>
+        /// Exports queued spans, metrics, and logs, waiting at most
+        /// <paramref name="timeout"/>.
+        /// </summary>
+        /// <param name="timeout">Upper bound on the wait. Defaults to 5 seconds.</param>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown if <paramref name="timeout"/> is negative or exceeds <see cref="uint.MaxValue"/> milliseconds.
+        /// </exception>
+        /// <exception cref="XybridException">Thrown if the bound is exceeded.</exception>
+        /// <remarks>
+        /// A no-op when observability is off. Call it from
+        /// <c>OnApplicationPause(true)</c>: mobile OSes can kill a backgrounded
+        /// app without delivering <c>OnApplicationQuit</c>.
+        /// </remarks>
+        public static void FlushObservability(TimeSpan? timeout = null)
+        {
+            uint ms = ObservabilityConfig.ToMilliseconds(
+                timeout ?? DefaultObservabilityTimeout, nameof(timeout));
+            ObservabilityCall(() => XybridBolt.XybridBolt.ObservabilityFlush(ms));
         }
 
         /// <summary>
-        /// Shuts down the telemetry sender, releasing its background worker.
+        /// Flushes and stops export, waiting at most <paramref name="timeout"/>.
         /// </summary>
+        /// <param name="timeout">Upper bound on the wait. Defaults to 5 seconds.</param>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown if <paramref name="timeout"/> is negative or exceeds <see cref="uint.MaxValue"/> milliseconds.
+        /// </exception>
+        /// <exception cref="XybridException">Thrown if the bound is exceeded.</exception>
         /// <remarks>
-        /// Thread-safe and idempotent: the first call stops the sender, subsequent
-        /// calls are no-ops. Fire-and-forget semantics &#x2014; this method does not
-        /// block on a final flush. Call <see cref="FlushTelemetry"/> first if you
-        /// need pending events delivered before shutdown.
+        /// Idempotent, and a no-op when observability is off. Export stays off
+        /// until the next <see cref="InitializeObservability"/>.
         /// </remarks>
-        public static void ShutdownTelemetry()
+        public static void ShutdownObservability(TimeSpan? timeout = null)
         {
-            lock (_lock)
-            {
-                if (!_telemetryInitialized)
-                {
-                    return;
-                }
+            uint ms = ObservabilityConfig.ToMilliseconds(
+                timeout ?? DefaultObservabilityTimeout, nameof(timeout));
+            ObservabilityCall(() => XybridBolt.XybridBolt.ObservabilityShutdown(ms));
+        }
 
-                _telemetryInitialized = false;
-                XybridBolt.XybridBolt.TelemetryShutdown();
+        /// <summary>
+        /// Records end-user feedback on a run.
+        /// </summary>
+        /// <param name="target">The run's <see cref="InferenceResult.Observation"/>.</param>
+        /// <param name="score">Optional numeric score (for example 1 for thumbs-up, 0 for thumbs-down).</param>
+        /// <param name="label">Optional label (for example <c>"helpful"</c>).</param>
+        /// <param name="comment">Optional free-text comment.</param>
+        /// <returns>
+        /// False when no logs signal is configured (the <see cref="ObservabilityConfig.Xybrid"/>
+        /// preset sends traces only) or observability is off.
+        /// </returns>
+        /// <exception cref="XybridException">
+        /// Thrown if <paramref name="target"/> is not a valid trace/span id pair.
+        /// </exception>
+        public static bool RecordFeedback(
+            XybridBolt.XybridObservationRef target,
+            double? score = null,
+            string label = null,
+            string comment = null)
+        {
+            return ObservabilityCall(() =>
+                XybridBolt.XybridBolt.ObservabilityRecordFeedback(target, score, label, comment));
+        }
+
+        /// <summary>
+        /// Records an evaluation result (for example an LLM-as-judge score) on a run.
+        /// </summary>
+        /// <param name="target">The run's <see cref="InferenceResult.Observation"/>.</param>
+        /// <param name="name">Evaluation name (for example <c>"relevance"</c>).</param>
+        /// <param name="scoreValue">Optional numeric score.</param>
+        /// <param name="scoreLabel">Optional categorical score.</param>
+        /// <param name="explanation">Optional explanation of the score.</param>
+        /// <returns>
+        /// False when no logs signal is configured (the <see cref="ObservabilityConfig.Xybrid"/>
+        /// preset sends traces only) or observability is off.
+        /// </returns>
+        /// <exception cref="ArgumentException">
+        /// Thrown if <paramref name="name"/> is null, empty, or whitespace.
+        /// </exception>
+        /// <exception cref="XybridException">
+        /// Thrown if <paramref name="target"/> is not a valid trace/span id pair.
+        /// </exception>
+        public static bool RecordEvaluation(
+            XybridBolt.XybridObservationRef target,
+            string name,
+            double? scoreValue = null,
+            string scoreLabel = null,
+            string explanation = null)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new ArgumentException("name must be a non-empty string.", nameof(name));
+            }
+
+            return ObservabilityCall(() => XybridBolt.XybridBolt.ObservabilityRecordEvaluation(
+                target, name, scoreValue, scoreLabel, explanation));
+        }
+
+        private static void ObservabilityCall(Action call)
+        {
+            ObservabilityCall(() =>
+            {
+                call();
+                return true;
+            });
+        }
+
+        private static T ObservabilityCall<T>(Func<T> call)
+        {
+            try
+            {
+                return call();
+            }
+            catch (Exception ex) when (
+                ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
+            {
+                throw BoltErrors.Translate(ex);
             }
         }
     }

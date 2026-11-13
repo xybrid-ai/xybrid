@@ -22,12 +22,13 @@ This example includes 7 interactive demo screens:
 |------|------------------|--------------|
 | Flutter | 3.19.0+ | [flutter.dev/docs/get-started/install](https://flutter.dev/docs/get-started/install) |
 | Dart | 3.3.0+ | Included with Flutter |
-| Xcode | 14.0+ | Mac App Store (for iOS/macOS) |
+| Xcode | 15.0+ | Mac App Store (for iOS/macOS) |
 | Android Studio | Hedgehog+ | [developer.android.com/studio](https://developer.android.com/studio) |
 
 ### Platform-Specific Requirements
 
 **iOS/macOS:**
+- Deployment target iOS 16.0+ or macOS 14.0+ (Apple Silicon)
 - Valid Apple Developer account (for device testing)
 - Xcode command line tools: `xcode-select --install`
 
@@ -67,8 +68,8 @@ flutter run \
 Both are optional. Without a key the app runs anonymously (on-device inference,
 telemetry disabled); without a platform URL it uses the default Xybrid
 endpoint. `XYBRID_PLATFORM_URL` is handy for pointing a debug build at a
-self-hosted or tunneled (e.g. ngrok) platform. Get a free key at
-[dashboard.xybrid.dev](https://dashboard.xybrid.dev). The iOS and Android
+self-hosted or tunneled (e.g. ngrok) platform. Get a key at
+[console.xybrid.dev](https://console.xybrid.dev). The iOS and Android
 native examples use the equivalent Xcode scheme / Gradle `BuildConfig`
 mechanisms — see their READMEs.
 
@@ -314,7 +315,7 @@ flutter test integration_test/
 
 - **[SDK API Reference](../../docs/sdk/API_REFERENCE.md)** - Complete API specification
 - **[Flutter SDK Docs](../../docs/sdk/flutter.md)** - Flutter-specific documentation
-- **[Online Documentation](https://docs.xybrid.dev/sdk/flutter)** - Full guides and tutorials
+- **[Online Documentation](https://docs.xybrid.dev/docs/sdks/flutter)** - Full guides and tutorials
 
 ## Related
 

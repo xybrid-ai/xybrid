@@ -14,13 +14,15 @@ name = "xybrid_sdk"
 path = "src/lib.rs"
 
 [dependencies]
-xybrid-macros = { version = "0.15.0", path = "../../macros" }
+xybrid-macros = { version = "0.18.0", path = "../../macros" }
+xybrid-observability = { version = "0.18.0", path = "../xybrid-observability" }
 anyhow = "1.0"
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
+url = "2.5"
 thiserror = "1.0"
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "sync", "fs", "time"] }
 tokio-stream = "0.1"
@@ -38,12 +40,12 @@ ort = { version = "=2.0.0-rc.11", default-features = false, features = ["ndarray
 # Platform-specific dependencies (NOT features - those are in presets)
 # Android: rustls with ring backend (aws-lc-rs uses getentropy unavailable on API 24)
 [target.'cfg(target_os = "android")'.dependencies]
-xybrid-core = { version = "0.15.0", path = "../xybrid-core", default-features = false, features = ["ort-dynamic"] }
+xybrid-core = { version = "0.18.0", path = "../xybrid-core", default-features = false, features = ["ort-dynamic"] }
 ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
-xybrid-core = { version = "0.15.0", path = "../xybrid-core", default-features = false, features = ["ort-download"] }
+xybrid-core = { version = "0.18.0", path = "../xybrid-core", default-features = false, features = ["ort-download"] }
 ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 
 [features]
@@ -52,8 +54,9 @@ default = []
 # Development/test convenience: lets SdkCacheProvider fall back to the
 # workspace's integration-test model fixtures. Off by default so shipped SDKs
 # never reference `xybrid_core::testing`. Forwards to `xybrid-core/test-util`
-# so the gate stays consistent if core later moves `testing` behind it.
-test-util = ["xybrid-core/test-util"]
+# so the gate stays consistent if core later moves `testing` behind it, and to
+# `xybrid-observability/test-util` for the test clocks some lib tests step.
+test-util = ["xybrid-core/test-util", "xybrid-observability/test-util"]
 
 # HuggingFace Hub integration (download models directly from HF repos)
 huggingface = ["dep:hf-hub", "dep:ureq3"]
@@ -144,6 +147,10 @@ dev-tools = ["xybrid-core/dev-tools"]
 
 [dev-dependencies]
 httpmock = "0.7"
+# In-memory span, metric and log capture through application-owned providers
+# in tests (`testing` provides the in-memory metric and log exporters).
+opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "metrics", "logs", "testing"] }
 
 # Re-export the macro
 [package.metadata.docs.rs]
@@ -157,6 +164,14 @@ all-features = true
 name = "cloud_fallback_demo"
 path = "examples/cloud_fallback_demo.rs"
 # Real inference path — needs llama.cpp linked.
+required-features = ["llm-llamacpp", "dev-tools"]
+
+# Step 6 staging acceptance (tools/scripts/observability_staging): real
+# registry models (llama.cpp, whisper.cpp, ONNX TTS) and the staged
+# memory-pressure seam of the cloud-fallback case.
+[[example]]
+name = "observability_acceptance"
+path = "examples/observability_acceptance.rs"
 required-features = ["llm-llamacpp", "dev-tools"]
 
 [[test]]

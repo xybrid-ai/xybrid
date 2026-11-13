@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "choice-criteria-order",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Criteria keep request order, not key order",
+  "covers": [
+    "choice-order",
+    "json-order"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"zeta\": \"Z team\", \"alpha\": \"A team\", \"mu\": \"M team\", \"beta\": \"B team\"}}}}",
+  "artifact": "d1-2b-hf"
+}

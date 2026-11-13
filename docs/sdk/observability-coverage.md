@@ -1,0 +1,283 @@
+# Observability execution and binding coverage
+
+Observability is optional and additive to offline execution. Configure export
+explicitly. References are `{trace_id, span_id}`; a valid unsampled span still
+has a reference, while explicit suppression has none. A reference does not
+promise delivery. Default governed text capture applies once export is enabled;
+select metadata-only mode or native redaction rules deliberately.
+
+## Execution shapes
+
+| Execution | Parent/control input | Reference output | Lifecycle |
+|---|---|---|---|
+| Model load: registry, path, reload, lazy materialization | Loader `.observation(...)` / existing options | Model `load_observation_ref()`; triggering run owns reload/lazy child | Load success/error; cancellation on abandoned work |
+| Model inference, sync/async, token stream | `RunOptions` observation; `run_async`, `run_stream` and the facade's async run take none and read the caller's parent from the ambient context only ([trace model](trace-model.md#async-entry-points-without-options)) | Inference/terminal result | Logical totals once, attempts retain own usage; see [Run outcomes](#run-outcomes) |
+| Pipeline | Pipeline observation options | Workflow on result; inference on stage results | Child stages and attempts share captured context; a streaming consumer that stops the pipeline (its `on_token` fails) cancels the stage, its attempt and the workflow; pipelines do not act on `cancellation_token`, so a stage that fails for its own reason keeps its error type, as its workflow does |
+| Streamed TTS | Existing run options (`run_tts_streaming_async` included: its explicit parent wins wherever the future runs) | SDK summary plus inference reference; foreign terminal result | Completion/error/cancellation ends operation; a request cancelled, aborted or refused before synthesis is one operation with that outcome (a pre-cancelled request returns a cancelled summary with its reference) |
+| Live ASR | Session observation options | Decoder reference on partial; workflow on terminal transcription | Reset starts a new session; cached partials add no inference; foreign flush ends worker |
+| Manual workflow/tool/inference/load | Explicit normalized W3C options | Handle context/reference | First terminal transition wins; last owner cancels; no implicit flush |
+| CLI direct-core calls and REPL | Operation-scoped capture adapter | Trace artifact / renderer | Each operation owns its local capture |
+| Browser GGUF generation | Browser observation options carried through worker | Generation reference | Worker errors/disposal terminate work |
+
+The ASR and streamed-TTS rows describe supported audio interfaces; they do not
+add those interfaces to the browser GGUF preview. Third-party provider-child
+spans require instrumentation in that provider. Xybrid hops carry context;
+direct third-party origins require explicit allowlisting.
+
+### Run outcomes
+
+Every SDK model request (LLM run or stream, TTS, the reactive cloud fallback)
+is one operation that ends with exactly one outcome and records one duration
+point (`gen_ai.client.inference.duration`, or the operation duration for
+`predict` models) carrying that outcome's `error.type`, so a request ledger
+reconciles against the metric.
+
+| What happens | `error.type` | Notes |
+|---|---|---|
+| The run stops on its caller's cancellation: the abort gate stops on the cancelled `cancellation_token` (by the caller, or by a preempting run) | `cancelled` | Span `ERROR` `cancelled`, attempt included; no exception log |
+| The caller abandons a stream before its terminal event: drops the Rust `run_stream` stream, drops a facade streaming session or closes a Bolt stream (`stream_close`), unsubscribes the Flutter stream, or a token callback returns an error (any error but a typed `CloudFallbackAbort`, which hands a model stream to its cloud leg: `AbortReason::UserCancelled` is the conventional one, and a model stream treats an untyped error the same way a streaming pipeline does) | `cancelled` | The run stops at its next token (the runtime sees one callback past the last delivered token); with or without a token. What the caller receives is unchanged. The consumer stopped the stream; the model did not fail |
+| A request cancelled before it runs (`check_before_run`, or a TTS token already cancelled) | `cancelled` | Recorded without waiting for a model whose lock a run in flight holds |
+| A resource abort before the run | the returned error's type: `aborted_for_cloud_fallback` when a streaming or TTS policy allows fallback, otherwise `inference_error` | On `run_streaming_with_fallback` this is the failed local attempt (`initial`, `local`), ahead of the remote `fallback` attempt; the request's outcome is the fallback's |
+| A refused input (for example a choice request to a model that does not score choices) | the refusal's type, such as `unsupported` | The runtime is never entered |
+| A run whose token was cancelled but that failed for its own reason (a batch run, which has no token boundary, or a stream whose `AbortPolicy` does not observe `UserCancelled`) | its own type, such as `inference_error` | Only a stop on the caller's cancellation is `cancelled` |
+
+`xybrid.genai.response.chunk_count` counts the tokens the caller's callback
+accepted: a token the abort gate stops, or that the caller refuses, is not a
+delivered chunk.
+
+### Content and delivery bounds
+
+These hold on every SDK path because the SDK records through the portable
+observer ([contract](../../crates/xybrid-observability/CONTRACT.md#content-pipeline)):
+
+- A run whose span does not record (an unsampled incoming parent,
+  `TraceMode::Suppress`, a live frame that is not traced) does no content
+  work for the span: no preflight, redaction hook, rules or truncation. Event
+  capture still processes its content.
+- A Rust redaction hook that panics fails closed like one that returns an
+  error: the run and its token stream are unaffected, and the value is omitted
+  and listed in `xybrid.genai.content.truncated_attributes`. An application
+  span processor that panics while a span ends is contained the same way.
+- The content budgets are clamped so that a span's content fits the 480 KiB
+  request bound with 64 KiB left for the span's other data: the
+  retained-operation budget is at most 416 KiB over OTLP/protobuf (the
+  default protocol) or 208 KiB over OTLP/JSON, and the attribute budget at
+  most that, so a raised budget (including the facade's
+  `set_max_content_bytes`) truncates or omits (and lists) content instead of
+  dropping the span. That 64 KiB is reserved, not enforced: a span whose other
+  data outgrows it (attributes the application adds, a large resource, many
+  or very long omitted prompt-variable names) can still be dropped as an
+  oversized item.
+- The Rust `PipelineStats` reports, per signal, `buffered_bytes`: the bytes
+  held against the 32 MiB delivery budget, zero after shutdown. The facade and
+  the foreign bindings do not carry it yet.
+- After an observability shutdown, `stats()` (Rust) and every binding's
+  observability stats keep the shut-down session's final per-signal counters
+  until the next init, with export reported disabled: nothing pending, and
+  what the shutdown cancelled in flight (`failed`) or found still queued
+  (`dropped`) included, so `accepted = exported + dropped + failed` reconciles
+  per signal. An init that replaces a running session reports the new
+  session's counters at once; shut down first to read the old one's. Before
+  any init the counters are zero.
+- A per-run session or observer (`ObservationOptions::session` /
+  `::observer`, Rust only; no binding has a per-run content option) can lower
+  content capture but never raise it: its policy is capped by the session the
+  run would otherwise use (the enclosing operation's, else the default; a
+  disabled one caps nothing, so the next one out caps). The run records
+  content only where both capture, within the smaller budgets, redacted by
+  both policies' hooks and rules, each hook once per value.
+- Live frames: the sampler remembers at most 1,024 frame sessions, evicting
+  the least recently used, and forgets a session 300 s after its last frame;
+  a forgotten session's next frame is traced. Lookup is a hash probe, so a
+  per-frame session id neither grows memory nor scans the sessions. Every
+  binding can name a frame session on a model run, so the live trace interval
+  applies everywhere it can be set: Rust `RunOptions::with_frame_session`;
+  the facade and Bolt `RunOptions.frame_session_id` (Swift
+  `XybridRunOptions.make(frameSessionId:)`, Kotlin
+  `runOptions(frameSessionId = …)`, Python `frame_session_id`, Unity
+  `ObservationOptions.FrameSessionId`, React Native `frameSessionId`); and
+  Flutter's `frameSessionId` parameter. A blank id is ignored. Pipelines,
+  loads and manual observations take no frame session.
+
+## Binding surfaces and validation
+
+The matrix separates executed local checks from platform-host checks. Generated
+output checks establish schema consistency; they do not establish device runtime
+behavior. All native surfaces share the facade's parent validation, content
+policy and first-terminal-wins implementation.
+
+| Surface | Parent / result references | Manual operations and disposal | Content and lifecycle | Local validation |
+|---|---|---|---|---|
+| Rust SDK | Loader, model, pipeline, TTS, ASR | Typed handles retain session; drop cancels | Owned/borrowed sessions, explicit device ID, declarative/callback redaction | Session, routing, tool, load, pipeline, TTS and decoder regressions; real-model tests remain fixture-dependent |
+| Swift | Existing options and generated result fields | `Xybrid.Observability.startWorkflow/startTool/startInference/startModelLoad`; `withWorkflow` | Config, rules, stats/flush/shutdown | Generation check executed. CI runtime lane: the `Observability runtime scenario (iOS Simulator)` job in [`build-apple.yml`](../../.github/workflows/build-apple.yml) runs the [shared scenario](../../tools/scripts/observability_capture/scenario.md) through the public Swift API on an iOS Simulator, linked against the xcframework CI builds, and checks what reaches a local OTLP receiver: parent-in, reference-out from the manual handles and the model load, manual operations, content redaction, the omitted attribute never reaching the receiver, release, the weightless model load and failed run, flush and shutdown. It passed all 18 checks in CI on the iOS Simulator (PR #752), and on a physical iPhone 15 Pro Max inside the example app with [`observability-scenario-ios-device.sh`](../../bindings/apple/scripts/observability-scenario-ios-device.sh) (run by hand, 2026-11-09). The macOS desktop runtime is not covered |
+| Kotlin | Existing options and generated result fields | `Xybrid.Observability.withWorkflow`; generated handles implement close/use | Same native config and lifecycle | Generation, wrapper compilation, three JUnit tests and RN codec checks. CI runtime lane: the `Observability scenario (x86_64 emulator)` job in [`build-android.yml`](../../.github/workflows/build-android.yml) runs the [shared scenario](../../tools/scripts/observability_capture/scenario.md) through the public Kotlin wrapper on an Android 15 x86_64 emulator, in the consumer APK built against the AAR CI builds, and checks what reaches a local OTLP receiver on the runner: parent-in, reference-out from the manual handles and the model load, manual operations, content redaction, the omitted attribute never reaching the receiver, release, the weightless model load and failed run, flush and shutdown. It passed all 18 checks in CI on the emulator with the shipped AAR (PR #752), and on a physical Pixel 8 (arm64-v8a) with the same AAR through `adb reverse` (run by hand, 2026-11-09); the same scenario code also passes on a desktop JVM through the JNI glue |
+| Python | Generated options and result fields, Python properties | Four `Xybrid*Observation` classes; context managers and explicit `close()` | Generated config, native stats/flush/shutdown | Compiled-bridge tests cover load/run/cloud pipeline, parentage, content and handle lifecycle; real ASR/TTS runs require model fixtures. CI runtime lane: the `Python SDK (ubuntu-latest)` job in [`ci.yml`](../../.github/workflows/ci.yml) runs the [shared scenario](../../tools/scripts/observability_capture/scenario.md) through the reference implementation on the compiled bridge and checks what reaches a local OTLP receiver, with the same checks as the Swift, Kotlin, Unity and Flutter lanes. A second run without the omit rule must export the omitted content, which shows that the scenario records it. Both runs pass in CI (PR #752) and locally on Linux against the compiled bridge |
+| Unity C# | Wrapper options and result references | Four wrapper handles implement `IDisposable` | Same native config; `using` releases final owner | Generation and .NET compilation checks. CI runtime lane: the `Run the observability runtime scenario (EditMode)` step of the `Unity Editor (Linux, Mono + IL2CPP)` job in [`unity-editor.yml`](../../.github/workflows/unity-editor.yml) runs the [shared scenario](../../tools/scripts/observability_capture/scenario.md) through the public C# API in the Unity 6000.3 Editor on Linux (Mono), against the Bazel-built Linux native the job stages, and checks what reaches a local OTLP receiver on the runner: parent-in, reference-out from the manual handles and the model load, manual operations, content redaction, the omitted attribute never reaching the receiver, release, the weightless model load and failed run, flush and shutdown. It passed all 18 checks in CI inside the Unity Editor (PR #752). IL2CPP player, Android, iOS, macOS and Windows runtimes are not covered |
+| Flutter | Existing load/run/pipeline/ASR options; stage references in stage latencies | `XybridObservability.start*`; generated opaque handles expose disposal | Native config/rules and asynchronous flush/shutdown | Reproducible FRB generation, Dart wrapper and Rust API tests. CI runtime lane: the `Observability runtime scenario (flutter test on Linux)` job in [`build-flutter.yml`](../../.github/workflows/build-flutter.yml) runs the [shared scenario](../../tools/scripts/observability_capture/scenario.md) through the public Dart API under `flutter test` on Linux, loading the release `libxybrid_flutter_ffi.so` the Linux build job produces, and checks what reaches a local OTLP receiver: parent-in, reference-out from the manual handles and the model load, manual operations, content redaction, the omitted attribute never reaching the receiver, release, the weightless model load and failed run, flush and shutdown. It passed all 18 checks in CI on Linux (PR #752). Android, iOS, macOS and Windows runtimes are not covered |
+| React Native | TurboModule codec and both native shims | `WorkflowObservation`, `ToolObservation`, `InferenceObservation`, `ModelLoadObservation`; explicit `dispose()` and module invalidation | Native config/rules and lifecycle | Type, facade, wire, parity and Kotlin codec tests. Staging runtime lane (step 6, run by hand): the example app runs the [staging scenario](../../tools/scripts/observability_staging/README.md) through the TurboModule on a Pixel 8 (the CI debug APK's natives) and an iPhone 15 Pro Max on iOS 26.6 (the CI XCFramework), exporting to Xybrid staging directly and through the Collector; all 42 checks passed on both. iOS 27 is not covered: the Expo 56 example template does not adopt the UIScene lifecycle iOS 27 requires, so the app stops at launch |
+| Browser | Worker propagation and generation result reference | Portable JS observer handles; browser model dispose | Application-owned provider lifecycle | Worker/control tests and typecheck. Staging runtime lane (step 6, run by hand): Chromium 149 runs the [staging scenario](../../tools/scripts/observability_staging/README.md) on the CI web artifact with the pinned SmolLM2 GGUF, exporting traces, and in a second session evaluation logs, straight to Xybrid staging; all 25 checks passed. Neither `@xybrid/web` nor `@xybrid/observability` stamps `xybrid.sdk.binding` (the application owns the provider), so browser rows carry no binding |
+| Portable JS | Explicit W3C controls / references | Workflow/tool/inference/load operations | Callback plus declarative policy, cancellable exporters | Shared fixtures, decoded wire and transport/lifecycle tests; real packed OTel 3.0/0.300 and 3.1/0.301 installations |
+
+The `lifecycle.shutdown` check requires the final counters after shutdown
+rather than zeros, so a lane passes it only with natives that keep the last
+snapshot readable; a native built before that change fails it. The lane
+results cited above predate the check.
+
+What the scenario lanes leave out:
+
+- **Run-result references.** The scenario's model has no weights, so its run
+  fails and returns no result; reference-out is shown from the manual handles
+  and the model load (`load_observation_ref`). A run result's reference needs a
+  model that runs.
+- **Omission from the capture alone.** A value the omit rule drops is listed
+  nowhere on the wire, so the receiver looks the same when the content was
+  never recorded. The Python lane's control run without the rule, and a test
+  that requires every lane's source to configure the rule and record the
+  content, show that the rule removed it
+  ([details](../../tools/scripts/observability_capture/scenario.md#what-the-checker-asserts)).
+
+### Behavioral evidence
+
+The following suites exercise the matrix. A generated-field comparison alone
+does not establish a parent/reference round trip or a runtime lifecycle result.
+
+| Surface | Regression source | Execution boundary |
+|---|---|---|
+| Rust | [SDK observation tests](../../crates/xybrid-sdk/src/observability.rs), [load attribute tests](../../crates/xybrid-sdk/tests/load_observability.rs), [per-run content floor](../../crates/xybrid-sdk/tests/per_run_content.rs), [core decoder tests](../../crates/xybrid-core/src/streaming/session.rs), [facade tests](../../crates/xybrid-ffi-facade/tests/observability.rs) | Synthetic runtime/HTTP fixtures and real host resource measurements exercise orchestration; downloaded-model tests skip when their assets are absent |
+| Python | [Native observation tests](../../bindings/python/tests/test_observability.py), [runtime scenario](../../bindings/python/tests/test_observability_scenario.py) | Compiled native bridge and local OTLP/HTTP receiver; the runtime scenario runs the [reference implementation](../../bindings/python/tests/observability_scenario.py) through `run_scenario.py`, once as is and once without the omit rule |
+| Flutter | [Observation wrapper tests](../../bindings/flutter/test/observability_test.dart), [pipeline tests](../../bindings/flutter/test/pipeline_observability_test.dart), [runtime scenario](../../bindings/flutter/test/observability_scenario_test.dart) | Dart wrapper and mocked FRB boundary; the runtime scenario loads the native Linux library under `flutter test` against a local OTLP receiver when `run_scenario.py` gives it an endpoint (its CI job does), and skips otherwise; mobile device execution remains separate |
+| React Native | [Facade tests](../../bindings/react-native/tests/facade.test.mjs), [wire tests](../../bindings/react-native/tests/wire.test.mjs) | Mocked TurboModule; native codec tests and device execution add host coverage |
+| Swift | [Observation tests](../../bindings/apple/Tests/XybridTests/ObservationTests.swift), [runtime scenario](../../bindings/apple/Tests/XybridTests/ObservabilityRuntimeTests.swift) | XCTest on an iOS Simulator in CI; the runtime scenario runs only in its CI job, against a local OTLP receiver, and skips elsewhere |
+| Kotlin | [Observation tests](../../bindings/kotlin/src/test/kotlin/ai/xybrid/ObservationTest.kt), [runtime scenario](../../bindings/kotlin/consumer-smoke/app/src/androidTest/kotlin/ai/xybrid/smoke/ObservabilityScenarioTest.kt) | Executed wrapper/JVM tests; the runtime scenario is an instrumented test on an Android emulator that runs only in its CI job, against a local OTLP receiver, and skips elsewhere |
+| Unity | [Observation tests](../../bindings/unity/Tests/Editor/ObservationTests.cs), [runtime scenario](../../bindings/unity/Tests/Editor/ObservabilityRuntimeScenarioTests.cs) | Unity Editor native test lane; .NET compile checks do not run these tests. The runtime scenario runs only in its CI step, in the Editor against a local OTLP receiver, and is ignored elsewhere |
+| Portable JS / browser | [Portable tests](../../bindings/observability-js/test), [browser observation tests](../../bindings/web/test/observability.test.ts) | Local exporters, worker mocks and packed-package consumers; actual browser model execution is separate |
+
+Native application examples below assume the usual SDK initialization has
+completed. They describe the public wrapper shapes without adding model or
+runtime dependencies to the portable package.
+
+## Staging acceptance (step 6)
+
+On 2026-11-11 and 2026-11-12 every binding ran the
+[staging scenario](../../tools/scripts/observability_staging/README.md) through its real
+caller and runtime, with a real registry model (`lfm2.5-230m`; SmolLM2-135M in the
+browser), against Xybrid staging in a fresh project. Each launch has two sessions:
+the Xybrid preset straight from the runtime (metadata only) and OTLP through the
+pinned Collector (content captured, one literal redaction). Everything stored is then
+read back from the staging API by trace id. The SDK under test is `00e61710`, with CI-built
+natives where CI builds them (XCFramework, AAR, React Native debug APK, web WASM).
+
+| Lane | Runtime | Result |
+|---|---|---|
+| Python | macOS (compiled bridge) | 42/42 |
+| Rust | macOS, plus pipeline `on_token` failure, streaming TTS, batch and live ASR, frame session, cloud fallback | 66/67: the fallback reaches the staging gateway, which answers 502 (no provider key) |
+| Swift | iPhone 15 Pro Max, iOS 26.6 | 42/42 |
+| Kotlin | Pixel 8, Android 16 | 42/42 |
+| React Native | Pixel 8; iPhone 15 Pro Max | 42/42; 42/42 |
+| Unity | Editor 6000.3.6f1, macOS | 42/42 |
+| Flutter | Dart VM on macOS; Pixel 8 | 42/42; 42/42 |
+| Browser | Chromium 149, macOS | 25/25 |
+| CLI | candidate CLI, `--trace-export` read back | 25 pass, 15 not applicable |
+
+The checks: references stored, parent chain rooted at the caller's span, identity
+(binding, service, device, launch), model, local execution, tokens and chunks as
+reported, the stopped stream recorded `cancelled`, direct sessions with no content and
+no quality records, Collector sessions with redacted content, linked feedback and
+evaluation and the metric ledger, the exact dashboard aggregate, and no key material in
+the evidence. Cross-tenant reads of every launch trace answered 404 for another
+organization and for another project in the same organization (190/190), and spans
+written by the other project under the same trace ids stayed separate (25/25).
+
+Not covered: Flutter on an iPhone (`flutter drive` needs macOS local-network access on
+the host to reach the app's VM service), iOS 27 for the React Native and Flutter example
+apps (their templates lack UIScene adoption), Unity players and Windows.
+
+## Binding examples
+
+Python closes the native owner deterministically. An exception ends the
+operation with a classification; arbitrary exception text is not exported.
+
+```python
+import xybrid
+
+with xybrid.XybridWorkflowObservation("checkout", None) as workflow:
+    parent = workflow.context()
+    options = xybrid.XybridObservationOptions(
+        traceparent=parent.traceparent if parent else None,
+        tracestate=parent.tracestate if parent else None,
+        conversation_id=None,
+        suppress_trace=False,
+    )
+    # Pass options through the existing loader/run/session APIs.
+    reference = workflow.observation_ref()
+# close() and later garbage collection release at most one owner.
+```
+
+React Native requires explicit release in `finally`; module invalidation also
+releases handles still registered by the module.
+
+```ts
+import { WorkflowObservation } from '@xybrid/react-native';
+
+const workflow = await WorkflowObservation.start('checkout');
+try {
+  const parent = await workflow.context();
+  // Pass parent?.traceparent/tracestate as existing observation options.
+  const reference = await workflow.observationRef();
+  await workflow.complete();
+} catch (error) {
+  await workflow.fail('application_error');
+  throw error;
+} finally {
+  await workflow.dispose();
+}
+```
+
+Kotlin `use` and Unity `using` release their owner. Complete explicitly on
+success; a release before completion cancels unfinished work.
+
+```kotlin
+Xybrid.Observability.withWorkflow("checkout") { operation ->
+    val parent = operation.context()
+    val reference = operation.observationRef()
+    // Carry the parent into child options rather than relying on thread locals.
+}
+```
+
+```csharp
+using (var workflow = Xybrid.WorkflowObservation.Start("checkout")) {
+    var parent = workflow.Context;
+    var reference = workflow.Reference;
+    workflow.Complete();
+}
+```
+
+Swift offers `try await Xybrid.Observability.withWorkflow("checkout") { operation in ... }`.
+Flutter offers `await XybridObservability.startWorkflow('checkout')`; read
+`await operation.context()` / `observationRef()`, complete or fail explicitly,
+and call `dispose()` in `finally` to release the FRB opaque owner. None of these
+handle-disposal paths flushes a provider.
+
+## Future runtime readiness
+
+Transformers.js, LiteRT and Apple Foundation Models are adapter opportunities,
+not shipped automatic instrumentation. Use the portable observer or SDK manual
+handles around the runtime's existing load and generation calls. Record
+`generate_content`, the actual runtime/model/location, governed messages and
+only measured usage. Record a chunk when bytes/text arrive; record first token
+only when the runtime supplies that measurement. Keep media as descriptors or
+references. Do not add capability-specific `run*` methods or runtime dependencies
+to `xybrid-observability` / `@xybrid/observability`.
+
+The [standalone Rust adapter](../../crates/xybrid-observability/examples/standalone.rs),
+[SDK session example](../../crates/xybrid-sdk/examples/observability_session.rs) and
+[JS adapter example](../../bindings/observability-js/examples/node-basic.ts)
+exercise those primitives without requiring a future runtime. Native adapters
+can call the same typed inference/load handles through Swift/Kotlin/Flutter/
+Python/C#; pass explicit context across their callbacks and async boundaries.
+The [future runtime adapters](../../bindings/observability-js/examples/runtime-readiness.ts)
+show callback and stream wrappers for Transformers.js, LiteRT and Foundation
+Models without installing those runtimes or inferring missing measurements.
+
+Hosted Collector, performance, staging and production acceptance are later
+milestones. Local source and generation checks do not establish those outcomes.

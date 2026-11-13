@@ -1,0 +1,106 @@
+# Purpose: Verify the decision corpus and run isolated preparation, finalization, matched CPU inference and SDK lifecycle checks against pinned d1 weights.
+name: "CI: Decision conformance"
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: '41 5 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: test-decision-conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# No workflow path filter: this check participates in upstream-engine update
+# validation and must reach a terminal result on every pull request.
+jobs:
+  native:
+    name: Decision CPU conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      XYBRID_NATIVES_FORCE_SOURCE: 1
+      XYBRID_REQUIRE_MODELS: 1
+      CARGO_BUILD_JOBS: 4
+      JOBS: 4
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: decision-cpu
+      - name: Install native build and fixture tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build jq libclang-dev
+      - name: Verify fixture identities and collection tooling
+        run: |
+          python3 tools/conformance/decision/check.py
+          python3 -m unittest discover -s tools/conformance/decision/tests -v
+      - name: Cache pinned Q4_K_M weights
+        if: github.event_name != 'schedule'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: integration-tests/fixtures/models/d1-2b-q4km/d1-2B-Q4_K_M.gguf
+          key: decision-q4km-${{ hashFiles('integration-tests/fixtures/decision/artifacts.json') }}
+      - name: Stage and verify the real model
+        run: |
+          integration-tests/download.sh d1-2b-q4km
+          python3 tools/conformance/decision/check.py --model integration-tests/fixtures/models/d1-2b-q4km/d1-2B-Q4_K_M.gguf
+      - name: Collect a fresh upstream reference with this compiler and CPU
+        env:
+          XYBRID_DECISION_REFERENCE_DIR: ${{ runner.temp }}/decision-upstream
+        run: |
+          tools/conformance/decision/build.sh
+          python3 tools/conformance/decision/stage_native.py --out "$RUNNER_TEMP/decision-native"
+          python3 tools/conformance/decision/stage_native.py --out "$RUNNER_TEMP/decision-native" --check
+          echo "XYBRID_NATIVES_PREBUILT_DIR=$RUNNER_TEMP/decision-native" >> "$GITHUB_ENV"
+          python3 tools/conformance/decision/oracle.py \
+            --collect integration-tests/fixtures/decision/hf/cases \
+            --artifact d1-2b-q4km --expect-cases 63 --out "$XYBRID_DECISION_REFERENCE_DIR"
+      - name: Require and execute every decision gate
+        env:
+          XYBRID_DECISION_REFERENCE_DIR: ${{ runner.temp }}/decision-upstream
+          XYBRID_DECISION_REPORT_DIR: ${{ runner.temp }}/decision-xybrid
+        run: |
+          LIST="$(cargo test --locked -p integration-tests --features llm-llamacpp --test decision_conformance -- --list)"
+          printf '%s\n' "$LIST"
+          for test in \
+            all_143_wire_cases_match_their_parse_stage \
+            upstream_selected_logits_finalize_independently_of_inference \
+            committed_decision_metadata_names_the_pinned_protocol \
+            native::all_preparation_and_metadata_variants_match_the_upstream \
+            native::native_selected_logits_match_a_fresh_matched_build_reference \
+            native::native_context_recovers_after_reordering_refusal_and_cancellation \
+            native::sdk_sync_async_returns_ordered_decisions_and_usage; do
+            printf '%s\n' "$LIST" | grep -qx "${test}: test" || { echo "missing required test: $test" >&2; exit 1; }
+          done
+          cargo test --locked -p integration-tests --features llm-llamacpp --test decision_conformance -- --nocapture --test-threads=1
+      - name: Require and execute the public CLI boundary
+        run: |
+          LIST="$(cargo test --locked -p xybrid-cli --features llm-llamacpp --test decision_cli_test -- --list)"
+          for test in \
+            decision_cli_rejects_conflicts_before_model_loading \
+            decision_cli_bounds_stdin_and_redacts_decoder_errors_before_model_loading \
+            decision_cli_file_stdin_and_machine_output_match_the_rust_sdk; do
+            printf '%s\n' "$LIST" | grep -qx "${test}: test" || { echo "missing required test: $test" >&2; exit 1; }
+          done
+          cargo test --locked -p xybrid-cli --features llm-llamacpp --test decision_cli_test -- --nocapture --test-threads=1
+      - name: Upload the upstream source, settings and numerical observations
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: decision-cpu-reference
+          path: |
+            ${{ runner.temp }}/decision-upstream
+            ${{ runner.temp }}/decision-xybrid
+            ${{ runner.temp }}/decision-native/native-stage.json
+          if-no-files-found: error

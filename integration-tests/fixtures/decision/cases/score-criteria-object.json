@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "score-criteria-object",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Object score criteria are refused",
+  "covers": ["refusal-parse"],
+  "artifact": "d1-2b-q4km",
+  "settings": null,
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"score\", \"instructions\": \"x\", \"criteria\": {\"0\": \"low\", \"1\": \"high\"}}}}",
+  "upstream": {
+    "parse": {
+      "refusal": {
+        "exception": "invalid_argument",
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "questions.q: \"criteria\" must be an array of 2 to 10 levels"
+      }
+    },
+    "server": {
+      "status": 400,
+      "agrees": true
+    }
+  },
+  "xybrid": {
+    "parse": {
+      "refuse": "invalid_criteria"
+    },
+    "prepare": "not_reached",
+    "evaluate": "not_reached",
+    "finalize": "not_reached"
+  }
+}

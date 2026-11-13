@@ -6,7 +6,7 @@
 //!
 //! # Vendor location (epic open decision §1, resolved)
 //!
-//! Pinned upstream commit `620d2225cc436ab0b001e3200e590e3b286ef9ab`.
+//! Pinned upstream commit `8642541b255bfb5dc39cd351a178be09013a55d6`.
 //! Source lives at workspace `vendor/llama-cpp/`, alongside
 //! `vendor/mlx-apple/` and `vendor/ort-{ios,android}/`. `.gitmodules`
 //! is updated to match.
@@ -42,7 +42,7 @@ const LLAMA_CPP_REPO: &str = "https://github.com/ggml-org/llama.cpp";
 // exact commit so consumers without submodule support (e.g. Flutter pub
 // cache git deps, crates.io tarballs) get a reproducible build instead of
 // upstream HEAD.
-const LLAMA_CPP_COMMIT: &str = "620d2225cc436ab0b001e3200e590e3b286ef9ab";
+const LLAMA_CPP_COMMIT: &str = "8642541b255bfb5dc39cd351a178be09013a55d6";
 
 fn main() {
     println!("cargo:rerun-if-changed=wrapper.cpp");
@@ -824,7 +824,25 @@ fn emit_link_and_wrapper(
         .std("c++17")
         .file(wrapper_path)
         .include(llama_cpp_dir.join("include"))
-        .include(llama_cpp_dir.join("ggml/include"));
+        .include(llama_cpp_dir.join("ggml/include"))
+        // The Jinja closure's headers and nlohmann. llama.cpp's src/ stays
+        // off the path: its unicode.h shadows common's.
+        .include(llama_cpp_dir.join("common"))
+        .include(llama_cpp_dir.join("vendor"));
+    // Audited minimal Jinja closure, pinned by LLAMA_CPP_COMMIT.
+    for source in [
+        "common/jinja/lexer.cpp",
+        "common/jinja/parser.cpp",
+        "common/jinja/runtime.cpp",
+        "common/jinja/value.cpp",
+        "common/jinja/string.cpp",
+        "common/json.cpp",
+        "common/unicode.cpp",
+    ] {
+        let path = llama_cpp_dir.join(source);
+        println!("cargo:rerun-if-changed={}", path.display());
+        wrapper_build.file(path);
+    }
     if vision_enabled {
         wrapper_build
             .include(llama_cpp_dir.join("tools/mtmd"))

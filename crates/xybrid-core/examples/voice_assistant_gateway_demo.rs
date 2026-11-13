@@ -172,6 +172,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
 
             match output.kind {
+                EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+                    return Err("Unexpected decision output".into());
+                }
                 EnvelopeKind::Text(text) => text,
                 _ => "Hello, how are you today?".to_string(),
             }
@@ -325,6 +328,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Extract audio from output envelope
     let audio_bytes = match tts_output.kind {
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            return Err("Unexpected decision output".into());
+        }
         EnvelopeKind::Audio(bytes) => bytes,
         _ => {
             eprintln!("❌ Unexpected TTS output type");

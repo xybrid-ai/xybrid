@@ -2,11 +2,106 @@
 
 ## Unreleased
 
+## 0.18.0
+
+* Liquid d1 decision models (`lfm3-d1/text/v1`). `XybridEnvelope.decisionRequest`
+  and `XybridEnvelope.decisionRequestJson` build a request for a local d1 model
+  from a state and 1 to 16 questions (`DecisionQuestion.choice`, `.yesNo`,
+  `.score`), and `XybridResult.decisions` holds one typed answer per question
+  with its probabilities. Pass structured state with `DecisionContent.jsonText`
+  to keep key order and integers above 2^53. Decision models run on the device
+  CPU through the existing `run`; streaming, conversation context, pipelines
+  and cloud fallback refuse them. Not qualified on devices yet: see the README.
+  Generated FRB glue updated for these types.
+* Observation controls for loading and live ASR; decoder/session, pipeline and
+  streamed-TTS references. Typed manual workflow/tool/inference/load handles
+  support explicit completion, failure and cancellation.
+* Caller-owned device IDs, ordered native redaction rules and explicit provider
+  propagation origins. Generated FRB glue updated for these fields.
+* Added explicit OpenTelemetry export configuration, exporter stats, bounded
+  flush/shutdown, and feedback/evaluation APIs through `XybridObservability`.
+  `RunOptions.observation` forwards W3C context, conversation IDs and trace
+  suppression on batch and token-streaming runs. Results and stream completion
+  tokens expose observation references; streamed tool calls remain single-use.
+  Normal/fallback streams retain one successful terminal token and its native
+  finish reason/index while attaching completion metrics and observation data.
+* Changed: an API key alone configures authentication without enabling export.
+  Pass `observability:` to `Xybrid.init` to opt in. Explicit legacy `ingestUrl`
+  and `initTelemetry` configure OTLP traces (bare URLs gain `/v1/traces`) and
+  replace previous configuration. Legacy receivers must accept OTLP. Native
+  legacy calls preserve metadata-only export (no prompt/output content).
+  Exporter state now reflects shutdown; invalid configurations can be corrected/retried.
+  Invalid resource modes/intervals fail before export is enabled or replaced.
+  Resource sampling remains independent of export. See README for migration.
+* Breaking: `XybridStreamSession.flush()` returns an `FfiTranscriptionResult`
+  instead of a `String`. Read `.text` for the transcript; the record also
+  carries `durationMs`, `chunksProcessed` and the session's `observation`.
+* Breaking: `FfiTtsStreamEvent.complete` carries an `FfiTtsStreamResult`
+  (status, sample rate, channels, sample and chunk counts, `observation`).
+  Code that constructs the event (mocks, fakes) must pass one. `runTtsStreaming`
+  hands it to the new `onComplete` callback, and fails the stream with a
+  `StateError` after the partial audio when the status is `limited`.
+* Changed: an explicit `traceparent` that is not valid W3C now fails the call
+  (`XybridException`, an error token, or a thrown error for sessions, loaders
+  and manual handles) instead of being ignored.
+* `XybridPipeline.run` accepts `observation:`; pipeline results now carry the
+  workflow reference and each stage's reference in `metrics.stageLatenciesMs`.
+* Fixed: unsubscribing a token stream (`runStreaming`,
+  `runStreamingWithContext`, `runStreamingWithFallback`) that was started
+  without a `CancellationToken` now halts generation at the next token and
+  releases the model write lock, as the docs already said; the run used to
+  continue to the end. Observability records the run as cancelled.
+* Changed: a token callback that fails for any reason now ends its run as
+  cancelled in observability, as a streaming pipeline already did; an untyped
+  failure used to be recorded as an inference error. What the stream reports
+  to its listener is unchanged.
+* Changed: the default budget of captured content per run is 416 KiB when
+  traces are sent as OTLP/protobuf (the default) and 208 KiB as OTLP/JSON,
+  instead of 208 KiB for both.
+
+
+## 0.17.0
+
+* Breaking: the plugin declares the platform minimums its precompiled libraries
+  are built for: iOS 16.0 (was 13.0), macOS 14.0 (was 10.15) and Android 9,
+  API 28 (`minSdkVersion` was 21). An app that targets an older version now
+  fails at build time, in `pod install` or the Android manifest merge, instead
+  of when it loads the native library on an older device. Raise the app's
+  minimums: `minSdk = 28` in `defaultConfig` of `android/app/build.gradle.kts`
+  (Flutter's default, `flutter.minSdkVersion`, is lower);
+  `platform :ios, '16.0'` in `ios/Podfile` and an iOS Deployment Target of 16.0
+  for the Runner target; `platform :osx, '14.0'` in `macos/Podfile` and a macOS
+  Deployment Target of 14.0. The libraries themselves are unchanged.
+* Added: LFM3 1.7B text and LFM3-VL 2B vision support through the existing
+  model APIs, including reasoning, tool calls and tool-result continuations.
+  Vision metadata can cap image tokens, and Hugging Face loading of
+  `LiquidAI/LFM3-VL-2B-GGUF` includes its projector with a 1,024-token image
+  cap. LFM3-Audio and LFM3-Omni are not supported.
+* Fixed: newly generated GGUF metadata caps the default context at 4,096
+  tokens to avoid allocating the model's full native KV cache. Increase
+  `execution_template.context_length` in the generated metadata for longer
+  conversations; previously generated files retain their configured context.
+* Fixed: llama.cpp results and streams preserve Unicode characters split
+  across tokens and trailing text, emit text before an in-token stop sequence,
+  report correct finish reasons, and deliver the terminal event even when
+  reasoning filtering suppresses every text delta.
+* Changed: precompiled libraries continue to use llama.cpp v0.8.0. Release
+  checks reject stale precompiled libraries and verify Apple deployment floors.
+  The new Rust decision data types and ONNX phoneme-timing metadata are not
+  exposed in Dart.
+
+## 0.16.0
+
+* Changed: precompiled native libraries now use llama.cpp v0.8.0.
+* Fixed: registry resolution sends runtime OS compatibility information and
+  retains backend/OS refusal diagnostics, including with telemetry disabled.
 * Fixed: Android builds support Gradle 9 / AGP 9 and copy `libc++_shared.so`
   from the host app's selected NDK. Apple build logs no longer dump the environment.
 * Fixed: `load()` throws `XybridException` with the native diagnostic, and run
   failures retain their causes without duplicated inference prefixes. Cached
   speech models fail during load when the build lacks a usable zzz backend.
+* Standard precompiled Flutter binaries continue to omit the optional speech
+  backend; native iOS speech linkage remains unqualified.
 
 ## 0.15.0
 

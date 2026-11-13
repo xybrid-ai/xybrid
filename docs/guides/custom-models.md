@@ -594,8 +594,8 @@ Task-to-step mapping:
 - Text classification / NER: Tokenize → model → ArgMax
 - Text generation (GGUF): Gguf template, no steps
 
-See the full field reference: https://github.com/xybrid-ai/xybrid/blob/main/docs/sdk/MODEL_METADATA.md
-See the JSON Schema: https://github.com/xybrid-ai/xybrid/blob/main/docs/sdk/model_metadata.schema.json
+See the full field reference: https://github.com/xybrid-ai/xybrid/blob/master/docs/sdk/MODEL_METADATA.md
+See the JSON Schema: https://github.com/xybrid-ai/xybrid/blob/master/docs/sdk/model_metadata.schema.json
 ````
 
 ### Worked Example: Configuring a BERT NER Model
