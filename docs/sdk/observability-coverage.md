@@ -188,9 +188,26 @@ the evidence. Cross-tenant reads of every launch trace answered 404 for another
 organization and for another project in the same organization (190/190), and spans
 written by the other project under the same trace ids stayed separate (25/25).
 
-Not covered: Flutter on an iPhone (`flutter drive` needs macOS local-network access on
-the host to reach the app's VM service), iOS 27 for the React Native and Flutter example
-apps (their templates lack UIScene adoption), Unity players and Windows.
+On 2026-11-13 at 20:49 UTC the
+[console check](../../tools/scripts/observability_staging/console.mjs) passed in
+the staging project Supertest: all 25 launch trace pages matched the API's span
+and request counts, linked feedback/evaluation records and run-span links
+(193 spans, 51 counted requests and 20 feedback/evaluation records across those
+traces). The overview's 24-hour execution count and 30-day on-device/cloud counts
+also matched the API. All 28 checks passed, with no browser JavaScript exceptions;
+the run saved its report and 26 screenshots.
+
+Not covered: the gateway's side of a cloud request, that is the span the gateway
+writes for the Rust cloud fallback and the CLI cloud run, because the staging gateway
+has no provider key and answers 502 (the client side passed: the local attempt is
+recorded as aborted for fallback and the remote attempt as a fallback); Flutter on an
+iPhone (`flutter drive` needs macOS local-network access on the host to reach the app's
+VM service), iOS 27 for the React Native and Flutter example apps (their templates lack
+UIScene adoption), Unity players and Windows.
+
+Separate gateway follow-up: configure a working provider key on staging, then
+rerun the Rust cloud fallback and CLI cloud run to verify the gateway-created
+span. The Rust result remains 66/67 until that check passes.
 
 ## Binding examples
 
