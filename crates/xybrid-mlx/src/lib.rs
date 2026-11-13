@@ -34,12 +34,11 @@
 //!    [`Clone`] implementation on `MlxArray` and `MlxStream` that calls
 //!    `mlx_*_set`, which is the idiomatic retain in mlx-c. We do **not**
 //!    derive [`Copy`] — that would silently double-free on [`Drop`].
-//! 3. **No global state.** Default streams are cached per thread via
-//!    [`thread_local!`] rather than in process-wide statics. This means
-//!    spinning up a fresh thread on iOS (where each app is its own process
-//!    and memory pressure is real) does not inherit a stale Metal stream
-//!    from another thread. Consumers that actually want a global can call
-//!    `MlxStream::default_cpu` / `MlxStream::default_gpu` themselves.
+//! 3. **Per-thread stream handles, one process-wide lock.** Default stream
+//!    handles are cached per thread via [`thread_local!`], but they all name
+//!    MLX's one default stream per device, and MLX does not tolerate two
+//!    threads evaluating at once. Every operation that evaluates takes
+//!    `exclusive()` first; see that module for what it covers.
 //! 4. **Zero `unsafe` in the public surface.** Every unsafe FFI call lives
 //!    in `pub(crate)` helpers in `ffi.rs` with `# Safety` doc comments.
 //!    Downstream crates (including `xybrid-core`'s MLX adapter) only use
@@ -55,6 +54,8 @@
 //!
 //! - `MlxArray` — RAII handle for `mlx_array`. Typed via [`MlxDtype`].
 //! - `MlxStream` + `Device` — stream handle and its device placement.
+//! - `exclusive` / `MlxExclusive` — the process-wide lock that serializes
+//!   MLX work across threads.
 //! - `SharedBuffer` — MTLBuffer-backed zero-copy heap region used by the
 //!   Envelope ↔ MlxArray conversion path (US-008).
 //! - [`EnvelopePayload`] / [`EnvelopeSource`] /
@@ -99,6 +100,8 @@ mod array;
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 mod buffer;
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
+mod exclusive;
+#[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 mod ffi;
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 mod memory;
@@ -113,6 +116,8 @@ mod stream;
 pub use array::{async_eval, perf_counters, reset_perf_counters, MlxArray, MlxPerfCounters};
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 pub use buffer::SharedBuffer;
+#[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
+pub use exclusive::{exclusive, MlxExclusive};
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]
 pub use memory::{clear_cache, set_cache_limit, version};
 #[cfg(all(feature = "bindings", target_os = "macos", target_arch = "aarch64"))]

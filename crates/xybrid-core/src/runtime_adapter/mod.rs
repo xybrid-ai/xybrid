@@ -93,10 +93,10 @@ pub(crate) mod llm_telemetry;
 
 // Shared streaming post-processing for LLM backends
 // (stop-pattern filtering, <think> tag stripping, safe-prefix buffer).
-// Used by backends whose engines don't strip these internally — currently
-// llama_cpp. Mistral's engine (mistralrs) handles it natively and does
+// Used by backends whose engines don't strip these internally: llama_cpp
+// and MLX. Mistral's engine (mistralrs) handles it natively and does
 // not import this module.
-#[cfg(feature = "llm-llamacpp")]
+#[cfg(any(feature = "llm-llamacpp", feature = "llm-mlx"))]
 pub(crate) mod streaming_postprocess;
 
 // MistralBackend (feature-gated, uses mistral.rs - desktop only, NOT Android)

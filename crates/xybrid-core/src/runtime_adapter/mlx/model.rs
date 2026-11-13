@@ -196,6 +196,13 @@ pub struct MlxLlmConfig {
     /// Default generation parameters used when `LlmBackend::generate` is
     /// called with no per-call override.
     pub default_generation: GenerationConfig,
+    /// Whether this is a reasoning ("thinking") model, from the model
+    /// metadata's `reasoning` flag
+    /// ([`LlmConfig::reasoning`](crate::runtime_adapter::llm::LlmConfig)).
+    /// Chat prompts then ask the template for its reasoning channel, and the
+    /// reasoning is split off the answer into
+    /// [`GenerationOutput::reasoning_content`].
+    pub reasoning: bool,
 }
 
 impl Default for MlxLlmConfig {
@@ -206,6 +213,7 @@ impl Default for MlxLlmConfig {
         Self {
             max_seq_len: 4096,
             default_generation: GenerationConfig::default(),
+            reasoning: false,
         }
     }
 }
@@ -214,7 +222,7 @@ impl MlxLlmConfig {
     pub fn new(max_seq_len: usize) -> Self {
         Self {
             max_seq_len,
-            default_generation: GenerationConfig::default(),
+            ..Self::default()
         }
     }
 
@@ -222,6 +230,35 @@ impl MlxLlmConfig {
         self.default_generation = gen;
         self
     }
+
+    /// Mark the model as a reasoning model (see [`Self::reasoning`]).
+    pub fn with_reasoning(mut self, reasoning: bool) -> Self {
+        self.reasoning = reasoning;
+        self
+    }
+}
+
+/// Tool calling and grammar-constrained decoding are llama.cpp-only today.
+/// Fail closed rather than silently generating without them: the same policy
+/// as the mistralrs backend and the SDK's cloud-fallback guard.
+fn reject_unsupported_generation(config: &GenerationConfig) -> LlmResult<()> {
+    if !config.tools.is_empty() {
+        return Err(AdapterError::InvalidInput(
+            "the MLX backend does not support tool calling; run tool-bearing requests on the \
+             llama.cpp backend (`backend: llamacpp`, a GGUF variant) or drop `tools` from the \
+             request"
+                .to_string(),
+        ));
+    }
+    if config.grammar.is_some() {
+        return Err(AdapterError::InvalidInput(
+            "the MLX backend does not support grammar-constrained generation; run \
+             grammar-bearing requests on the llama.cpp backend (`backend: llamacpp`, a GGUF \
+             variant) or drop `grammar` from the request"
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Subset of an MLX-LM `config.json` we need at the trait surface. Captured
@@ -397,6 +434,14 @@ impl MlxLlmAdapter {
         };
 
         let kv_cache = KvCache::new(n_layers, self.config.max_seq_len);
+        // Materializing weights creates and evaluates MLX arrays; it queues
+        // behind any generation in flight (see `xybrid_mlx::exclusive`).
+        #[cfg(all(
+            feature = "llm-mlx-runtime",
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let _mlx = xybrid_mlx::exclusive();
         #[cfg(all(
             feature = "llm-mlx-runtime",
             target_os = "macos",
@@ -629,6 +674,16 @@ impl MlxLlmAdapter {
         self.loaded.as_ref().and_then(|s| s.chat_template.as_ref())
     }
 
+    /// Whether chat prompts ask the template for its reasoning channel.
+    ///
+    /// Follows the model's `reasoning` flag, except for Gemma: its
+    /// `<|channel>thought … <channel|>` blocks have no capture here, so a
+    /// reasoning channel would leak into the answer. The llama.cpp backend
+    /// makes the same exception (`template_thinking`).
+    pub(crate) fn reasoning_enabled(&self) -> bool {
+        self.config.reasoning && !matches!(self.architecture(), Some(ModelArchitecture::Gemma4))
+    }
+
     fn prompt_from_messages(&self, messages: &[ChatMessage]) -> MlxLlmResult<String> {
         if self.loaded.is_none() {
             return Err(MlxLlmError::NotLoaded);
@@ -812,6 +867,7 @@ impl LlmBackend for MlxLlmAdapter {
         if config.context_length > 0 {
             self.config.max_seq_len = config.context_length;
         }
+        self.config.reasoning = config.reasoning;
         self.load_in_place(model_dir).map_err(AdapterError::from)?;
         Ok(())
     }
@@ -833,17 +889,21 @@ impl LlmBackend for MlxLlmAdapter {
         if self.loaded.is_none() {
             return Err(MlxLlmError::NotLoaded.into());
         }
+        reject_unsupported_generation(config)?;
         let prompt = self
             .prompt_from_messages(messages)
             .map_err(AdapterError::from)?;
-        generate::generate_tokens(self, &prompt, GenerateParams::new(config), None)
-            .map_err(AdapterError::from)
+        generate::generate_chat(self, &prompt, config, None).map_err(AdapterError::from)
     }
 
+    /// Raw prompts keep the caller's text as generated: only
+    /// `config.stop_sequences` end the run, and neither chat markers nor
+    /// reasoning blocks are filtered (the llama.cpp backend's raw contract).
     fn generate_raw(&self, prompt: &str, config: &GenerationConfig) -> LlmResult<GenerationOutput> {
         if self.loaded.is_none() {
             return Err(MlxLlmError::NotLoaded.into());
         }
+        reject_unsupported_generation(config)?;
         generate::generate_tokens(self, prompt, GenerateParams::new(config), None)
             .map_err(AdapterError::from)
     }
@@ -857,10 +917,27 @@ impl LlmBackend for MlxLlmAdapter {
         if self.loaded.is_none() {
             return Err(MlxLlmError::NotLoaded.into());
         }
+        reject_unsupported_generation(config)?;
         let prompt = self
             .prompt_from_messages(messages)
             .map_err(AdapterError::from)?;
-        generate::generate_tokens(self, &prompt, GenerateParams::new(config), Some(on_token))
+        generate::generate_chat(self, &prompt, config, Some(on_token)).map_err(AdapterError::from)
+    }
+
+    /// Streams a raw prompt token by token, with [`Self::generate_raw`]'s
+    /// contract. Without this override the trait default would buffer the
+    /// whole output and emit it as one chunk.
+    fn generate_raw_streaming(
+        &self,
+        prompt: &str,
+        config: &GenerationConfig,
+        on_token: StreamingCallback<'_>,
+    ) -> LlmResult<GenerationOutput> {
+        if self.loaded.is_none() {
+            return Err(MlxLlmError::NotLoaded.into());
+        }
+        reject_unsupported_generation(config)?;
+        generate::generate_tokens(self, prompt, GenerateParams::new(config), Some(on_token))
             .map_err(AdapterError::from)
     }
 
@@ -870,6 +947,10 @@ impl LlmBackend for MlxLlmAdapter {
 
     fn context_length(&self) -> Option<usize> {
         Some(self.config.max_seq_len)
+    }
+
+    fn wire_label(&self) -> Option<&'static str> {
+        Some("mlx")
     }
 }
 

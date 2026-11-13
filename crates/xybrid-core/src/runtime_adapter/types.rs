@@ -414,11 +414,13 @@ pub struct GenerationConfig {
     #[serde(default = "default_repetition_penalty")]
     pub repetition_penalty: f32,
 
-    /// Optional deterministic sampling seed.
+    /// Optional sampling seed, for reproducible sampled output.
     ///
-    /// The MLX backend currently honors this by constructing its sampler via
-    /// `Sampler::seeded(seed)`. Other local backends may ignore it until their
-    /// runtime wrappers expose stable seed plumbing.
+    /// Honored by the MLX backend: the same seed, prompt and settings give
+    /// the same tokens. The llama.cpp and mistralrs backends do not take a
+    /// seed yet and ignore it. `None` samples from fresh entropy on every
+    /// call, on every backend. Greedy decoding (`temperature == 0`, the
+    /// default) is deterministic with or without a seed.
     #[serde(default)]
     pub seed: Option<u64>,
 
@@ -432,7 +434,9 @@ pub struct GenerationConfig {
     ///
     /// Set the raw grammar via [`GenerationConfig::with_grammar`], or convert a
     /// JSON Schema with [`GenerationConfig::with_json_schema`]. `None` = free
-    /// (unconstrained) generation. Ignored by non-llama backends.
+    /// (unconstrained) generation. Grammars are llama.cpp-only: the MLX
+    /// backend rejects a request that carries one instead of answering
+    /// unconstrained, and the mistralrs backend ignores it.
     #[serde(default)]
     pub grammar: Option<String>,
 
@@ -445,9 +449,9 @@ pub struct GenerationConfig {
     /// notation) into the response envelope's `tool_calls` metadata.
     /// Tool calling is llama.cpp-only today and unsupported paths fail
     /// closed: a model without an embedded chat template, the mistralrs
-    /// backend, and the SDK's cloud-fallback leg all reject tool-bearing
-    /// requests instead of silently generating without the tools. Empty
-    /// means no tool calling (existing behavior, unchanged).
+    /// and MLX backends, and the SDK's cloud-fallback leg all reject
+    /// tool-bearing requests instead of silently generating without the
+    /// tools. Empty means no tool calling (existing behavior, unchanged).
     #[serde(default)]
     pub tools: Vec<Tool>,
 }

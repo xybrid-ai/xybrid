@@ -234,12 +234,17 @@ impl MlxEmbeddingAdapter {
 
         let tokenizer = tokenizer_loader::load_from_file(&tokenizer_path)
             .map_err(|e| MlxLlmError::TokenizerLoad(e.to_string()))?;
+        // Materializing weights creates MLX arrays; it queues behind any MLX
+        // work in flight (see `xybrid_mlx::exclusive`).
         #[cfg(all(
             feature = "llm-mlx-runtime",
             target_os = "macos",
             target_arch = "aarch64"
         ))]
-        let runtime_weights = super::arch::bert::runtime::build(&bert_cfg, &weights)?;
+        let runtime_weights = {
+            let _mlx = xybrid_mlx::exclusive();
+            super::arch::bert::runtime::build(&bert_cfg, &weights)?
+        };
 
         self.loaded = Some(LoadedState {
             model_dir: model_dir.to_path_buf(),
@@ -591,6 +596,10 @@ fn run_encoder(
     _attention_mask: &[u32],
     hidden_dim: usize,
 ) -> MlxLlmResult<Vec<f32>> {
+    // One MLX operation at a time, process-wide, taken before the adapter's
+    // own weight lock (see `xybrid_mlx::exclusive`): an embedding run beside
+    // a generation would otherwise crash inside MLX.
+    let _mlx = xybrid_mlx::exclusive();
     let weights = state.runtime_weights.lock().map_err(|_| {
         MlxLlmError::ConfigInvalid("BERT runtime weight cache lock is poisoned".into())
     })?;

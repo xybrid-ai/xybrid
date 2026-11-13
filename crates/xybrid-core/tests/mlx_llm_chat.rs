@@ -278,6 +278,235 @@ fn synthetic_qwen_streaming_abort_after_n_tokens_preserves_error_and_resets_stat
     );
 }
 
+/// Tool calling and grammar-constrained decoding are llama.cpp-only. A request
+/// that carries either fails on MLX before any token is generated, on every
+/// generation entry point, instead of answering without them.
+#[test]
+fn synthetic_qwen_refuses_tools_and_grammar_on_every_entry_point() {
+    let _guard = mlx_test_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_synthetic_qwen_bundle(tmp.path());
+    let adapter =
+        MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default()).expect("load synthetic qwen3");
+
+    let tool = xybrid_core::gateway::Tool::function(
+        "lookup_weather",
+        "Look up the weather",
+        serde_json::json!({ "type": "object", "properties": {} }),
+    );
+    let with_tools = short_greedy_config().with_tools([tool]);
+    let with_grammar = short_greedy_config().with_grammar("root ::= \"ok\"");
+    let messages = [ChatMessage::user("Hello")];
+
+    for (config, refusal) in [
+        (&with_tools, "does not support tool calling"),
+        (
+            &with_grammar,
+            "does not support grammar-constrained generation",
+        ),
+    ] {
+        let streamed = Arc::new(Mutex::new(0usize));
+        let counting = || -> StreamingCallback<'static> {
+            let streamed = streamed.clone();
+            Box::new(move |_token: PartialToken| {
+                *streamed.lock().unwrap() += 1;
+                Ok(())
+            })
+        };
+        let results = [
+            LlmBackend::generate(&adapter, &messages, config).map(drop),
+            LlmBackend::generate_raw(&adapter, "Hello", config).map(drop),
+            LlmBackend::generate_streaming(&adapter, &messages, config, counting()).map(drop),
+            LlmBackend::generate_raw_streaming(&adapter, "Hello", config, counting()).map(drop),
+        ];
+        for result in results {
+            let err = result.expect_err("MLX must refuse the request");
+            assert!(
+                matches!(err, AdapterError::InvalidInput(_)),
+                "expected an invalid-input refusal, got {err:?}"
+            );
+            let message = err.to_string();
+            assert!(message.contains(refusal), "{message}");
+            assert!(
+                message.contains("backend: llamacpp"),
+                "the refusal names the backend that can serve the request: {message}"
+            );
+        }
+        assert_eq!(*streamed.lock().unwrap(), 0, "nothing may be generated");
+    }
+}
+
+/// A streamed chat turn delivers text deltas, then one empty terminal token
+/// that carries `finish_reason` and the final text: the contract the llama.cpp
+/// backend has, so a consumer needs no per-backend handling. The batch call
+/// returns the same text.
+#[test]
+fn synthetic_qwen_chat_stream_ends_with_one_terminal_token() {
+    let _guard = mlx_test_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_synthetic_qwen_bundle(tmp.path());
+    let adapter =
+        MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default()).expect("load synthetic qwen3");
+    let config = GenerationConfig {
+        max_tokens: 8,
+        ..short_greedy_config()
+    };
+    let messages = [ChatMessage::user("Hello")];
+
+    let seen: Arc<Mutex<Vec<PartialToken>>> = Arc::new(Mutex::new(Vec::new()));
+    let seen_for_cb = seen.clone();
+    let cb: StreamingCallback<'_> = Box::new(move |token: PartialToken| {
+        seen_for_cb.lock().unwrap().push(token);
+        Ok(())
+    });
+    let streamed = LlmBackend::generate_streaming(&adapter, &messages, &config, cb)
+        .expect("synthetic qwen chat stream");
+
+    let seen = seen.lock().unwrap();
+    let (terminal, deltas) = seen.split_last().expect("a terminal token");
+    assert!(
+        terminal.token.is_empty(),
+        "the terminal token carries no text"
+    );
+    assert_eq!(
+        terminal.finish_reason.as_deref(),
+        Some(streamed.finish_reason.as_str())
+    );
+    assert_eq!(terminal.cumulative_text, streamed.text);
+    for (index, token) in seen.iter().enumerate() {
+        assert_eq!(token.index, index, "chunk indices count emitted chunks");
+    }
+    for delta in deltas {
+        assert!(
+            delta.finish_reason.is_none(),
+            "only the terminal token ends the turn"
+        );
+        assert!(!delta.token.is_empty(), "a delta carries text");
+    }
+    let streamed_text: String = deltas.iter().map(|t| t.token.as_str()).collect();
+    assert_eq!(
+        streamed_text.trim(),
+        streamed.text,
+        "the deltas add up to the answer"
+    );
+
+    let batch =
+        LlmBackend::generate(&adapter, &messages, &config).expect("synthetic qwen chat batch");
+    assert_eq!(batch.text, streamed.text);
+    assert_eq!(batch.finish_reason, streamed.finish_reason);
+}
+
+/// The SDK loads a model on one thread and runs it on others (`spawn_blocking`
+/// for its async entry points), and an application can hold several models.
+/// MLX keeps its default streams per thread, so each case needs proof.
+fn thread_test_config() -> GenerationConfig {
+    GenerationConfig {
+        max_tokens: 24,
+        ..short_greedy_config()
+    }
+}
+
+const THREAD_PROMPT_A: &str = "The ocean is";
+const THREAD_PROMPT_B: &str = "A list of three fruits:";
+
+fn generate_on_thread(
+    adapter: &Arc<MlxLlmAdapter>,
+    prompt: &'static str,
+) -> std::thread::JoinHandle<Vec<i64>> {
+    let adapter = adapter.clone();
+    std::thread::spawn(move || streamed_token_ids(&adapter, prompt, &thread_test_config()))
+}
+
+/// Weights materialized on the loading thread generate on another thread,
+/// with nothing generated on the loading thread first.
+fn assert_generates_off_the_loading_thread(dir: &Path) {
+    let adapter =
+        Arc::new(MlxLlmAdapter::load(dir, &MlxLlmConfig::default()).expect("load bundle"));
+
+    let moved = generate_on_thread(&adapter, THREAD_PROMPT_A)
+        .join()
+        .expect("generation on another thread");
+    assert!(!moved.is_empty());
+
+    let home = streamed_token_ids(&adapter, THREAD_PROMPT_A, &thread_test_config());
+    assert_eq!(moved, home, "a model generates the same on any thread");
+
+    let again = generate_on_thread(&adapter, THREAD_PROMPT_A)
+        .join()
+        .expect("generation on a third thread");
+    assert_eq!(again, home);
+}
+
+/// Two adapters generate at the same time, each producing what it produces
+/// alone.
+fn assert_two_models_generate_at_once(dir_a: &Path, dir_b: &Path) {
+    let a =
+        Arc::new(MlxLlmAdapter::load(dir_a, &MlxLlmConfig::default()).expect("load first bundle"));
+    let b =
+        Arc::new(MlxLlmAdapter::load(dir_b, &MlxLlmConfig::default()).expect("load second bundle"));
+    let alone_a = streamed_token_ids(&a, THREAD_PROMPT_A, &thread_test_config());
+    let alone_b = streamed_token_ids(&b, THREAD_PROMPT_B, &thread_test_config());
+    assert!(!alone_a.is_empty() && !alone_b.is_empty());
+
+    for round in 0..4 {
+        let first = generate_on_thread(&a, THREAD_PROMPT_A);
+        let second = generate_on_thread(&b, THREAD_PROMPT_B);
+        assert_eq!(
+            first.join().expect("first concurrent generation"),
+            alone_a,
+            "round {round}: first model beside another"
+        );
+        assert_eq!(
+            second.join().expect("second concurrent generation"),
+            alone_b,
+            "round {round}: second model beside another"
+        );
+    }
+}
+
+#[test]
+fn synthetic_qwen_generates_off_the_loading_thread() {
+    let _guard = mlx_test_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_synthetic_qwen_bundle(tmp.path());
+
+    assert_generates_off_the_loading_thread(tmp.path());
+}
+
+#[test]
+fn synthetic_qwen_generates_beside_another_model() {
+    let _guard = mlx_test_lock();
+    let first = tempfile::tempdir().expect("tempdir");
+    let second = tempfile::tempdir().expect("tempdir");
+    write_synthetic_qwen_bundle(first.path());
+    write_synthetic_qwen_bundle(second.path());
+
+    assert_two_models_generate_at_once(first.path(), second.path());
+}
+
+#[test]
+fn real_qwen_generates_off_the_loading_thread_when_staged() {
+    let Some(dir) = qwen_bundle_dir() else {
+        eprintln!("SKIP: XYBRID_MLX_QWEN_DIR not set");
+        return;
+    };
+    let _guard = mlx_test_lock();
+
+    assert_generates_off_the_loading_thread(&dir);
+}
+
+#[test]
+fn real_qwen_generates_beside_another_model_when_staged() {
+    let Some(dir) = qwen_bundle_dir() else {
+        eprintln!("SKIP: XYBRID_MLX_QWEN_DIR not set");
+        return;
+    };
+    let _guard = mlx_test_lock();
+
+    // Two adapters over the same bundle are two independent models in memory.
+    assert_two_models_generate_at_once(&dir, &dir);
+}
+
 #[test]
 fn synthetic_gemma_bundle_runs_runtime_forward_without_external_fixture() {
     let _guard = mlx_test_lock();

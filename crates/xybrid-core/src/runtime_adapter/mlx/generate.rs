@@ -24,9 +24,14 @@
 //! feature.
 
 use crate::runtime_adapter::llm::{
-    ChatMessage, GenerationConfig, GenerationOutput, StreamingCallback,
+    ChatMessage, GenerationConfig, GenerationOutput, PartialToken, StreamingCallback,
 };
 use crate::runtime_adapter::llm_telemetry::{compute_streaming_fields, StreamingTelemetryFields};
+use crate::runtime_adapter::streaming_postprocess::{
+    is_reasoning_primed, merge_stop_patterns, strip_and_capture_thinking_tags_primed,
+    trim_partial_stop_suffix, truncate_at_first_stop, StreamingTextFilter, CHAT_STOP_PATTERNS,
+    CHAT_STOP_PATTERNS_BROKEN,
+};
 
 use std::time::Instant;
 
@@ -34,24 +39,20 @@ use super::chat_template::RenderOptions;
 use super::model::{MlxLlmAdapter, MlxLlmError, MlxLlmResult};
 use super::sampler::Sampler;
 
-/// Default seed used by the MLX generate path when the caller has not set
-/// [`GenerationConfig::seed`]. This preserves the historical deterministic
-/// default that streaming-vs-batched parity tests rely on.
-const DEFAULT_SAMPLER_SEED: u64 = 0;
-
 /// Render a chat-message list into the raw prompt string the tokenizer
 /// sees. Loads the bundle's chat template from `tokenizer_config.json`
 /// (cached on the adapter's [`LoadedState`](super::model)), applies it with
-/// `add_generation_prompt = true` so the LLM continues mid-turn. User-facing
-/// generation disables model thinking channels because the CLI/SDK generation
-/// APIs return answers rather than reasoning traces.
+/// `add_generation_prompt = true` so the LLM continues mid-turn. The template
+/// is asked for its reasoning channel only for a reasoning model (see
+/// [`MlxLlmAdapter::reasoning_enabled`]); every other model gets a direct
+/// answer.
 pub fn render_prompt(adapter: &MlxLlmAdapter, messages: &[ChatMessage]) -> MlxLlmResult<String> {
     let template = adapter
         .chat_template()
         .ok_or(MlxLlmError::NotLoaded)?
         .clone();
     let options = RenderOptions {
-        enable_thinking: false,
+        enable_thinking: adapter.reasoning_enabled(),
         ..RenderOptions::default()
     };
     template
@@ -65,17 +66,23 @@ pub fn render_prompt(adapter: &MlxLlmAdapter, messages: &[ChatMessage]) -> MlxLl
 #[derive(Debug)]
 pub struct GenerateParams<'cfg> {
     pub config: &'cfg GenerationConfig,
-    /// Pre-constructed sampler. `GenerateParams::new` honors
-    /// [`GenerationConfig::seed`] and otherwise preserves the historical
-    /// deterministic default; tests may still inject a custom sampler.
+    /// Pre-constructed sampler. `GenerateParams::new` seeds it from
+    /// [`GenerationConfig::seed`], or from system entropy when the caller set
+    /// none; tests may still inject a custom sampler.
     pub sampler: Sampler,
 }
 
 impl<'cfg> GenerateParams<'cfg> {
+    /// A request without a seed samples differently on every call, as the
+    /// llama.cpp backend does. Greedy decoding (`temperature == 0`, the
+    /// default) never consults the sampler's randomness.
     pub fn new(config: &'cfg GenerationConfig) -> Self {
         Self {
             config,
-            sampler: Sampler::seeded(config.seed.unwrap_or(DEFAULT_SAMPLER_SEED)),
+            sampler: match config.seed {
+                Some(seed) => Sampler::seeded(seed),
+                None => Sampler::from_entropy(),
+            },
         }
     }
 
@@ -83,6 +90,136 @@ impl<'cfg> GenerateParams<'cfg> {
         self.sampler = sampler;
         self
     }
+}
+
+/// Stop patterns a streamed chat turn is cut at: the caller's stop sequences
+/// plus the chat-template markers every backend filters.
+fn chat_stream_stop_patterns(config: &GenerationConfig) -> Vec<String> {
+    merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS)
+}
+
+/// The patterns the finished text is cut at: the streamed ones plus the
+/// variants a tokenizer leaves when it splits the leading `<` off a marker.
+/// Those would match ordinary text mid-stream, so they run on final text only.
+fn chat_final_stop_patterns(config: &GenerationConfig) -> Vec<String> {
+    let mut extras: Vec<&str> = CHAT_STOP_PATTERNS.to_vec();
+    extras.extend_from_slice(CHAT_STOP_PATTERNS_BROKEN);
+    merge_stop_patterns(&config.stop_sequences, &extras)
+}
+
+/// Apply the chat-output contract to a finished turn: cut at the first stop
+/// pattern, drop a partial stop left by a budget cut, split reasoning blocks
+/// into [`GenerationOutput::reasoning_content`], and trim. Returns whether the
+/// turn was cut off by its token budget.
+fn finish_chat_output(
+    output: &mut GenerationOutput,
+    final_patterns: &[String],
+    primed: bool,
+) -> bool {
+    let mut text = std::mem::take(&mut output.text);
+    let stopped_in_text = truncate_at_first_stop(&mut text, final_patterns);
+    trim_partial_stop_suffix(&mut text, final_patterns);
+    let truncated_by_budget = !stopped_in_text && output.finish_reason == "length";
+    let (clean, reasoning_content) =
+        strip_and_capture_thinking_tags_primed(&text, primed, truncated_by_budget);
+    output.text = clean.trim().to_string();
+    output.reasoning_content = reasoning_content;
+    output.finish_reason = if truncated_by_budget {
+        "length"
+    } else {
+        "stop"
+    }
+    .to_string();
+    truncated_by_budget
+}
+
+/// Run one chat turn for a prompt rendered by [`render_prompt`], with the
+/// chat-output contract the llama.cpp backend has (`streaming_postprocess`):
+///
+/// - the turn ends on the caller's stop sequences and on chat-template
+///   markers, and neither appears in the text;
+/// - reasoning blocks never reach the answer or the token stream, and are
+///   returned in [`GenerationOutput::reasoning_content`];
+/// - a streamed turn delivers filtered text deltas, then one empty terminal
+///   token that carries `finish_reason` and the final text.
+///
+/// [`generate_tokens`] stays the unfiltered loop underneath: raw prompts and
+/// the token-level parity tests use it directly.
+pub fn generate_chat<'cb>(
+    adapter: &MlxLlmAdapter,
+    prompt: &str,
+    config: &GenerationConfig,
+    on_token: Option<StreamingCallback<'cb>>,
+) -> MlxLlmResult<GenerationOutput> {
+    let stream_patterns = chat_stream_stop_patterns(config);
+    let final_patterns = chat_final_stop_patterns(config);
+    // A template can open the reasoning channel itself (LFM3 with thinking
+    // on); the model's output then starts mid-thought with no opener.
+    let primed = is_reasoning_primed(prompt);
+
+    // The decode loop ends on a chat marker the tokenizer renders as text,
+    // not only on the caller's stops, instead of running out its budget.
+    let mut loop_config = config.clone();
+    loop_config.stop_sequences = stream_patterns.clone();
+
+    let Some(mut on_token) = on_token else {
+        let mut output = generate_tokens(adapter, prompt, GenerateParams::new(&loop_config), None)?;
+        finish_chat_output(&mut output, &final_patterns, primed);
+        return Ok(output);
+    };
+
+    let mut filter = if primed {
+        StreamingTextFilter::new_reasoning_primed(stream_patterns)
+    } else {
+        StreamingTextFilter::new(stream_patterns)
+    };
+    let mut emitted = 0usize;
+    let mut output = {
+        let forward: StreamingCallback<'_> = Box::new(|raw: PartialToken| {
+            if let Some(safe_text) = filter.push(&raw.token) {
+                let mut partial =
+                    PartialToken::new(safe_text, emitted, filter.cumulative_emitted().to_string());
+                if let Some(token_id) = raw.token_id {
+                    partial = partial.with_token_id(token_id);
+                }
+                emitted += 1;
+                on_token(partial)?;
+            }
+            Ok(())
+        });
+        generate_tokens(
+            adapter,
+            prompt,
+            GenerateParams::new(&loop_config),
+            Some(forward),
+        )?
+    };
+    let truncated_by_budget = finish_chat_output(&mut output, &final_patterns, primed);
+
+    // A primed turn that ended without closing its reasoning block streamed
+    // nothing: the final cleanup surfaces that text as the answer, so the
+    // stream delivers it too.
+    if emitted == 0 && primed && !truncated_by_budget && !output.text.is_empty() {
+        on_token(PartialToken::new(
+            output.text.clone(),
+            emitted,
+            output.text.clone(),
+        ))
+        .map_err(MlxLlmError::StreamingCallback)?;
+        emitted += 1;
+    }
+
+    // The terminal token is the only place the callback learns how the turn
+    // ended, so it goes out even when the filter held back every delta.
+    if output.tokens_generated > 0 {
+        on_token(
+            PartialToken::new(String::new(), emitted, output.text.clone())
+                .with_finish_reason(output.finish_reason.as_str()),
+        )
+        .map_err(MlxLlmError::StreamingCallback)?;
+    }
+
+    Ok(output)
 }
 
 /// Orchestrate the token-by-token generation loop for a pre-rendered
@@ -427,6 +564,13 @@ mod runtime {
         mut params: GenerateParams<'_>,
         mut callback: Option<StreamingCallback<'cb>>,
     ) -> MlxLlmResult<GenerationOutput> {
+        // One MLX operation at a time, process-wide: two models generating at
+        // once crash inside MLX (see `xybrid_mlx::exclusive`). Taken before
+        // the adapter's own weight lock, as every MLX entry point does, so a
+        // thread holding weights always holds this already.
+        let _mlx = xybrid_mlx::exclusive();
+        // Timed from here, so time spent queued behind another model is not
+        // reported as this run's time to first token.
         let start = Instant::now();
         let mut chunk_timestamps: Vec<Instant> = Vec::new();
 
@@ -708,8 +852,8 @@ mod runtime {
                 prefill_tps: fields.prefill_tps,
                 // Text-only MLX path: no image preprocessing leg to time.
                 image_preprocess_ms: None,
-                // MLX does not split a reasoning channel yet; <think> capture
-                // happens in the shared executor marker-table pass.
+                // The raw loop returns text as generated; `generate_chat`
+                // splits reasoning blocks off a chat turn afterwards.
                 reasoning_content: None,
             })
         })();
@@ -953,13 +1097,14 @@ mod tests {
     }
 
     #[test]
-    fn generate_params_default_seed_is_deterministic() {
-        // Two runs of Sampler::seeded(DEFAULT_SAMPLER_SEED) should produce
-        // the same token sequence on the same logits — the invariant the
-        // streaming-vs-batched parity test depends on.
-        let logits = vec![0.5, 1.0, 1.5, 2.0];
+    fn generate_params_without_a_seed_sample_differently_each_time() {
+        // An unseeded request draws from system entropy, as the llama.cpp
+        // backend does: a fixed default seed would make every "regenerate"
+        // return the same sampled answer. 64 draws over a 1024-way uniform
+        // distribution collide by chance with probability 1024^-64.
+        let logits = vec![0.0; 1024];
         let cfg = GenerationConfig {
-            temperature: 0.8,
+            temperature: 1.0,
             top_k: 0,
             top_p: 1.0,
             min_p: 0.0,
@@ -971,11 +1116,87 @@ mod tests {
         };
         let mut p1 = GenerateParams::new(&cfg);
         let mut p2 = GenerateParams::new(&cfg);
-        for _ in 0..16 {
-            let t1 = p1.sampler.sample(&logits, p1.config, &[]).unwrap();
-            let t2 = p2.sampler.sample(&logits, p2.config, &[]).unwrap();
-            assert_eq!(t1, t2);
+        let draw = |p: &mut GenerateParams<'_>| -> Vec<i64> {
+            (0..64)
+                .map(|_| p.sampler.sample(&logits, p.config, &[]).unwrap())
+                .collect()
+        };
+        assert_ne!(draw(&mut p1), draw(&mut p2));
+    }
+
+    fn chat_output(text: &str, finish_reason: &str) -> GenerationOutput {
+        GenerationOutput {
+            text: text.to_string(),
+            tokens_generated: 4,
+            generation_time_ms: 1,
+            tokens_per_second: 1.0,
+            finish_reason: finish_reason.to_string(),
+            ttft_ms: None,
+            mean_itl_ms: None,
+            p95_itl_ms: None,
+            emitted_chunks: None,
+            inter_chunk_ms: Vec::new(),
+            decode_tps: None,
+            prefill_tps: None,
+            image_preprocess_ms: None,
+            reasoning_content: None,
         }
+    }
+
+    #[test]
+    fn finish_chat_output_cuts_at_a_stop_and_keeps_the_stop_out_of_the_text() {
+        let config = GenerationConfig {
+            stop_sequences: vec!["END".to_string()],
+            ..Default::default()
+        };
+        let patterns = chat_final_stop_patterns(&config);
+
+        // The loop reports "stop" for a stop sequence and leaves it in place.
+        let mut output = chat_output("  the answer END trailing", "stop");
+        let truncated = finish_chat_output(&mut output, &patterns, false);
+        assert!(!truncated);
+        assert_eq!(output.text, "the answer");
+        assert_eq!(output.finish_reason, "stop");
+
+        // A chat marker the tokenizer rendered as text ends the turn too,
+        // even when the loop itself ran out its budget.
+        let mut output = chat_output("the answer<|im_end|>\n<|im_start|>user", "length");
+        let truncated = finish_chat_output(&mut output, &patterns, false);
+        assert!(!truncated);
+        assert_eq!(output.text, "the answer");
+        assert_eq!(output.finish_reason, "stop");
+
+        // A budget cut that lands inside a marker drops the partial marker.
+        let mut output = chat_output("the answer<|im_", "length");
+        let truncated = finish_chat_output(&mut output, &patterns, false);
+        assert!(truncated);
+        assert_eq!(output.text, "the answer");
+        assert_eq!(output.finish_reason, "length");
+    }
+
+    #[test]
+    fn finish_chat_output_splits_reasoning_off_the_answer() {
+        let patterns = chat_final_stop_patterns(&GenerationConfig::default());
+
+        // The model opened the block itself.
+        let mut output = chat_output("<think>weigh it</think>Four.", "stop");
+        finish_chat_output(&mut output, &patterns, false);
+        assert_eq!(output.text, "Four.");
+        assert_eq!(output.reasoning_content.as_deref(), Some("weigh it"));
+
+        // The template opened it, and the budget ran out mid-thought: all of
+        // it is reasoning, none of it an answer.
+        let mut output = chat_output("still weighing", "length");
+        let truncated = finish_chat_output(&mut output, &patterns, true);
+        assert!(truncated);
+        assert_eq!(output.text, "");
+        assert_eq!(output.reasoning_content.as_deref(), Some("still weighing"));
+
+        // No reasoning: nothing is captured.
+        let mut output = chat_output("Four.", "stop");
+        finish_chat_output(&mut output, &patterns, false);
+        assert_eq!(output.text, "Four.");
+        assert_eq!(output.reasoning_content, None);
     }
 
     #[test]
