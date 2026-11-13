@@ -334,7 +334,8 @@ pub(crate) unsafe fn format_chat_with_model(
 /// `stop_lens` either both null with
 /// `n_stop_seqs == 0`, or both valid. `grammar` / `grammar_root` are either
 /// null (unconstrained generation) or NUL-terminated C strings that outlive
-/// the call.
+/// the call. `banned_tokens` is either null with `n_banned_tokens == 0`, or
+/// valid for `n_banned_tokens` elements.
 #[allow(clippy::too_many_arguments)]
 pub(crate) unsafe fn generate(
     ctx: *mut c_void,
@@ -351,6 +352,8 @@ pub(crate) unsafe fn generate(
     seed: u32,
     grammar: *const c_char,
     grammar_root: *const c_char,
+    banned_tokens: *const i32,
+    n_banned_tokens: c_int,
     stop_seqs: *const i32,
     stop_lens: *const c_int,
     n_stop_seqs: c_int,
@@ -372,6 +375,8 @@ pub(crate) unsafe fn generate(
         seed,
         grammar,
         grammar_root,
+        banned_tokens,
+        n_banned_tokens,
         stop_seqs,
         stop_lens,
         n_stop_seqs,
@@ -401,6 +406,8 @@ pub(crate) unsafe fn generate_streaming(
     seed: u32,
     grammar: *const c_char,
     grammar_root: *const c_char,
+    banned_tokens: *const i32,
+    n_banned_tokens: c_int,
     stop_seqs: *const i32,
     stop_lens: *const c_int,
     n_stop_seqs: c_int,
@@ -425,6 +432,8 @@ pub(crate) unsafe fn generate_streaming(
         seed,
         grammar,
         grammar_root,
+        banned_tokens,
+        n_banned_tokens,
         stop_seqs,
         stop_lens,
         n_stop_seqs,
@@ -459,6 +468,8 @@ pub(crate) unsafe fn generate_from_current_logits(
     seed: u32,
     grammar: *const c_char,
     grammar_root: *const c_char,
+    banned_tokens: *const i32,
+    n_banned_tokens: c_int,
     stop_seqs: *const i32,
     stop_lens: *const c_int,
     n_stop_seqs: c_int,
@@ -481,6 +492,8 @@ pub(crate) unsafe fn generate_from_current_logits(
         seed,
         grammar,
         grammar_root,
+        banned_tokens,
+        n_banned_tokens,
         stop_seqs,
         stop_lens,
         n_stop_seqs,

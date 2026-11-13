@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every local stage's model, as the CLI does, and `Pipeline::is_ready`
   reports a stage downloaded by `load_models` as ready, so later runs don't
   reload it.
+- **LFM3 with thinking off (llama.cpp):** a turn is one answer again. With a
+  system prompt or earlier turns in the conversation, LFM3 wrote a first
+  answer, a stray `</think>` and the answer once more. A batch run filed the
+  first answer under `reasoning_content`, but a stream had already sent all
+  three, so `xybrid repl --stream` printed
+  `The capital of France is Paris.</think>The capital of France is Paris.`
+  and stream and final text disagreed, on tool continuations too. LFM3's
+  thinking-off prompt ends with the think channel closed, and after such a
+  prompt the sampler can no longer pick `<think>` or `</think>`. That makes
+  thinking off strict for LFM3: it cannot open a think block of its own
+  either. Thinking-on runs are unchanged. In
+  `xybrid-llama`, `generate_with_stops`, `generate_streaming` and
+  `generate_from_current_logits_streaming` take a `banned_tokens` list after
+  `grammar`; pass `&[]` to ban nothing.
 
 ## [0.18.0] - 2026-11-12
 
