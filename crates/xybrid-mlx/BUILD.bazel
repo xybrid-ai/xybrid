@@ -5,7 +5,7 @@
 # is exactly what the workspace graph needs (xybrid-core's optional `llm-mlx`
 # feature is not enabled in any Bazel slice today). The linked runtime stays a
 # cargo-only concern on Apple Silicon macOS (CI job: check (llm-mlx-runtime,
-# macos-14)); the `metal` dep is bindings-gated and therefore absent here.
+# macos)); the `metal` dep is bindings-gated and therefore absent here.
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 

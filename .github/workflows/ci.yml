@@ -28,6 +28,7 @@ jobs:
       python_sdk: ${{ steps.filter.outputs.python_sdk }}
       kotlin_jni: ${{ steps.filter.outputs.kotlin_jni }}
       apple_bolt: ${{ steps.filter.outputs.apple_bolt }}
+      mlx_runtime: ${{ steps.filter.outputs.mlx_runtime }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Check changed paths
@@ -384,7 +385,13 @@ jobs:
           XYBRID_LLAMA_CPP_VULKAN: "1"
         run: cargo check -p xybrid-sdk --features platform-desktop
 
+  # The `llm-mlx` tier compiles everything about the MLX backend except the
+  # calls into MLX itself (selection, registry formats, config and weight
+  # validation, chat templates, sampling), so it runs on Linux for every code
+  # change and catches most breakage without a macOS runner.
   check-mlx-non-linking:
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
     name: check (llm-mlx non-linking, ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
@@ -392,9 +399,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
           toolchain: stable
+          components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ubuntu-mlx-non-linking
+      # The workspace clippy job never enables `llm-mlx`, so nothing else lints
+      # this tier.
+      - name: Clippy core MLX non-linking tier
+        run: cargo clippy -p xybrid-core --no-default-features --features llm-mlx --all-targets -- -D warnings
       - name: Check core MLX non-linking tier
         run: cargo check -p xybrid-core --no-default-features --features llm-mlx
       - name: Check SDK MLX non-linking tier
@@ -424,9 +436,16 @@ jobs:
       - name: Test MLX benchmark wrapper host gates
         run: bash tools/scripts/test-bench-scripts.sh
 
+  # The only job that links MLX and runs it. It needs Apple Silicon and, while
+  # no xcframework release is pinned, a source build of MLX, so it runs only
+  # when something that reaches the MLX runtime changed (`mlx_runtime` in
+  # tools/scripts/ci_gate.py).
   check-mlx-runtime-macos:
-    name: check (llm-mlx-runtime, macos-14)
-    runs-on: macos-14
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.mlx_runtime == 'true'
+    name: check (llm-mlx-runtime, macos)
+    runs-on: macos-15
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -435,9 +454,13 @@ jobs:
         with:
           toolchain: stable
           targets: aarch64-apple-ios
+          components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: macos-mlx-runtime
+          # Per-image cache: build-script output records this image's Xcode
+          # clang-runtime path, which other images may lack.
+          env-vars: ImageOS
       - name: Check iOS core MLX non-linking target
         run: |
           CARGO_TARGET_DIR="${RUNNER_TEMP}/xybrid-ios-mlx-non-linking-target" \
@@ -449,15 +472,29 @@ jobs:
       - name: Check MLX xcframework pin status
         id: mlx_pin
         run: ./tools/scripts/fetch-mlx-xcframework.sh --check-published
-      - name: Install MLX source-build tools
+      # A source build of MLX takes about twenty minutes on a hosted runner.
+      # Its output depends only on the pins and the two build scripts, so it
+      # is cached on those. A cache hit also proves nothing about the pins
+      # being buildable today; build-mlx-xcframework.yml covers that whenever
+      # they change.
+      - name: Cache the source-built MLX xcframework
         if: steps.mlx_pin.outputs.published != 'true'
+        id: mlx_cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            vendor/mlx-apple/mlx.xcframework
+            vendor/mlx-apple/.installed-source-pin
+          key: mlx-xcframework-source-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vendor/mlx-apple/UPSTREAM_VERSIONS.txt', 'tools/scripts/build-mlx-slice.sh', 'tools/scripts/build-local-mlx-xcframework.sh') }}
+      - name: Install MLX source-build tools
+        if: steps.mlx_pin.outputs.published != 'true' && steps.mlx_cache.outputs.cache-hit != 'true'
         run: |
           if ! command -v ninja >/dev/null 2>&1; then
             brew install ninja
           fi
           ninja --version
       - name: Build local macOS MLX xcframework from pins
-        if: steps.mlx_pin.outputs.published != 'true'
+        if: steps.mlx_pin.outputs.published != 'true' && steps.mlx_cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           echo "::notice::MLX xcframework download pin is unavailable; building a local macOS slice from pinned upstream SHAs for runtime CI."
@@ -479,8 +516,8 @@ jobs:
         run: cargo clippy -p mlx-c-sys --features bindings --all-targets -- -D warnings
       - name: Clippy xybrid-mlx bindings
         run: cargo clippy -p xybrid-mlx --features bindings --all-targets -- -D warnings
-      - name: Check xybrid-core MLX runtime
-        run: cargo check -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp
+      - name: Clippy xybrid-core MLX runtime
+        run: cargo clippy -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp --all-targets -- -D warnings
       - name: Test xybrid-core MLX runtime
         run: cargo test -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp --lib
       - name: Test MLX LLM runtime smoke

@@ -4,7 +4,7 @@
 # this crate compiles to an empty shell on every target (see src/lib.rs), so no
 # bindgen build script and no mlx.xcframework link step are needed here. The
 # linked runtime (`bindings`) stays a cargo-only concern on Apple Silicon
-# macOS (CI job: check (llm-mlx-runtime, macos-14)).
+# macOS (CI job: check (llm-mlx-runtime, macos)).
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 

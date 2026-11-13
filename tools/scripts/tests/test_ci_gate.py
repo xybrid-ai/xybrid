@@ -277,6 +277,34 @@ class RequiredGateTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 check_jobs(needs)
 
+    def test_mlx_runtime_job_runs_for_what_reaches_the_mlx_runtime(self):
+        for path in (
+            "crates/mlx-c-sys/build.rs", "crates/xybrid-mlx/src/array.rs",
+            "crates/xybrid-core/src/ir/envelope.rs", "crates/xybrid-sdk/src/registry_client.rs",
+            "crates/xybrid-cli/src/commands/run.rs", "crates/xybrid-llama/src/generation.rs",
+            "macros/src/lib.rs", "vendor/mlx-apple/UPSTREAM_VERSIONS.txt", "vendor/llama-cpp",
+            "tools/scripts/build-mlx-slice.sh", "tools/scripts/test-fetch-mlx-xcframework.sh",
+            "Cargo.lock", ".github/workflows/ci.yml",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(classify("pull_request", pr_files(path))["mlx_runtime"], "true")
+                needs = self.needs(path)
+                needs["check-mlx-runtime-macos"] = {"result": "skipped"}
+                with self.assertRaises(ValueError):
+                    check_jobs(needs)
+        for path in (
+            "crates/xybrid-bolt/src/lib.rs", "bindings/kotlin/build.gradle.kts",
+            "bindings/web/src/index.ts", "tools/scripts/ci_gate.py",
+            "vendor/llama-cpp-notes.txt", ".github/workflows/build-mlx-xcframework.yml",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(classify("pull_request", pr_files(path))["mlx_runtime"], "false")
+                needs = self.needs(path)
+                # Some of these paths require the tooling tests instead.
+                needs["tooling-tests"] = {"result": "success"}
+                needs["check-mlx-runtime-macos"] = {"result": "skipped"}
+                check_jobs(needs)
+
     def test_every_optional_job_is_required_by_ci_success_and_gated_by_its_flag(self):
         workflow = (Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         required = re.search(r"^  ci-success:\n(?:    .*\n)*?    needs: \[([^\]]*)\]", workflow, re.M)[1]

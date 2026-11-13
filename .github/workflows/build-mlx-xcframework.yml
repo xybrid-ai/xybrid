@@ -32,8 +32,15 @@ on:
       - 'tools/scripts/build-mlx-slice.sh'
       - '.github/workflows/build-mlx-xcframework.yml'
 
+# Read-only by default: the pull-request and master-push runs only build and
+# upload a workflow artifact. The publish job below asks for `contents: write`
+# itself, and runs only for an `mlx-v*` tag.
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: build-mlx-xcframework-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   MLX_DEPLOYMENT_TARGET_IOS: '16.4'
@@ -214,13 +221,27 @@ jobs:
             ${{ steps.package.outputs.zip_name }}.sha256
           if-no-files-found: error
 
+  # Publishing is its own job so that only it holds a token that can write to
+  # the repository, and only for a tag: nothing a pull request can change runs
+  # with that token (the build above, and tools/scripts/build-mlx-slice.sh
+  # which it calls, run read-only).
+  publish:
+    name: Publish mlx.xcframework to the tag's release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/mlx-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mlx-xcframework
       - name: Attach to GitHub Release
-        if: steps.version.outputs.is_tag == 'true'
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
         with:
           files: |
-            ${{ steps.package.outputs.zip_name }}
-            ${{ steps.package.outputs.zip_name }}.sha256
+            mlx-*.xcframework.zip
+            mlx-*.xcframework.zip.sha256
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
         env:
