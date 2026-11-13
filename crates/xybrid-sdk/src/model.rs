@@ -1520,8 +1520,10 @@ fn validate_local_backend_override(
 }
 
 fn metadata_uses_local_backend_selector(metadata: &ModelMetadata) -> bool {
-    if matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. })
-        || is_mlx_llm_safetensors_metadata(metadata)
+    if matches!(
+        metadata.execution_template,
+        ExecutionTemplate::Gguf { .. } | ExecutionTemplate::Decision(_)
+    ) || is_mlx_llm_safetensors_metadata(metadata)
         || is_mlx_embedding_safetensors_metadata(metadata)
     {
         return true;
@@ -1561,6 +1563,17 @@ fn validate_local_backend_artifact_compatibility(
             }
             BackendChoice::LlamaCpp | BackendChoice::Mistral => Err(SdkError::ConfigError(format!(
                 "backend `{}` does not support local SafeTensors model `{}`; use `auto` or `mlx`",
+                backend.as_str(),
+                metadata.model_id
+            ))),
+        },
+        // A decision model is answered by the llama.cpp decision runtime and
+        // nothing else: pinning another backend must not look like it worked.
+        ExecutionTemplate::Decision(_) => match backend {
+            BackendChoice::LlamaCpp => Ok(()),
+            BackendChoice::Mlx | BackendChoice::Mistral => Err(SdkError::ConfigError(format!(
+                "backend `{}` does not run decision model `{}`; decision models run on llama.cpp \
+                 (use `auto` or `llamacpp`)",
                 backend.as_str(),
                 metadata.model_id
             ))),
@@ -8340,6 +8353,29 @@ mod tests {
     }
 
     #[test]
+    fn a_decision_model_accepts_only_the_llamacpp_backend_override() {
+        // The llama.cpp decision runtime is the only thing that answers a
+        // decision model. Pinning another backend used to be accepted and
+        // then ignored.
+        let mut metadata = xybrid_core::execution::ModelMetadata::onnx("d1", "1.0", "model.gguf");
+        metadata.execution_template = ExecutionTemplate::Decision(
+            xybrid_core::execution::template::DecisionTemplate::new("model.gguf"),
+        );
+
+        validate_local_backend_artifact_compatibility(&metadata, crate::BackendChoice::LlamaCpp)
+            .expect("llama.cpp runs decision models");
+        for backend in [crate::BackendChoice::Mlx, crate::BackendChoice::Mistral] {
+            let err =
+                validate_local_backend_override(&metadata, backend, &apple_mlx_selector_cfg())
+                    .unwrap_err();
+            assert!(
+                err.to_string().contains("does not run decision model `d1`"),
+                "{backend}: {err}"
+            );
+        }
+    }
+
+    #[test]
     fn local_gguf_backend_override_rejects_explicit_mlx_artifact_mismatch() {
         let mut metadata =
             xybrid_core::execution::ModelMetadata::onnx("qwen3-4b-gguf", "1.0", "model.gguf");
@@ -8528,7 +8564,9 @@ mod tests {
     }
 
     #[test]
-    fn auto_registry_selection_falls_back_to_gguf_without_safetensors() {
+    fn auto_registry_selection_keeps_the_registry_default_without_safetensors() {
+        // Only MLX asks for a variant other than the default: a model with no
+        // SafeTensors variant resolves as it does on a build without MLX.
         let detail = registry_detail("text-generation", &[("llamacpp-q4", "gguf")]);
 
         assert_eq!(
@@ -8538,7 +8576,25 @@ mod tests {
                 &apple_mlx_selector_cfg()
             )
             .unwrap(),
-            Some("gguf")
+            None
+        );
+    }
+
+    #[test]
+    fn auto_registry_selection_keeps_the_registry_default_when_llamacpp_is_selected() {
+        let detail = registry_detail(
+            "text-generation",
+            &[("llamacpp-q4", "gguf"), ("mlx-fp16", "safetensors")],
+        );
+
+        assert_eq!(
+            select_auto_registry_format_for_detail(
+                "qwen3.5-3b",
+                &detail,
+                &linux_llamacpp_selector_cfg()
+            )
+            .unwrap(),
+            None
         );
     }
 

@@ -682,9 +682,9 @@ pub(crate) fn select_auto_registry_format_for_detail(
     detail: &ModelDetail,
     cfg: &SelectorCfg,
 ) -> Result<Option<&'static str>, SdkError> {
-    let Some(stage_kind) = registry_backend_selectable_kind(&detail.task) else {
+    if registry_backend_selectable_kind(&detail.task).is_none() {
         return Ok(None);
-    };
+    }
 
     let selected = match select_with_cfg(&SelectionParams::new(model_id), detail, cfg) {
         Ok(selected) => selected,
@@ -698,30 +698,39 @@ pub(crate) fn select_auto_registry_format_for_detail(
         Err(err) => return Err(selector_error_to_sdk(err)),
     };
 
-    let Some(format) = registry_format_for_backend(selected) else {
-        return Ok(None);
-    };
-
-    if stage_kind == "embed" && format != "safetensors" {
-        return Ok(None);
-    }
-
-    if detail.has_variant(model_id, format) {
-        Ok(Some(format))
+    // Only MLX asks for a variant other than the registry default. Every
+    // other selection keeps the default under the bare mask, exactly as a
+    // build without MLX resolves it.
+    if selected == BackendChoice::Mlx && detail.has_variant(model_id, "safetensors") {
+        Ok(Some("safetensors"))
     } else {
         Ok(None)
     }
 }
 
+/// Whether this build can run MLX on this host: the non-linking tier alone
+/// (`llm-mlx` without `llm-mlx-runtime`) or a failed Metal probe cannot.
+fn mlx_runtime_usable(cfg: &SelectorCfg) -> bool {
+    cfg.host_is_apple_arm64 && cfg.mlx_compiled && cfg.mlx_runtime_ok
+}
+
 /// Resolve the registry format preference for an automatic local backend load.
 ///
-/// This is the shared SDK/CLI bridge to the core backend selector: when the
-/// registry says a model is an LLM or embedding task and exposes an MLX
-/// SafeTensors variant, an Apple Silicon build with a working MLX runtime
-/// resolves `Some("safetensors")`. LLM tasks can otherwise fall back through
-/// the selector's normal GGUF priority; embedding tasks keep the registry
-/// default instead of requesting GGUF because the local llama.cpp adapter does
-/// not currently produce embedding envelopes.
+/// `None` is the registry's default variant, cached under the bare model
+/// mask. That is the answer on every build that cannot run MLX, with no
+/// registry request made here: such a build loads exactly as it did before
+/// MLX existed.
+///
+/// A build with a working MLX runtime (Apple Silicon, `llm-mlx-runtime`,
+/// Metal probe passed) prefers the registry's SafeTensors variant of an LLM
+/// or embedding model when the registry lists one, and resolves
+/// `Some("safetensors")`. A SafeTensors variant in the registry is therefore
+/// a promise that MLX can load it: an architecture or quantization this
+/// build's MLX adapter does not support fails the load with an error naming
+/// `backend: llamacpp`, and is not retried with the default variant.
+///
+/// A copy already extracted on this machine always wins, whichever variant
+/// it is, so a cached model loads without the registry.
 ///
 /// # Errors
 ///
@@ -737,27 +746,27 @@ pub fn registry_format_for_auto_local_backend(
     if let Some(format) = offline_auto_registry_format(client, model_id, cfg) {
         return Ok(Some(format));
     }
-    if client.resolve_offline(model_id).is_some() {
+    if client.resolve_offline(model_id).is_some() || !mlx_runtime_usable(cfg) {
         return Ok(None);
     }
 
     match client.get_model(model_id) {
         Ok(detail) => select_auto_registry_format_for_detail(model_id, &detail, cfg),
-        Err(err) if registry_metadata_error_can_fall_back_to_default(&err) => {
-            Ok(offline_auto_registry_format(client, model_id, cfg))
-        }
+        Err(err) if registry_metadata_error_can_fall_back_to_default(&err) => Ok(None),
         Err(err) => Err(err),
     }
 }
 
+/// The format-variant copy of `model_id` already extracted on this machine
+/// that an automatic load should use, if any: an MLX SafeTensors copy when
+/// this build can run MLX, else a GGUF copy an explicit `backend: llamacpp`
+/// load left behind. Local file system only.
 pub(crate) fn offline_auto_registry_format(
     client: &RegistryClient,
     model_id: &str,
     cfg: &SelectorCfg,
 ) -> Option<&'static str> {
-    if cfg.host_is_apple_arm64
-        && cfg.mlx_compiled
-        && cfg.mlx_runtime_ok
+    if mlx_runtime_usable(cfg)
         && client
             .resolve_offline_with_format(model_id, "safetensors")
             .is_some()
@@ -4587,6 +4596,67 @@ mod tests {
             stats.total_size_bytes,
             (metadata.len() + weights.len()) as u64
         );
+    }
+
+    #[test]
+    fn auto_format_asks_the_registry_nothing_on_a_build_that_cannot_run_mlx() {
+        // A build without a working MLX runtime has one variant to load, the
+        // registry default under the bare mask, and loads it as it did before
+        // MLX existed: no model-detail request, no format-keyed cache entry.
+        let server = httpmock::MockServer::start();
+        let detail = server.mock(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/v1/models/qwen3.5-0.8b");
+            then.status(200).json_body(serde_json::json!({
+                "id": "qwen3.5-0.8b",
+                "family": "qwen",
+                "task": "text-generation",
+                "parameters": 800_000_000u64,
+                "description": "Qwen 3.5 0.8B",
+                "variants": {
+                    "universal": {
+                        "platform": "universal", "format": "gguf", "quantization": "q4_k_m",
+                        "size_bytes": 1, "hf_repo": "xybrid-ai/q", "file": "q.gguf"
+                    },
+                    "macos-arm64": {
+                        "platform": "macos-arm64", "format": "safetensors",
+                        "quantization": "fp16", "size_bytes": 1, "hf_repo": "xybrid-ai/q-mlx",
+                        "file": "model.safetensors"
+                    }
+                }
+            }));
+        });
+        let tmp = tempfile::TempDir::new().unwrap();
+        let client =
+            RegistryClient::with_url_and_cache_dir(server.base_url(), tmp.path().to_path_buf())
+                .unwrap();
+
+        let non_linking_mac = SelectorCfg {
+            mlx_runtime_ok: false,
+            ..macos_all_backends_selector_cfg()
+        };
+        for cfg in [linux_llamacpp_selector_cfg(), non_linking_mac] {
+            assert_eq!(
+                registry_format_for_auto_local_backend(&client, "qwen3.5-0.8b", &cfg).unwrap(),
+                None,
+                "{}",
+                cfg.target
+            );
+        }
+        detail.assert_hits(0);
+
+        // The same registry answer makes an MLX-capable build prefer the
+        // SafeTensors variant.
+        assert_eq!(
+            registry_format_for_auto_local_backend(
+                &client,
+                "qwen3.5-0.8b",
+                &macos_all_backends_selector_cfg()
+            )
+            .unwrap(),
+            Some("safetensors")
+        );
+        detail.assert_hits(1);
     }
 
     #[test]
