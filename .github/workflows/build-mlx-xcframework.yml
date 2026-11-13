@@ -52,6 +52,9 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # Nothing here pushes, and the job uploads an artifact.
+          persist-credentials: false
 
       - name: Select Xcode 16
         run: |
@@ -103,10 +106,15 @@ jobs:
           echo "is_tag=$IS_TAG" >> "$GITHUB_OUTPUT"
           echo "Resolved version: $VERSION (tagged=$IS_TAG)"
 
+      # A tag build is the artifact that gets published and pinned by
+      # checksum: it compiles everything itself, and never from a cache an
+      # earlier run filled.
       - name: Setup sccache
+        if: steps.version.outputs.is_tag != 'true'
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
       - name: Configure sccache environment
+        if: steps.version.outputs.is_tag != 'true'
         run: |
           {
             echo "SCCACHE_GHA_ENABLED=true"
