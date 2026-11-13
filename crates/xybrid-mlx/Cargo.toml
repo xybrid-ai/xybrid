@@ -18,7 +18,7 @@ path = "src/lib.rs"
 # `cargo clippy --workspace` on Ubuntu CI runners stays clean — the MTLBuffer
 # bindings are currently Apple Silicon macOS-only.
 default = []
-bindings = ["mlx-c-sys/bindings", "dep:metal"]
+bindings = ["mlx-c-sys/bindings", "dep:metal", "dep:libc"]
 
 [dependencies]
 mlx-c-sys = { path = "../mlx-c-sys", version = "0.18.0" }
@@ -30,6 +30,9 @@ tracing = "0.1"
 # rejected by the top-level compile_error! in lib.rs.
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
 metal = { version = "0.29", optional = true }
+# `dladdr`, to find the binary image MLX is linked into: MLX looks for its
+# Metal shader library beside that image (see src/resources.rs).
+libc = { version = "0.2", optional = true }
 
 [[bench]]
 name = "zero_copy"

@@ -10,8 +10,12 @@
 //! the whole binding set: callers should not need to reach into
 //! `mlx_c_sys::bindings` directly.
 
-use std::ffi::{c_char, c_void, CStr};
-use std::sync::{Mutex, OnceLock};
+use std::cell::Cell;
+use std::ffi::{c_char, c_void, CStr, OsStr};
+use std::mem::MaybeUninit;
+use std::os::unix::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use mlx_c_sys::bindings::{
     self as sys, mlx_array, mlx_dtype, mlx_optional_dtype, mlx_optional_float, mlx_optional_int,
@@ -21,7 +25,15 @@ use mlx_c_sys::bindings::{
 use crate::error::MlxError;
 
 static ERROR_HANDLER_INSTALLED: OnceLock<()> = OnceLock::new();
-static LAST_ERROR_MESSAGE: Mutex<Option<String>> = Mutex::new(None);
+
+thread_local! {
+    /// The message of the last mlx-c error raised on this thread. mlx-c calls
+    /// the handler from inside the failing C function, on the caller's thread,
+    /// so a per-thread slot pairs every message with the return code that
+    /// reported it. A process-wide slot would let one thread's `check_rc`
+    /// take, or lose, another thread's message.
+    static LAST_ERROR_MESSAGE: Cell<Option<String>> = const { Cell::new(None) };
+}
 
 /// Capture an mlx-c error message without unwinding across the C boundary.
 ///
@@ -41,9 +53,9 @@ unsafe extern "C" fn error_trampoline(msg: *const c_char, _data: *mut c_void) {
                 .into_owned()
         };
 
-        if let Ok(mut slot) = LAST_ERROR_MESSAGE.lock() {
-            *slot = Some(message);
-        }
+        // `try_with`: an error raised while this thread is being torn down
+        // has nowhere to record its message, and must not panic for it.
+        let _ = LAST_ERROR_MESSAGE.try_with(|slot| slot.set(Some(message)));
     });
 }
 
@@ -61,7 +73,33 @@ pub(crate) fn ensure_error_handler() {
 }
 
 fn take_recorded_error() -> Option<String> {
-    LAST_ERROR_MESSAGE.lock().ok()?.take()
+    LAST_ERROR_MESSAGE.try_with(Cell::take).ok().flatten()
+}
+
+/// Directory of the binary image this crate is loaded from: the executable,
+/// or the dynamic library that embeds it. MLX is linked statically into the
+/// same image and resolves its colocated `mlx.metallib` against this
+/// directory, found the same way (`dladdr` on one of its own functions).
+pub(crate) fn image_dir() -> Option<PathBuf> {
+    let mut info = MaybeUninit::<libc::Dl_info>::zeroed();
+    // SAFETY: `dladdr` reads the address it is given without dereferencing it
+    // and writes only to `info`, which is valid for writes of a `Dl_info`.
+    let found = unsafe { libc::dladdr(image_dir as *const c_void, info.as_mut_ptr()) };
+    if found == 0 {
+        return None;
+    }
+    // SAFETY: a nonzero return means `dladdr` filled in `info`.
+    let info = unsafe { info.assume_init() };
+    if info.dli_fname.is_null() {
+        return None;
+    }
+    // SAFETY: `dli_fname` is a nul-terminated path owned by the dynamic
+    // loader, valid for as long as the image stays loaded; this function is
+    // part of that image.
+    let image = unsafe { CStr::from_ptr(info.dli_fname) };
+    Path::new(OsStr::from_bytes(image.to_bytes()))
+        .parent()
+        .map(Path::to_path_buf)
 }
 
 /// Translate an mlx-c nonzero return into an [`MlxError`].

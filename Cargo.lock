@@ -6458,6 +6458,7 @@ dependencies = [
  "libloading 0.8.9",
  "log",
  "mel_spec",
+ "memmap2",
  "minijinja",
  "minijinja-contrib",
  "ndarray 0.17.2",
@@ -6553,6 +6554,7 @@ dependencies = [
 name = "xybrid-mlx"
 version = "0.18.0"
 dependencies = [
+ "libc",
  "metal 0.29.0",
  "mlx-c-sys",
  "thiserror 1.0.69",

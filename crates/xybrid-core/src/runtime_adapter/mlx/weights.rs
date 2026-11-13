@@ -11,6 +11,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use memmap2::Mmap;
 use safetensors::SafeTensors;
 use serde::Deserialize;
 
@@ -19,7 +20,9 @@ use super::model::{MlxLlmError, MlxLlmResult};
 #[derive(Debug)]
 pub struct SafeTensorBundle {
     layout: SafeTensorLayout,
-    file_cache: Mutex<Option<(PathBuf, Arc<Vec<u8>>)>>,
+    /// The shard read last, kept mapped: tensors are read shard by shard, so
+    /// one mapping serves every tensor of a shard.
+    file_cache: Mutex<Option<(PathBuf, Arc<Mmap>)>>,
 }
 
 /// Lightweight SafeTensors metadata for one tensor.
@@ -132,11 +135,10 @@ impl SafeTensorBundle {
     pub fn tensor_info(&self, name: &str) -> MlxLlmResult<TensorInfo> {
         let path = self.tensor_path(name)?;
         let bytes = self.file_bytes(&path)?;
-        let st =
-            SafeTensors::deserialize(bytes.as_slice()).map_err(|e| MlxLlmError::WeightLoad {
-                path: path.clone(),
-                reason: format!("parse safetensors: {e}"),
-            })?;
+        let st = SafeTensors::deserialize(&bytes).map_err(|e| MlxLlmError::WeightLoad {
+            path: path.clone(),
+            reason: format!("parse safetensors: {e}"),
+        })?;
         let view = st.tensor(name).map_err(|e| MlxLlmError::WeightLoad {
             path: path.clone(),
             reason: format!("tensor `{name}` missing: {e}"),
@@ -162,11 +164,10 @@ impl SafeTensorBundle {
 
         let path = self.tensor_path(name)?;
         let bytes = self.file_bytes(&path)?;
-        let st =
-            SafeTensors::deserialize(bytes.as_slice()).map_err(|e| MlxLlmError::WeightLoad {
-                path: path.clone(),
-                reason: format!("parse safetensors: {e}"),
-            })?;
+        let st = SafeTensors::deserialize(&bytes).map_err(|e| MlxLlmError::WeightLoad {
+            path: path.clone(),
+            reason: format!("parse safetensors: {e}"),
+        })?;
         let view = st.tensor(name).map_err(|e| MlxLlmError::WeightLoad {
             path: path.clone(),
             reason: format!("tensor `{name}` missing: {e}"),
@@ -204,11 +205,10 @@ impl SafeTensorBundle {
 
         let path = self.tensor_path(name)?;
         let bytes = self.file_bytes(&path)?;
-        let st =
-            SafeTensors::deserialize(bytes.as_slice()).map_err(|e| MlxLlmError::WeightLoad {
-                path: path.clone(),
-                reason: format!("parse safetensors: {e}"),
-            })?;
+        let st = SafeTensors::deserialize(&bytes).map_err(|e| MlxLlmError::WeightLoad {
+            path: path.clone(),
+            reason: format!("parse safetensors: {e}"),
+        })?;
         let view = st.tensor(name).map_err(|e| MlxLlmError::WeightLoad {
             path: path.clone(),
             reason: format!("tensor `{name}` missing: {e}"),
@@ -245,7 +245,14 @@ impl SafeTensorBundle {
         }
     }
 
-    fn file_bytes(&self, path: &Path) -> MlxLlmResult<Arc<Vec<u8>>> {
+    /// The bytes of one weight file, memory-mapped.
+    ///
+    /// A shard is gigabytes. Reading it into a buffer and then copying each
+    /// tensor into MLX held the model in memory twice for the length of a
+    /// load; a mapping is paged in as tensors are copied out and costs no
+    /// anonymous memory of its own. It also makes header-only work (tensor
+    /// names, shapes, validation) touch only the header's pages.
+    fn file_bytes(&self, path: &Path) -> MlxLlmResult<Arc<Mmap>> {
         {
             let cache = self
                 .file_cache
@@ -260,10 +267,20 @@ impl SafeTensorBundle {
                 }
             }
         }
-        let bytes = Arc::new(fs::read(path).map_err(|e| MlxLlmError::WeightLoad {
+        let file = fs::File::open(path).map_err(|e| MlxLlmError::WeightLoad {
             path: path.to_path_buf(),
             reason: format!("read safetensors: {e}"),
-        })?);
+        })?;
+        // SAFETY: the mapping is read-only and private to this bundle. The
+        // one way to invalidate it is another writer truncating the file in
+        // place while it is mapped. Model files are never rewritten in place:
+        // the SDK's downloads write a temporary file and rename it over the
+        // destination, which leaves an existing mapping on the old inode.
+        let mapped = unsafe { Mmap::map(&file) }.map_err(|e| MlxLlmError::WeightLoad {
+            path: path.to_path_buf(),
+            reason: format!("map safetensors: {e}"),
+        })?;
+        let bytes = Arc::new(mapped);
         let mut cache = self
             .file_cache
             .lock()
@@ -305,11 +322,10 @@ fn safetensor_shape_to_i32(shape: &[usize], path: &Path, name: &str) -> MlxLlmRe
 
 fn tensor_names_from_file(bundle: &SafeTensorBundle, path: &Path) -> MlxLlmResult<HashSet<String>> {
     let bytes = bundle.file_bytes(path)?;
-    let (_, meta) =
-        SafeTensors::read_metadata(bytes.as_slice()).map_err(|e| MlxLlmError::WeightLoad {
-            path: path.to_path_buf(),
-            reason: format!("invalid safetensors header: {e}"),
-        })?;
+    let (_, meta) = SafeTensors::read_metadata(&bytes).map_err(|e| MlxLlmError::WeightLoad {
+        path: path.to_path_buf(),
+        reason: format!("invalid safetensors header: {e}"),
+    })?;
     Ok(meta.tensors().into_keys().collect())
 }
 
