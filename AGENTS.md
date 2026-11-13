@@ -278,8 +278,8 @@ contract is `docs/development/liquid-decision-protocol.md`, and
 
 SafeTensors LLM and embedding models run on MLX through
 `crates/xybrid-core/src/runtime_adapter/mlx/`, over `crates/xybrid-mlx` (safe
-wrappers) and `crates/mlx-c-sys` (bindgen). User-facing behavior is in
-`docs/backends/mlx.md`.
+wrappers) and `crates/mlx-c-sys` (bindgen, published as `xybrid-mlx-sys`).
+User-facing behavior is in `docs/backends/mlx.md`.
 
 - **Two tiers, and only cargo builds the second.** `llm-mlx` compiles
   everything except the calls into MLX, on every target; it is what the Linux

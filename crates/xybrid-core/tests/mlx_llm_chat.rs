@@ -3,7 +3,7 @@
 //! These tests require:
 //! - Apple Silicon macOS.
 //! - The `llm-mlx-runtime` feature enabled (which forwards
-//!   `xybrid-mlx/bindings` → `mlx-c-sys/bindings` and links
+//!   `xybrid-mlx/bindings` → `xybrid-mlx-sys/bindings` and links
 //!   `vendor/mlx-apple/mlx.xcframework`).
 //! - Optional real MLX bundles staged at `$XYBRID_MLX_QWEN_DIR` or
 //!   `$XYBRID_MLX_QWEN_4B_DIR`, `$XYBRID_MLX_QWEN_4BIT_DIR`,

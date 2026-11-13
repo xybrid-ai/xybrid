@@ -4,7 +4,7 @@
 //! # Activation
 //!
 //! The real bindings are hidden behind the `bindings` cargo feature. A default
-//! build (`cargo build -p mlx-c-sys`) compiles this crate to an empty shell on
+//! build (`cargo build -p xybrid-mlx-sys`) compiles this crate to an empty shell on
 //! every target — this keeps the workspace-wide `cargo clippy` / `cargo check`
 //! on Linux CI runners green, because MLX links against Metal and Accelerate
 //! and cannot be built or linked on non-Apple hosts.
@@ -23,7 +23,7 @@
 //! RAII, typed-shape, and error-mapping concerns.
 //!
 //! The generated bindings are intentionally *not* re-exported transitively:
-//! downstream crates opt in explicitly by depending on `mlx-c-sys` with the
+//! downstream crates opt in explicitly by depending on `xybrid-mlx-sys` with the
 //! `bindings` feature and using the items behind `bindings::*`.
 
 #![allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
@@ -38,7 +38,7 @@
     not(all(target_os = "macos", target_arch = "aarch64"))
 ))]
 compile_error!(
-    "mlx-c-sys `bindings` feature is currently supported only on Apple Silicon \
+    "xybrid-mlx-sys `bindings` feature is currently supported only on Apple Silicon \
      macOS (`aarch64-apple-darwin`). iOS remains non-linking only until upstream MLX \
      ships a Metal-enabled iOS slice. Disable `llm-mlx-runtime` for this target."
 );

@@ -1,5 +1,10 @@
 [package]
-name = "mlx-c-sys"
+# Published as `xybrid-mlx-sys`, like the other native binding crates
+# (`xybrid-llama-sys`, `xybrid-whisper-sys`, `xybrid-zzz-sys`): it builds only
+# against this workspace's vendored xcframework and is not a general-purpose
+# mlx-c binding. The directory and the library name (`mlx_c_sys`) keep the
+# upstream library's name.
+name = "xybrid-mlx-sys"
 version.workspace = true
 edition.workspace = true
 license = "MIT"

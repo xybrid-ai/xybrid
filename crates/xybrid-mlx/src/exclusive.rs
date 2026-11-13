@@ -12,7 +12,7 @@
 //!
 //! A static is the right owner here even though statics are otherwise avoided
 //! for correctness-relevant state: the state being protected is MLX's own
-//! process-global runtime, and `mlx-c-sys`'s `links` key guarantees one copy
+//! process-global runtime, and `xybrid-mlx-sys`'s `links` key guarantees one copy
 //! of that runtime per process.
 
 use std::cell::Cell;

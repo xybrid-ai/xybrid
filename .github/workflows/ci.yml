@@ -471,16 +471,16 @@ jobs:
         run: rm -rf "${RUNNER_TEMP}/xybrid-ios-mlx-non-linking-target"
       - name: Materialize the MLX xcframework
         uses: ./.github/actions/mlx-xcframework
-      - name: Check mlx-c-sys bindings
-        run: cargo check -p mlx-c-sys --features bindings
-      - name: Test mlx-c-sys bindings
-        run: cargo test -p mlx-c-sys --features bindings
+      - name: Check xybrid-mlx-sys bindings
+        run: cargo check -p xybrid-mlx-sys --features bindings
+      - name: Test xybrid-mlx-sys bindings
+        run: cargo test -p xybrid-mlx-sys --features bindings
       - name: Check xybrid-mlx bindings
         run: cargo check -p xybrid-mlx --features bindings
       - name: Test xybrid-mlx bindings
         run: cargo test -p xybrid-mlx --features bindings
-      - name: Clippy mlx-c-sys bindings
-        run: cargo clippy -p mlx-c-sys --features bindings --all-targets -- -D warnings
+      - name: Clippy xybrid-mlx-sys bindings
+        run: cargo clippy -p xybrid-mlx-sys --features bindings --all-targets -- -D warnings
       - name: Clippy xybrid-mlx bindings
         run: cargo clippy -p xybrid-mlx --features bindings --all-targets -- -D warnings
       - name: Clippy xybrid-core MLX runtime

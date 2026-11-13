@@ -211,7 +211,7 @@ kept for when the license expires or the GameCI image changes.
 Builds a fat `mlx.xcframework` from upstream
 [`ml-explore/mlx`](https://github.com/ml-explore/mlx) and
 [`ml-explore/mlx-c`](https://github.com/ml-explore/mlx-c) so that downstream
-consumers (the `mlx-c-sys` crate and `vendor/mlx-apple/`) can link against a
+consumers (the `xybrid-mlx-sys` crate and `vendor/mlx-apple/`) can link against a
 prebuilt artifact instead of carrying CMake + a Metal toolchain.
 
 ### When it runs
@@ -265,7 +265,7 @@ published; when it is, the fetch script verifies that artifact's SHA256.
    plus their merged header tree.
 5. Copy each slice's compiled `*.metallib` into the matching slice's
    `Resources/` directory inside `mlx.xcframework`. Consumers (the
-   `mlx-c-sys` crate's `build.rs`) resolve them relative to the slice library
+   `xybrid-mlx-sys` crate's `build.rs`) resolve them relative to the slice library
    path. Missing macOS `*.metallib` is an error; missing iOS `*.metallib` is
    expected with the current upstream pins and is emitted as a notice.
 6. Zip the framework as `mlx-{version}.xcframework.zip` and write a sibling
@@ -294,7 +294,7 @@ script uses its own temporary Cargo target, so those transient artifacts are
 removed before the linked Rust checks without wiping the runtime job's main
 Cargo target. The local MLX source-build script also deletes its temporary
 source/build tree by default to keep macOS runner disk use bounded. It then runs
-the `mlx-c-sys`, `xybrid-mlx`, `xybrid-core`, `xybrid-sdk`, CLI, LLM and
+the `xybrid-mlx-sys`, `xybrid-mlx`, `xybrid-core`, `xybrid-sdk`, CLI, LLM and
 embedding benchmark compile checks, and Apple-platform link checks. The
 `xybrid-core` runtime test steps run the full `tests/mlx_llm_chat.rs` harness
 and the `tests/mlx_embedding.rs` harness.

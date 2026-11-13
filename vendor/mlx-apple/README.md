@@ -3,7 +3,7 @@
 This directory materializes an `mlx.xcframework` built from upstream
 [ml-explore/mlx](https://github.com/ml-explore/mlx) and
 [ml-explore/mlx-c](https://github.com/ml-explore/mlx-c). Downstream consumers
-(the `mlx-c-sys` and `xybrid-mlx` crates, and the Flutter / Apple SDK bindings)
+(the `xybrid-mlx-sys` and `xybrid-mlx` crates)
 link against this xcframework so they do not need CMake or a Metal toolchain
 locally.
 

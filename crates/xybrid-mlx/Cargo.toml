@@ -13,15 +13,15 @@ path = "src/lib.rs"
 [features]
 # Default: empty crate that compiles on any target. Consumers opt in to the
 # real MLX-linked implementation via `bindings`, which forwards to
-# `mlx-c-sys/bindings` (link the xcframework) and pulls in `metal` for the
+# `xybrid-mlx-sys/bindings` (link the xcframework) and pulls in `metal` for the
 # zero-copy SharedBuffer path (US-008). Off by default so
 # `cargo clippy --workspace` on Ubuntu CI runners stays clean — the MTLBuffer
 # bindings are currently Apple Silicon macOS-only.
 default = []
-bindings = ["mlx-c-sys/bindings", "dep:metal", "dep:libc"]
+bindings = ["xybrid-mlx-sys/bindings", "dep:metal", "dep:libc"]
 
 [dependencies]
-mlx-c-sys = { path = "../mlx-c-sys", version = "0.18.0" }
+xybrid-mlx-sys = { path = "../mlx-c-sys", version = "0.18.0" }
 thiserror = { workspace = true }
 tracing = "0.1"
 
