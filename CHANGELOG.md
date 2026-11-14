@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-14
+
+### Added
+
+- **Agent setup:** the skills installer now includes `xybrid-connect` and its
+  reference script, with a SHA-256 check before replacing an installed copy.
+  The CLI installers describe the optional `xybrid connect` command, and the
+  documentation covers `connect`, `auth` and provisional workspace deadlines
+  in English and Chinese. Agent signup is available in production; trace
+  export still requires explicit configuration.
+
+### Changed
+
+- **Cargo:** refreshed the generated llama.cpp native manifest for the LFM3
+  fix below, so matching prebuilt archives are available to external builds.
+- **Flutter:** regenerated the FRB binding comments for Rust 1.100.
+
 ### Fixed
 
 - **SDK:** a pipeline stage with no `target:` and no provider runs locally
