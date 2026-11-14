@@ -274,6 +274,68 @@ contract is `docs/development/liquid-decision-protocol.md`, and
   differ). Keep llama.cpp's `src/` off the wrapper's include path: a second
   `ggml.h` breaks the iOS build.
 
+### MLX backend (Apple Silicon macOS, preview)
+
+SafeTensors LLM and embedding models run on MLX through
+`crates/xybrid-core/src/runtime_adapter/mlx/`, over `crates/xybrid-mlx` (safe
+wrappers) and `crates/mlx-c-sys` (bindgen, published as `xybrid-mlx-sys`).
+User-facing behavior is in `docs/backends/mlx.md`.
+
+- **Two tiers, and only cargo builds the second.** `llm-mlx` compiles
+  everything except the calls into MLX, on every target; it is what the Linux
+  job checks. `llm-mlx-runtime` links `vendor/mlx-apple/mlx.xcframework` and is
+  a compile error off `aarch64-apple-darwin`. Bazel builds both MLX crates as
+  empty shells, so no shipped artifact contains MLX. Build the xcframework with
+  `tools/scripts/build-local-mlx-xcframework.sh`; nothing is published yet
+  (`release=unpublished` in `vendor/mlx-apple/UPSTREAM_VERSIONS.txt`, whose
+  pins are release commits, never tag-object hashes).
+- **MLX refuses what it cannot do.** Tools and grammars are llama.cpp-only and
+  `reject_unsupported_generation` (`mlx/model.rs`) fails the request, as the
+  mistralrs backend does for tools. A new capability on `GenerationConfig` or
+  `RunOptions` is either implemented for MLX or refused there. Never ignored.
+- **Chat turns share llama.cpp's output contract.** `generate_chat`
+  (`mlx/generate.rs`) runs them through `streaming_postprocess`: chat markers
+  end the turn, reasoning goes to `reasoning_content`, a stream ends with one
+  empty terminal token. `generate_tokens` stays the unfiltered loop that raw
+  prompts and the token-level parity tests use.
+- **One MLX operation at a time.** Two threads evaluating at once segfault
+  inside MLX. Every path that evaluates MLX arrays (a load, a generation, an
+  embedding run) takes `xybrid_mlx::exclusive()` first, before any adapter
+  lock. `tests/mlx_llm_chat.rs` runs two models at once to hold this.
+  `MlxArray::eval` and `async_eval` take the lock themselves (it is
+  reentrant), so the safe API cannot be raced; the operation-wide guard is
+  still needed, because a run keeps lazy graphs in flight between evaluations.
+- **A dropped model gives its memory back.** MLX frees arrays into a pool it
+  keeps, so the struct that owns a model's weights ends with a
+  `xybrid_mlx::ReleasePooledMemory` field (last, so the weights drop first),
+  and a load declares one before it materializes anything. It never waits for
+  the lock: an operation in flight clears the pool as it finishes. Tests
+  assert MLX's active and pooled bytes return to where they started.
+- **Every first MLX call goes through `ensure_metallib_resource`.** It installs
+  xybrid's error handler too; mlx-c's default one prints and exits the
+  process. A new `xybrid-mlx` entry point that can be a process's first MLX
+  call (an allocator query, say) calls it before touching the FFI.
+- **Real-weight tests run through `tools/scripts/run-mlx-real-tests.sh`**: one
+  process per test, then all in one process, with the crash report's backtrace
+  printed when a process dies. MLX and the Metal stack abort on failures no
+  caller can catch, and a bare `cargo test` names neither the test nor the
+  frame.
+- **Automatic registry selection must not change other builds.** Only a build
+  that can run MLX asks the registry for a `safetensors` variant
+  (`registry_format_for_auto_local_backend`). Every other build resolves the
+  default variant under the bare mask with no extra request, and a test counts
+  the requests.
+- **Label a model's runtime with `backend_label_for_metadata`**, not
+  `backend_label_from_template`: SafeTensors is Candle's format, and only the
+  metadata says a bundle runs on MLX.
+- **`mlx.metallib` is found relative to the image that links MLX.**
+  `crates/xybrid-mlx/src/resources.rs` mirrors MLX's own lookup (`dladdr`, then
+  `Resources/`). A distributed binary ships the file there or sets
+  `XYBRID_MLX_METALLIB`.
+- **The MLX-linked CI job is path-gated.** `check (llm-mlx-runtime, macos)`
+  runs when `mlx_runtime` in `tools/scripts/ci_gate.py` matches. A new path
+  that can break the runtime joins that pattern, or the job never sees it.
+
 ### Releases
 
 **Releases are cut by branch name, not by hand.** Push a `release/v<version>`

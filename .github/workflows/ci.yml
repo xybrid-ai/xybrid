@@ -28,6 +28,7 @@ jobs:
       python_sdk: ${{ steps.filter.outputs.python_sdk }}
       kotlin_jni: ${{ steps.filter.outputs.kotlin_jni }}
       apple_bolt: ${{ steps.filter.outputs.apple_bolt }}
+      mlx_runtime: ${{ steps.filter.outputs.mlx_runtime }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Check changed paths
@@ -384,6 +385,127 @@ jobs:
           XYBRID_LLAMA_CPP_VULKAN: "1"
         run: cargo check -p xybrid-sdk --features platform-desktop
 
+  # The `llm-mlx` tier compiles everything about the MLX backend except the
+  # calls into MLX itself (selection, registry formats, config and weight
+  # validation, chat templates, sampling), so it runs on Linux for every code
+  # change and catches most breakage without a macOS runner.
+  check-mlx-non-linking:
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
+    name: check (llm-mlx non-linking, ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: ubuntu-mlx-non-linking
+      # The workspace clippy job never enables `llm-mlx`, so nothing else lints
+      # this tier.
+      - name: Clippy core MLX non-linking tier
+        run: cargo clippy -p xybrid-core --no-default-features --features llm-mlx --all-targets -- -D warnings
+      - name: Check core MLX non-linking tier
+        run: cargo check -p xybrid-core --no-default-features --features llm-mlx
+      - name: Check SDK MLX non-linking tier
+        run: cargo check -p xybrid-sdk --no-default-features --features llm-mlx
+      - name: Check CLI MLX non-linking tier
+        run: cargo check -p xybrid-cli --no-default-features --features llm-mlx
+      - name: Test MLX selector and non-linking routing
+        run: cargo test -p xybrid-core --no-default-features --features llm-mlx runtime_adapter::selector --lib
+      - name: Test MLX executor non-linking routing
+        run: cargo test -p xybrid-core --no-default-features --features llm-mlx execution::executor::tests::test_executor_dispatches_mlx_embedding_before_generic_safetensors_runtime --lib
+      - name: Test SDK MLX registry-format selection
+        run: cargo test -p xybrid-sdk --no-default-features --features llm-mlx registry_format --lib
+      - name: Test CLI MLX registry-format selection
+        run: cargo test -p xybrid-cli --no-default-features --features llm-mlx --bin xybrid
+      - name: Check MLX benchmark non-linking build
+        run: cargo bench -p xybrid-core --no-default-features --features llm-mlx --bench llm_backend_compare --no-run
+      - name: Check MLX embedding benchmark non-linking build
+        run: cargo bench -p xybrid-core --no-default-features --features llm-mlx --bench mlx_embedding --no-run
+      - name: Test MLX xcframework fetch script pin status
+        run: bash tools/scripts/test-fetch-mlx-xcframework.sh
+      - name: Test MLX xcframework slice build script
+        run: bash tools/scripts/test-build-mlx-slice.sh
+      - name: Test local MLX xcframework source-build script
+        run: bash tools/scripts/test-build-local-mlx-xcframework.sh
+      - name: Test real-weight MLX test runner
+        run: bash tools/scripts/test-run-mlx-real-tests.sh
+      - name: Test staged MLX fixture checks
+        run: bash tools/scripts/test-integration-download-staged.sh
+      - name: Test MLX benchmark wrapper host gates
+        run: bash tools/scripts/test-bench-scripts.sh
+
+  # The only job that links MLX and runs it. It needs Apple Silicon and, while
+  # no xcframework release is pinned, a source build of MLX, so it runs only
+  # when something that reaches the MLX runtime changed (`mlx_runtime` in
+  # tools/scripts/ci_gate.py).
+  check-mlx-runtime-macos:
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.mlx_runtime == 'true'
+    name: check (llm-mlx-runtime, macos)
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: aarch64-apple-ios
+          components: clippy
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: macos-mlx-runtime
+          # Per-image cache: build-script output records this image's Xcode
+          # clang-runtime path, which other images may lack.
+          env-vars: ImageOS
+      - name: Check iOS core MLX non-linking target
+        run: |
+          CARGO_TARGET_DIR="${RUNNER_TEMP}/xybrid-ios-mlx-non-linking-target" \
+            cargo build -p xybrid-core --target aarch64-apple-ios --no-default-features --features llm-mlx
+      - name: Check iOS MLX runtime gate
+        run: bash tools/scripts/test-ios-mlx-runtime-gate.sh
+      - name: Clean iOS MLX build artifacts
+        run: rm -rf "${RUNNER_TEMP}/xybrid-ios-mlx-non-linking-target"
+      - name: Materialize the MLX xcframework
+        uses: ./.github/actions/mlx-xcframework
+      - name: Check xybrid-mlx-sys bindings
+        run: cargo check -p xybrid-mlx-sys --features bindings
+      - name: Test xybrid-mlx-sys bindings
+        run: cargo test -p xybrid-mlx-sys --features bindings
+      - name: Check xybrid-mlx bindings
+        run: cargo check -p xybrid-mlx --features bindings
+      - name: Test xybrid-mlx bindings
+        run: cargo test -p xybrid-mlx --features bindings
+      - name: Clippy xybrid-mlx-sys bindings
+        run: cargo clippy -p xybrid-mlx-sys --features bindings --all-targets -- -D warnings
+      - name: Clippy xybrid-mlx bindings
+        run: cargo clippy -p xybrid-mlx --features bindings --all-targets -- -D warnings
+      - name: Clippy xybrid-core MLX runtime
+        run: cargo clippy -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp --all-targets -- -D warnings
+      - name: Test xybrid-core MLX runtime
+        run: cargo test -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp --lib
+      - name: Test MLX LLM runtime smoke
+        run: cargo test -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp --test mlx_llm_chat
+      - name: Test MLX embedding runtime smoke
+        run: cargo test -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp --test mlx_embedding
+      - name: Check xybrid-sdk MLX runtime
+        run: cargo check -p xybrid-sdk --no-default-features --features llm-mlx-runtime,llm-llamacpp
+      - name: Test xybrid-sdk MLX runtime
+        run: cargo test -p xybrid-sdk --no-default-features --features llm-mlx-runtime,llm-llamacpp --lib
+      - name: Check xybrid-cli MLX runtime
+        run: cargo check -p xybrid-cli --no-default-features --features llm-mlx-runtime,llm-llamacpp
+      - name: Test xybrid-cli MLX runtime
+        run: cargo test -p xybrid-cli --no-default-features --features llm-mlx-runtime,llm-llamacpp --bin xybrid
+      - name: Check MLX vs llama.cpp benchmark
+        run: cargo bench -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp --bench llm_backend_compare --no-run
+      - name: Check MLX embedding benchmark
+        run: cargo bench -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp --bench mlx_embedding --no-run
+
   clippy-llm:
     needs: tooling-changes
     if: needs.tooling-changes.outputs.full_ci == 'true'
@@ -676,7 +798,7 @@ jobs:
     runs-on: ubuntu-latest
     # Inspect dependency results even when the tooling path gate skips its matrix.
     if: ${{ !cancelled() }}
-    needs: [tooling-changes, tooling-tests, unity-bolt-compile, unity-bolt-drift, python-sdk, kotlin-jni-drift, apple-bolt-drift, fmt, workflow-index, version-sync, agent-skills, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, observability, web]
+    needs: [tooling-changes, tooling-tests, unity-bolt-compile, unity-bolt-drift, python-sdk, kotlin-jni-drift, apple-bolt-drift, fmt, workflow-index, version-sync, agent-skills, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, check-mlx-non-linking, check-mlx-runtime-macos, clippy-llm, test-llm, test, api-contract, observability, web]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Verify required job results

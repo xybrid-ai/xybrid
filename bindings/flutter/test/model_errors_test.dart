@@ -47,14 +47,14 @@ class _Loader implements FfiModelLoader {
   final _ErrorApi _api;
 
   @override
-  Future<FfiModel> load() async {
+  Future<FfiModel> load({FfiBackend? backend}) async {
     final error = _api.loadError;
     if (error != null) throw error;
     return _Model(_api);
   }
 
   @override
-  Stream<FfiLoadEvent> loadWithProgress() =>
+  Stream<FfiLoadEvent> loadWithProgress({FfiBackend? backend}) =>
       Stream.fromIterable(_api.loadEvents);
 
   @override

@@ -178,6 +178,39 @@ fn an_uncached_chat_model_speculates_after_one_resolve_and_downloads_that_varian
     download.assert_hits(1);
 }
 
+#[test]
+fn a_speculative_download_populates_and_reuses_the_selected_format_cache() {
+    let registry = MockServer::start();
+    let id = "formatted-chat";
+    let resolve = mock_resolve(
+        &registry,
+        id,
+        resolve_body(&registry, id, "model.gguf", true, Some(gguf_metadata(id))),
+    );
+    let download = mock_file(&registry, "model.gguf", WEIGHTS);
+    let temp = tempfile::TempDir::new().unwrap();
+    let client = client(&registry.base_url(), &temp);
+    let resolved = client.resolve_with_format(id, None, "gguf").unwrap();
+
+    let model = ModelLoader::from_registry(id).load_speculative(
+        Arc::clone(&client),
+        id,
+        Some("gguf"),
+        resolved,
+    );
+    let status = model.await_download(DOWNLOAD_TIMEOUT_MS);
+    assert_eq!(status.state, DownloadState::Ready, "{status:?}");
+    assert!(model.is_loaded());
+    assert!(client.resolve_offline(id).is_none());
+    let cached = client.resolve_offline_with_format(id, "gguf").unwrap();
+    let reused = client
+        .fetch_extracted_with_format(id, None, "gguf", |_| {})
+        .unwrap();
+    assert_eq!(reused, cached);
+    resolve.assert_hits(1);
+    download.assert_hits(1);
+}
+
 /// Before this check every uncached registry model was speculated, so a TTS or
 /// ASR model got a chat placeholder and its requests went to the gateway's
 /// chat endpoint.

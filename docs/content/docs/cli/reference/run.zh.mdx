@@ -23,6 +23,7 @@ xybrid run --pipeline <name> --dry-run
 | `--input-text` | | 文本模型（LLM、TTS）的文本输入 |
 | `--input-audio` | | 音频模型（ASR）的音频文件路径 — 支持 WAV、MP3、OGG、FLAC |
 | `--target` | | 强制指定模型格式（`onnx`、`coreml`、`tflite`）；省略时自动检测 |
+| `--backend` | | 强制指定本地生成或 Embedding 后端（`auto`、`mlx`、`llamacpp`、`mistral`） |
 | `--dry-run` | | 模拟路由决策但不执行推理 |
 | `--policy` | | 加载约束路由的策略 Bundle（YAML/JSON）— 见 [混合执行 › 策略](/docs/concepts/hybrid-execution#策略) |
 | `--trace` | | 启用执行追踪，输出火焰图与 LLM 指标 |
@@ -35,6 +36,13 @@ xybrid run --pipeline <name> --dry-run
 3. 打印各阶段延迟与路由摘要
 
 在 dry-run 模式下，CLI 会像真实运行一样在当前设备快照下决策第一个阶段（策略与路由），但不执行推理。后续阶段标记为未知：它们的输入是上一阶段的输出，在未执行时并不存在。
+
+显式指定的后端是硬性要求：如果当前构建无法提供该后端，或该后端无法运行模型的
+格式，运行会失败。`mlx` 是面向 Apple Silicon Mac 的预览功能，需要启用了
+`llm-mlx-runtime` 功能的构建；它运行 SafeTensors 模型，并会拒绝需要工具、
+语法约束或图像的请求。对于 Registry 模型，`mlx` 会请求 SafeTensors 变体，
+`llamacpp` 会请求 GGUF 变体。Registry 目前还没有任何 SafeTensors 变体，因此
+`mlx` 目前只适用于本地模型目录。
 
 ## 示例
 
@@ -99,6 +107,16 @@ XYBRID_API_KEY="<your-xybrid-api-key>" xybrid run \
 `crates/xybrid-cli/examples/hybrid-deepseek.yaml` 使用 `backend: direct` 和
 `DEEPSEEK_API_KEY` 直接调用 DeepSeek，可用于手动检查提供商连接。
 自动化策略路由测试使用回环地址上的模拟 DeepSeek 端点和测试凭据。
+
+### 在 MLX 上运行本地 SafeTensors 模型
+
+```bash
+xybrid run --directory ./qwen3-mlx --backend mlx --input-text "Summarize this."
+```
+
+该目录包含模型的 SafeTensors 文件，以及一个指明受支持架构的
+`model_metadata.json`。不加 `--backend` 时，这样的目录同样会在 MLX 上运行；
+加上该参数后，MLX 不可用时会直接报错。
 
 ## 示例输出
 

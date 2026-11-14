@@ -390,6 +390,7 @@ Stream tokens in real-time as the LLM generates:
 
 ```dart
 final model = await XybridModelLoader.fromRegistry('qwen-2.5-0.5b').load();
+print('Token streaming: ${model.supportsTokenStreaming()}');
 
 await for (final token in model.runStreaming(XybridEnvelope.text('What is ML?'))) {
   stdout.write(token.token);
@@ -442,6 +443,24 @@ await for (final token in model.runStreamingWithContext(envelope, context)) {
 | **Android** | ✅ | — | ✅ | arm64-v8a, x86_64; ORT from Maven Central |
 | **Linux** | ✅ | ✅ CPU | ✅ | x86_64 |
 | **Windows** | ✅ | ✅ CPU | ✅ | x86_64 |
+
+### Choosing a local backend
+
+`load()` and `loadWithProgress()` take an optional `backend:` that pins the
+local LLM or embedding backend for that model:
+
+```dart
+final model = await XybridModelLoader.fromRegistry('qwen3.5-0.8b')
+    .load(backend: XybridBackend.llamaCpp);
+```
+
+`XybridBackend.auto` (the default) lets the SDK choose. An explicit backend is
+a hard requirement: the load fails if the native library cannot provide it.
+
+`XybridBackend.mlx` runs SafeTensors models on Apple's MLX. It is a preview
+for Apple Silicon macOS and is **not in the published package**: it needs a
+native library built from source with the `llm-mlx-runtime` feature. See
+[`docs/backends/mlx.md`](../../docs/backends/mlx.md) in the main repo.
 
 ### Model Support
 
@@ -548,7 +567,7 @@ https://github.com/xybrid-ai/xybrid/tree/master/examples/flutter
 |-------|---------|
 | `Xybrid` | SDK initialization, cache checking, factory methods |
 | `XybridModelLoader` | Load models from registry or local bundle |
-| `XybridModel` | Run inference (batch, streaming, with context) |
+| `XybridModel` | Run inference (batch, streaming, with context) and inspect token streaming support |
 | `XybridEnvelope` | Type-safe inputs: audio, text, embedding |
 | `XybridResult` | Inference output: text, audio, embedding, latency |
 | `StreamToken` | Individual LLM token during streaming |

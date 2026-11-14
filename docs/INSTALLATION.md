@@ -57,6 +57,12 @@ cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features pl
 XYBRID_LLAMA_CPP_VULKAN=1 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-desktop
 ```
 
+The prebuilt binaries from the install script are built from these presets.
+None of them contains the MLX backend: running SafeTensors models on MLX is a
+preview for Apple Silicon Macs that needs a build from a clone of this
+repository. See [Build from a Local Clone](#build-from-a-local-clone) and
+[`backends/mlx.md`](backends/mlx.md).
+
 Vulkan is a build-time setting, not a Cargo feature, and it is **Linux-only**
 today. Install the Vulkan SDK before enabling it; the build reads
 `VULKAN_SDK/lib` when resolving the loader. Unset `XYBRID_LLAMA_CPP_VULKAN`
@@ -126,6 +132,8 @@ only binaries you compile yourself.
 | `vision` | Image envelope and preprocessing support |
 | `llm-llamacpp-vision` | llama.cpp vision-language support (`mmproj` / `mtmd`) |
 | `llm-mistral` | mistral.rs LLM backend (alternative) |
+| `llm-mlx` | MLX metadata, selector, tokenizer, and SafeTensors validation without linking MLX |
+| `llm-mlx-runtime` | Real MLX SafeTensors execution on Apple Silicon macOS; requires `vendor/mlx-apple/mlx.xcframework/` |
 
 </details>
 
@@ -193,6 +201,18 @@ cd xybrid
 cargo build --release -p xybrid-cli --features platform-macos
 # Binary at target/release/xybrid
 ```
+
+To run SafeTensors models on MLX (a preview, Apple Silicon Macs only), build
+the MLX xcframework from its pinned sources first, then add the runtime
+feature. This needs Xcode and CMake, and takes several minutes:
+
+```bash
+./tools/scripts/build-local-mlx-xcframework.sh
+cargo build --release -p xybrid-cli --features platform-macos,llm-mlx-runtime
+```
+
+[`backends/mlx.md`](backends/mlx.md) covers what MLX runs, what it does not,
+and how to ship a binary built this way.
 
 ## Verify Installation
 
@@ -382,9 +402,20 @@ The `run` command accepts multiple input sources (mutually exclusive):
 | `--voice <id>` | TTS voice ID (e.g., `af_bella`) |
 | `--output <file>` | Output file (.wav for audio, .txt for text, .json for choice scores) |
 | `--target <format>` | Target format (onnx, coreml, tflite) |
+| `--backend <backend>` | Local generation or embedding backend override (`auto`, `mlx`, `llamacpp`, `mistral`) |
 | `--dry-run` | Validate without executing |
 | `--trace` | Enable execution tracing |
 | `--trace-export <file>` | Export trace to JSON (Chrome trace format) |
+
+### `fetch` Options
+
+| Flag | Description |
+|------|-------------|
+| `--model <id>` | Registry model to fetch |
+| `<file>` | Pipeline YAML; fetches non-cloud stages |
+| `--huggingface <repo>` | HuggingFace repo to fetch |
+| `--platform <platform>` | Target registry platform (auto-detected if omitted) |
+| `--backend <backend>` | Fetch the variant a backend loads (`auto`, `mlx`, `llamacpp`, `mistral`). `mlx` asks for a SafeTensors variant and needs an MLX build; the registry lists none yet. See [`backends/mlx.md`](backends/mlx.md). |
 
 ### `repl` Options
 
@@ -393,6 +424,7 @@ The `run` command accepts multiple input sources (mutually exclusive):
 | `--model <id>` | Registry model to load |
 | `--huggingface <repo>` | HuggingFace model to load |
 | `--model-file <path>` | Local GGUF file to load |
+| `--backend <backend>` | Local generation or embedding backend override (`auto`, `mlx`, `llamacpp`, `mistral`) |
 | `--stream` | Stream tokens as generated (LLM) |
 | `--system <prompt>` | System prompt for the conversation |
 | `--voice <id>` | TTS voice ID |

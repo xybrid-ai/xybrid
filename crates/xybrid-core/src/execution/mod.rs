@@ -111,12 +111,12 @@ pub(crate) mod text_chunking;
 pub(crate) mod tts_timing;
 
 // LLM telemetry span stampers (internal, LLM features only)
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 pub(crate) mod llm_telemetry;
 
 // Tool-result continuation glue for the executor's LLM paths (internal,
 // LLM features only)
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 pub(crate) mod tool_continuation;
 
 // Main executor

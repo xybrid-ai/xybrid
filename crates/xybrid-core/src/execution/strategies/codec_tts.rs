@@ -12,7 +12,8 @@ use crate::execution::postprocessing::codec::{
 };
 use crate::execution::strategies::llm::{LlmGenerationParams, LlmInference, LlmModelConfig};
 use crate::execution::template::{
-    ExecutionTemplate, GenerationParams, ModelMetadata, PostprocessingStep,
+    gguf_runtime_backend_hint, ExecutionTemplate, GenerationParams, ModelMetadata,
+    PostprocessingStep,
 };
 use crate::execution::types::ExecutorResult;
 use crate::execution::voice_loader::TtsVoiceLoader;
@@ -121,7 +122,7 @@ impl<I: LlmInference> CodecTtsStrategy<I> {
                     let template_path = Path::new(base_path).join(template);
                     config = config.with_chat_template(template_path.to_string_lossy().to_string());
                 }
-                if let Some(hint) = metadata.metadata.get("backend").and_then(|v| v.as_str()) {
+                if let Some(hint) = gguf_runtime_backend_hint(metadata) {
                     config = config.with_backend_hint(hint);
                 }
                 Ok(config)
@@ -143,6 +144,7 @@ impl<I: LlmInference> CodecTtsStrategy<I> {
             top_p: 1.0,
             top_k: 50,
             repetition_penalty: 1.0,
+            seed: None,
             system_prompt: None,
             stop_sequences: vec!["<|SPEECH_GENERATION_END|>".to_string()],
             tools: Vec::new(),
@@ -551,6 +553,7 @@ mod tests {
             files: vec!["model.gguf".to_string()],
             vision_encoder: None,
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -573,6 +576,7 @@ mod tests {
             files: vec!["model.gguf".to_string()],
             vision_encoder: None,
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,

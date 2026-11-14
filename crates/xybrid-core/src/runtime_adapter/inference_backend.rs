@@ -48,6 +48,10 @@ pub enum RuntimeType {
     /// Candle framework (HuggingFace, pure Rust)
     #[cfg(feature = "candle")]
     Candle,
+
+    /// MLX framework (Apple Silicon)
+    #[cfg(feature = "llm-mlx")]
+    Mlx,
 }
 
 impl RuntimeType {
@@ -57,6 +61,8 @@ impl RuntimeType {
             RuntimeType::CoreML => "coreml",
             #[cfg(feature = "candle")]
             RuntimeType::Candle => "candle",
+            #[cfg(feature = "llm-mlx")]
+            RuntimeType::Mlx => "mlx",
         }
     }
 }

@@ -19,8 +19,14 @@ import 'tools.dart';
 
 // Native completion supplies metrics and correlation after the terminal token.
 // Hold that terminal token so successful turns still finalize exactly once.
+//
+// A local abort crosses as a cloud-fallback marker. With
+// [cloudFallbackAbortIsFinal] it ends the run (unless a terminal token already
+// did); otherwise it is a non-final marker announcing the cloud continuation.
 Stream<StreamToken> _tokensWithCompletion(
-    Stream<FfiStreamEvent> stream) async* {
+  Stream<FfiStreamEvent> stream, {
+  bool cloudFallbackAbortIsFinal = true,
+}) async* {
   StreamToken? pendingFinal;
   var emittedToolCalls = false;
   try {
@@ -80,6 +86,23 @@ Stream<StreamToken> _tokensWithCompletion(
             isFinal: true,
             finishReason: 'error: $field0',
           );
+        case FfiStreamEvent_CloudFallbackAbort(:final field0):
+          if (!cloudFallbackAbortIsFinal) {
+            // After a terminal token the marker changes nothing; that token
+            // still waits for its completion.
+            if (pendingFinal == null) {
+              yield _cloudFallbackAbortToken(field0, isFinal: false);
+            }
+          } else if (pendingFinal != null) {
+            // The run already produced its terminal token; the abort replaces
+            // only the completion, so finalize with that token.
+            yield pendingFinal;
+            pendingFinal = null;
+            return;
+          } else {
+            yield _cloudFallbackAbortToken(field0, isFinal: true);
+            return;
+          }
       }
     }
   } catch (error) {
@@ -107,6 +130,27 @@ class XybridException implements Exception {
 
   @override
   String toString() => 'XybridException: $message';
+}
+
+/// Local generation or embedding backend override for model loading.
+///
+/// [auto] leaves backend selection to the native SDK. Concrete values hard-pin
+/// the requested backend; unavailable explicit backends fail during load with
+/// the native selector message.
+enum XybridBackend {
+  auto,
+  mlx,
+  llamaCpp,
+  mistral;
+
+  FfiBackend toFfi() {
+    return switch (this) {
+      XybridBackend.auto => FfiBackend.auto,
+      XybridBackend.mlx => FfiBackend.mlx,
+      XybridBackend.llamaCpp => FfiBackend.llamaCpp,
+      XybridBackend.mistral => FfiBackend.mistral,
+    };
+  }
 }
 
 /// Cooperative cancel handle for an in-flight batch or streaming run.
@@ -176,6 +220,33 @@ class CancellationToken {
       return false;
     }
   }
+}
+
+CloudFallbackReason _cloudFallbackReasonFromFfi(FfiCloudFallbackReason reason) {
+  return switch (reason) {
+    FfiCloudFallbackReason.userCancelled => CloudFallbackReason.userCancelled,
+    FfiCloudFallbackReason.stressThrottle => CloudFallbackReason.stressThrottle,
+    FfiCloudFallbackReason.stressMemory => CloudFallbackReason.stressMemory,
+    FfiCloudFallbackReason.stressThermal => CloudFallbackReason.stressThermal,
+    FfiCloudFallbackReason.stressCpuSustained =>
+      CloudFallbackReason.stressCpuSustained,
+    FfiCloudFallbackReason.budgetExceeded => CloudFallbackReason.budgetExceeded,
+  };
+}
+
+StreamToken _cloudFallbackAbortToken(
+  FfiCloudFallbackAbort abort, {
+  required bool isFinal,
+}) {
+  final reason = _cloudFallbackReasonFromFfi(abort.reason);
+  return StreamToken(
+    token: '',
+    index: 0,
+    cumulativeText: '',
+    isFinal: isFinal,
+    finishReason: isFinal ? 'cloud_fallback: ${reason.wireName}' : null,
+    cloudFallbackReason: reason,
+  );
 }
 
 /// Event emitted during model loading with progress tracking.
@@ -303,9 +374,11 @@ class XybridModelLoader {
   /// Returns a ready-to-use [XybridModel] instance.
   ///
   /// Throws [XybridException] if loading fails, retaining the native diagnostic.
-  Future<XybridModel> load() async {
+  Future<XybridModel> load({
+    XybridBackend backend = XybridBackend.auto,
+  }) async {
     try {
-      final ffiModel = await _inner.load();
+      final ffiModel = await _inner.load(backend: backend.toFfi());
       return XybridModel._(ffiModel);
     } on XybridException {
       rethrow;
@@ -339,8 +412,10 @@ class XybridModelLoader {
   ///   }
   /// }
   /// ```
-  Stream<LoadEvent> loadWithProgress() {
-    return _inner.loadWithProgress().map((ffiEvent) {
+  Stream<LoadEvent> loadWithProgress({
+    XybridBackend backend = XybridBackend.auto,
+  }) {
+    return _inner.loadWithProgress(backend: backend.toFfi()).map((ffiEvent) {
       return switch (ffiEvent) {
         FfiLoadEvent_Progress(:final field0) => LoadProgress(
             field0.progress,
@@ -371,6 +446,12 @@ class XybridModel {
 
   XybridModel._(this.inner);
 
+  /// Whether this model supports native token-by-token streaming.
+  ///
+  /// Returns `true` for token-streaming LLM models such as GGUF and
+  /// runtime-ready MLX SafeTensors models, and `false` for batch-only model
+  /// types or non-linking MLX skeleton builds.
+  bool supportsTokenStreaming() => inner.supportsTokenStreaming();
   /// Immutable reference for the load that created this model.
   ObservationRef? get loadObservationRef => inner.loadObservationRef();
 
@@ -637,7 +718,7 @@ class XybridModel {
         cancellationToken: cancellationToken?.inner.fork(),
       );
 
-      yield* _tokensWithCompletion(stream);
+      yield* _tokensWithCompletion(stream, cloudFallbackAbortIsFinal: false);
     } catch (e) {
       yield StreamToken(
         token: '',
@@ -754,6 +835,8 @@ class XybridModel {
               isFinal: true,
               finishReason: 'error: $field0',
             );
+          case FfiStreamEvent_CloudFallbackAbort(:final field0):
+            yield _cloudFallbackAbortToken(field0, isFinal: true);
         }
       }
     } catch (e) {

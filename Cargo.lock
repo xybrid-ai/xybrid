@@ -6408,11 +6408,13 @@ dependencies = [
  "libc",
  "opentelemetry",
  "opentelemetry_sdk",
+ "safetensors",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha2",
  "tempfile",
+ "tokenizers",
  "tracing",
  "tracing-flame",
  "tracing-subscriber",
@@ -6449,6 +6451,7 @@ dependencies = [
  "libloading 0.8.9",
  "log",
  "mel_spec",
+ "memmap2",
  "minijinja",
  "minijinja-contrib",
  "ndarray 0.17.2",
@@ -6490,6 +6493,7 @@ dependencies = [
  "windows-sys 0.59.0",
  "xybrid-llama",
  "xybrid-llama-sys",
+ "xybrid-mlx",
  "xybrid-whisper",
  "xybrid-zzz-sys",
  "yuvutils-rs",
@@ -6540,6 +6544,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "xybrid-mlx"
+version = "0.18.0"
+dependencies = [
+ "libc",
+ "metal 0.29.0",
+ "thiserror 1.0.69",
+ "tracing",
+ "xybrid-mlx-sys",
+]
+
+[[package]]
+name = "xybrid-mlx-sys"
+version = "0.18.0"
+dependencies = [
+ "bindgen",
+]
+
+[[package]]
 name = "xybrid-observability"
 version = "0.18.0"
 dependencies = [
@@ -6574,12 +6596,14 @@ dependencies = [
  "opentelemetry_sdk",
  "ort",
  "rustls",
+ "safetensors",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha2",
  "tempfile",
  "thiserror 1.0.69",
+ "tokenizers",
  "tokio",
  "tokio-stream",
  "ureq 2.12.1",

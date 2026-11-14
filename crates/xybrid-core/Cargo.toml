@@ -8,6 +8,9 @@ homepage.workspace = true
 documentation.workspace = true
 description = "Core runtime for hybrid cloud-edge AI inference: model execution, pipeline orchestration, and routing primitives."
 readme = "README.md"
+# A 7 MB tokenizer that only the MLX tests read (tests/fixtures/README.md).
+# Nothing in a published build uses it.
+exclude = ["tests/fixtures/qwen_tokenizer.json"]
 # Upstream llama backend source lives at workspace `vendor/llama-cpp/`
 # (see `.gitmodules`), consumed by the `xybrid-llama-sys` crate's build
 # script. No tarball-exclude needed here — the source is not under this
@@ -105,6 +108,8 @@ candle-core = { version = "0.8", optional = true }
 candle-nn = { version = "0.8", optional = true }
 candle-transformers = { version = "0.8", optional = true }
 safetensors = { version = "0.4", optional = true }
+# Maps MLX SafeTensors shards instead of reading them into memory (llm-mlx).
+memmap2 = { version = "0.9", optional = true }
 hf-hub = { version = "0.5", optional = true, default-features = false, features = ["ureq", "rustls-tls"] }  # HF model downloads; rustls (no native-tls/openssl), unified with xybrid-sdk's 0.5
 byteorder = { version = "1.5", optional = true }  # For reading mel filter bytes
 num-traits = { version = "0.2", optional = true }  # Required by candle audio
@@ -116,6 +121,16 @@ rayon = { version = "1.8", optional = true }  # Bounded mobile compute pool (can
 # crates.io release (mistralrs 0.8.1 or newer) and restore the
 # `dep:mistralrs` wiring in the `llm-mistral*` features below.
 # mistralrs = { version = "0.8", optional = true }
+
+# MLX adapter dep (US-010+). `llm-mlx` uses the non-linking portion of
+# `xybrid-mlx` on every platform, while `llm-mlx-runtime` forwards
+# `xybrid-mlx/bindings` for Apple Silicon runtime execution.
+xybrid-mlx = { path = "../xybrid-mlx", version = "0.18.0", optional = true }
+
+# minijinja (declared above with the llama.cpp deps) is also pulled in by
+# `llm-mlx` for the MLX adapter's chat template renderer (US-014) — the
+# HuggingFace-style template flavor that MLX-LM bundles ship. The MLX
+# sampler's seeded RNG rides the workspace-wide `rand` pin declared above.
 
 [features]
 # `llm-llamacpp` is NOT enabled by default — it requires cmake + a C++
@@ -224,6 +239,25 @@ llm-llamacpp-vision = [
     "xybrid-llama/vision",
 ]
 
+# MLX backend metadata/dispatch path (cross-platform, no MLX linkage).
+# Gates runtime_adapter/mlx metadata, selector, tokenizer, and weight-validation paths.
+# Mutually compatible with llm-llamacpp; the runtime selector chooses between
+# them at load time (see runtime_adapter/selector.rs, US-016). `dep:safetensors`
+# (US-011+) is pulled in unconditionally alongside the adapter so arch builders
+# can read weight bundles without a second feature flip; `xybrid-mlx/bindings`
+# remains deliberately NOT forwarded here so the non-linking path (dispatch +
+# weight-key validation, no MLX linkage) can be tested without the xcframework.
+# Enable `llm-mlx-runtime` for the Apple Silicon macOS linked runtime.
+llm-mlx = ["dep:xybrid-mlx", "dep:safetensors", "dep:memmap2", "dep:minijinja", "dep:minijinja-contrib"]
+
+# Full MLX runtime for Apple Silicon macOS — forwards `xybrid-mlx/bindings` so
+# the Qwen/Gemma/LFM architecture builders (US-011+) can actually allocate
+# `MlxArray`s and run the transformer forward pass. Requires
+# `vendor/mlx-apple/mlx.xcframework` to be present (downloaded when a pin is
+# available or source-built via `tools/scripts/build-local-mlx-xcframework.sh`)
+# and compile_error! guards unsupported targets.
+llm-mlx-runtime = ["llm-mlx", "xybrid-mlx/bindings"]
+
 # dev-tools — exposes test seams (e.g. resource-snapshot providers) for
 # downstream demos, integration tests, and benchmarks. Off by default.
 # Crates that depend on `xybrid-core` enable this when they need to inject
@@ -302,6 +336,20 @@ harness = false
 name = "raw_image_ingress"
 harness = false
 required-features = ["dev-tools"]
+
+[[bench]]
+name = "llm_backend_compare"
+harness = false
+
+# MLX SafeTensors embedding throughput benchmark.
+[[bench]]
+name = "mlx_embedding"
+harness = false
+
+# MLX streaming cancellation unwind latency benchmark.
+[[bench]]
+name = "mlx_cancellation_latency"
+harness = false
 
 # Platform-specific ureq dependencies
 # Non-Android: Use default ureq with TLS

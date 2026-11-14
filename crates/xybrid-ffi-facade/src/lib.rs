@@ -958,6 +958,9 @@ impl GenerationConfig {
             stop_sequences,
             grammar,
             tools,
+            // The facade POD has no seed knob: seeding is a Rust-SDK surface
+            // today, and the readback path (model defaults) never carries one.
+            seed: _,
         } = config;
         let tools = tools
             .into_iter()
@@ -4759,6 +4762,7 @@ stages:
             min_p: 0.1,
             top_k: 17,
             repetition_penalty: 1.2,
+            seed: None,
             stop_sequences: vec!["stop".into()],
             grammar: Some("root ::= \"ok\"".into()),
             tools: vec![sdk::Tool::function(
