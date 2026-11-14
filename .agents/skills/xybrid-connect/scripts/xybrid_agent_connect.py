@@ -723,14 +723,15 @@ def write_atomic(path, text, private=False):
 
 
 def file_comment(credential):
-    """The comment above the key: the claim command and dates, never the claim token or link."""
+    """The comment above the key: the claim command and dates, never the claim token or link. The workspace can be
+    claimed until the claim deadline; its key stops at the earlier key deadline."""
     org = org_name(credential)
     if not is_provisional(credential):
         return ['Xybrid key for the workspace "%s", written by xybrid_agent_connect.py.' % org,
                 "Never commit this file or share the key."]
     return ['Xybrid provisional workspace "%s": restricted client key written by xybrid_agent_connect.py.' % org,
             "Claim it with GitHub by %s to keep it: run `xybrid_agent_connect.py claim` (or `xybrid auth claim`)."
-            % day(credential.get("key_expires_at")),
+            % day(credential.get("claim_expires_at")),
             "Unclaimed, the key stops on %s (UTC) and the workspace is deleted on %s." % (
                 day(credential.get("key_expires_at")), day(credential.get("claim_expires_at"))),
             "Never commit this file or share the key."]
@@ -1262,15 +1263,17 @@ class Connect:
                                             done, self.target.rel, reason, self.claim_sentences(credential)))
 
     def claim_sentences(self, credential):
+        """How to claim the workspace, and both deadlines: it can be claimed until the claim deadline (when it is
+        deleted), while its key stops working at the earlier key deadline."""
         key_at, claim_at = credential.get("key_expires_at"), credential.get("claim_expires_at")
         if not is_provisional(credential) or not key_at or not claim_at:
             return ""
         url = claim_url(self.host, credential)
         if url:
             claim = (" Claim it with GitHub by %s: %s (this link is private: don't put it in commits, PRs or issues)."
-                     % (day(key_at), url))
+                     % (day(claim_at), url))
         elif credential.get("claim_token"):
-            claim = " Claim it with GitHub by %s with %s." % (day(key_at), CLAIM)
+            claim = " Claim it with GitHub by %s with %s." % (day(claim_at), CLAIM)
         else:
             claim = (" Its claim link was not saved on this machine, so it can't be claimed from here; the key works "
                      "until %s." % day(key_at))

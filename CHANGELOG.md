@@ -31,6 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `xybrid-llama`, `generate_with_stops`, `generate_streaming` and
   `generate_from_current_logits_streaming` take a `banned_tokens` list after
   `grammar`; pass `&[]` to ban nothing.
+- **CLI:** `xybrid connect` gave the wrong date to claim a provisional
+  workspace by. Its `tell_the_user` and the comment it writes above the key
+  in the `--write-env` file said to claim by the key's expiry
+  (`key_expires_at`), but the workspace can be claimed until it is deleted
+  (`claim_expires_at`, a week later on Xybrid's platform), and claiming
+  restores an expired key. Both now say to claim by `claim_expires_at`, and
+  still give `key_expires_at` as the date the key, and with it platform
+  access, stops. The `xybrid-connect` skill's reference script,
+  `xybrid_agent_connect.py`, made the same mistake and is fixed too, so its
+  published SHA-256 changed. The deadlines themselves, the JSON report and
+  the saved credentials are unchanged.
 
 ## [0.18.0] - 2026-11-12
 
