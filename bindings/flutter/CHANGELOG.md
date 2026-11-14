@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.19.0
+
+* Fixed: pipeline stages with no explicit target or cloud provider now download
+  and load their local model, including passthrough GGUFs. A model downloaded by
+  `loadModels` is recognized as ready on later runs.
+* Fixed: LFM3 with thinking disabled no longer repeats its answer or emits stray
+  think tags when a system prompt, conversation history or tool continuation is
+  present. Streamed text agrees with the final result.
+* Changed: refreshed the native libraries and regenerated FRB binding comments
+  for Rust 1.100.
+
 ## 0.18.0
 
 * Liquid d1 decision models (`lfm3-d1/text/v1`). `XybridEnvelope.decisionRequest`
