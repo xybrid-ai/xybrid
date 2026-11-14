@@ -4,7 +4,7 @@
   "sdk_base_version": "0.15.0",
   "update_kind": "minor",
   "sdk_release": {
-    "version": "0.18.0",
+    "version": "0.19.0",
     "commit": "8642541b255bfb5dc39cd351a178be09013a55d6"
   }
 }
