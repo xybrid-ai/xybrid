@@ -1,4 +1,4 @@
-# Purpose: The pull-request pipeline: repository checks, Rust format, lint, tests and feature matrix, binding drift, API contract, observability, Python and Web SDKs, and the backend lanes. Gates merges.
+# Purpose: The pull-request pipeline: repository checks, Rust format, lint, tests and feature matrix, binding drift, API contract, observability, Python and Web SDKs, the backend lanes, and the SDK lanes it calls. Gates merges.
 name: "CI: Workspace"
 
 # The one workflow that validates pull requests (with bazel.yml). New coverage
@@ -13,7 +13,10 @@ on:
   workflow_dispatch:
     inputs:
       lanes:
-        description: Lanes to run, comma-separated (candle, llamacpp, policy_routing, whispercpp). Empty runs every lane.
+        description: >-
+          Lanes to run, comma-separated: candle, whispercpp, policy_routing,
+          llamacpp, android, apple, flutter, react_native, unity_editor.
+          Empty runs every lane.
         type: string
         required: false
         default: ''
@@ -48,6 +51,11 @@ jobs:
       whispercpp: ${{ steps.filter.outputs.whispercpp }}
       policy_routing: ${{ steps.filter.outputs.policy_routing }}
       llamacpp: ${{ steps.filter.outputs.llamacpp }}
+      android: ${{ steps.filter.outputs.android }}
+      apple: ${{ steps.filter.outputs.apple }}
+      flutter: ${{ steps.filter.outputs.flutter }}
+      react_native: ${{ steps.filter.outputs.react_native }}
+      unity_editor: ${{ steps.filter.outputs.unity_editor }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Check changed paths
@@ -658,6 +666,59 @@ jobs:
           LIST="$(cargo test -p xybrid-core --features llm-llamacpp-vision,ort-download --test vlm_lfm2_smoke -- --list)"
           printf '%s\n' "$LIST" | grep -qx 'lfm2_vl_runtime_caption_smoke_when_fixture_is_downloaded: test'
           cargo test -p xybrid-core --features llm-llamacpp-vision,ort-download --test vlm_lfm2_smoke -- --nocapture
+
+  # ---------------------------------------------------------------------------
+  # SDK lanes: one lane file per binding or platform, called when one of its
+  # paths in LANE_PATHS changes. GitHub names a called job's check
+  # `<caller name> / <job name>`, so these caller names are part of every
+  # check name below them. Advisory (ci_gate.ADVISORY_JOBS) like the backend
+  # lanes. A caller job takes no runs-on, env or timeout: those stay in the
+  # lane file, and it inherits this workflow's read-all permissions.
+  # ---------------------------------------------------------------------------
+
+  android:
+    name: Android
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.android == 'true'
+    uses: ./.github/workflows/build-android.yml
+    secrets:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+
+  apple:
+    name: Apple
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.apple == 'true'
+    uses: ./.github/workflows/build-apple.yml
+
+  flutter:
+    name: Flutter
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.flutter == 'true'
+    uses: ./.github/workflows/build-flutter.yml
+
+  react-native:
+    name: React Native
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.react_native == 'true'
+    uses: ./.github/workflows/build-react-native.yml
+    secrets:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+
+  # game-ci/unity-test-runner publishes `Unity EditMode results` through the
+  # Checks API. A lane file cannot grant itself more than its caller job has.
+  unity-editor:
+    name: Unity Editor
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.unity_editor == 'true'
+    permissions:
+      contents: read
+      checks: write
+    uses: ./.github/workflows/unity-editor.yml
+    secrets:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+      UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+      UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
 
   # (Retired) The cargo linux-CLI build lived here. The required Bazel check
   # ("Bazel graph + RBE targets", bazel.yml) now builds + smokes the linux CLI

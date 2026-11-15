@@ -35,8 +35,10 @@ CI gates: two required checks protect `master`, `CI Success` (`ci.yml`) and
 workflow index, version sync and every `tools/scripts/tests` test, on every
 change), the three commands above (`test` on Linux only), the feature checks
 (`check-*`, `clippy-llm`, `test-llm`), `api-contract`, observability, the Web
-and Python SDKs, the binding drift jobs and the backend lanes (Candle,
-whisper.cpp, policy routing, llama.cpp). `tools/scripts/ci_gate.py` decides
+and Python SDKs, the binding drift jobs, the backend lanes (Candle,
+whisper.cpp, policy routing, llama.cpp) and the SDK lanes it calls
+(`build-android.yml`, `build-apple.yml`, `build-flutter.yml`,
+`build-react-native.yml`, `unity-editor.yml`). `tools/scripts/ci_gate.py` decides
 which jobs a change needs, and `CI Success` fails unless each job it requires
 passed or was skipped for that reason; lanes in its `ADVISORY_JOBS` report
 without gating. `.github/workflows/README.md` maps every workflow.
@@ -692,7 +694,9 @@ is generated from the workflow files, and these rules keep it true:
   (`ci.yml`) and `Bazel graph + RBE targets` (`bazel.yml`)
   gate `master` through branch protection. `tools/scripts/llamacpp_update.py`
   also waits on job names (`REQUIRED_CHECKS`, `AUTOMATION_CHECKS`) before it
-  cuts a llama.cpp release. Edit a workflow's `name:` freely.
+  cuts a llama.cpp release. Edit a workflow's `name:` freely. A lane file's
+  checks are named `<caller job name> / <job name>`, so the caller job's
+  `name:` in `ci.yml` (`Android`, `Apple`, ...) is part of those check names.
 
 ---
 

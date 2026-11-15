@@ -18,7 +18,9 @@ on:
   pull_request:
     branches: [master]
   # Path-filtered: a master merge touching any Bazel input re-warms the shared
-  # cache so the next PR starts warm.
+  # cache so the next PR starts warm. The same list is BAZEL_PATHS in
+  # tools/scripts/ci_gate.py, which gates pull requests (the `changes` job);
+  # test_ci_gate.py keeps the two equal.
   push:
     branches: [master]
     paths:
@@ -28,7 +30,7 @@ on:
       - ".bazelignore"
       - "BUILD.bazel"
       - "**/BUILD.bazel"
-      # Starlark that BUILD files load — toolchain logic lives here, and
+      # Starlark that BUILD files load: toolchain logic lives here, and
       # `**/BUILD.bazel` alone would let a .bzl-only change slip through.
       - "**/*.bzl"
       - "bazel/**"
@@ -48,11 +50,24 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "tools/unity-runtime-smoke/**"
+      # Also built or read by the jobs: //:whisper's sources,
+      # //integration-tests:all and the fixtures crate tests read,
+      # //xtask:xtask_test, the Flutter cdylib, the Windows bolt smoke, the C#
+      # the DLL audit reads its required exports from, and the Rust metadata
+      # fixtures xybrid-core's inline tests read.
+      - "vendor/whisper-cpp"
+      - "integration-tests/**"
+      - "xtask/**"
+      - "bindings/flutter/rust/**"
+      - "tools/windows-smoke/**"
+      - "bindings/unity/Runtime/Bolt/XybridBolt.cs"
+      - "bindings/web/test/fixtures/rust-metadata-*.json"
       # The shared actions this workflow's jobs are built from.
       - ".github/actions/**"
       - ".github/workflows/bazel.yml"
       # Markdown inside any path above cannot change a Bazel build.
       - "!**.md"
+      - "!**.mdx"
   workflow_dispatch:
 
 permissions:
@@ -63,44 +78,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Cheap path gate (no checkout — just the PR's file list). Lets the heavy
-  # `bazel` job be a required check without blocking PRs that only touch
-  # unrelated files (docs, other workflows, ...).
+  # Cheap path gate (a one-file checkout and the PR's file list). Lets the
+  # heavy `bazel` job be a required check without blocking PRs that only touch
+  # unrelated files (docs, other workflows, ...). The paths are BAZEL_PATHS in
+  # tools/scripts/ci_gate.py, the same registry ci.yml's jobs are gated by.
   changes:
     name: Detect Bazel-relevant changes
     runs-on: ubuntu-latest
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
     steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          sparse-checkout: tools/scripts/ci_gate.py
+          sparse-checkout-cone-mode: false
       - name: Check changed paths
         id: filter
+        # pipefail: a ci_gate.py error must fail the step, not vanish into tee.
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           # push / dispatch already path-filter at the trigger → always relevant.
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Drop docs before matching: the patterns below are directory
-          # prefixes (`crates/`, `bindings/kotlin/`, ...), so a README inside
-          # one of them would otherwise trigger the full RBE matrix.
-          FILES=$(gh api --paginate \
-            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-            --jq '.[].filename' | grep -vE '\.mdx?$' || true)
-          if printf '%s\n' "$FILES" | grep -qE '^(MODULE\.bazel|\.bazelrc|\.bazelversion|\.bazelignore|BUILD\.bazel|.*/BUILD\.bazel|.*\.bzl|bazel/|tools/scripts/|rules_android_ndk\.patch|rules_foreign_cc\.patch|rules_rust\.patch|hermetic_llvm\.patch|emsdk\.patch|crates/|bindings/kotlin/|bindings/web/runtime/|macros/|vendor/llama-cpp|vendor/ort-macos/|vendor/ort-android/|Cargo\.toml|Cargo\.lock|tools/unity-runtime-smoke/|\.github/actions/|\.github/workflows/bazel\.yml)'; then
-            REL=true
-          else
-            REL=false
-          fi
-          echo "relevant=$REL" >> "$GITHUB_OUTPUT"
-          echo "Bazel-relevant PR: $REL"
+          gh api --paginate --slurp \
+            "repos/$REPOSITORY/pulls/$PR_NUMBER/files" > "$RUNNER_TEMP/bazel-files.json"
+          python3 tools/scripts/ci_gate.py bazel pull_request "$RUNNER_TEMP/bazel-files.json" \
+            | tee -a "$GITHUB_OUTPUT"
 
   bazel:
     name: Bazel graph + RBE targets
     # Skipped (→ passing) on PRs that touch no Bazel input; runs otherwise.
+    # A failed `changes` job runs it too: a skipped required check passes, so
+    # a gate that errors must not skip the build.
     needs: changes
-    if: needs.changes.outputs.relevant == 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.relevant == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -603,7 +621,7 @@ jobs:
   bazel-linux-vulkan:
     name: Bazel linux Vulkan lane
     needs: changes
-    if: needs.changes.outputs.relevant == 'true'
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.relevant == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:

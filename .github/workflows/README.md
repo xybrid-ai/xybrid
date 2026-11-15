@@ -34,7 +34,9 @@ rules under [Adding CI](#adding-ci). The last two are decisions to keep.
   `Bazel graph + RBE targets` (`bazel.yml`), matched by job name.
   `tools/scripts/llamacpp_update.py` waits on more job names before it cuts a
   llama.cpp release (its `REQUIRED_CHECKS`). A workflow's `name:` can change
-  freely; those job names cannot.
+  freely; those job names cannot. A lane file's checks are named
+  `<caller job name> / <job name>`, so the caller job's `name:` in `ci.yml` is
+  part of every check below it.
 
 ## Adding CI
 
@@ -114,7 +116,7 @@ The pull-request pipeline (ci.yml, bazel.yml) and suites that run only on master
 | [`bazel.yml`](bazel.yml) | CI: Bazel | push to `master`, pull_request to `master`, workflow_dispatch | none | Bazel graph analysis and remote-execution targets; a required check that skips when no Bazel input changed. |
 | [`test-choice-conformance.yml`](test-choice-conformance.yml) | CI: Choice conformance | push to `master`, pull_request to `master`, schedule (`23 5 * * *`), workflow_dispatch | none | Regenerate and verify choice-scoring conformance artifacts against pinned sha256s, then score FORMS through core, the Rust SDK and the CLI; daily cold rebuild. |
 | [`test-decision-conformance.yml`](test-decision-conformance.yml) | CI: Decision conformance | push to `master`, pull_request to `master`, schedule (`41 5 * * *`), workflow_dispatch | none | Verify the decision corpus and run isolated preparation, finalization, matched CPU inference and SDK lifecycle checks against pinned d1 weights. |
-| [`ci.yml`](ci.yml) | CI: Workspace | push to `master`, pull_request to `master`, workflow_dispatch | none | The pull-request pipeline: repository checks, Rust format, lint, tests and feature matrix, binding drift, API contract, observability, Python and Web SDKs, and the backend lanes. Gates merges. |
+| [`ci.yml`](ci.yml) | CI: Workspace | push to `master`, pull_request to `master`, workflow_dispatch | checks | The pull-request pipeline: repository checks, Rust format, lint, tests and feature matrix, binding drift, API contract, observability, Python and Web SDKs, the backend lanes, and the SDK lanes it calls. Gates merges. |
 | [`test-zzz-android.yml`](test-zzz-android.yml) | CI: zzz Android AAR | push to `master`, workflow_dispatch | none | Build the arm64-v8a speech AAR on master with the pinned engine, gate it and its Gradle repackaging, then dlopen its x86_64 slice on an emulator. |
 | [`test-zzz-engine.yml`](test-zzz-engine.yml) | CI: zzz engine | push to `master`, workflow_dispatch | none | Fetch and verify the pinned Phonon/Kitten-only engine slices and link them into Rust tests on each pinned target. |
 
@@ -124,12 +126,12 @@ Per-platform SDK builds, wrapper tests and example apps.
 
 | File | Name | Triggers | Writes | Purpose |
 | --- | --- | --- | --- | --- |
-| [`build-android.yml`](build-android.yml) | SDK: Android | push to `master`, pull_request to `master`, workflow_dispatch | none | Build the Android .so files for every ABI, test the Kotlin wrapper, and gate dlopen and the observability scenario on an x86_64 emulator. |
-| [`build-apple.yml`](build-apple.yml) | SDK: Apple | push to `master`, pull_request to `master`, workflow_dispatch | none | Build and verify the Apple XCFramework, then unit-test the Swift wrapper and run the observability runtime scenario on an iOS Simulator. |
-| [`build-flutter.yml`](build-flutter.yml) | SDK: Flutter | push to `master`, pull_request to `master`, workflow_dispatch | none | Analyze and test the Dart wrapper, build the native libraries, run the observability runtime scenario on the Linux library, and build a consumer app against the packaged layout. |
-| [`build-react-native.yml`](build-react-native.yml) | SDK: React Native | push to `master`, pull_request to `master`, workflow_dispatch | none | Test and npm-pack the JS package; build the iOS and Android example apps. |
+| [`build-android.yml`](build-android.yml) | SDK: Android | called by `ci.yml`, workflow_dispatch | none | Build the Android .so files for every ABI, test the Kotlin wrapper, and gate dlopen and the observability scenario on an x86_64 emulator. |
+| [`build-apple.yml`](build-apple.yml) | SDK: Apple | called by `ci.yml`, workflow_dispatch | none | Build and verify the Apple XCFramework, then unit-test the Swift wrapper and run the observability runtime scenario on an iOS Simulator. |
+| [`build-flutter.yml`](build-flutter.yml) | SDK: Flutter | called by `ci.yml`, workflow_dispatch | none | Analyze and test the Dart wrapper, build the native libraries, run the observability runtime scenario on the Linux library, and build a consumer app against the packaged layout. |
+| [`build-react-native.yml`](build-react-native.yml) | SDK: React Native | called by `ci.yml`, workflow_dispatch | none | Test and npm-pack the JS package; build the iOS and Android example apps. |
 | [`trusted-zzz-sdk.yml`](trusted-zzz-sdk.yml) | SDK: Trusted zzz Apple candidate (manual) | workflow_dispatch | none | Manual: Produce a source-verified, notice-bearing Apple SDK candidate from genuine schema-5 engine pins on protected master. |
-| [`unity-editor.yml`](unity-editor.yml) | SDK: Unity Editor | push to `master`, pull_request to `master`, workflow_dispatch | checks | Run a real Unity Editor: EditMode tests against a Bazel-built native, an IL2CPP player smoke, then the observability runtime scenario. |
+| [`unity-editor.yml`](unity-editor.yml) | SDK: Unity Editor | called by `ci.yml`, workflow_dispatch | checks | Run a real Unity Editor: EditMode tests against a Bazel-built native, an IL2CPP player smoke, then the observability runtime scenario. |
 | [`web-webgpu.yml`](web-webgpu.yml) | SDK: WebGPU inference (manual) | workflow_dispatch | none | Manual: build the Web SDK and run WebGPU generation in Chromium on a self-hosted GPU runner. |
 
 ### Artifacts
@@ -204,14 +206,22 @@ under `tools/scripts/tests/`, which take about two minutes and no toolchain.
 **Lanes.** A lane validates one area (a backend, a binding) and runs only when
 that area's paths change. The backend lanes are `ci.yml` jobs: `test-candle`,
 `test-whispercpp-integration`, `test-policy-routing` and `llamacpp-validate`.
-`tools/scripts/ci_gate.py` holds each lane's paths (`LANE_PATHS`, in GitHub's
-`paths:` syntax), and an edit to `ci.yml`, `.github/actions/` or `ci_gate.py`
-runs them all. Lanes in `ADVISORY_JOBS` report on the pull request without
-gating `CI Success`. To run lanes by hand, dispatch `ci.yml` with `lanes`
-(comma-separated; empty runs every lane). On `master` `ci_gate.py` ignores
-`lanes` and runs every lane: a skipped lane would put a newer, skipped check on
-HEAD under a name the llama.cpp release requires to succeed. To retry one lane
-there, re-run the push run's failed jobs.
+The SDK lanes are files `ci.yml` calls (`workflow_call`): `build-android.yml`,
+`build-apple.yml`, `build-flutter.yml`, `build-react-native.yml` and
+`unity-editor.yml`, whose checks read `Android / Build Android .so (all ABIs)`
+and so on. `tools/scripts/ci_gate.py` holds each lane's paths (`LANE_PATHS`, in
+GitHub's `paths:` syntax), and an edit to `ci.yml`, `.github/actions/` or
+`ci_gate.py` runs them all. Lanes in `ADVISORY_JOBS` report on the pull request
+without gating `CI Success`. To run lanes by hand, dispatch a lane file, or
+dispatch `ci.yml` with `lanes` (comma-separated; empty runs every lane). On
+`master` `ci_gate.py` ignores `lanes` and runs every lane: a skipped lane would
+put a newer, skipped check on HEAD under a name the llama.cpp release requires
+to succeed. To retry one lane there, re-run the push run's failed jobs.
+
+**Bazel.** `bazel.yml` runs on every pull request so its required job can
+report; its `changes` job skips the build unless a path in `BAZEL_PATHS`
+(`ci_gate.py bazel`) changed. Its push trigger lists the same paths, and
+`test_ci_gate.py` keeps the two equal.
 
 **Natives.** `build-natives.yml` compiles the llama.cpp static slices once per
 target and feature set and pushes them to `ghcr.io/xybrid-ai/llama-natives`. It

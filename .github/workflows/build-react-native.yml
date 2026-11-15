@@ -1,39 +1,17 @@
 # Purpose: Test and npm-pack the JS package; build the iOS and Android example apps.
 name: "SDK: React Native"
 
+# A lane: ci.yml's `React Native` job calls this file when one of the paths in
+# LANE_PATHS["react_native"] (tools/scripts/ci_gate.py) changes, on pull requests and
+# on master pushes, which keep master's caches warm for new branches. Its
+# checks are named `React Native / <job>`. Dispatch it here to run it alone.
 on:
-  pull_request:
-    branches: [master]
-    paths:
-      - 'bindings/react-native/**'
-      - 'bindings/apple/**'
-      - 'bindings/kotlin/**'
-      - 'crates/xybrid-bolt/**'
-      - 'crates/xybrid-ffi-facade/**'
-      - '.github/workflows/build-react-native.yml'
-      # Docs-only changes under the paths above (READMEs, examples) never
-      # affect the build — exclude markdown so they don't trigger it.
-      - '!**.md'
-  # Run on master merges too, so each merge saves a default-branch-scoped
-  # cache. GitHub Actions caches are branch-scoped: a PR run can only restore
-  # caches from its own branch or the default branch, so without this every
-  # new PR branch's first run is cold. Keep these paths in sync with the
-  # pull_request trigger above.
-  push:
-    branches: [master]
-    paths:
-      - 'bindings/react-native/**'
-      - 'bindings/apple/**'
-      - 'bindings/kotlin/**'
-      - 'crates/xybrid-bolt/**'
-      - 'crates/xybrid-ffi-facade/**'
-      - '.github/workflows/build-react-native.yml'
-      - '!**.md'
+  workflow_call:
+    # Optional: forks and Dependabot pull requests receive none.
+    secrets:
+      BUILDBUDDY_API_KEY:
+        required: false
   workflow_dispatch:
-
-concurrency:
-  group: build-react-native-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions: read-all
 

@@ -18,7 +18,8 @@ Two kinds of flag:
 A new backend or real-model suite is one ci.yml job gated on its flag
 (`if: needs.tooling-changes.outputs.<flag> == 'true'`), one LANE_PATHS row,
 its OPTIONAL_JOBS entry, its line in tooling-changes' outputs, and (once it is
-reliable) an entry in CI Success's needs. test_ci_gate.py fails until they agree.
+reliable) an entry in CI Success's needs. test_ci_gate.py fails until they
+agree. BAZEL_PATHS is bazel.yml's gate, read with `ci_gate.py bazel`.
 """
 
 import argparse
@@ -109,7 +110,159 @@ LANE_PATHS: Dict[str, List[str]] = {
         "integration-tests/tests/llamacpp_release.rs",
         "crates/xybrid-core/tests/llamacpp_stream_text.rs",
     ],
+    # The SDK lanes (lane files ci.yml calls). Each lists its own file, which
+    # holds the jobs. Markdown inside these paths never affects a build.
+    "android": [
+        "bindings/kotlin/**",
+        "crates/xybrid-bolt/**",
+        "crates/xybrid-ffi-facade/**",
+        "crates/xybrid-core/**",
+        "crates/xybrid-sdk/**",
+        "crates/xybrid-observability/**",
+        "tools/scripts/android-dlopen-gate.sh",
+        "tools/scripts/android-dlopen-probe.c",
+        "tools/scripts/verify_android_jni.py",
+        "tools/scripts/verify_android_api_level.py",
+        # The shared observability scenario's receiver and checker.
+        "tools/scripts/observability_capture/**",
+        "xtask/**",
+        # llama.cpp's Android build config and sources (see //:llama_android_dl).
+        "BUILD.bazel",
+        "bazel/ggml/**",
+        # The Android NDK toolchains: @androidndk (API 28) and the AAR arm64
+        # slice's @androidndk_api29 (see //bazel/toolchains/android), the patch
+        # that generates both, and the .bazelrc NDK download pins.
+        "MODULE.bazel",
+        "bazel/toolchains/android/**",
+        "rules_android_ndk.patch",
+        ".bazelrc",
+        "crates/llama-cpp-sys/**",
+        "vendor/llama-cpp",
+        "vendor/ort-android/**",
+        "Cargo.lock",
+        "Cargo.toml",
+        ".github/workflows/build-android.yml",
+        "!**.md",
+    ],
+    "apple": [
+        "bindings/apple/**",
+        "crates/xybrid-bolt/**",
+        "crates/xybrid-ffi-facade/**",
+        "crates/xybrid-core/**",
+        "crates/xybrid-sdk/**",
+        "crates/xybrid-observability/**",
+        "crates/xybrid-llama/**",
+        "crates/llama-cpp-sys/**",
+        # The Bazel graph that assembles the xcframework: sim triple + ort-sys
+        # annotation, the llama iOS arms, --config=ios, the fetched sim-ORT
+        # rule, and the committed device ORT slice.
+        "MODULE.bazel",
+        "BUILD.bazel",
+        ".bazelrc",
+        "bazel/**",
+        "vendor/ort-ios/**",
+        "Cargo.lock",
+        "Cargo.toml",
+        # The shared observability scenario the runtime job runs and checks.
+        "tools/scripts/observability_capture/**",
+        ".github/workflows/build-apple.yml",
+        "!**.md",
+    ],
+    "flutter": [
+        "bindings/flutter/**",
+        "crates/xybrid-ffi-facade/**",
+        # The Flutter crate links the SDK and core through the facade, and FRB
+        # mirrors types it reaches there: a change in them can break the
+        # native build or leave the committed glue stale.
+        "crates/xybrid-sdk/**",
+        "crates/xybrid-core/**",
+        "crates/xybrid-observability/**",
+        "xtask/**",
+        # The shared observability scenario's receiver and checker.
+        "tools/scripts/observability_capture/**",
+        ".github/workflows/build-flutter.yml",
+        "!**.md",
+    ],
+    "react_native": [
+        "bindings/react-native/**",
+        "bindings/apple/**",
+        "bindings/kotlin/**",
+        "crates/xybrid-bolt/**",
+        "crates/xybrid-ffi-facade/**",
+        ".github/workflows/build-react-native.yml",
+        "!**.md",
+    ],
+    "unity_editor": [
+        "bindings/unity/**",
+        "crates/xybrid-bolt/**",
+        "crates/xybrid-ffi-facade/**",
+        # The SDK and the observability crate it links: the observability
+        # runtime scenario exercises their export, content rules and
+        # lifecycle through the C# API. xybrid-core is left to the Apple,
+        # Android and Flutter lanes, which run the same scenario on its changes.
+        "crates/xybrid-sdk/**",
+        "crates/xybrid-observability/**",
+        "tools/unity-runtime-smoke/**",
+        "tools/scripts/stage_unity_native.py",
+        "tools/scripts/stage_unity_desktop_ort.py",
+        "tools/scripts/bazel-output.sh",
+        "tools/scripts/write-buildbuddy-rc.sh",
+        "tools/scripts/observability_capture/**",
+        ".github/workflows/unity-editor.yml",
+        "!**.md",
+    ],
 }
+
+# bazel.yml's required job (`Bazel graph + RBE targets`) and its Vulkan lane
+# run on a pull request when one of these paths changes (`ci_gate.py bazel`),
+# and bazel.yml's push trigger lists the same paths (test_ci_gate.py keeps the
+# two equal). Not selected by PIPELINE_PATHS: a ci.yml edit is no Bazel input.
+BAZEL_PATHS = [
+    "MODULE.bazel",
+    ".bazelrc",
+    ".bazelversion",
+    ".bazelignore",
+    "BUILD.bazel",
+    "**/BUILD.bazel",
+    # Starlark that BUILD files load: toolchain logic lives here, and
+    # `**/BUILD.bazel` alone would let a .bzl-only change slip through.
+    "**/*.bzl",
+    "bazel/**",
+    "tools/scripts/**",
+    "rules_android_ndk.patch",
+    "rules_foreign_cc.patch",
+    "rules_rust.patch",
+    "hermetic_llvm.patch",
+    "emsdk.patch",
+    "crates/**",
+    "bindings/kotlin/**",
+    "bindings/web/runtime/**",
+    "macros/**",
+    "vendor/llama-cpp",
+    "vendor/ort-macos/**",
+    "vendor/ort-android/**",
+    "Cargo.toml",
+    "Cargo.lock",
+    "tools/unity-runtime-smoke/**",
+    # Also built or read by the jobs: //:whisper's sources,
+    # //integration-tests:all and the fixtures crate tests read,
+    # //xtask:xtask_test, the Flutter cdylib, the Windows bolt smoke, the C#
+    # the DLL audit reads its required exports from, and the Rust metadata
+    # fixtures xybrid-core's inline tests read.
+    "vendor/whisper-cpp",
+    "integration-tests/**",
+    "xtask/**",
+    "bindings/flutter/rust/**",
+    "tools/windows-smoke/**",
+    "bindings/unity/Runtime/Bolt/XybridBolt.cs",
+    "bindings/web/test/fixtures/rust-metadata-*.json",
+    # The shared actions this workflow's jobs are built from.
+    ".github/actions/**",
+    ".github/workflows/bazel.yml",
+    # Markdown inside any path above cannot change a Bazel build.
+    "!**.md",
+    "!**.mdx",
+]
 
 # Paths that select every flag and lane: the pipeline itself, the shared
 # actions its jobs are built from, and this registry.
@@ -129,6 +282,11 @@ OPTIONAL_JOBS = {
     "test-whispercpp-integration": "whispercpp",
     "test-policy-routing": "policy_routing",
     "llamacpp-validate": "llamacpp",
+    "android": "android",
+    "apple": "apple",
+    "flutter": "flutter",
+    "react-native": "react_native",
+    "unity-editor": "unity_editor",
 }
 ALWAYS_JOBS = {"tooling-changes", "repo-checks"}
 
@@ -136,7 +294,17 @@ ALWAYS_JOBS = {"tooling-changes", "repo-checks"}
 # pull request without blocking the merge. Every lane starts here, so moving it
 # into ci.yml does not change merge policy; it joins CI Success's needs by
 # leaving this set.
-ADVISORY_JOBS = {"test-candle", "test-whispercpp-integration", "test-policy-routing", "llamacpp-validate"}
+ADVISORY_JOBS = {
+    "test-candle",
+    "test-whispercpp-integration",
+    "test-policy-routing",
+    "llamacpp-validate",
+    "android",
+    "apple",
+    "flutter",
+    "react-native",
+    "unity-editor",
+}
 
 _GLOB_SPECIAL = set("?+[]")
 
@@ -233,6 +401,12 @@ def classify(event: str, payload: object) -> Dict[str, str]:
     return {key: str(value).lower() for key, value in selected.items()}
 
 
+def bazel(event: str, payload: object) -> Dict[str, str]:
+    """bazel.yml's gate: whether a Bazel input changed."""
+    paths, uncertain = changed_paths(event, payload)
+    return {"relevant": str(uncertain or any_selected(BAZEL_PATHS, paths)).lower()}
+
+
 def dispatch(lanes: str, ref: str = "") -> Dict[str, str]:
     """A manual run: every job, and the named lanes (all of them when none are named).
 
@@ -283,6 +457,9 @@ def main() -> int:
     changes = commands.add_parser("changes", help="classify a push or pull request's changed files")
     changes.add_argument("event", choices=("push", "pull_request"))
     changes.add_argument("files", type=Path)
+    gate = commands.add_parser("bazel", help="whether a push or pull request changed a Bazel input")
+    gate.add_argument("event", choices=("push", "pull_request"))
+    gate.add_argument("files", type=Path)
     manual = commands.add_parser("dispatch", help="select jobs for a workflow_dispatch run")
     manual.add_argument("lanes", nargs="?", default="", help="comma-separated lanes; empty selects every lane")
     manual.add_argument("--ref", default="", help="the run's github.ref")
@@ -291,6 +468,8 @@ def main() -> int:
     try:
         if args.command == "changes":
             outputs = classify(args.event, json.loads(args.files.read_text()))
+        elif args.command == "bazel":
+            outputs = bazel(args.event, json.loads(args.files.read_text()))
         elif args.command == "dispatch":
             outputs = dispatch(args.lanes, args.ref)
         else:
