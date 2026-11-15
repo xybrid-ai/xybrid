@@ -149,8 +149,8 @@ with the label `application_error` (never the error text) otherwise.
 `Tests/XybridTests/ObservabilityRuntimeTests.swift` runs the shared
 [observability runtime scenario](../../tools/scripts/observability_capture/scenario.md)
 through this API against a local OTLP receiver. It skips unless the scenario
-driver supplies the receiver, which CI's `Observability runtime scenario (iOS
-Simulator)` job in `build-apple.yml` does. To run it on a Mac, with the local
+driver supplies the receiver, which the `Run observability scenario (iOS
+Simulator)` step of `build-apple.yml`'s `Build XCFramework` job does. To run it on a Mac, with the local
 xcframework unzipped (see below) and a booted simulator:
 
 ```bash
