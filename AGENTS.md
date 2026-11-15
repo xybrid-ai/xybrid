@@ -35,13 +35,15 @@ CI gates: two required checks protect `master`, `CI Success` (`ci.yml`) and
 workflow index, version sync and every `tools/scripts/tests` test, on every
 change), the three commands above (`test` on Linux only), the feature checks
 (`check-*`, `clippy-llm`, `test-llm`), `api-contract`, observability, the Web
-and Python SDKs, the binding drift job, the backend lanes (Candle,
-whisper.cpp, policy routing, llama.cpp) and the SDK lanes it calls
+and Python SDKs, the binding drift job, the backend lanes (Candle, whisper.cpp,
+policy routing, llama.cpp) and the lanes it calls: the SDKs
 (`build-android.yml`, `build-apple.yml`, `build-flutter.yml`,
-`build-react-native.yml`, `unity-editor.yml`). `tools/scripts/ci_gate.py` decides
-which jobs a change needs, and `CI Success` fails unless each job it requires
-passed or was skipped for that reason; lanes in its `ADVISORY_JOBS` report
-without gating. `.github/workflows/README.md` maps every workflow.
+`build-react-native.yml`, `unity-editor.yml`) and conformance
+(`test-choice-conformance.yml`, `test-decision-conformance.yml`).
+`tools/scripts/ci_gate.py` decides which jobs a change needs, and `CI Success`
+fails unless each job it requires passed or was skipped for that reason; lanes
+in its `ADVISORY_JOBS` report without gating. `.github/workflows/README.md` maps
+every workflow.
 
 Crate-wide lint opt-outs go in `lib.rs` at the crate root (see e.g.
 `crates/xybrid-core/src/lib.rs`). Don't sprinkle `#[allow(...)]` at call sites —
@@ -259,11 +261,11 @@ contract is `docs/development/liquid-decision-protocol.md`, and
   `LlamaModel::load`, which scans every key after loading and refuses.
   `xybrid_llama` keeps its own copy of the rules. Change both together: core
   tests compare them.
-- **`Decision CPU conformance` is a required check.**
-  `test-decision-conformance.yml` has no path filter, and
-  `tools/scripts/llamacpp_update.py` waits on that job name. It collects a
-  fresh upstream reference on the runner and compares bit for bit. Never loosen
-  the comparison to make it pass.
+- **`Decision conformance / Decision CPU conformance` gates llama.cpp releases.**
+  `ci.yml` calls `test-decision-conformance.yml` on every change that is not
+  docs-only, and `tools/scripts/llamacpp_update.py` waits on that check name.
+  It collects a fresh upstream reference on the runner and compares bit for
+  bit. Never loosen the comparison to make it pass.
 - **The llama.cpp pin has copies the update automation does not rewrite:**
   `tools/conformance/decision/{check.py,oracle.py}`,
   `integration-tests/fixtures/decision/{integrity.json,oracle.json}`,
@@ -675,30 +677,31 @@ is generated from the workflow files, and these rules keep it true:
   `gen_workflow_index.py --check` fails on a file missing from its
   `WORKFLOW_FILES`, and on a `pull_request` / `pull_request_target` trigger
   outside `PULL_REQUEST_FILES`: only `ci.yml` and `bazel.yml` validate pull
-  requests (the others listed scan, dry-run, publish or greet, plus the lane
-  workflows not yet called from `ci.yml`). A lane file declares `workflow_call`
-  (plus `workflow_dispatch`, plus `schedule` for a nightly) and is called from
-  `ci.yml`. A seconds-long check that needs no toolchain is a test under
-  `tools/scripts/tests/`; a new cargo invocation is a step in the `ci.yml` job
-  with the same runner and feature family; a new backend or real-model suite is
-  one `ci.yml` job built from the shared actions in `.github/actions/`
-  (`setup-rust`, `install-boltffi`, `fetch-model`, `free-disk-space`), one
-  `LANE_PATHS` row and `OPTIONAL_JOBS` entry in `tools/scripts/ci_gate.py` with
-  its `tooling-changes` output and, once reliable, one `CI Success` `needs`
-  entry (`ADVISORY_JOBS` until then); a new binding or platform is a lane file,
-  the one new file this allows: its PR lists it in `WORKFLOW_FILES`.
-  `setup-rust`, `install-boltffi` and `fetch-model` save their caches from
-  `master` only. macOS runs 5 jobs at once for the whole organization, so add
-  steps to an existing macOS job: the check also holds `ci.yml` and its lane
-  files to `MACOS_JOB_BUDGET` macOS jobs, which a new one raises in the same PR
-  with a reason. The full rules are in the workflow README, "Adding CI".
+  requests (the others listed scan, dry-run, publish or greet). A lane file
+  declares `workflow_call` (plus `workflow_dispatch`, plus `schedule` for a
+  nightly) and is called from `ci.yml`. A seconds-long check that needs no
+  toolchain is a test under `tools/scripts/tests/`; a new cargo invocation is a
+  step in the `ci.yml` job with the same runner and feature family; a new
+  backend or real-model suite is one `ci.yml` job built from the shared actions
+  in `.github/actions/` (`setup-rust`, `install-boltffi`, `fetch-model`,
+  `free-disk-space`), one `LANE_PATHS` row and `OPTIONAL_JOBS` entry in
+  `tools/scripts/ci_gate.py` with its `tooling-changes` output and, once
+  reliable, one `CI Success` `needs` entry (`ADVISORY_JOBS` until then); a new
+  binding or platform is a lane file, the one new file this allows: its PR lists
+  it in `WORKFLOW_FILES`. `setup-rust`, `install-boltffi` and `fetch-model` save
+  their caches from `master` only. macOS runs 5 jobs at once for the whole
+  organization, so add steps to an existing macOS job: the check also holds
+  `ci.yml` and its lane files to `MACOS_JOB_BUDGET` macOS jobs, which a new one
+  raises in the same PR with a reason. The full rules are in the workflow
+  README, "Adding CI".
 - **Job names are matched as checks; never rename them.** `CI Success`
   (`ci.yml`) and `Bazel graph + RBE targets` (`bazel.yml`)
   gate `master` through branch protection. `tools/scripts/llamacpp_update.py`
   also waits on job names (`REQUIRED_CHECKS`, `AUTOMATION_CHECKS`) before it
   cuts a llama.cpp release. Edit a workflow's `name:` freely. A lane file's
   checks are named `<caller job name> / <job name>`, so the caller job's
-  `name:` in `ci.yml` (`Android`, `Apple`, ...) is part of those check names.
+  `name:` in `ci.yml` (`Android`, `Choice conformance`, ...) is part of those
+  check names, two of which `REQUIRED_CHECKS` polls.
 
 ---
 

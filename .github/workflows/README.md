@@ -1,8 +1,8 @@
 # GitHub Actions workflows
 
 GitHub reads only top-level files in this directory. `ci.yml` and `bazel.yml`
-validate pull requests, with the lane workflows not yet called from `ci.yml`;
-everything else is release, artifact, security, community or manual automation.
+validate pull requests; everything else is release, artifact, security,
+community or manual automation.
 This page is the map: what each workflow is for, when it runs, what it can
 write, and which ones depend on each other.
 
@@ -53,10 +53,9 @@ how to follow them.
 2. **Only `ci.yml` and `bazel.yml` validate pull requests.**
    `PULL_REQUEST_FILES` names the files that may declare `pull_request` or
    `pull_request_target`: those two, the security scans, the release dry-run
-   and publish, the community bots, and the lanes not yet moved behind
-   `ci.yml`. A lane file declares `workflow_call` (plus `workflow_dispatch`,
-   plus `schedule` for a nightly), never `push` or a pull-request event, and a
-   workflow must call it.
+   and publish, and the community bots. A lane file declares `workflow_call`
+   (plus `workflow_dispatch`, plus `schedule` for a nightly), never `push` or a
+   pull-request event, and a workflow must call it.
 3. **A check that takes seconds and needs no toolchain is a test** under
    `tools/scripts/tests/`, not a job.
 4. **A new cargo invocation is a step** in the `ci.yml` job with the same
@@ -89,7 +88,7 @@ save its own Rust caches, evicting master's. `setup-rust`, `install-boltffi` and
 `fetch-model` restore on pull requests and save only on `master` pushes. Other
 caches still save from pull requests: the release and zzz workflows' own setup
 blocks (their tests pin them), `build-flutter.yml`, `build-android.yml`'s NDK,
-the conformance workflows, the `web` job, `bazel-repo-cache` and
+the conformance lanes' model caches, the `web` job, `bazel-repo-cache` and
 `setup-vulkan-sdk`.
 
 Dependabot's `github-actions` entry lists each action directory, because `/`
@@ -118,9 +117,9 @@ The pull-request pipeline (ci.yml, bazel.yml) and suites that run only on master
 | File | Name | Triggers | Writes | Purpose |
 | --- | --- | --- | --- | --- |
 | [`bazel.yml`](bazel.yml) | CI: Bazel | push to `master`, pull_request to `master`, workflow_dispatch | none | Bazel graph analysis and remote-execution targets; a required check that skips when no Bazel input changed. |
-| [`test-choice-conformance.yml`](test-choice-conformance.yml) | CI: Choice conformance | push to `master`, pull_request to `master`, schedule (`23 5 * * *`), workflow_dispatch | none | Regenerate and verify choice-scoring conformance artifacts against pinned sha256s, then score FORMS through core, the Rust SDK and the CLI; daily cold rebuild. |
-| [`test-decision-conformance.yml`](test-decision-conformance.yml) | CI: Decision conformance | push to `master`, pull_request to `master`, schedule (`41 5 * * *`), workflow_dispatch | none | Verify the decision corpus and run isolated preparation, finalization, matched CPU inference and SDK lifecycle checks against pinned d1 weights. |
-| [`ci.yml`](ci.yml) | CI: Workspace | push to `master`, pull_request to `master`, workflow_dispatch | checks | The pull-request pipeline: repository checks, Rust format, lint, tests and feature matrix, binding drift, API contract, observability, Python and Web SDKs, the backend lanes, and the SDK lanes it calls. Gates merges. |
+| [`test-choice-conformance.yml`](test-choice-conformance.yml) | CI: Choice conformance | called by `ci.yml`, schedule (`23 5 * * *`), workflow_dispatch | none | Regenerate and verify choice-scoring conformance artifacts against pinned sha256s, then score FORMS through core, the Rust SDK and the CLI; daily cold rebuild. |
+| [`test-decision-conformance.yml`](test-decision-conformance.yml) | CI: Decision conformance | called by `ci.yml`, schedule (`41 5 * * *`), workflow_dispatch | none | Verify the decision corpus and run isolated preparation, finalization, matched CPU inference and SDK lifecycle checks against pinned d1 weights. |
+| [`ci.yml`](ci.yml) | CI: Workspace | push to `master`, pull_request to `master`, workflow_dispatch | checks | The pull-request pipeline: repository checks, Rust format, lint, tests and feature matrix, binding drift, API contract, observability, Python and Web SDKs, the backend lanes, and the SDK and conformance lanes it calls. Gates merges. |
 | [`test-zzz-android.yml`](test-zzz-android.yml) | CI: zzz Android AAR | push to `master`, workflow_dispatch | none | Build the arm64-v8a speech AAR on master with the pinned engine, gate it and its Gradle repackaging, then dlopen its x86_64 slice on an emulator. |
 | [`test-zzz-engine.yml`](test-zzz-engine.yml) | CI: zzz engine | push to `master`, workflow_dispatch | none | Fetch and verify the pinned Phonon/Kitten-only engine slices and link them into Rust tests on each pinned target. |
 
@@ -213,15 +212,21 @@ that area's paths change. The backend lanes are `ci.yml` jobs: `test-candle`,
 The SDK lanes are files `ci.yml` calls (`workflow_call`): `build-android.yml`,
 `build-apple.yml`, `build-flutter.yml`, `build-react-native.yml` and
 `unity-editor.yml`, whose checks read `Android / Build Android .so (all ABIs)`
-and so on. `tools/scripts/ci_gate.py` holds each lane's paths (`LANE_PATHS`, in
-GitHub's `paths:` syntax), and an edit to `ci.yml`, `.github/actions/` or
-`ci_gate.py` runs them all. Lanes in `ADVISORY_JOBS` report on the pull request
-without gating `CI Success`. To run lanes by hand, dispatch a lane file, or
-dispatch `ci.yml` with `lanes` (comma-separated; empty runs every lane). On
-`master`, or a branch whose tip is master's HEAD, `ci_gate.py` ignores `lanes`
-and runs every lane: a skipped lane would put a newer, skipped check on HEAD
-under a name the llama.cpp release requires to succeed. To retry one lane there,
-re-run the push run's failed jobs.
+and so on. The conformance lanes are called files too:
+`test-choice-conformance.yml` (when its paths change; its Qwen GGUF job, a macOS
+runner, only when the paths that job reads change) and
+`test-decision-conformance.yml` (on every change that is not docs-only). Each
+keeps its nightly cold rebuild as its own `schedule`: on `ci.yml` it would put
+skipped checks on master's HEAD over the ones the llama.cpp release reads.
+`tools/scripts/ci_gate.py` holds each lane's paths (`LANE_PATHS`, in GitHub's
+`paths:` syntax), and an edit to `ci.yml`, `.github/actions/` or `ci_gate.py`
+runs them all. Lanes in `ADVISORY_JOBS` report on the pull request without
+gating `CI Success`. To run lanes by hand, dispatch a lane file, or dispatch
+`ci.yml` with `lanes` (comma-separated; empty runs every lane). On `master`, or
+a branch whose tip is master's HEAD, `ci_gate.py` ignores `lanes` and runs every
+lane: a skipped lane would put a newer, skipped check on HEAD under a name the
+llama.cpp release requires to succeed. To retry one lane there, re-run the push
+run's failed jobs.
 
 **Bazel.** `bazel.yml` runs on every pull request so its required job can
 report; its `changes` job skips the build unless a path in `BAZEL_PATHS`

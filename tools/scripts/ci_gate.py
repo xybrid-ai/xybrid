@@ -210,7 +210,53 @@ LANE_PATHS: Dict[str, List[str]] = {
         ".github/workflows/unity-editor.yml",
         "!**.md",
     ],
+    # The conformance lanes. Choice conformance regenerates and verifies the
+    # choice-scoring artifacts against pinned sha256s, then scores FORMS
+    # through core, the SDK and the CLI.
+    "choice": [
+        "integration-tests/fixtures/choice/**",
+        "integration-tests/fixtures/models/models.json",
+        "integration-tests/fixtures/models/cua-s1-forms/**",
+        "integration-tests/download.sh",
+        "integration-tests/Cargo.toml",
+        "integration-tests/src/**",
+        "integration-tests/tests/choice_forms_conformance.rs",
+        "tools/conformance/**",
+        "tools/scripts/check_choice_provenance.py",
+        "tools/scripts/tests/test_check_choice_provenance.py",
+        "tools/scripts/stage_unity_desktop_ort.py",
+        "vendor/llama-cpp",
+        "crates/llama-cpp-sys/**",
+        "crates/xybrid-core/**",
+        "crates/xybrid-sdk/**",
+        "crates/xybrid-cli/**",
+        "Cargo.toml",
+        "Cargo.lock",
+        ".cargo/**",
+        ".github/workflows/test-choice-conformance.yml",
+        "!**.md",
+    ],
+    # Not a job of its own: ci.yml passes it to the choice lane as `gguf`,
+    # which gates the Qwen GGUF job (a macOS runner). That job rebuilds or
+    # re-verifies the GGUFs from what these paths hold: the recipe and
+    # converter (tools/conformance, except the decision tooling), the choice
+    # fixtures and provenance its checker digests, models.json, the llama.cpp
+    # gitlink the provenance pins, the checker itself, and the lane file.
+    "choice_gguf": [
+        "tools/conformance/**",
+        "!tools/conformance/decision/**",
+        "integration-tests/fixtures/choice/**",
+        "integration-tests/fixtures/models/models.json",
+        "vendor/llama-cpp",
+        "tools/scripts/check_choice_provenance.py",
+        ".github/workflows/test-choice-conformance.yml",
+        "!**.md",
+    ],
 }
+
+# Rows that narrow a step inside another lane rather than select a job: a
+# manual run that names the lane selects them too.
+SUB_LANES = {"choice_gguf": "choice"}
 
 # bazel.yml's required job (`Bazel graph + RBE targets`) and its Vulkan lane
 # run on a pull request when one of these paths changes (`ci_gate.py bazel`),
@@ -283,6 +329,7 @@ OPTIONAL_JOBS = {
     "flutter": "flutter",
     "react-native": "react_native",
     "unity-editor": "unity_editor",
+    "choice-conformance": "choice",
 }
 ALWAYS_JOBS = {"tooling-changes", "repo-checks"}
 
@@ -300,6 +347,8 @@ ADVISORY_JOBS = {
     "flutter",
     "react-native",
     "unity-editor",
+    "choice-conformance",
+    "decision-conformance",
 }
 
 _GLOB_SPECIAL = set("?+[]")
@@ -419,12 +468,15 @@ def dispatch(lanes: str, ref: str = "") -> Dict[str, str]:
             file=sys.stderr,
         )
         named = []
-    unknown = sorted(set(named) - set(LANE_PATHS))
+    choices = sorted(set(LANE_PATHS) - set(SUB_LANES))
+    unknown = sorted(set(named) - set(choices))
     if unknown:
-        raise ValueError(f"Unknown lane(s) {', '.join(unknown)}; choose from {', '.join(sorted(LANE_PATHS))}")
+        raise ValueError(f"Unknown lane(s) {', '.join(unknown)}; choose from {', '.join(choices)}")
     selected = {"full_ci": True}
     selected.update({key: True for key in PATH_FILTERS})
-    selected.update({lane: not named or lane in named for lane in LANE_PATHS})
+    selected.update({
+        lane: not named or lane in named or SUB_LANES.get(lane) in named for lane in LANE_PATHS
+    })
     return {key: str(value).lower() for key, value in selected.items()}
 
 

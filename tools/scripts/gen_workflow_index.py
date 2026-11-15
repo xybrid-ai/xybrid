@@ -97,8 +97,7 @@ WORKFLOW_FILES = frozenset(
 # bazel.yml validate pull requests; the others scan them (codeql.yml,
 # gradle-wrapper-validation.yml), dry-run a release (release-dryrun.yml),
 # publish a merged release PR (release-publish.yml) or greet contributors
-# (discord-notify.yml, welcome.yml). The remaining entries are lanes that have
-# not yet moved behind ci.yml; each leaves this set when it does.
+# (discord-notify.yml, welcome.yml).
 PULL_REQUEST_FILES = frozenset(
     {
         "bazel.yml",
@@ -108,8 +107,6 @@ PULL_REQUEST_FILES = frozenset(
         "gradle-wrapper-validation.yml",
         "release-dryrun.yml",
         "release-publish.yml",
-        "test-choice-conformance.yml",
-        "test-decision-conformance.yml",
         "welcome.yml",
     }
 )
@@ -121,7 +118,12 @@ PULL_REQUEST_FILES = frozenset(
 # them. A new one goes into an existing macOS job as steps. If it truly needs
 # its own runner, raise this number in the same PR and say why; when a macOS
 # job goes, lower it, so the room is not reused silently.
-MACOS_JOB_BUDGET = 6
+#
+# 7: check-platform-macos, the Candle, whisper.cpp and policy-routing lanes,
+# the Apple build, React Native's iOS build, and the choice lane's Qwen GGUF
+# job, which ran on every matching pull request from its own workflow before
+# ci.yml called it and now runs only when the paths it reads change.
+MACOS_JOB_BUDGET = 7
 
 _PULL_REQUEST_EVENTS = ("pull_request", "pull_request_target")
 
