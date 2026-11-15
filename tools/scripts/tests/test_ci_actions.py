@@ -22,7 +22,14 @@ WORKFLOWS = REPO / ".github" / "workflows"
 # Workflows whose Rust toolchain, cargo cache, boltffi install and disk cleanup
 # come from the shared actions. Release and zzz workflows keep their own copies,
 # whose text their tests pin.
-SHARED_SETUP_WORKFLOWS = ("ci.yml", "bazel.yml", "build-android.yml", "unity-editor.yml")
+SHARED_SETUP_WORKFLOWS = (
+    "ci.yml",
+    "bazel.yml",
+    "build-android.yml",
+    "unity-editor.yml",
+    "test-choice-conformance.yml",
+    "test-decision-conformance.yml",
+)
 
 INLINE_COPIES = {
     "dtolnay/rust-toolchain": "use ./.github/actions/setup-rust",

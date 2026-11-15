@@ -513,6 +513,28 @@ class ReleaseTests(unittest.TestCase):
                 self.checks.append({"id": 100, "name": "CI Success", "status": status, "conclusion": conclusion})
                 self.assertFalse(self.plan()["ready"])
 
+    def test_a_nightly_conformance_run_counts_as_the_check_ci_yml_reports(self):
+        # The conformance lane files' schedules report their jobs without
+        # ci.yml's `<caller> / ` prefix; the newest run under either name decides.
+        self.track("v0.5.0")
+        for nightly, required in update.CHECK_ALIASES.items():
+            with self.subTest(check=required):
+                self.assertIn(required, update.REQUIRED_CHECKS)
+                base = [check for check in self.checks if check["name"] != required]
+                self.checks = base + [{"id": 900, "name": nightly, "status": "completed", "conclusion": "success"}]
+                self.assertTrue(self.plan()["ready"])
+                self.checks = base + [
+                    {"id": 900, "name": required, "status": "completed", "conclusion": "failure"},
+                    {"id": 901, "name": nightly, "status": "completed", "conclusion": "success"},
+                ]
+                self.assertTrue(self.plan()["ready"])
+                self.checks = base + [
+                    {"id": 900, "name": nightly, "status": "completed", "conclusion": "success"},
+                    {"id": 901, "name": required, "status": "completed", "conclusion": "failure"},
+                ]
+                self.assertFalse(self.plan()["ready"])
+                self.checks = base + [{"id": 900, "name": required, "status": "completed", "conclusion": "success"}]
+
     def test_other_failed_checks_block_but_automation_does_not_wait_on_itself(self):
         self.track("v0.5.0")
         self.checks.append({"id": 100, "name": "Prepare llama.cpp release", "status": "in_progress"})

@@ -19,6 +19,7 @@ from ci_gate import (
     OPTIONAL_JOBS,
     PATH_FILTERS,
     PIPELINE_PATHS,
+    SUB_LANES,
     bazel,
     check_jobs,
     classify,
@@ -68,16 +69,19 @@ def ci_jobs() -> dict:
     return gen_workflow_index.read_jobs(WORKFLOWS / "ci.yml")
 
 
+def job_check_names(job) -> set:
+    """The check runs a job reports; one calling a lane file reports
+    `<caller> / <job>` for each job of the callee."""
+    if job.uses and job.uses.startswith("./.github/workflows/"):
+        callee = job.uses.rsplit("/", 1)[1]
+        return {f"{job.check_name} / {name}" for name in check_names(callee)}
+    return {job.check_name}
+
+
 def check_names(workflow: str) -> set:
-    """The check-run names a workflow's jobs report; a job calling a lane file
-    reports `<caller> / <job>` for each job of the callee."""
     names = set()
     for job in gen_workflow_index.read_jobs(WORKFLOWS / workflow).values():
-        if job.uses and job.uses.startswith("./.github/workflows/"):
-            callee = job.uses.rsplit("/", 1)[1]
-            names |= {f"{job.check_name} / {name}" for name in check_names(callee)}
-        else:
-            names.add(job.check_name)
+        names |= job_check_names(job)
     return names
 
 
@@ -248,13 +252,41 @@ class LaneTests(unittest.TestCase):
 
     BACKEND = {"candle", "whispercpp", "policy_routing", "llamacpp"}
     SDK = {"android", "apple", "flutter", "react_native", "unity_editor"}
+    CONFORMANCE = {"choice", "choice_gguf"}
 
     def lanes(self, *paths: str, among: set = BACKEND) -> set:
         outputs = classify("pull_request", pr_files(*paths))
         return {lane for lane in among if outputs[lane] == "true"}
 
-    def test_every_lane_is_a_backend_or_sdk_lane(self):
-        self.assertEqual(set(LANE_PATHS), self.BACKEND | self.SDK)
+    def test_every_lane_is_a_backend_sdk_or_conformance_lane(self):
+        self.assertEqual(set(LANE_PATHS), self.BACKEND | self.SDK | self.CONFORMANCE)
+
+    def test_the_choice_lane_and_its_gguf_job_run_on_their_inputs(self):
+        cases = {
+            "integration-tests/fixtures/choice/provenance.json": {"choice", "choice_gguf"},
+            "integration-tests/fixtures/models/models.json": {"choice", "choice_gguf"},
+            "tools/conformance/convert_gguf.sh": {"choice", "choice_gguf"},
+            "tools/scripts/check_choice_provenance.py": {"choice", "choice_gguf"},
+            "vendor/llama-cpp": {"choice", "choice_gguf"},
+            ".github/workflows/test-choice-conformance.yml": {"choice", "choice_gguf"},
+            # The decision tooling is no input of the GGUF job.
+            "tools/conformance/decision/check.py": {"choice"},
+            "crates/xybrid-core/src/lib.rs": {"choice"},
+            "integration-tests/fixtures/models/cua-s1-forms/model_metadata.json": {"choice"},
+            "integration-tests/fixtures/choice/README.md": set(),
+            "crates/xybrid-bolt/src/lib.rs": set(),
+        }
+        for path, expected in cases.items():
+            with self.subTest(path=path):
+                self.assertEqual(self.lanes(path, among=self.CONFORMANCE), expected)
+
+    def test_the_gguf_row_only_narrows_the_choice_lane(self):
+        for pattern in LANE_PATHS["choice_gguf"]:
+            if pattern.startswith("!"):
+                continue
+            with self.subTest(pattern=pattern):
+                self.assertIn(pattern, LANE_PATHS["choice"])
+        self.assertEqual(SUB_LANES, {"choice_gguf": "choice"})
 
     def test_each_lane_runs_on_its_own_inputs(self):
         cases = {
@@ -294,9 +326,11 @@ class LaneTests(unittest.TestCase):
         # release: release_plan() then requires each polled check to have
         # succeeded on that HEAD, so the push must select every polled lane.
         outputs = classify("push", {"files": [{"filename": "crates/llama-cpp-sys/natives-manifest.txt"}]})
-        jobs = ci_jobs()
-        polled = [job for job in jobs.values() if job.check_name in llamacpp_update.REQUIRED_CHECKS]
-        self.assertTrue(polled)
+        polled = [
+            job for job in ci_jobs().values()
+            if job_check_names(job) & llamacpp_update.REQUIRED_CHECKS
+        ]
+        self.assertGreaterEqual(len(polled), 5)
         for job in polled:
             with self.subTest(job=job.id):
                 flag = OPTIONAL_JOBS.get(job.id, "full_ci")
@@ -327,8 +361,11 @@ class LaneTests(unittest.TestCase):
         some = dispatch("candle, whispercpp")
         self.assertEqual({lane for lane in LANE_PATHS if some[lane] == "true"}, {"candle", "whispercpp"})
         self.assertTrue(all(some[key] == "true" for key in ("full_ci", *PATH_FILTERS)))
-        with self.assertRaises(ValueError):
-            dispatch("candel")
+        choice = dispatch("choice")
+        self.assertEqual({lane for lane in LANE_PATHS if choice[lane] == "true"}, {"choice", "choice_gguf"})
+        for name in ("candel", "choice_gguf"):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                dispatch(name)
 
     def test_dispatch_on_master_runs_every_lane(self):
         # A skipped lane would put a newer, skipped check run on master's HEAD
@@ -452,9 +489,43 @@ class PipelineShapeTests(unittest.TestCase):
                     self.assertIn(f"{secret}: ${{{{ secrets.{secret} }}}}", caller)
             self.assertNotIn("secrets: inherit", caller, "pass each secret a lane declares, nothing more")
 
+    def test_lane_files_declare_no_concurrency_group(self):
+        # In a called run, github.ref is the caller's: a lane file's group
+        # would match its own nightly schedule run on master and cancel the
+        # push run whose checks the llama.cpp release reads. ci.yml's group
+        # already cancels superseded runs.
+        for job in ci_jobs().values():
+            if job.uses:
+                callee = job.uses.rsplit("/", 1)[1]
+                with self.subTest(lane=callee):
+                    self.assertEqual(gen_workflow_index.parse_workflow(WORKFLOWS / callee).concurrency, ())
+
+    def test_the_gguf_job_follows_its_own_row(self):
+        caller = job_text("ci.yml", "choice-conformance")
+        self.assertIn("gguf: ${{ needs.tooling-changes.outputs.choice_gguf }}", caller)
+        lane = gen_workflow_index.read_jobs(WORKFLOWS / "test-choice-conformance.yml")
+        self.assertEqual(lane["label-token"].condition, "inputs.gguf != 'false'")
+        self.assertTrue(lane["label-token"].runs_on.startswith("macos"))
+
+    def test_decision_conformance_runs_on_every_change_that_is_not_docs_only(self):
+        self.assertEqual(ci_jobs()["decision-conformance"].condition, "needs.tooling-changes.outputs.full_ci == 'true'")
+        self.assertNotIn("decision-conformance", OPTIONAL_JOBS)
+
     def test_the_unity_lane_may_publish_its_check(self):
         caller = job_text("ci.yml", "unity-editor")
         self.assertRegex(caller, r"(?m)^    permissions:\n      contents: read\n      checks: write$")
+
+    def test_each_nightly_alias_names_the_same_job_as_its_required_check(self):
+        # A lane file's schedule reports its job unprefixed; the alias must be
+        # exactly that job of the file ci.yml's caller calls.
+        callers = {job.check_name: job for job in ci_jobs().values() if job.uses}
+        for nightly, required in llamacpp_update.CHECK_ALIASES.items():
+            with self.subTest(check=required):
+                caller, _, job = required.partition(" / ")
+                self.assertEqual(job, nightly)
+                lane = callers[caller].uses.rsplit("/", 1)[1]
+                self.assertIn(nightly, check_names(lane))
+                self.assertIn("schedule", gen_workflow_index.parse_workflow(WORKFLOWS / lane).events)
 
     def test_every_check_the_llama_cpp_release_waits_on_exists(self):
         # A misspelt or renamed job leaves the automation waiting forever.

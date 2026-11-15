@@ -44,8 +44,17 @@ REQUIRED_CHECKS = {
     "llama.cpp stable validation",
     "Test whisper.cpp (integration, real model)",
     "Test policy routing (real local model, fake DeepSeek)",
-    "Provenance and fixture digests",
-    "Decision CPU conformance",
+    # Jobs of lane files ci.yml calls: GitHub prefixes the caller job's name.
+    "Choice conformance / Provenance and fixture digests",
+    "Decision conformance / Decision CPU conformance",
+}
+# The conformance lane files also run on their own nightly schedule, which
+# reports the same jobs without ci.yml's prefix on master's HEAD. They are the
+# same checks: the newest run under either name decides, as it did before the
+# lanes moved behind ci.yml.
+CHECK_ALIASES = {
+    "Provenance and fixture digests": "Choice conformance / Provenance and fixture digests",
+    "Decision CPU conformance": "Decision conformance / Decision CPU conformance",
 }
 AUTOMATION_CHECKS = {"Discover llama.cpp stable", "Prepare llama.cpp release"}
 NATIVE_TARGETS = {
@@ -374,7 +383,7 @@ def manifest_problems(root: Path, commit: str) -> list[str]:
 def check_problems(checks: list[dict]) -> list[str]:
     latest = {}
     for check in checks:
-        name = check["name"]
+        name = CHECK_ALIASES.get(check["name"], check["name"])
         if name not in latest or check["id"] > latest[name]["id"]:
             latest[name] = check
     problems = [f"Waiting for successful check: {name}" for name in sorted(REQUIRED_CHECKS)

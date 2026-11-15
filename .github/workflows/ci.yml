@@ -1,4 +1,4 @@
-# Purpose: The pull-request pipeline: repository checks, Rust format, lint, tests and feature matrix, binding drift, API contract, observability, Python and Web SDKs, the backend lanes, and the SDK lanes it calls. Gates merges.
+# Purpose: The pull-request pipeline: repository checks, Rust format, lint, tests and feature matrix, binding drift, API contract, observability, Python and Web SDKs, the backend lanes, and the SDK and conformance lanes it calls. Gates merges.
 name: "CI: Workspace"
 
 # The one workflow that validates pull requests (with bazel.yml). New coverage
@@ -15,8 +15,8 @@ on:
       lanes:
         description: >-
           Lanes to run, comma-separated: candle, whispercpp, policy_routing,
-          llamacpp, android, apple, flutter, react_native, unity_editor.
-          Empty runs every lane.
+          llamacpp, android, apple, flutter, react_native, unity_editor,
+          choice. Empty runs every lane.
         type: string
         required: false
         default: ''
@@ -54,6 +54,8 @@ jobs:
       flutter: ${{ steps.filter.outputs.flutter }}
       react_native: ${{ steps.filter.outputs.react_native }}
       unity_editor: ${{ steps.filter.outputs.unity_editor }}
+      choice: ${{ steps.filter.outputs.choice }}
+      choice_gguf: ${{ steps.filter.outputs.choice_gguf }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Check changed paths
@@ -673,6 +675,29 @@ jobs:
       UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+
+  # ---------------------------------------------------------------------------
+  # Conformance lanes. tools/scripts/llamacpp_update.py waits on
+  # `Choice conformance / Provenance and fixture digests` and
+  # `Decision conformance / Decision CPU conformance` before it cuts a
+  # llama.cpp release: never rename these caller jobs. Each lane file keeps
+  # its own nightly schedule (a cold rebuild).
+  # ---------------------------------------------------------------------------
+
+  choice-conformance:
+    name: Choice conformance
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.choice == 'true'
+    uses: ./.github/workflows/test-choice-conformance.yml
+    with:
+      gguf: ${{ needs.tooling-changes.outputs.choice_gguf }}
+
+  # Runs on every change that is not docs-only, and reports skipped on one.
+  decision-conformance:
+    name: Decision conformance
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
+    uses: ./.github/workflows/test-decision-conformance.yml
 
   # (Retired) The cargo linux-CLI build lived here. The required Bazel check
   # ("Bazel graph + RBE targets", bazel.yml) now builds + smokes the linux CLI

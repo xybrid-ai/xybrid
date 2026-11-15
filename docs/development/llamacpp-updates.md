@@ -63,11 +63,15 @@ to match, and requires every base/vision target in the native build matrix.
 It also verifies that the slices are anonymously reachable before cutting a
 release branch.
 
-The daily run checks validation on the exact master commit it will release:
-CI Success, Bazel, stable-update validation, policy routing, Whisper, and
-choice-conformance provenance must all succeed. Any other pending or failing
-check also blocks preparation. The intake/preparation jobs themselves are
-excluded so the bot does not wait on its own running check.
+The daily run checks validation on the exact master commit it will release: CI
+Success, Bazel, stable-update validation, policy routing, Whisper,
+choice-conformance provenance and decision conformance must all succeed
+(`REQUIRED_CHECKS` in `tools/scripts/llamacpp_update.py` names them). The
+conformance workflows' nightly runs report those two checks without `ci.yml`'s
+caller prefix; the bot counts them as the same checks (`CHECK_ALIASES`), so a
+nightly success still covers a commit whose push did not select the lane. Any
+other pending or failing check also blocks preparation. The intake/preparation
+jobs themselves are excluded so the bot does not wait on its own running check.
 
 For a stable `0.x` workspace with a classified patch or minor upstream update,
 the default target is the next minor version (currently `0.11.0`). This includes
