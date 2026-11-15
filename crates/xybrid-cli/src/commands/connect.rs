@@ -1094,6 +1094,9 @@ impl Session<'_> {
         Ok(true)
     }
 
+    /// How to claim the workspace, and both of its deadlines: it can be claimed
+    /// until the claim deadline (when it is deleted), while its key stops
+    /// working at the earlier key deadline.
     fn claim_sentences(&self, credential: &Credential) -> String {
         let now = Utc::now();
         if !credential.is_provisional() {
@@ -1108,11 +1111,11 @@ impl Session<'_> {
             Some(url) => format!(
                 " Claim it with GitHub by {}: {url} (this link is private: don't put it in \
                  commits, PRs or issues).",
-                human_date(key_deadline)
+                human_date(claim_deadline)
             ),
             None if credential.claim_token.is_some() => format!(
                 " Claim it with GitHub by {} with `xybrid auth claim`.",
-                human_date(key_deadline)
+                human_date(claim_deadline)
             ),
             None => format!(
                 " Its claim link was not saved on this machine, so it can't be claimed from \
@@ -1541,7 +1544,8 @@ fn org_name(credential: &Credential) -> String {
 }
 
 /// The comment written above the key: claim command and dates, never the
-/// token or link.
+/// token or link. The workspace can be claimed until the claim deadline; its
+/// key stops at the earlier key deadline.
 fn file_comment(credential: &Credential) -> Vec<String> {
     let name = org_name(credential);
     if !credential.is_provisional() {
@@ -1560,7 +1564,7 @@ fn file_comment(credential: &Credential) -> Vec<String> {
         ),
         format!(
             "Claim it with GitHub by {} to keep it: run `xybrid auth claim`.",
-            date(credential.key_expires_at)
+            date(credential.claim_expires_at)
         ),
         format!(
             "Unclaimed, the key stops on {} (UTC) and the workspace is deleted on {}.",
@@ -1954,10 +1958,13 @@ mod tests {
         assert!(version_less("0.1.0-beta12", "0.2.0"));
     }
 
+    /// The comment also dates each deadline by what it means: claim by the
+    /// claim deadline, while the key stops at the earlier key deadline.
     #[test]
     fn file_comments_never_carry_the_claim_token() {
         let now = Utc::now();
         let token = "z".repeat(43);
+        let deadline = |raw: &str| raw.parse::<DateTime<Utc>>().unwrap();
         let credential = Credential {
             platform_origin: host::PRODUCTION_API.into(),
             repository_root: "/repo".into(),
@@ -1968,8 +1975,8 @@ mod tests {
                 name: "my-app".into(),
             }),
             project: None,
-            key_expires_at: Some(now),
-            claim_expires_at: Some(now),
+            key_expires_at: Some(deadline("2026-11-21T12:00:00Z")),
+            claim_expires_at: Some(deadline("2026-11-28T12:00:00Z")),
             claim_token: Some(Secret::new(token.clone())),
             source: None,
             console_origin: None,
@@ -1979,10 +1986,21 @@ mod tests {
             privacy_url: None,
             created_at: now,
         };
-        let comment = file_comment(&credential).join("\n");
+        let lines = file_comment(&credential);
+        let comment = lines.join("\n");
         assert!(!comment.contains(&token));
         assert!(!comment.contains("/claim/"));
         assert!(comment.contains("xybrid auth claim"));
+        assert_eq!(
+            lines[1],
+            "Claim it with GitHub by 2026-11-28 to keep it: run `xybrid auth claim`."
+        );
+        assert_eq!(
+            lines[2],
+            "Unclaimed, the key stops on 2026-11-21 (UTC) and the workspace is deleted on \
+             2026-11-28."
+        );
+        assert!(!comment.contains("by 2026-11-21"), "{comment}");
     }
 
     #[test]

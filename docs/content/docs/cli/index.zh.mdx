@@ -56,6 +56,8 @@ xybrid models list
 | `xybrid pack` | 从模型目录创建 `.xyb` Bundle |
 | `xybrid bundle` | 拉取注册表模型并生成 `.xyb` Bundle |
 | `xybrid telemetry` | 管理注册表遥测设置 |
+| [`xybrid connect`](/zh/docs/cli/reference/connect) | 无需注册，把项目连接到一个可认领的 Xybrid 工作区并保存其密钥 |
+| [`xybrid auth`](/zh/docs/cli/reference/auth) | 查看、找回或移除项目已保存的凭据：`status`、`claim`、`logout` |
 
 ## 常用工作流
 
@@ -80,7 +82,7 @@ xybrid fetch --model kokoro-82m
 
 | 选项 | 环境变量 | 说明 |
 |------|----------|------|
-| `--api-key` | `XYBRID_API_KEY` | 云端 API Key；仅配置密钥不会启用可观测性导出 |
+| `--api-key` | `XYBRID_API_KEY` | 云端 API Key；仅配置密钥不会启用可观测性导出。两者都未设置时，使用 [`xybrid connect`](/zh/docs/cli/reference/connect) 保存的密钥 |
 | `--platform-url` | `XYBRID_PLATFORM_URL` | 云端网关 URL（默认 `https://api.xybrid.dev`） |
 | `--observability` | — | 显式启用 Xybrid 链路导出；需要 API Key |
 | `--traces-endpoint` | — | `--observability` 使用的完整链路 URL（默认 `https://ingest.xybrid.dev/v1/traces`） |

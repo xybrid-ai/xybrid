@@ -24,7 +24,7 @@ model-free capture scenario in
 | `lanes.sh` | One subcommand per lane: build or stage the candidate, copy the config to the runtime, launch, copy `expectations.json` back. |
 | `react-native-lane.sh` | The React Native lanes' device steps (Metro, config copy, launch without tapping, polling for `expectations.json`), called by `lanes.sh`. |
 | `collector-lan.yaml` | Collector overlay: bind the OTLP receiver to the host's LAN address (iPhone lanes). |
-| `console.mjs` | Read-only console check: after you sign in once on a temporary Chrome profile, every launch trace's page and the overview KPIs against the staging API. |
+| `console.mjs` | Read-only console check: after you sign in on a temporary Chrome profile, every launch trace's page and the overview KPIs against the staging API. Set `XYBRID_CONSOLE_PROFILE` to a private directory outside the evidence (e.g. `~/.xybrid-staging-console`) to keep the profile, and so the sign-in, between runs; delete it with the step's keys. `XYBRID_CONSOLE_WORKSPACE=/o/<org>/<project>` opens the launch project directly; the check still verifies it. |
 | `fixtures/` | A recorded passing run (Python lane), used by the unit tests. |
 
 Python 3.9+ standard library only. Unit tests:

@@ -2,15 +2,18 @@
 //
 //   node tools/scripts/observability_staging/console.mjs <evidence lanes root> [key file]
 //
-// Opens Chrome on a fresh, temporary profile at https://staging.xybrid.dev and
-// waits (up to 15 minutes) for you to sign in and open the launch project:
-// the check starts once that workspace shows one of the launches' traces.
+// Opens Chrome at https://staging.xybrid.dev and waits (up to 15 minutes) for
+// you to sign in and open the launch project: the check starts once that
+// workspace shows one of the launches' traces. The profile is temporary and
+// deleted at the end, unless XYBRID_CONSOLE_PROFILE names a directory (keep it
+// outside the evidence, mode 0700): that profile is kept, so its sign-in and
+// last-opened project carry over to the next run.
 // Then, for each launch trace in <root>/traces.json (run_staging.py summary),
 // it compares the trace page with the staging API's answer, read with the
 // launch key: span rows, request and span counts, linked quality records,
 // a span link, and the overview KPIs against GET /v1/telemetry/stats. Writes
 // report.json and screenshots to <root>/../console-<time>/; the key and the
-// session never reach them. The profile is deleted at the end.
+// session never reach them.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -33,7 +36,9 @@ const traces = JSON.parse(fs.readFileSync(path.join(root, "traces.json"), "utf8"
 assert(traces.length > 0, "traces.json lists no launch traces; run run_staging.py summary first");
 const out = path.join(path.dirname(path.resolve(root)), `console-${new Date().toISOString().replace(/[:.]/g, "-")}`);
 fs.mkdirSync(out, { recursive: true });
-const profile = fs.mkdtempSync(path.join(os.tmpdir(), "xybrid-step6-console-"));
+const keptProfile = process.env.XYBRID_CONSOLE_PROFILE;
+if (keptProfile) fs.mkdirSync(keptProfile, { recursive: true, mode: 0o700 });
+const profile = keptProfile || fs.mkdtempSync(path.join(os.tmpdir(), "xybrid-step6-console-"));
 const report = { passed: false, origin, started_at: new Date().toISOString(), checks: [], browserErrors: [] };
 const scrub = (text) => String(text).replaceAll(key, "[REDACTED]");
 const save = (name, value) => fs.writeFileSync(path.join(out, name), scrub(JSON.stringify(value, null, 2)));
@@ -67,37 +72,62 @@ const field = (scope, label) => scope.locator("dt").filter({ hasText: new RegExp
 const qualityList = () => page.getByRole("list", { name: "Feedback and evaluation results" });
 
 try {
-  await page.goto(`${origin}/traces`, { waitUntil: "domcontentloaded", timeout: 60_000 });
+  // XYBRID_CONSOLE_WORKSPACE (`/o/<org>/<project>`) opens that workspace first;
+  // it still has to pass the check below.
+  const start = process.env.XYBRID_CONSOLE_WORKSPACE ?? "";
+  assert(start === "" || /^\/o\/[^/]+\/[^/]+$/.test(start), "XYBRID_CONSOLE_WORKSPACE is /o/<org>/<project>");
+  await page.goto(`${origin}${start}/traces`, { waitUntil: "domcontentloaded", timeout: 60_000 });
   console.log("Sign in to the staging console in the Chrome window and open the launch project's Traces page.");
   const probe = traces[0];
+  // Another project may hold spans under the same trace id (the isolation run's
+  // probes do), so the launch project is the one showing the launch key's spans.
+  const probeSpans = (await apiRead(`/v1/telemetry/traces/${probe.trace_id}/spans`)).spans ?? [];
+  assert(probeSpans.length > 0, `the launch key reads no spans for ${probe.trace_id}`);
   let workspace = null;
   const deadline = Date.now() + 15 * 60_000;
+  const rejected = new Set();
   while (workspace === null && Date.now() < deadline) {
     await page.waitForTimeout(5_000);
-    // Sign-in may happen in any tab of the window: take the workspace from any of them.
-    const paths = context.pages().map((tab) => {
-      try {
-        return new URL(tab.url()).pathname;
-      } catch {
-        return "";
+    // Sign-in may happen in any tab of the window: try every workspace open in it.
+    const candidates = new Set(
+      context.pages().flatMap((tab) => {
+        try {
+          const match = /^(\/o\/[^/]+\/[^/]+)(\/|$)/.exec(new URL(tab.url()).pathname);
+          return match ? [match[1]] : [];
+        } catch {
+          return [];
+        }
+      }),
+    );
+    for (const candidate of candidates) {
+      if (workspace !== null || rejected.has(candidate)) continue;
+      const check = await context.newPage();
+      const response = await check.goto(`${origin}${candidate}/traces/${probe.trace_id}`, {
+        waitUntil: "domcontentloaded",
+        timeout: 60_000,
+      });
+      // The heading shows the requested id even when the workspace cannot load
+      // the trace: require the loaded view (its summary with a Requests field)
+      // with the launch's span rows.
+      const loaded =
+        response?.status() === 200 &&
+        (await check.getByRole("heading", { name: probe.trace_id, exact: true }).waitFor({ state: "visible", timeout: 15_000 }).then(() => true, () => false)) &&
+        (await check.locator("dt").filter({ hasText: /^Requests$/ }).first().waitFor({ state: "visible", timeout: 15_000 }).then(() => true, () => false));
+      const found =
+        loaded &&
+        (await expect(check.locator("[data-span-row]"))
+          .toHaveCount(probeSpans.length, { timeout: 15_000 })
+          .then(() => true, () => false));
+      await check.close();
+      if (found) workspace = candidate;
+      // Probe each project at most once. A missing trace can render an HTTP 200
+      // document without a Requests summary, so the document status alone cannot
+      // identify it. Retrying any failed probe would spend more analytics reads.
+      else {
+        rejected.add(candidate);
+        console.log(`${candidate} did not show the launch's spans; open the launch project.`);
       }
-    });
-    const match = paths.map((path) => /^(\/o\/[^/]+\/[^/]+)(\/|$)/.exec(path)).find(Boolean);
-    if (!match) continue;
-    const candidate = match[1];
-    const check = await context.newPage();
-    const response = await check.goto(`${origin}${candidate}/traces/${probe.trace_id}`, {
-      waitUntil: "domcontentloaded",
-      timeout: 60_000,
-    });
-    // The heading shows the requested id even when the workspace cannot load
-    // the trace: require the loaded view (its summary with a Requests field).
-    const found =
-      response?.status() === 200 &&
-      (await check.getByRole("heading", { name: probe.trace_id, exact: true }).isVisible({ timeout: 15_000 }).catch(() => false)) &&
-      (await check.locator("dt").filter({ hasText: /^Requests$/ }).first().isVisible({ timeout: 15_000 }).catch(() => false));
-    await check.close();
-    if (found) workspace = candidate;
+    }
   }
   assert(workspace, "no workspace showed the launch traces within 15 minutes");
   report.workspace = workspace;
@@ -172,6 +202,6 @@ try {
   report.finished_at = new Date().toISOString();
   save("report.json", report);
   await context.close();
-  fs.rmSync(profile, { recursive: true, force: true });
+  if (!keptProfile) fs.rmSync(profile, { recursive: true, force: true });
   console.log(`${report.passed ? "PASS" : "FAIL"}: ${report.checks.length} checks; evidence ${out}`);
 }

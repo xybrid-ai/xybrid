@@ -409,6 +409,33 @@ class ScriptContractTests(unittest.TestCase):
         code, status = self.run_script(app, "status")
         self.assertEqual((code, status["status"], status["verification"]["traces_received"]), (0, "connected", True))
 
+    def test_claim_by_is_the_claim_deadline_not_the_key_deadline(self):
+        # The loopback platform's key stops on 2999-01-01, a week before the workspace can no longer be claimed and
+        # is deleted, on 2999-01-08. Claim-by wording names the claim deadline, with a claim link or the recovery
+        # command, on creation and on reuse; the key deadline only dates the key's stop (INF-295).
+        key, claim = "2999-01-01", "2999-01-08"
+        link = re.escape(": http://localhost:5173/claim/%s (this link is private" % TOKEN)
+        command = r" with `[^`]+ claim` \(or `xybrid auth claim`\)\."
+        for app, how, env in ((self.repo("linked"), link, {"XYBRID_CONSOLE_URL": "http://localhost:5173"}),
+                              (self.repo("unlinked"), command, {})):
+            for expected in ("created", "existing"):
+                with self.subTest(app=app.name, status=expected):
+                    code, report = self.run_script(app, "connect", "--write-env", ".env", **env)
+                    self.assertEqual((code, report["status"]), (0, expected), report)
+                    tell = report["tell_the_user"]
+                    self.assertRegex(tell, " Claim it with GitHub by %s%s" % (claim, how))
+                    self.assertIn(" Until it is claimed, platform access stops on %s and the workspace is scheduled "
+                                  "for deletion on %s." % (key, claim), tell)
+                    self.assertNotIn("by " + key, tell)
+            with self.subTest(app=app.name, file=".env"):
+                text = (app / ".env").read_text()
+                self.assertIn("\n# Claim it with GitHub by %s to keep it: " % claim, text)
+                self.assertIn("\n# Unclaimed, the key stops on %s (UTC) and the workspace is deleted on %s.\n"
+                              % (key, claim), text)
+                self.assertNotIn("by " + key, text)
+                self.assertNotIn(TOKEN, text, "the claim token never goes into the project file")
+                self.assertNotIn("/claim/", text, "nor the private claim link")
+
     def test_closed_tracked_ci_and_opt_out_create_nothing(self):
         tracked = self.repo("tracked")
         (tracked / ".env").write_text("OTHER=1\n")

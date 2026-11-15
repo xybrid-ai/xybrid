@@ -139,7 +139,7 @@ xybrid run --model kokoro-82m --input-text "国破山河在，城春草木深" -
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.18.0
+  xybrid_flutter: ^0.19.0
 ```
 
 **运行模型：**
@@ -156,7 +156,7 @@ final result = await model.run(XybridEnvelope.text('国破山河在，城春草�
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.18.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.19.0")
 }
 ```
 
@@ -178,7 +178,7 @@ val result = model.runAsync(Envelope.text("国破山河在，城春草木深"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.18.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.19.0")
 ]
 ```
 
@@ -227,7 +227,7 @@ var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 
 ```toml
 [dependencies]
-xybrid = "0.18.0"
+xybrid = "0.19.0"
 ```
 
 **运行模型：**
@@ -357,6 +357,8 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 ```
 
 Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚本会为 Claude Code（`.claude/skills`）和 Codex（`.codex/skills`）创建符号链接。
+
+安装脚本还会添加 `/xybrid-connect`，无需注册即可把你的项目连接到 Xybrid 控制台。它运行 `xybrid connect`（需要 CLI 0.18.0 或更高版本）创建一个临时工作区，把受限密钥保存在已加入 gitignore 的文件中，并给你一个私密链接，用 GitHub 认领该工作区。如果不认领，密钥会在 7 天后停止工作，工作区会在 14 天后被删除。参见 [API 密钥](https://docs.xybrid.dev/zh/docs/concepts/api-keys#临时工作区)。
 
 **手动创建** — 在模型目录中新建 `model_metadata.json`：
 

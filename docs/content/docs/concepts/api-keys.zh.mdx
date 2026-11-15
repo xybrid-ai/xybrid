@@ -25,9 +25,10 @@ Android 的 `local.properties`，或 iOS 中由构建配置引入的 `.xcconfig`
 - **控制台。** 登录 [console.xybrid.dev](https://console.xybrid.dev)，打开项目的
   **API keys** 页面并创建密钥。你可以选择 live 或 test；密钥只在创建时显示一次。
   控制台创建的密钥拥有完整（full）作用域，并可随时在控制台中吊销。
-- **代理注册（agent signup）。** 编程代理可以在无人登录的情况下为项目创建一个临时工作区。
+- **代理注册（agent signup）。** 编程代理可以在无人登录的情况下，通过运行
+  [`xybrid connect`](/zh/docs/cli/reference/connect) 为项目创建一个临时工作区。
   它的密钥是客户端（client）作用域的 `sk_live_` 密钥；如果没有人认领，工作区会过期。
-  代理注册尚未全面开放，参见[临时工作区](#临时工作区)。
+  参见[临时工作区](#临时工作区)。
 
 ## 作用域
 
@@ -107,8 +108,9 @@ Flutter（`resourceTelemetry`）或 `XYBRID_RESOURCE_TELEMETRY` 环境变量开�
 
 ## 临时工作区
 
-通过代理注册创建的工作区在被人认领之前都是**临时（provisional）**的。代理注册尚未全面开放；
-本节说明这类工作区的生命周期。
+通过代理注册创建的工作区在被人认领之前都是**临时（provisional）**的。编程代理使用
+[`xybrid connect`](/zh/docs/cli/reference/connect) 创建它，需要 CLI 0.18.0 或更高版本，
+无需账号。本节说明这类工作区的生命周期。
 
 | 创建后 | 未认领的工作区 |
 |--------|----------------|
@@ -117,7 +119,8 @@ Flutter（`resourceTelemetry`）或 `XYBRID_RESOURCE_TELEMETRY` 环境变量开�
 | 第 7 至 14 天 | 仍可认领该工作区，认领后密钥恢复可用（除非你选择轮换密钥）。 |
 | 第 14 天 | 工作区及其密钥被删除。它发送的轨迹会保留到过期为止（目前最长 90 天），其云端网关调用记录目前尚未设定过期时间。 |
 
-认领方法：打开认领链接，使用 GitHub 登录控制台，确认工作区信息后认领。该链接是私密的：
+认领方法：打开认领链接，使用 GitHub 登录控制台，确认工作区信息后认领。
+[`xybrid auth claim`](/zh/docs/cli/reference/auth) 会再次显示该链接。该链接是私密的：
 任何打开它并登录的人都能认领这个工作区。认领后的工作区会保留其项目和轨迹历史，
 上述期限也不再适用。在认领之前，它可以发送轨迹、使用模型仓库，并每天发起少量云端网关请求。
 

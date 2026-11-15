@@ -6,6 +6,11 @@
 //! opt-outs, proxies, keys and OTLP variables removed unless a case sets them.
 //! The platform is a custom loopback host, so `--allow-custom-host` is passed
 //! and the console comes from `XYBRID_CONSOLE_URL`.
+//!
+//! The binary is this build's, or the executable named by
+//! `XYBRID_CLI_TEST_BIN`, so a released CLI can be checked against these
+//! cases, e.g. `XYBRID_CLI_TEST_BIN=$PWD/xybrid-v<version>-linux-x86_64 cargo
+//! test -p xybrid-cli --test connect_auth_cli_test claim_by_`.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -182,6 +187,11 @@ fn mock_challenge(server: &MockServer) -> Mock<'_> {
 }
 
 fn mock_connect(server: &MockServer) -> Mock<'_> {
+    mock_connect_with(server, provision(KEY, Some(CLAIM_TOKEN), 7, false))
+}
+
+/// [`mock_connect`] answering with `body`.
+fn mock_connect_with(server: &MockServer, body: Value) -> Mock<'_> {
     server.mock(|when, then| {
         when.method(POST)
             .path("/v1/agent/connect")
@@ -193,7 +203,7 @@ fn mock_connect(server: &MockServer) -> Mock<'_> {
             .matches(sends_no_identifying_fields);
         then.status(201)
             .header("Cache-Control", "no-store")
-            .json_body(provision(KEY, Some(CLAIM_TOKEN), 7, false));
+            .json_body(body);
     })
 }
 
@@ -387,14 +397,30 @@ impl Sandbox {
     }
 }
 
-/// The CLI binary as an absolute path. Cargo sets `CARGO_BIN_EXE_xybrid` to an
-/// absolute path, but Bazel sets it to a runfiles-relative one, which stops
-/// resolving once a command runs in a project directory. Resolved once, against
-/// the directory the test binary started in.
+/// Runs these cases against another `xybrid` executable, such as a released
+/// one, instead of the one this build made. Test-only: the CLI never reads it.
+const TEST_BIN_ENV: &str = "XYBRID_CLI_TEST_BIN";
+
+/// The CLI binary as an absolute path: [`TEST_BIN_ENV`] when set, else this
+/// build's. Cargo sets `CARGO_BIN_EXE_xybrid` to an absolute path, but Bazel
+/// sets it to a runfiles-relative one, which stops resolving once a command
+/// runs in a project directory. Resolved once, against the directory the test
+/// binary started in.
 fn xybrid_bin() -> &'static Path {
     static BIN: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     BIN.get_or_init(|| {
-        let path = PathBuf::from(env!("CARGO_BIN_EXE_xybrid"));
+        let path = match std::env::var_os(TEST_BIN_ENV).filter(|p| !p.is_empty()) {
+            Some(path) => {
+                let path = PathBuf::from(path);
+                assert!(
+                    path.is_file(),
+                    "{TEST_BIN_ENV}={} is not a file",
+                    path.display()
+                );
+                path
+            }
+            None => PathBuf::from(env!("CARGO_BIN_EXE_xybrid")),
+        };
         if path.is_absolute() {
             path
         } else {
@@ -618,6 +644,161 @@ fn a_new_env_file_is_created_private_and_reused_on_the_next_connect() {
     status.assert_hits(1);
     let env = std::fs::read_to_string(sandbox.project.join(".env")).unwrap();
     assert_eq!(env.matches("XYBRID_API_KEY=").count(), 1, "{env}");
+}
+
+/// The deadline `field` of a platform answer.
+fn deadline(answer: &Value, field: &str) -> chrono::DateTime<Utc> {
+    let raw = answer[field]
+        .as_str()
+        .unwrap_or_else(|| panic!("{field} in {answer}"));
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .unwrap_or_else(|err| panic!("{field} {raw:?}: {err}"))
+        .with_timezone(&Utc)
+}
+
+/// `answer`'s key and claim deadlines as `tell_the_user` words dates: the
+/// local date (the CLI runs in this process's time zone).
+fn told_deadlines(answer: &Value) -> (String, String) {
+    let day = |field| {
+        deadline(answer, field)
+            .with_timezone(&chrono::Local)
+            .format("%a, %b %-d %Y")
+            .to_string()
+    };
+    (day("key_expires_at"), day("claim_expires_at"))
+}
+
+/// How `tell_the_user` says to claim the workspace.
+enum ClaimBy<'a> {
+    /// With this private link.
+    Link(&'a str),
+    /// With `xybrid auth claim`, when no console is known to build a link.
+    Command,
+}
+
+/// `tell_the_user` says to claim by `answer`'s claim deadline (when an
+/// unclaimed workspace is deleted), and gives the earlier key deadline only as
+/// when the key, and with it platform access, stops: never as the date to
+/// claim by.
+fn assert_told_to_claim_by_the_claim_deadline(tell: &str, answer: &Value, how: ClaimBy<'_>) {
+    let (key, claim) = told_deadlines(answer);
+    assert_ne!(key, claim, "the deadlines must differ to tell them apart");
+    let how = match how {
+        ClaimBy::Link(link) => format!(": {link} (this link is private"),
+        ClaimBy::Command => " with `xybrid auth claim`.".to_string(),
+    };
+    assert!(
+        tell.contains(&format!(" Claim it with GitHub by {claim}{how}")),
+        "{tell}"
+    );
+    assert!(
+        tell.contains(&format!(
+            " Until it is claimed, platform access stops on {key} and the workspace is \
+             scheduled for deletion on {claim}."
+        )),
+        "{tell}"
+    );
+    assert!(!tell.contains(&format!("by {key}")), "{tell}");
+}
+
+/// The project file's comment does the same with UTC dates, and names the
+/// claim command, never the private link or its token.
+fn assert_commented_to_claim_by_the_claim_deadline(env: &str, answer: &Value) {
+    let date = |field| deadline(answer, field).format("%Y-%m-%d").to_string();
+    let (key, claim) = (date("key_expires_at"), date("claim_expires_at"));
+    assert!(
+        env.contains(&format!(
+            "\n# Claim it with GitHub by {claim} to keep it: run `xybrid auth claim`.\n"
+        )),
+        "{env}"
+    );
+    assert!(
+        env.contains(&format!(
+            "\n# Unclaimed, the key stops on {key} (UTC) and the workspace is deleted on {claim}.\n"
+        )),
+        "{env}"
+    );
+    assert!(!env.contains(&format!("by {key}")), "{env}");
+    assert!(
+        !env.contains(CLAIM_TOKEN) && !env.contains("/claim/"),
+        "{env}"
+    );
+}
+
+/// "Claim by" is the claim deadline, not the key deadline a week before it, in
+/// `tell_the_user` with a claim link and in the project file, on creation and
+/// on reuse (INF-295).
+#[test]
+fn claim_by_is_the_claim_deadline_with_a_claim_link() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    mock_challenge(&server);
+    let provisioned = provision(KEY, Some(CLAIM_TOKEN), 7, false);
+    let connect = mock_connect_with(&server, provisioned.clone());
+    let url = server.base_url();
+    let console = [("XYBRID_CONSOLE_URL", CONSOLE)];
+    let link = format!("{CONSOLE}/claim/{CLAIM_TOKEN}");
+
+    let run = sandbox.run_with(&connect_args(&url), &console);
+    assert_eq!(run.code, Some(0), "{run}");
+    run.assert_no_secret(KEY);
+    let report = run.json();
+    assert_eq!(report["status"], "created");
+    assert_eq!(report["claim_url"], link);
+    let tell = report["tell_the_user"].as_str().unwrap();
+    assert_told_to_claim_by_the_claim_deadline(tell, &provisioned, ClaimBy::Link(&link));
+    let env = std::fs::read_to_string(sandbox.project.join(".env")).unwrap();
+    assert_commented_to_claim_by_the_claim_deadline(&env, &provisioned);
+
+    // Reused, with the deadlines the platform reports for the saved key.
+    let answer = workspace(false, false, "none");
+    let status = mock_workspace(&server, KEY, answer.clone());
+    let run = sandbox.run_with(&connect_args(&url), &console);
+    assert_eq!(run.code, Some(0), "{run}");
+    let report = run.json();
+    assert_eq!(report["status"], "existing");
+    assert_eq!(report["claim_url"], link);
+    let tell = report["tell_the_user"].as_str().unwrap();
+    assert_told_to_claim_by_the_claim_deadline(tell, &answer, ClaimBy::Link(&link));
+    status.assert_hits(1);
+    connect.assert_hits(1);
+}
+
+/// As [`claim_by_is_the_claim_deadline_with_a_claim_link`], without a console
+/// to build the link from: the copy names the recovery command instead.
+#[test]
+fn claim_by_is_the_claim_deadline_with_the_claim_command() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    mock_challenge(&server);
+    let provisioned = provision(KEY, Some(CLAIM_TOKEN), 7, false);
+    let connect = mock_connect_with(&server, provisioned.clone());
+    let url = server.base_url();
+
+    let run = sandbox.run(&connect_args(&url));
+    assert_eq!(run.code, Some(0), "{run}");
+    run.assert_no_secret(KEY);
+    let report = run.json();
+    assert_eq!(report["status"], "created");
+    assert_eq!(report["claim_url"], Value::Null);
+    let tell = report["tell_the_user"].as_str().unwrap();
+    assert_told_to_claim_by_the_claim_deadline(tell, &provisioned, ClaimBy::Command);
+    let env = std::fs::read_to_string(sandbox.project.join(".env")).unwrap();
+    assert_commented_to_claim_by_the_claim_deadline(&env, &provisioned);
+
+    let answer = workspace(false, false, "none");
+    let status = mock_workspace(&server, KEY, answer.clone());
+    let run = sandbox.run(&connect_args(&url));
+    assert_eq!(run.code, Some(0), "{run}");
+    let report = run.json();
+    assert_eq!(report["status"], "existing");
+    assert_eq!(report["claim_url"], Value::Null);
+    let tell = report["tell_the_user"].as_str().unwrap();
+    assert_told_to_claim_by_the_claim_deadline(tell, &answer, ClaimBy::Command);
+    status.assert_hits(1);
+    connect.assert_hits(1);
 }
 
 #[test]
@@ -1793,11 +1974,12 @@ fn a_project_file_that_fails_after_provisioning_still_reports_the_workspace() {
     let sandbox = Sandbox::new();
     let server = MockServer::start();
     let challenge = mock_challenge(&server);
+    let provisioned = provision(KEY, Some(CLAIM_TOKEN), 7, false);
     let slow = server.mock(|when, then| {
         when.method(POST).path("/v1/agent/connect");
         then.status(201)
             .delay(Duration::from_secs(2))
-            .json_body(provision(KEY, Some(CLAIM_TOKEN), 7, false));
+            .json_body(provisioned.clone());
     });
     let url = server.base_url();
 
@@ -1825,7 +2007,7 @@ fn a_project_file_that_fails_after_provisioning_still_reports_the_workspace() {
         tell.contains("Created the provisional Xybrid workspace"),
         "{tell}"
     );
-    assert!(tell.contains(&link), "{tell}");
+    assert_told_to_claim_by_the_claim_deadline(tell, &provisioned, ClaimBy::Link(&link));
     assert!(tell.contains("reuses the saved key"), "{tell}");
 
     // Once fixed, the next run reuses the saved key: no second workspace.

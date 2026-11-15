@@ -4989,7 +4989,7 @@ def observability_record_evaluation(target: XybridObservationRef, name: str, sco
 
 MODULE_NAME = "xybrid_bolt"
 PACKAGE_NAME = "xybrid_bolt"
-PACKAGE_VERSION = "0.18.0"
+PACKAGE_VERSION = "0.19.0"
 
 __all__ = [
     "MODULE_NAME",

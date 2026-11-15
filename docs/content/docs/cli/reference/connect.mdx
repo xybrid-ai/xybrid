@@ -1,0 +1,118 @@
+---
+title: xybrid connect
+description: Connect a project to a claimable Xybrid workspace without signing in
+---
+
+`xybrid connect` gives a project a Xybrid key without an account. It is built
+for coding agents: no browser and no sign-up. It creates (or reuses) a
+[provisional workspace](/docs/concepts/api-keys#provisional-workspaces) with a
+restricted, client-scoped key, saves the key privately, and keeps a private
+link that a person uses to claim the workspace with GitHub.
+
+It never prints the key and never turns on trace export. It needs CLI 0.18.0 or
+newer.
+
+## Usage
+
+```bash
+xybrid connect --write-env .env
+xybrid connect --write-env local.properties
+xybrid connect --agent claude-code --write-env .env --json
+```
+
+Run it from the project's repository. Credentials are kept per repository and
+platform host.
+
+## Options
+
+| Option | Description |
+|--------|-------------|
+| `--write-env <PATH>` | Write the key to this untracked project file and gitignore it |
+| `--env-name <VAR>` | Variable to set in `--write-env`. Default `XYBRID_API_KEY`, or `xybrid.apiKey` in a `.properties` file. For Expo, pass `EXPO_PUBLIC_XYBRID_API_KEY` |
+| `--agent <NAME>` | Self-reported agent name, for example `claude-code`. Detected from `CLAUDECODE=1` when possible |
+| `--project-name <NAME>` | Name for a new workspace or project. Default: the repository's directory name |
+| `--new` | Create a new workspace even if this project has saved credentials. Never replaces a key already in the project file |
+| `--allow-ci` | Connect even when a CI environment is detected. Privacy opt-outs still apply |
+| `--allow-custom-host` | Allow a `--platform-url` other than the Xybrid production or staging API. HTTPS is required unless the host is localhost |
+| `--json` | Print one JSON object instead of text |
+
+### Project files
+
+`--write-env` accepts three kinds of file. Any other file name is refused.
+
+| Format | File names | Default variable |
+|--------|------------|------------------|
+| dotenv | `.env`, `.env.*` (such as `.env.local`), `*.env` | `XYBRID_API_KEY` |
+| Java properties | `local.properties`, `*.properties` | `xybrid.apiKey` |
+| xcconfig | `*.xcconfig` | `XYBRID_API_KEY` |
+
+Other lines in the file are kept as they are, and a value that is already set
+is never replaced. Above the key, `connect` writes a comment with the claim
+command and the workspace's dates. The comment never holds the claim link.
+
+## What it does
+
+1. **Checks first, before anything is created.** `connect` stops in CI unless
+   you pass `--allow-ci`. It stops when a privacy opt-out is set
+   (`XYBRID_TELEMETRY_OPTOUT`, `DO_NOT_TRACK` or `OTEL_SDK_DISABLED=true`). It
+   stops when Git tracks the `--write-env` file. It also checks for a key the
+   project already has and for a writable private credentials store.
+2. **Reuses or creates.** A project with a saved key reuses it. A second
+   repository on the same machine becomes a new project in the same unclaimed
+   workspace. Otherwise `connect` creates a new workspace, which takes a few
+   seconds.
+3. **Saves the key.** The key and the claim token go to the private store,
+   `~/.xybrid/credentials.json` (`XYBRID_CREDENTIALS_FILE` moves it). With
+   `--write-env`, the key also goes to the project file, and the file is added
+   to `.gitignore`.
+
+Later commands in the same repository use the saved key when neither
+`--api-key` nor `XYBRID_API_KEY` is set.
+
+## Exit codes
+
+| Exit | Status | Meaning |
+|------|--------|---------|
+| 0 | `created`, `existing` | The project has a key: a new one, or the one it already had |
+| 3 | `signup_closed` | Xybrid is not creating agent workspaces right now |
+| 4 | `offline` | Xybrid could not be reached |
+| 5 | `ci_skipped`, `opted_out` | A CI environment or a privacy opt-out was detected |
+| 6 | `env_file_tracked` | Git tracks the project file. Choose an untracked file |
+| 7 | `workspace_expired` | The saved workspace's key expired, but the workspace can still be claimed |
+| 1 | `error` | Anything else. `error.code` in the JSON says why |
+
+## JSON output
+
+`--json` prints one object. It never contains the key, only a preview such as
+`sk_live_AbCd1234…`.
+
+| Field | Content |
+|-------|---------|
+| `schema_version` | `1` |
+| `status` | One of the statuses above |
+| `tell_the_user` | A message for the person, including the claim link when there is one |
+| `key` | `source`, `preview` and `scope` |
+| `env_file` | `path`, `variable`, `written`, `already_configured`, `gitignored`, and `suggestions` when the file is tracked |
+| `credentials` | `path`, `saved`, and `recovery` (whether `xybrid auth claim` can show the link again) |
+| `workspace` | Organization and project, `key_expires_at`, `claim_expires_at`, `limits` and the terms and privacy links |
+| `claim_url` | The private claim link |
+| `verification` | Whether traces from this project have been stored |
+| `next_steps` | `wire_init`, `verify` and `relay`, each with a `summary` and sometimes a `command` |
+
+The claim link is private. Anyone who opens it and signs in can claim the
+workspace, so keep it out of commits, pull requests, issues and logs.
+
+## After connecting
+
+- **Turn on trace export yourself.** A key alone exports nothing. Configure the
+  Xybrid observability preset in your app, or add `--observability` to a CLI
+  command. See [API keys](/docs/concepts/api-keys#authentication-and-trace-export-are-separate).
+- **Check that a trace arrived** with [`xybrid auth status`](/docs/cli/reference/auth).
+- **Claim the workspace.** Unclaimed, the key stops after 7 days and the
+  workspace is deleted after 14 days. You can claim until it is deleted, and
+  claiming restores a stopped key. [`xybrid auth claim`](/docs/cli/reference/auth)
+  shows the link again.
+
+Coding agents can follow the `xybrid-connect` skill, which also wires
+metadata-only export for each SDK. It lives in
+[`agents/skills/xybrid-connect`](https://github.com/xybrid-ai/xybrid/tree/master/agents/skills/xybrid-connect).

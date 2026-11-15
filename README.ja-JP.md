@@ -139,7 +139,7 @@ xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.18.0
+  xybrid_flutter: ^0.19.0
 ```
 
 **モデルを実行:**
@@ -156,7 +156,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.18.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.19.0")
 }
 ```
 
@@ -178,7 +178,7 @@ val result = model.runAsync(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.18.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.19.0")
 ]
 ```
 
@@ -227,7 +227,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.18.0"
+xybrid = "0.19.0"
 ```
 
 **モデルを実行:**
@@ -358,6 +358,8 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 ```
 
 スキルはエージェント非依存で、[`agents/skills/`](agents/skills/)に配置されます。インストーラーはClaude Code（`.claude/skills`）とCodex（`.codex/skills`）にシンボリックリンクを作成します。
+
+インストーラーは`/xybrid-connect`も追加します。サインアップなしでプロジェクトをXybridコンソールに接続するスキルです。`xybrid connect`（CLI 0.18.0以降）を実行して仮のワークスペースを作成し、制限付きキーをgitignore済みのファイルに保存し、GitHubでワークスペースをクレーム（引き継ぎ）するための非公開リンクを渡します。クレームしない場合、キーは7日後に停止し、ワークスペースは14日後に削除されます。詳しくは[APIキー](https://docs.xybrid.dev/en/docs/concepts/api-keys#provisional-workspaces)を参照してください。
 
 **手動の場合** — モデルディレクトリに`model_metadata.json`を作成:
 

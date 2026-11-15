@@ -31,9 +31,10 @@ included from your build configuration on iOS.
   test, and the console shows the key once, when it is created. Console keys
   have full scope. You can revoke a key there at any time.
 - **Agent signup.** A coding agent can create a provisional workspace for a
-  project while no one is signed in. Its keys are client-scoped `sk_live_`
-  keys, and the workspace expires unless a person claims it. Agent signup is
-  not generally available yet; see [Provisional workspaces](#provisional-workspaces).
+  project while no one is signed in, by running
+  [`xybrid connect`](/docs/cli/reference/connect). Its keys are client-scoped
+  `sk_live_` keys, and the workspace expires unless a person claims it; see
+  [Provisional workspaces](#provisional-workspaces).
 
 ## Scopes
 
@@ -128,8 +129,9 @@ when you supply one.
 ## Provisional workspaces
 
 A workspace created through agent signup is **provisional** until a person
-claims it. Agent signup is not generally available yet; this section describes
-what happens to such a workspace.
+claims it. A coding agent creates one with
+[`xybrid connect`](/docs/cli/reference/connect), which needs CLI 0.18.0 or
+newer and no account. This section describes what happens to such a workspace.
 
 | Time after creation | Unclaimed workspace |
 |---------------------|---------------------|
@@ -139,7 +141,8 @@ what happens to such a workspace.
 | Day 14 | The workspace and its keys are deleted. Traces it sent stay until they expire, currently up to 90 days, and records of its gateway calls have no expiry yet. |
 
 To claim, open the claim link, sign in to the console with GitHub, review the
-workspace and claim it. The link is private: anyone who opens it and signs in
+workspace and claim it. [`xybrid auth claim`](/docs/cli/reference/auth) shows
+the link again. The link is private: anyone who opens it and signs in
 can claim the workspace. A claimed workspace keeps its projects and trace
 history, and its deadlines no longer apply. Until then, it can send traces,
 use the registry and make a small daily number of cloud-gateway requests.

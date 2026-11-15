@@ -29,6 +29,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reproducible on the MLX backend; the llama.cpp and mistralrs backends ignore
   it. `Xybrid::model(id)` is shorthand for `ModelLoader::from_registry(id)`.
 
+## [0.19.0] - 2026-11-14
+
+### Added
+
+- **Agent setup:** the skills installer now includes `xybrid-connect` and its
+  reference script, with a SHA-256 check before replacing an installed copy.
+  The CLI installers describe the optional `xybrid connect` command, and the
+  documentation covers `connect`, `auth` and provisional workspace deadlines
+  in English and Chinese. Agent signup is available in production; trace
+  export still requires explicit configuration.
+
+### Changed
+
+- **Cargo:** refreshed the generated llama.cpp native manifest for the LFM3
+  fix below, so matching prebuilt archives are available to external builds.
+- **Flutter:** regenerated the FRB binding comments for Rust 1.100.
+
 ### Fixed
 
 - **SDK:** a pipeline stage with no `target:` and no provider runs locally
@@ -53,6 +70,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `xybrid-llama`, `generate_with_stops`, `generate_streaming` and
   `generate_from_current_logits_streaming` take a `banned_tokens` list after
   `grammar`; pass `&[]` to ban nothing.
+- **CLI:** `xybrid connect` gave the wrong date to claim a provisional
+  workspace by. Its `tell_the_user` and the comment it writes above the key
+  in the `--write-env` file said to claim by the key's expiry
+  (`key_expires_at`), but the workspace can be claimed until it is deleted
+  (`claim_expires_at`, a week later on Xybrid's platform), and claiming
+  restores an expired key. Both now say to claim by `claim_expires_at`, and
+  still give `key_expires_at` as the date the key, and with it platform
+  access, stops. The `xybrid-connect` skill's reference script,
+  `xybrid_agent_connect.py`, made the same mistake and is fixed too, so its
+  published SHA-256 changed. The deadlines themselves, the JSON report and
+  the saved credentials are unchanged.
 
 ## [0.18.0] - 2026-11-12
 
