@@ -15,6 +15,7 @@ describes, because a table can only be built from files that follow them:
     pull_request_target. A lane file declares workflow_call (plus
     workflow_dispatch, plus schedule for a nightly), is called by a workflow,
     and never declares push or a pull-request event.
+  * ci.yml and the lane files it calls hold exactly MACOS_JOB_BUDGET macOS jobs.
 
 Standard library only: this runs on a bare CI runner and on a laptop without a
 YAML package. It reads the small, regular subset of YAML these files use and
@@ -112,6 +113,15 @@ PULL_REQUEST_FILES = frozenset(
         "welcome.yml",
     }
 )
+
+# macOS runners are shared: the organization's plan runs 5 macOS jobs at once,
+# across every repository, so each one a pull request starts can queue behind
+# another pull request's. The pull-request pipeline (ci.yml and the lane files
+# it calls, matrix legs counted) holds exactly this many; macos_jobs() lists
+# them. A new one goes into an existing macOS job as steps. If it truly needs
+# its own runner, raise this number in the same PR and say why; when a macOS
+# job goes, lower it, so the room is not reused silently.
+MACOS_JOB_BUDGET = 6
 
 _PULL_REQUEST_EVENTS = ("pull_request", "pull_request_target")
 
@@ -409,6 +419,8 @@ class Job:
     runs_on: Optional[str]
     # `strategy.matrix.include` entries, each as its scalar keys.
     include: Tuple[Dict[str, str], ...] = ()
+    # Other `strategy.matrix` keys (axes whose values multiply the legs).
+    axes: Tuple[str, ...] = ()
 
     @property
     def check_name(self) -> str:
@@ -424,6 +436,19 @@ def _folded(rest: str, block: Sequence[str]) -> str:
     return _scalar(rest)
 
 
+def _matrix_axes(job_lines: Sequence[str]) -> Tuple[str, ...]:
+    """Keys under `strategy.matrix` other than include/exclude: axes the legs multiply over."""
+    matrix = next((i for i, line in enumerate(job_lines) if re.match(r"^      matrix:\s*$", line)), None)
+    if matrix is None:
+        return ()
+    block = [line for line in _block(job_lines, matrix) if not _skip(line)]
+    if not block:
+        return ()
+    indent = min(_indent(line) for line in block)
+    keys = [m.group(1) for line in block if _indent(line) == indent and (m := _KEY.match(line))]
+    return tuple(key for key in keys if key not in ("include", "exclude"))
+
+
 def _matrix_include(job_lines: Sequence[str]) -> Tuple[Dict[str, str], ...]:
     strategy = next((i for i, line in enumerate(job_lines) if re.match(r"^    strategy:\s*$", line)), None)
     if strategy is None:
@@ -436,6 +461,8 @@ def _matrix_include(job_lines: Sequence[str]) -> Tuple[Dict[str, str], ...]:
     for line in _block(block, start):
         if _skip(line):
             continue
+        if re.match(r"^\s*-\s*\{", line):
+            raise Unsupported(f"unsupported flow-mapping matrix entry {line.strip()!r}")
         match = re.match(r"^\s*(-\s+)?([A-Za-z_][\w-]*):\s*(.*)$", line)
         if not match:
             continue
@@ -455,6 +482,9 @@ def read_jobs(path: Path) -> Dict[str, Job]:
         raise Unsupported(f"{path.name}: no top-level jobs:")
     jobs: Dict[str, Job] = {}
     body = _block(lines, start)
+    content = [line for line in body if not _skip(line)]
+    if content and min(_indent(line) for line in content) != 2:
+        raise Unsupported(f"{path.name}: jobs must be indented two spaces")
     for offset, line in enumerate(body):
         if _skip(line) or _indent(line) != 2:
             continue
@@ -482,8 +512,64 @@ def read_jobs(path: Path) -> Dict[str, Job]:
             uses=keys.get("uses"),
             runs_on=keys.get("runs-on"),
             include=_matrix_include(job_lines),
+            axes=_matrix_axes(job_lines),
         )
     return jobs
+
+
+def _macos_legs(job: Job, file: str) -> List[str]:
+    """This job's macOS legs. Raises on a runner shape it cannot count rather than miss one."""
+    runner = job.runs_on
+    if not runner or runner[:1] in ("[", "{"):
+        # A missing value, a group/labels mapping or a label list.
+        raise Unsupported(f"{file}: job {job.id} runs on {runner!r}, which macos_jobs() cannot count")
+    matrix = re.fullmatch(r"\$\{\{\s*matrix\.([\w-]+)\s*\}\}", runner)
+    if matrix:
+        if not job.include or matrix.group(1) in job.axes:
+            raise Unsupported(
+                f"{file}: job {job.id} runs on a matrix axis; list its legs under `include:` only"
+            )
+        return [
+            f"{file}:{job.id} ({leg.get(matrix.group(1), '?')})"
+            for leg in job.include
+            # GitHub matches runner labels case-insensitively.
+            if leg.get(matrix.group(1), "").lower().startswith("macos")
+        ]
+    if "${{" in runner:
+        raise Unsupported(f"{file}: job {job.id} runs on {runner!r}, which macos_jobs() cannot count")
+    return [f"{file}:{job.id}"] if runner.lower().startswith("macos") else []
+
+
+def macos_jobs(directory: Path, entry: str = "ci.yml") -> List[str]:
+    """The macOS jobs a pull request can start through `entry` and the lane files it calls."""
+    if not (directory / entry).is_file():
+        return []
+    found: List[str] = []
+    for job in read_jobs(directory / entry).values():
+        if job.uses and job.uses.startswith("./.github/workflows/"):
+            found += macos_jobs(directory, job.uses.rsplit("/", 1)[1])
+        elif job.uses:
+            raise Unsupported(f"{entry}: job {job.id} calls {job.uses}, whose runners macos_jobs() cannot see")
+        else:
+            found += _macos_legs(job, entry)
+    return found
+
+
+def macos_problems(directory: Path, budget: Optional[int] = None) -> List[str]:
+    budget = MACOS_JOB_BUDGET if budget is None else budget
+    jobs = macos_jobs(directory)
+    if len(jobs) > budget:
+        return [
+            f"the pull-request pipeline has {len(jobs)} macOS jobs ({', '.join(jobs)}), over "
+            f"MACOS_JOB_BUDGET ({budget}). Add steps to an existing macOS job, or raise the "
+            "budget in tools/scripts/gen_workflow_index.py in the same PR and say why"
+        ]
+    if len(jobs) < budget:
+        return [
+            f"the pull-request pipeline has {len(jobs)} macOS jobs ({', '.join(jobs)}); lower "
+            f"MACOS_JOB_BUDGET from {budget} to {len(jobs)} so the room is not reused silently"
+        ]
+    return []
 
 
 def load(directory: Path) -> List[Workflow]:
@@ -619,7 +705,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         workflows = load(WORKFLOWS_DIR)
-        rule_violations = problems(workflows)
+        rule_violations = problems(workflows) + macos_problems(WORKFLOWS_DIR)
         if rule_violations:
             for violation in rule_violations:
                 print(f"error: {violation}", file=sys.stderr)

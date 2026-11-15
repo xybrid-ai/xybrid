@@ -43,10 +43,8 @@ jobs:
     outputs:
       full_ci: ${{ steps.filter.outputs.full_ci }}
       ort_staging: ${{ steps.filter.outputs.ort_staging }}
-      unity_bolt: ${{ steps.filter.outputs.unity_bolt }}
+      bindings_drift: ${{ steps.filter.outputs.bindings_drift }}
       python_sdk: ${{ steps.filter.outputs.python_sdk }}
-      kotlin_jni: ${{ steps.filter.outputs.kotlin_jni }}
-      apple_bolt: ${{ steps.filter.outputs.apple_bolt }}
       candle: ${{ steps.filter.outputs.candle }}
       whispercpp: ${{ steps.filter.outputs.whispercpp }}
       policy_routing: ${{ steps.filter.outputs.policy_routing }}
@@ -85,51 +83,53 @@ jobs:
           python3 tools/scripts/ci_gate.py changes "$EVENT_NAME" "$RUNNER_TEMP/ci-files.json" \
             | tee -a "$GITHUB_OUTPUT"
 
-  kotlin-jni-drift:
-    name: Kotlin and JNI generation drift
+  # The committed bindings are generator output: Kotlin and the JNI glue, the
+  # Swift and C header the xcframework ships, and the Unity C#. A bolt export,
+  # a doc comment or a facade type change can leave them stale, so this job
+  # regenerates each with the pinned boltffi and compares (one install, one
+  # xybrid-bolt build for all three), then compiles the Unity C# against
+  # Unity's frozen scripting profile. Generation is host-agnostic (boltffi + a
+  # cargo metadata build), so it runs on Linux; the Swift compile stays on
+  # macOS in build-apple.yml. Each check runs even when an earlier one failed.
+  bindings-drift:
+    name: Binding generation drift
     needs: tooling-changes
-    if: needs.tooling-changes.outputs.kotlin_jni == 'true'
+    if: needs.tooling-changes.outputs.bindings_drift == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: ./.github/actions/setup-rust
-      - uses: ./.github/actions/install-boltffi
+      - id: boltffi
+        uses: ./.github/actions/install-boltffi
       - name: Compare committed Kotlin and JNI with fresh generation
+        if: ${{ !cancelled() && steps.boltffi.outcome == 'success' }}
         run: python3 tools/scripts/gen_kotlin_bolt.py --check
-
-  # The committed Swift bindings and the C header the xcframework ships are
-  # generator output, like Kotlin/Python/Unity — but until now they had no
-  # drift gate, so a regeneration could silently disagree with the crate.
-  # Generation is host-agnostic (boltffi + a cargo metadata build), so this
-  # runs on Linux; the Swift *compile* stays on macOS in build-apple.yml.
-  apple-bolt-drift:
-    name: Swift and C header generation drift
-    needs: tooling-changes
-    if: needs.tooling-changes.outputs.apple_bolt == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: ./.github/actions/setup-rust
-      - uses: ./.github/actions/install-boltffi
       - name: Compare committed Swift and C header with fresh generation
+        if: ${{ !cancelled() && steps.boltffi.outcome == 'success' }}
         run: bindings/apple/scripts/gen-bolt-bindings.sh --check
-
-  # The committed Unity C# (bindings/unity/Runtime/Bolt) is generator output
-  # like Kotlin/Swift/Python, but only its compile was gated: a bolt export or
-  # doc-comment change could ship without regenerating it. Generation is
-  # host-agnostic (boltffi + a cargo metadata build), so this runs on Linux;
-  # the netstandard2.1 compile stays in unity-bolt-compile.
-  unity-bolt-drift:
-    name: Unity C# generation drift
-    needs: tooling-changes
-    if: needs.tooling-changes.outputs.unity_bolt == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: ./.github/actions/setup-rust
-      - uses: ./.github/actions/install-boltffi
       - name: Compare committed Unity C# with fresh generation
+        if: ${{ !cancelled() && steps.boltffi.outcome == 'success' }}
         run: python3 tools/scripts/gen_unity_bolt_csharp.py --check
+      # netstandard2.1 + C# 9, Unity's scripting profile: catches a boltffi
+      # output change or a missed down-level in gen_unity_bolt_csharp.py at PR
+      # time instead of in the Editor. ubuntu-latest ships SDK 8+ for the
+      # reflection check.
+      - name: Compile Unity bindings and check desktop native imports
+        if: ${{ !cancelled() }}
+        run: |
+          dotnet --version
+          dotnet build tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c Release
+          dotnet run --project tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c Release -f net8.0 --no-build -- xybrid_bolt
+      - name: Check iOS player native imports
+        if: ${{ !cancelled() }}
+        run: |
+          dotnet build tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c IOSPlayer -p:DefineConstants=UNITY_IOS
+          dotnet run --project tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c IOSPlayer -f net8.0 --no-build -- __Internal
+      - name: Check Unity Editor native imports with iOS selected
+        if: ${{ !cancelled() }}
+        run: |
+          dotnet build tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c IOSEditor -p:DefineConstants=UNITY_IOS%3BUNITY_EDITOR
+          dotnet run --project tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c IOSEditor -f net8.0 --no-build -- xybrid_bolt
 
   # Stage the pinned ONNX Runtime the Unity desktop plugin ships and load it,
   # on the two hosts it ships for. The tooling unit tests run in repo-checks.
@@ -156,32 +156,6 @@ jobs:
         run: |
           ${{ matrix.python }} tools/scripts/stage_unity_desktop_ort.py ${{ matrix.platform }} "${{ runner.temp }}/unity-ort"
           ${{ matrix.python }} -c "import ctypes, sys; ctypes.CDLL(sys.argv[1])" "${{ runner.temp }}/unity-ort/${{ matrix.runtime }}"
-
-  # Compile the committed BoltFFI C# bindings against Unity's frozen scripting
-  # profile (netstandard2.1 + C# 9). Catches a boltffi output change or a missed
-  # down-level in gen_unity_bolt_csharp.py at PR time instead of in the Editor.
-  unity-bolt-compile:
-    name: Compile Unity bolt bindings (netstandard2.1)
-    needs: tooling-changes
-    if: needs.tooling-changes.outputs.unity_bolt == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Compile bindings and check desktop native imports
-        # ubuntu-latest ships SDK 8+ for the reflection check. Every build also
-        # compiles netstandard2.1 with C# 9 to match Unity's scripting profile.
-        run: |
-          dotnet --version
-          dotnet build tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c Release
-          dotnet run --project tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c Release -f net8.0 --no-build -- xybrid_bolt
-      - name: Check iOS player native imports
-        run: |
-          dotnet build tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c IOSPlayer -p:DefineConstants=UNITY_IOS
-          dotnet run --project tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c IOSPlayer -f net8.0 --no-build -- __Internal
-      - name: Check Unity Editor native imports with iOS selected
-        run: |
-          dotnet build tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c IOSEditor -p:DefineConstants=UNITY_IOS%3BUNITY_EDITOR
-          dotnet run --project tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c IOSEditor -f net8.0 --no-build -- xybrid_bolt
 
   # The Python SDK is the one binding CI cannot test from the committed tree
   # alone: boltffi's Python target compiles a CPython bridge per interpreter,
@@ -262,20 +236,6 @@ jobs:
           components: clippy
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
-  # Feature combination checks - ensure platform builds don't break
-  check-no-default-features:
-    needs: tooling-changes
-    if: needs.tooling-changes.outputs.full_ci == 'true'
-    name: check (no-default-features, ubuntu-latest)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          cache-key: ubuntu-latest-no-default
-      - name: Check without default features
-        run: cargo check -p xybrid-core --no-default-features
-
   check-platform-macos:
     needs: tooling-changes
     if: needs.tooling-changes.outputs.full_ci == 'true'
@@ -296,51 +256,45 @@ jobs:
       - name: Test native Core ML fixture
         run: cargo test -p integration-tests --features coreml --test coreml_native
 
+  # Feature combinations, so platform builds don't break. platform-desktop
+  # and platform-macos include llm-llamacpp-vision (xybrid-sdk's Cargo.toml),
+  # so these checks also cover the vision build on Linux and macOS.
   check-platform-desktop:
     needs: tooling-changes
     if: needs.tooling-changes.outputs.full_ci == 'true'
-    name: check (platform-desktop, ubuntu-latest)
+    name: check (no-default-features, platform-desktop, ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true
-      - uses: ./.github/actions/setup-rust
+      - id: rust
+        uses: ./.github/actions/setup-rust
         with:
           cache-key: ubuntu-platform-desktop
+      - name: Check without default features
+        run: cargo check -p xybrid-core --no-default-features
+      # Reports even when the check above failed; they were separate jobs.
       - name: Check platform-desktop
+        if: ${{ !cancelled() && steps.rust.outcome == 'success' }}
         run: cargo check -p xybrid-sdk --features platform-desktop
 
+  # The only Windows compile on a pull request. Its Linux and macOS legs
+  # repeated check-platform-desktop and check-platform-macos exactly.
   check-vision-platforms:
     needs: tooling-changes
     if: needs.tooling-changes.outputs.full_ci == 'true'
-    name: check vision (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: linux
-            os: ubuntu-latest
-            features: platform-desktop,llm-llamacpp-vision
-            cache-key: linux-vision-platform
-          - name: macos
-            os: macos-latest
-            features: platform-macos,llm-llamacpp-vision
-            cache-key: macos-vision-platform
-          - name: windows
-            os: windows-latest
-            features: platform-desktop,llm-llamacpp-vision
-            cache-key: windows-vision-platform
+    name: check vision (windows)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true
       - uses: ./.github/actions/setup-rust
         with:
-          cache-key: ${{ matrix.cache-key }}
+          cache-key: windows-vision-platform
       - name: Check vision build without model artifacts
-        run: cargo check -p xybrid-sdk --features ${{ matrix.features }}
+        run: cargo check -p xybrid-sdk --features platform-desktop,llm-llamacpp-vision
 
   # Linux only. Windows cannot build ggml's `vulkan-shaders-gen` under cargo's
   # OUT_DIR: the nested CMake ExternalProject blows past MAX_PATH and MSBuild's
@@ -914,14 +868,10 @@ jobs:
       - tooling-changes
       - repo-checks
       - tooling-tests
-      - unity-bolt-compile
-      - unity-bolt-drift
+      - bindings-drift
       - python-sdk
-      - kotlin-jni-drift
-      - apple-bolt-drift
       - fmt
       - clippy
-      - check-no-default-features
       - check-platform-macos
       - check-platform-desktop
       - check-vision-platforms

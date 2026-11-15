@@ -42,8 +42,8 @@ rules under [Adding CI](#adding-ci). The last two are decisions to keep.
 
 CI used to grow one workflow per feature, each with its own triggers, path
 list, setup block and runner. `ci.yml` is now the pull-request pipeline, and
-new coverage extends it. The first two rules fail `Repo checks`; the rest
-are how to follow them.
+new coverage extends it. Rules 1, 2 and 7 fail `Repo checks`; the rest are
+how to follow them.
 
 1. **No new workflow file.** `WORKFLOW_FILES` in `gen_workflow_index.py` lists
    every file in this directory, and an unlisted file fails the check. A file
@@ -69,6 +69,9 @@ are how to follow them.
 6. **A new binding or platform is a lane file called from `ci.yml`.**
 7. **macOS runs 5 jobs at once for the whole organization.** Add steps to an
    existing macOS job; a new one waits behind every other pull request's.
+   `MACOS_JOB_BUDGET` in `gen_workflow_index.py` is the number of macOS jobs
+   `ci.yml` and its lane files hold, matrix legs counted. A new one raises it
+   in the same PR and says why; removing one lowers it.
 
 ## Shared setup
 

@@ -312,6 +312,106 @@ class AllowlistTests(unittest.TestCase):
         self.assertIn("bazel.yml", gen.PULL_REQUEST_FILES)
 
 
+class MacosBudgetTests(unittest.TestCase):
+    CI = textwrap.dedent(
+        """\
+        # Purpose: x
+        name: "CI: Workspace"
+        on: pull_request
+        jobs:
+          linux:
+            runs-on: ubuntu-latest
+          mac:
+            runs-on: macos-15
+          legs:
+            name: legs (${{ matrix.name }})
+            runs-on: ${{ matrix.os }}
+            strategy:
+              fail-fast: false
+              matrix:
+                include:
+                  - name: linux
+                    os: ubuntu-latest
+                  - name: mac
+                    os: macos-latest
+                  - name: windows
+                    os: windows-latest
+          lane:
+            name: Lane
+            uses: ./.github/workflows/lane.yml
+        """
+    )
+    LANE = textwrap.dedent(
+        """\
+        # Purpose: x
+        name: "SDK: Lane"
+        on:
+          workflow_call:
+        jobs:
+          ios:
+            runs-on: macos-26
+          android:
+            runs-on: ubuntu-latest
+        """
+    )
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        write(self.dir, "ci.yml", self.CI)
+        write(self.dir, "lane.yml", self.LANE)
+
+    def test_counts_jobs_matrix_legs_and_called_lanes(self):
+        self.assertEqual(
+            gen.macos_jobs(self.dir),
+            ["ci.yml:mac", "ci.yml:legs (macos-latest)", "lane.yml:ios"],
+        )
+
+    def test_the_budget_is_exact_both_ways(self):
+        self.assertEqual(gen.macos_problems(self.dir, 3), [])
+        over = gen.macos_problems(self.dir, 2)
+        self.assertEqual(len(over), 1)
+        self.assertIn("3 macOS jobs", over[0])
+        self.assertIn("over MACOS_JOB_BUDGET (2)", over[0])
+        under = gen.macos_problems(self.dir, 4)
+        self.assertIn("lower MACOS_JOB_BUDGET from 4 to 3", under[0])
+
+    def test_labels_match_case_insensitively(self):
+        write(self.dir, "lane.yml", self.LANE.replace("macos-26", "macOS-latest"))
+        self.assertIn("lane.yml:ios", gen.macos_jobs(self.dir))
+
+    def test_a_runner_it_cannot_count_is_refused(self):
+        # Each shape would otherwise count zero and slip past the budget.
+        shapes = {
+            "an expression": "runs-on: ${{ inputs.runner }}",
+            "a label list": "runs-on: [macos-15]",
+            "a group mapping": "runs-on:\n      group: mac\n      labels: macos-15",
+            "a matrix axis": "runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n"
+            "        os: [ubuntu-latest, macos-latest]\n        include:\n          - os: ubuntu-latest\n            extra: one",
+            "a flow-mapping leg": "runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n"
+            "        include:\n          - { os: macos-latest }",
+        }
+        for label, runner in shapes.items():
+            with self.subTest(label):
+                write(self.dir, "lane.yml", self.LANE.replace("runs-on: macos-26", runner))
+                with self.assertRaises(gen.Unsupported):
+                    gen.macos_jobs(self.dir)
+
+    def test_jobs_at_another_indent_or_remote_calls_are_refused(self):
+        head, jobs = self.LANE.split("jobs:\n")
+        write(self.dir, "lane.yml", head + "jobs:\n" + "".join("  " + line for line in jobs.splitlines(True)))
+        with self.assertRaises(gen.Unsupported):
+            gen.macos_jobs(self.dir)
+        write(self.dir, "lane.yml", self.LANE)
+        write(self.dir, "ci.yml", self.CI + "  remote:\n    uses: org/repo/.github/workflows/x.yml@main\n")
+        with self.assertRaises(gen.Unsupported):
+            gen.macos_jobs(self.dir)
+
+    def test_the_repository_pipeline_is_within_budget(self):
+        self.assertEqual(gen.macos_problems(gen.WORKFLOWS_DIR), [])
+
+
 class RenderTests(unittest.TestCase):
     def test_orders_groups_then_names_and_escapes_pipes(self):
         table = gen.render(
@@ -370,6 +470,7 @@ class MainTests(unittest.TestCase):
             ("README", self.readme),
             ("WORKFLOW_FILES", frozenset({"sample.yml"})),
             ("PULL_REQUEST_FILES", frozenset({"sample.yml"})),
+            ("MACOS_JOB_BUDGET", 0),
         ):
             patcher = patch.object(gen, target, value)
             patcher.start()

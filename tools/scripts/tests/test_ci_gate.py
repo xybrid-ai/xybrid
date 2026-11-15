@@ -182,12 +182,12 @@ class ChangeSelectionTests(unittest.TestCase):
             "crates/xybrid-ffi-facade/src/observability_operations.rs",
         ):
             outputs = classify("pull_request", pr_files(path))
-            for flag in ("unity_bolt", "python_sdk", "kotlin_jni", "apple_bolt"):
+            for flag in ("bindings_drift", "python_sdk"):
                 with self.subTest(path=path, flag=flag):
                     self.assertEqual(outputs[flag], "true")
         for path in ("crates/xybrid-sdk/src/lib.rs", "bindings/unity/Tests/Editor/ObservationTests.cs"):
             with self.subTest(path=path):
-                self.assertEqual(classify("pull_request", pr_files(path))["unity_bolt"], "false")
+                self.assertEqual(classify("pull_request", pr_files(path))["bindings_drift"], "false")
 
     def test_observability_scenario_inputs_run_the_python_suite(self):
         # The Python suite runs the shared scenario end to end over the
@@ -201,14 +201,19 @@ class ChangeSelectionTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(classify("pull_request", pr_files(path))["python_sdk"], "true")
 
-    def test_unity_drift_inputs_select_both_unity_jobs(self):
+    def test_each_generator_and_its_outputs_run_the_drift_job(self):
         for path in (
             "bindings/unity/Runtime/Bolt/XybridError.cs",
             "bindings/unity/Runtime/Api/Observation.cs",
             "tools/scripts/gen_unity_bolt_csharp.py",
+            "tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj",
+            "tools/scripts/gen_kotlin_bolt.py",
+            "bindings/kotlin/bazel/jni/jni_glue.c",
+            "bindings/apple/scripts/gen-bolt-bindings.sh",
+            "bindings/apple/include/xybrid-bolt.h",
         ):
             with self.subTest(path=path):
-                self.assertEqual(classify("pull_request", pr_files(path))["unity_bolt"], "true")
+                self.assertEqual(classify("pull_request", pr_files(path))["bindings_drift"], "true")
 
     def test_the_pipeline_and_its_registry_run_every_job_and_lane(self):
         for path in (
@@ -496,11 +501,11 @@ class RequiredGateTests(unittest.TestCase):
 
     def test_a_gated_job_is_optional_only_when_its_inputs_are_untouched(self):
         needs = self.needs("crates/xybrid-core/src/lib.rs")
-        needs["unity-bolt-drift"] = {"result": "skipped"}
+        needs["bindings-drift"] = {"result": "skipped"}
         check_jobs(needs)
         for path in ("crates/xybrid-bolt/src/lib.rs", "bindings/unity/Runtime/Bolt/XybridError.cs"):
             needs = self.needs(path)
-            needs["unity-bolt-drift"] = {"result": "skipped"}
+            needs["bindings-drift"] = {"result": "skipped"}
             with self.subTest(path=path), self.assertRaises(ValueError):
                 check_jobs(needs)
 

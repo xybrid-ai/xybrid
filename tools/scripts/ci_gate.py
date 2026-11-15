@@ -34,17 +34,16 @@ PATH_FILTERS = {
     # The ONNX Runtime staging legs download and load the archives the script
     # pins; nothing else in the tree changes what they do.
     "ort_staging": r"^tools/scripts/stage_unity_desktop_ort\.py$",
-    # The committed C# is generated from the whole bolt crate (its exports and
-    # their doc comments) and the facade types it wraps, so a change to either
-    # must run the drift check and recompile the hand-written Api layer on top.
-    "unity_bolt": r"^(bindings/unity/Runtime/(Bolt/|BoltSupplement/|Api/)|tools/unity-bolt-compile-check/|tools/scripts/gen_unity_bolt_csharp\.py$|crates/xybrid-bolt/|crates/xybrid-ffi-facade/)",
+    # bindings-drift regenerates the committed Kotlin/JNI, Swift/C header and
+    # Unity C# bindings and compiles the Unity C# (with its hand-written Api
+    # layer). Each is generated from the whole bolt crate (its exports and their
+    # doc comments) over the facade types it wraps, so a change to either runs it.
+    "bindings_drift": r"^(crates/xybrid-bolt/|crates/xybrid-ffi-facade/|bindings/(kotlin|apple)/|bindings/unity/Runtime/(Bolt/|BoltSupplement/|Api/)|tools/unity-bolt-compile-check/|tools/scripts/gen_(kotlin_bolt|unity_bolt_csharp)\.py$)",
     # The suite exports manual observations to a local receiver, so it also
     # covers the facade those handles wrap, and runs the shared observability
     # scenario (tools/scripts/observability_capture/) end to end, so it also
     # covers the SDK and the observability crate that export it.
     "python_sdk": r"^(bindings/python/|tools/scripts/(gen_python_bolt\.py|build-python-bolt\.sh)$|tools/scripts/observability_capture/|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|crates/xybrid-sdk/|crates/xybrid-observability/)",
-    "kotlin_jni": r"^(bindings/kotlin/|tools/scripts/gen_kotlin_bolt\.py$|crates/xybrid-bolt/|crates/xybrid-ffi-facade/)",
-    "apple_bolt": r"^(bindings/apple/|crates/xybrid-bolt/|crates/xybrid-ffi-facade/)",
 }
 
 # Lane -> paths, in GitHub's `on.<event>.paths` syntax: `*` stays within a
@@ -273,11 +272,8 @@ PIPELINE_PATHS = [".github/workflows/ci.yml", ".github/actions/**", "tools/scrip
 # docs-only (`full_ci`), except ALWAYS_JOBS, which run on every change.
 OPTIONAL_JOBS = {
     "tooling-tests": "ort_staging",
-    "unity-bolt-compile": "unity_bolt",
-    "unity-bolt-drift": "unity_bolt",
+    "bindings-drift": "bindings_drift",
     "python-sdk": "python_sdk",
-    "kotlin-jni-drift": "kotlin_jni",
-    "apple-bolt-drift": "apple_bolt",
     "test-candle": "candle",
     "test-whispercpp-integration": "whispercpp",
     "test-policy-routing": "policy_routing",
