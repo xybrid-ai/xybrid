@@ -3,8 +3,9 @@
 Generated bindings are checked in next to hand-written wrappers. A generator
 without a gate lets a crate change ship with stale output; a gate that does not
 trigger on the generator's inputs is the same failure, just quieter. These tests
-read the workflows and the CI path filters, so a new generator (or a gate that
-loses its trigger) fails here rather than in a consumer's build.
+read the workflows and the CI path registry (tools/scripts/ci_gate.py), so a new
+generator (or a gate that loses its trigger) fails here rather than in a
+consumer's build.
 """
 
 import re
@@ -14,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ci_gate import OPTIONAL_JOBS, PATH_FILTERS
+from ci_gate import LANE_PATHS, OPTIONAL_JOBS, PATH_FILTERS
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
@@ -69,16 +70,6 @@ def job_block(workflow: str, job: str) -> str:
     return match[1]
 
 
-def trigger_paths(workflow: str, event: str) -> list:
-    block = re.search(rf"^  {event}:\n((?:    .*\n)*)", workflow, re.M)
-    if block is None:
-        raise AssertionError(f"no {event} trigger")
-    paths = re.search(r"^    paths:\n((?:      .*\n)*)", block[1], re.M)
-    if paths is None:
-        raise AssertionError(f"{event} trigger has no path filter")
-    return re.findall(r"^      - '([^']+)'", paths[1], re.M)
-
-
 class GenerationGateTests(unittest.TestCase):
     def test_every_generator_is_listed(self):
         found = {
@@ -122,11 +113,12 @@ class GenerationGateTests(unittest.TestCase):
             with self.subTest(output=output):
                 self.assertIn(output, check[1])
         self.assertIn("git diff --exit-code", check[1])
-        for event in ("pull_request", "push"):
-            paths = trigger_paths(workflow, event)
-            for path in FRB_INPUTS:
-                with self.subTest(event=event, path=path):
-                    self.assertIn(path, paths)
+        # ci.yml calls build-flutter.yml when one of these paths changes, on
+        # pull requests and master pushes alike.
+        self.assertIn("uses: ./.github/workflows/build-flutter.yml", (WORKFLOWS / "ci.yml").read_text(encoding="utf-8"))
+        for path in FRB_INPUTS:
+            with self.subTest(path=path):
+                self.assertIn(path, LANE_PATHS["flutter"])
 
 
 if __name__ == "__main__":

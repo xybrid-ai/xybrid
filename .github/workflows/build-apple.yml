@@ -1,64 +1,13 @@
 # Purpose: Build and verify the Apple XCFramework, then unit-test the Swift wrapper and run the observability runtime scenario on an iOS Simulator.
 name: "SDK: Apple"
 
+# A lane: ci.yml's `Apple` job calls this file when one of the paths in
+# LANE_PATHS["apple"] (tools/scripts/ci_gate.py) changes, on pull requests and
+# on master pushes, which keep master's caches warm for new branches. Its
+# checks are named `Apple / <job>`. Dispatch it here to run it alone.
 on:
-  pull_request:
-    branches: [master]
-    paths:
-      - 'bindings/apple/**'
-      - 'crates/xybrid-bolt/**'
-      - 'crates/xybrid-ffi-facade/**'
-      - 'crates/xybrid-core/**'
-      - 'crates/xybrid-sdk/**'
-      - 'crates/xybrid-observability/**'
-      - 'crates/xybrid-llama/**'
-      - 'crates/llama-cpp-sys/**'
-      # The Bazel graph that assembles the xcframework (G4): sim triple + ort-sys
-      # annotation, the llama iOS arms, --config=ios, the fetched sim-ORT rule,
-      # and the committed device ORT slice.
-      - 'MODULE.bazel'
-      - 'BUILD.bazel'
-      - '.bazelrc'
-      - 'bazel/**'
-      - 'vendor/ort-ios/**'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      # The shared observability scenario the runtime job runs and checks.
-      - 'tools/scripts/observability_capture/**'
-      - '.github/workflows/build-apple.yml'
-      # Docs-only changes under the paths above (READMEs, examples) never
-      # affect the native build — exclude markdown so they don't trigger it.
-      - '!**.md'
-  # Run on master merges too, so the Bazel xcframework build stays green on the
-  # default branch (and warms any future Bazel remote/disk cache — the build is
-  # currently uncached, so a cold iOS build is ~15-20 min; caching is a follow-up).
-  # Keep these paths in sync with the pull_request trigger above.
-  push:
-    branches: [master]
-    paths:
-      - 'bindings/apple/**'
-      - 'crates/xybrid-bolt/**'
-      - 'crates/xybrid-ffi-facade/**'
-      - 'crates/xybrid-core/**'
-      - 'crates/xybrid-sdk/**'
-      - 'crates/xybrid-observability/**'
-      - 'crates/xybrid-llama/**'
-      - 'crates/llama-cpp-sys/**'
-      - 'MODULE.bazel'
-      - 'BUILD.bazel'
-      - '.bazelrc'
-      - 'bazel/**'
-      - 'vendor/ort-ios/**'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - 'tools/scripts/observability_capture/**'
-      - '.github/workflows/build-apple.yml'
-      - '!**.md'
+  workflow_call:
   workflow_dispatch:
-
-concurrency:
-  group: build-apple-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions: read-all
 

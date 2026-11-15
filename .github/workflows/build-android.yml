@@ -1,86 +1,17 @@
 # Purpose: Build the Android .so files for every ABI, test the Kotlin wrapper, and gate dlopen and the observability scenario on an x86_64 emulator.
 name: "SDK: Android"
 
+# A lane: ci.yml's `Android` job calls this file when one of the paths in
+# LANE_PATHS["android"] (tools/scripts/ci_gate.py) changes, on pull requests and
+# on master pushes, which keep master's caches warm for new branches. Its
+# checks are named `Android / <job>`. Dispatch it here to run it alone.
 on:
-  pull_request:
-    branches: [master]
-    paths:
-      - 'bindings/kotlin/**'
-      - 'crates/xybrid-bolt/**'
-      - 'crates/xybrid-ffi-facade/**'
-      - 'crates/xybrid-core/**'
-      - 'crates/xybrid-sdk/**'
-      - 'crates/xybrid-observability/**'
-      - 'tools/scripts/android-dlopen-gate.sh'
-      - 'tools/scripts/android-dlopen-probe.c'
-      - 'tools/scripts/verify_android_jni.py'
-      - 'tools/scripts/verify_android_api_level.py'
-      # The shared observability scenario's receiver and checker (the
-      # observability-scenario job below).
-      - 'tools/scripts/observability_capture/**'
-      - 'xtask/**'
-      # llama.cpp's Android build config and sources (see //:llama_android_dl).
-      - 'BUILD.bazel'
-      - 'bazel/ggml/**'
-      # The Android NDK toolchains: @androidndk (API 28) and the AAR arm64
-      # slice's @androidndk_api29 (see //bazel/toolchains/android), the patch
-      # that generates both, and the .bazelrc NDK download pins.
-      - 'MODULE.bazel'
-      - 'bazel/toolchains/android/**'
-      - 'rules_android_ndk.patch'
-      - '.bazelrc'
-      - 'crates/llama-cpp-sys/**'
-      - 'vendor/llama-cpp'
-      - 'vendor/ort-android/**'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - '.github/actions/**'
-      - '.github/workflows/build-android.yml'
-      # Docs-only changes under the paths above (READMEs, examples) never
-      # affect the native build — exclude markdown so they don't trigger it.
-      - '!**.md'
-  # Run on master merges too, so each merge saves a default-branch-scoped
-  # cache (sccache + rust-cache). GitHub Actions caches are branch-scoped:
-  # a PR run can only restore caches from its own branch or the default
-  # branch. Without this trigger master never builds, so master has no
-  # cache, so every new PR branch's first run is cold (~35 min). Warming
-  # master here lets new branches start warm (~5 min). Keep these paths in
-  # sync with the pull_request trigger above.
-  push:
-    branches: [master]
-    paths:
-      - 'bindings/kotlin/**'
-      - 'crates/xybrid-bolt/**'
-      - 'crates/xybrid-ffi-facade/**'
-      - 'crates/xybrid-core/**'
-      - 'crates/xybrid-sdk/**'
-      - 'crates/xybrid-observability/**'
-      - 'tools/scripts/android-dlopen-gate.sh'
-      - 'tools/scripts/android-dlopen-probe.c'
-      - 'tools/scripts/verify_android_jni.py'
-      - 'tools/scripts/verify_android_api_level.py'
-      - 'tools/scripts/observability_capture/**'
-      - 'xtask/**'
-      # llama.cpp's Android build config and sources (see //:llama_android_dl).
-      - 'BUILD.bazel'
-      - 'bazel/ggml/**'
-      - 'MODULE.bazel'
-      - 'bazel/toolchains/android/**'
-      - 'rules_android_ndk.patch'
-      - '.bazelrc'
-      - 'crates/llama-cpp-sys/**'
-      - 'vendor/llama-cpp'
-      - 'vendor/ort-android/**'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - '.github/actions/**'
-      - '.github/workflows/build-android.yml'
-      - '!**.md'
+  workflow_call:
+    # Optional: forks and Dependabot pull requests receive none.
+    secrets:
+      BUILDBUDDY_API_KEY:
+        required: false
   workflow_dispatch:
-
-concurrency:
-  group: build-android-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions: read-all
 
