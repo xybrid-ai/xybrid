@@ -10,7 +10,7 @@ use crate::ffi;
 use crate::stream::MlxStream;
 
 /// Borrow the caller-provided stream or, if `None`, fetch a clone of the
-/// thread-local default CPU stream.
+/// process-wide CPU stream.
 enum StreamRef<'a> {
     Borrowed(&'a MlxStream),
     Owned(MlxStream),

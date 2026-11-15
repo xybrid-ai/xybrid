@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license = "MIT"
 repository.workspace = true
-description = "Safe Rust wrappers over mlx-c for Apple Silicon MLX inference. Typed shapes, RAII handles, no global state."
+description = "Safe Rust wrappers over mlx-c for Apple Silicon MLX inference. Typed shapes, RAII handles, one MLX operation at a time."
 
 [lib]
 name = "xybrid_mlx"

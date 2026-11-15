@@ -9,7 +9,7 @@
 //!
 //! All ops follow the same default-stream convention documented in
 //! [`super`] — pass `Some(&stream)` to pin a device, `None` to fall through
-//! to the thread-local default CPU stream.
+//! to the process-wide CPU stream.
 
 use crate::array::MlxArray;
 use crate::error::{MlxError, MlxResult};
@@ -17,7 +17,7 @@ use crate::ffi;
 use crate::stream::MlxStream;
 
 /// Borrow the caller-provided stream or, if `None`, fetch a clone of the
-/// thread-local default CPU stream.
+/// process-wide CPU stream.
 enum StreamRef<'a> {
     Borrowed(&'a MlxStream),
     Owned(MlxStream),

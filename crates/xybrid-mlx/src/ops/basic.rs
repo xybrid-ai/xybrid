@@ -3,7 +3,7 @@
 //!
 //! Safe, non-panicking wrappers over the corresponding mlx-c entry points.
 //! All ops take an optional `&MlxStream`; `None` dispatches to the
-//! thread-local default CPU stream (see module docs in [`crate::ops`] for
+//! process-wide CPU stream (see module docs in [`crate::ops`] for
 //! why the default is CPU rather than GPU).
 
 use crate::array::MlxArray;
@@ -16,7 +16,7 @@ use std::ffi::CStr;
 use std::thread::LocalKey;
 
 /// Borrow the caller-provided stream or, if `None`, fetch a clone of the
-/// thread-local default CPU stream. Returned value's `Drop` cleans up the
+/// process-wide CPU stream. Returned value's `Drop` cleans up the
 /// cloned handle in the default case; the `Either` split is modelled via a
 /// small owned-or-borrowed wrapper to avoid a heap allocation.
 enum StreamRef<'a> {

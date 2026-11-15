@@ -34,12 +34,13 @@
 //!    [`Clone`] implementation on `MlxArray` and `MlxStream` that calls
 //!    `mlx_*_set`, which is the idiomatic retain in mlx-c. We do **not**
 //!    derive [`Copy`] — that would silently double-free on [`Drop`].
-//! 3. **Per-thread stream handles, one process-wide lock.** Default stream
-//!    handles are cached per thread via [`thread_local!`], but they all name
-//!    MLX's one default stream per device, and MLX does not tolerate two
-//!    threads evaluating at once. Every evaluating call takes `exclusive()`
-//!    itself, and an operation that spans several takes it once around the
-//!    whole run; see that module for what it covers.
+//! 3. **One stream per device for the whole process, one process-wide lock.**
+//!    MLX's own streams belong to the thread that created them. A model here
+//!    is loaded on one thread and run on others, so every `MlxStream` is a
+//!    handle to a stream registered for all threads, which MLX leaves
+//!    unsynchronized. Every evaluating call takes `exclusive()` itself, and
+//!    an operation that spans several takes it once around the whole run;
+//!    see that module for what it covers.
 //! 4. **Zero `unsafe` in the public surface.** Every unsafe FFI call lives
 //!    in `pub(crate)` helpers in `ffi.rs` with `# Safety` doc comments.
 //!    Downstream crates (including `xybrid-core`'s MLX adapter) only use
