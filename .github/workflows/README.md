@@ -57,13 +57,33 @@ are how to follow them.
    `tools/scripts/tests/`, not a job.
 4. **A new cargo invocation is a step** in the `ci.yml` job with the same
    runner and feature family.
-5. **A new backend or real-model suite is one `ci.yml` job** gated on its
-   flag, the flag's path rule and `OPTIONAL_JOBS` entry in
-   `tools/scripts/ci_gate.py`, its line in `tooling-changes`' outputs, and one
-   entry in `CI Success`'s `needs`.
+5. **A new backend or real-model suite is one `ci.yml` job** built from the
+   shared actions and gated on its flag, the flag's path rule and
+   `OPTIONAL_JOBS` entry in `tools/scripts/ci_gate.py`, its line in
+   `tooling-changes`' outputs, and one entry in `CI Success`'s `needs`.
 6. **A new binding or platform is a lane file called from `ci.yml`.**
 7. **macOS runs 5 jobs at once for the whole organization.** Add steps to an
    existing macOS job; a new one waits behind every other pull request's.
+
+## Shared setup
+
+Jobs are built from the composite actions in [`../actions/`](../actions), not
+from copied setup blocks: `setup-rust` (toolchain and cargo cache),
+`install-boltffi` (the pinned boltffi CLI, cached), `free-disk-space`,
+`setup-vulkan-sdk` and `bazel-repo-cache`. A change under `.github/actions/`
+selects every gated job, in `ci.yml` and in `bazel.yml`.
+
+**Caches.** A cache saved by a pull request is visible to that pull request
+alone but counts against the repository's 10 GB, and every pull request used to
+save its own Rust caches, evicting master's. `setup-rust` and `install-boltffi`
+restore on pull requests and save only on `master` pushes. Other caches still
+save from pull requests: the release and zzz workflows' own setup blocks (their
+tests pin them), `build-flutter.yml`, `build-android.yml`'s NDK, the conformance
+workflows, the `web` job, `bazel-repo-cache` and `setup-vulkan-sdk`.
+
+Dependabot's `github-actions` entry lists each action directory, because `/`
+covers only `.github/workflows/`; `tools/scripts/tests/test_ci_actions.py`
+fails when one is missing.
 
 ## Preserving execution
 

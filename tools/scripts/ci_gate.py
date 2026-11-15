@@ -14,7 +14,8 @@ PATH_FILTERS = {
     # test_generation_gates.py reads build-flutter.yml and the FRB wrapper, and
     # globs bindings/*/scripts/gen* for generators that need a drift gate.
     # test_observability_capture.py reads each binding's observability scenario.
-    "relevant": r"^(tools/scripts/|bindings/(python/tests/observability_scenario\.py|apple/Tests/XybridTests/ObservabilityRuntimeTests\.swift|kotlin/consumer-smoke/app/src/androidTest/kotlin/ai/xybrid/smoke/ObservabilityScenario\.kt|unity/Tests/Editor/ObservabilityRuntimeScenarioTests\.cs|flutter/test/observability_scenario_test\.dart)$|bindings/(web|observability-js)/(scripts/|package\.json$|pnpm-(lock|workspace)\.yaml$)|bindings/observability-js/src/version\.ts$|crates/zzz-sys/(zzz_pull\.py|natives-manifest\.json)$|bindings/flutter/((ios|macos)/xybrid_flutter\.podspec|android/build\.gradle|generate-frb\.sh)$|bindings/[^/]+/scripts/gen[^/]*$|\.bazelrc$|\.github/workflows/(ci|build-flutter|release-prep|release-publish|test-zzz-android|test-zzz-engine|trusted-zzz-sdk)\.yml$)",
+    # test_ci_actions.py reads Dependabot's config and Cargo.lock's boltffi pin.
+    "relevant": r"^(tools/scripts/|\.github/dependabot\.yml$|Cargo\.lock$|bindings/(python/tests/observability_scenario\.py|apple/Tests/XybridTests/ObservabilityRuntimeTests\.swift|kotlin/consumer-smoke/app/src/androidTest/kotlin/ai/xybrid/smoke/ObservabilityScenario\.kt|unity/Tests/Editor/ObservabilityRuntimeScenarioTests\.cs|flutter/test/observability_scenario_test\.dart)$|bindings/(web|observability-js)/(scripts/|package\.json$|pnpm-(lock|workspace)\.yaml$)|bindings/observability-js/src/version\.ts$|crates/zzz-sys/(zzz_pull\.py|natives-manifest\.json)$|bindings/flutter/((ios|macos)/xybrid_flutter\.podspec|android/build\.gradle|generate-frb\.sh)$|bindings/[^/]+/scripts/gen[^/]*$|\.bazelrc$|\.github/workflows/(ci|build-flutter|release-prep|release-publish|test-zzz-android|test-zzz-engine|trusted-zzz-sdk)\.yml$)",
     # The committed C# is generated from the whole bolt crate (its exports and
     # their doc comments) and the facade types it wraps, so a change to either
     # must run the drift check and recompile the hand-written Api layer on top.
@@ -27,6 +28,9 @@ PATH_FILTERS = {
     "kotlin_jni": r"^(bindings/kotlin/|tools/scripts/gen_kotlin_bolt\.py$|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)",
     "apple_bolt": r"^(bindings/apple/|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)",
 }
+# The shared setup actions every gated job is built from: a change to one can
+# break any job, so it selects them all.
+EVERY_JOB = r"^\.github/actions/"
 OPTIONAL_JOBS = {
     "tooling-tests": "relevant",
     "unity-bolt-compile": "unity_bolt",
@@ -74,9 +78,10 @@ def classify(event: str, payload: object) -> dict[str, str]:
 
     uncertain = not files or len(files) >= limit
     full_ci = uncertain or not all(docs_path(path) for path in paths)
+    every = uncertain or any(re.search(EVERY_JOB, path) for path in paths)
     selected = {"full_ci": full_ci}
     selected.update({
-        key: full_ci and (uncertain or any(re.search(pattern, path) for path in paths))
+        key: full_ci and (every or any(re.search(pattern, path) for path in paths))
         for key, pattern in PATH_FILTERS.items()
     })
     return {key: str(value).lower() for key, value in selected.items()}
