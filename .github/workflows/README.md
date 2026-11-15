@@ -259,6 +259,10 @@ published; when it is, the fetch script verifies that artifact's SHA256.
    MLX forces Metal off when `CMAKE_SYSTEM_NAME=iOS`. The iOS slices therefore
    exist for link-layout compatibility only until upstream supports iOS Metal
    builds. Tests, examples, benchmarks, and the Python bindings are disabled.
+
+   Each slice builds mlx-c, and mlx-c's build compiles MLX from the pinned
+   checkout (`FETCHCONTENT_SOURCE_DIR_MLX`): MLX is built once per slice, and
+   the wrapper is compiled against the MLX it is archived with.
 3. Combine `libmlx.a` + `libmlxc.a` into `libmlx-combined.a` per slice (via
    `libtool -static`) so the xcframework consumes a single archive per slice.
 4. Run `xcodebuild -create-xcframework` against the three combined archives

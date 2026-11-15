@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Regression tests for build-mlx-slice.sh shell compatibility and generator selection.
+# Regression tests for build-mlx-slice.sh: shell compatibility, generator
+# selection, and that MLX is built once, from --mlx-src, by the mlx-c build.
 
 set -euo pipefail
 
@@ -40,12 +41,16 @@ if [ "$1" = "--build" ]; then
     done
     mkdir -p "$build_dir"
     case "$target" in
-        mlx)
-            printf 'mlx\n' > "$build_dir/libmlx.a"
-            mkdir -p "$build_dir/mlx/backend/metal/kernels"
-            printf 'metallib\n' > "$build_dir/mlx/backend/metal/kernels/mlx.metallib"
+        mlxc)
+            # mlx-c's build fetches MLX and builds it under _deps/.
+            printf 'mlxc\n' > "$build_dir/libmlxc.a"
+            if [ -z "${XYBRID_TEST_NO_MLX:-}" ]; then
+                mkdir -p "$build_dir/_deps/mlx-build/mlx/backend/metal/kernels"
+                printf 'mlx\n' > "$build_dir/_deps/mlx-build/libmlx.a"
+                printf 'metallib\n' \
+                    > "$build_dir/_deps/mlx-build/mlx/backend/metal/kernels/mlx.metallib"
+            fi
             ;;
-        mlxc) printf 'mlxc\n' > "$build_dir/libmlxc.a" ;;
         *)    echo "unexpected cmake target: $target" >&2; exit 1 ;;
     esac
     exit 0
@@ -95,6 +100,68 @@ grep -q -- '-G Unix Makefiles' "$cmake_log"
 test -f "$TMP_ROOT/out/lib/libmlx-combined.a"
 test -f "$TMP_ROOT/out/lib/mlx.metallib"
 
+# MLX is configured once, by mlx-c, from the pinned checkout: the wrapper must
+# be compiled against the MLX it is archived with, not the release mlx-c's own
+# CMakeLists would fetch.
+[ "$(grep -c -- '^-S ' "$cmake_log")" = "1" ] || {
+    echo "expected exactly one cmake configure, got:" >&2
+    cat "$cmake_log" >&2
+    exit 1
+}
+grep -q -- "^-S $TMP_ROOT/mlx-c .*-DFETCHCONTENT_SOURCE_DIR_MLX=$TMP_ROOT/mlx" "$cmake_log"
+# Error messages name their source file; the build machine's path stays out.
+grep -q -- "-DCMAKE_CXX_FLAGS=-ffile-prefix-map=$TMP_ROOT/mlx-c=mlx-c -ffile-prefix-map=$TMP_ROOT/mlx=mlx" "$cmake_log"
+if grep -q -- '-DMLX_DIR=' "$cmake_log"; then
+    echo "mlx-c ignores MLX_DIR; the slice must not rely on it" >&2
+    exit 1
+fi
+[ "$(grep -c -- '^--build ' "$cmake_log")" = "1" ]
+[ "$(cat "$TMP_ROOT/out/lib/libmlx.a")" = "mlx" ]
+[ "$(cat "$TMP_ROOT/out/lib/libmlxc.a")" = "mlxc" ]
+
+# Relative checkouts, as build-mlx-xcframework.yml passes them, reach CMake as
+# absolute paths: it would read a relative FETCHCONTENT_SOURCE_DIR_MLX against
+# the build tree.
+mkdir -p "$TMP_ROOT/rel/src/mlx/mlx" "$TMP_ROOT/rel/src/mlx-c/mlx/c"
+(
+    cd "$TMP_ROOT/rel"
+    PATH="$TOOLS_DIR:/bin:/usr/bin:/usr/sbin:/sbin" \
+    XYBRID_TEST_CMAKE_LOG="$TMP_ROOT/rel.log" \
+        "$BUILD_SCRIPT" \
+        --slice macos-arm64 \
+        --sysroot macosx \
+        --arch arm64 \
+        --system-name Darwin \
+        --deployment-target 14.0 \
+        --mlx-src src/mlx \
+        --mlx-c-src src/mlx-c \
+        --out out > "$TMP_ROOT/rel.stdout"
+)
+grep -q -- "^-S $TMP_ROOT/rel/src/mlx-c -B $TMP_ROOT/rel/src/mlx-c/build-macos-arm64 " "$TMP_ROOT/rel.log"
+grep -q -- "-DFETCHCONTENT_SOURCE_DIR_MLX=$TMP_ROOT/rel/src/mlx\$" "$TMP_ROOT/rel.log"
+grep -q -- "-ffile-prefix-map=$TMP_ROOT/rel/src/mlx-c=mlx-c " "$TMP_ROOT/rel.log"
+test -f "$TMP_ROOT/rel/out/lib/libmlx-combined.a"
+
+# If mlx-c ever stops building MLX itself, fail instead of archiving a wrapper
+# with no MLX behind it. (A fresh mlx-c checkout: the build tree lives in it.)
+mkdir -p "$TMP_ROOT/mlx-c-bare/mlx/c"
+if PATH="$TOOLS_DIR:/bin:/usr/bin:/usr/sbin:/sbin" \
+    XYBRID_TEST_NO_MLX=1 \
+    XYBRID_TEST_CMAKE_LOG="$TMP_ROOT/no-mlx.log" \
+    "$BUILD_SCRIPT" \
+    --slice macos-arm64 \
+    --sysroot macosx \
+    --arch arm64 \
+    --system-name Darwin \
+    --deployment-target 14.0 \
+    --mlx-src "$TMP_ROOT/mlx" \
+    --mlx-c-src "$TMP_ROOT/mlx-c-bare" \
+    --out "$TMP_ROOT/out-no-mlx" > "$TMP_ROOT/no-mlx.stdout" 2> "$TMP_ROOT/no-mlx.stderr"; then
+    echo "expected a build that produced no libmlx.a to fail" >&2
+    exit 1
+fi
+grep -q -- 'did not produce' "$TMP_ROOT/no-mlx.stderr"
+
 if PATH="$TOOLS_DIR:/bin:/usr/bin:/usr/sbin:/sbin" \
     CMAKE_GENERATOR=Ninja \
     XYBRID_TEST_CMAKE_LOG="$TMP_ROOT/ninja.log" \
@@ -112,4 +179,4 @@ if PATH="$TOOLS_DIR:/bin:/usr/bin:/usr/sbin:/sbin" \
 fi
 grep -q -- "CMAKE_GENERATOR=Ninja but 'ninja' is not on PATH" "$TMP_ROOT/ninja.stderr"
 
-echo "build-mlx-slice.sh generator tests passed"
+echo "build-mlx-slice.sh tests passed"

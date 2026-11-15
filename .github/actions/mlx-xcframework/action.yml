@@ -6,7 +6,7 @@ description: >-
   runners only.
 
 # While no release is pinned (`release=unpublished`) the xcframework is built
-# from source, about twenty minutes on a hosted runner. Its contents depend
+# from source, several minutes on a hosted runner. Its contents depend
 # only on the pins and the build scripts, so the build is cached on those. A
 # cache hit proves nothing about the pins being buildable today;
 # build-mlx-xcframework.yml covers that whenever they change.

@@ -8,6 +8,11 @@
 #   lib/libmlx-combined.a libmlx.a + libmlxc.a merged via libtool -static
 #   lib/*.metallib        compiled Metal shader libraries (when produced)
 #
+# MLX is built once, as part of the mlx-c build. mlx-c's CMake fetches the MLX
+# release its own CMakeLists names unless told otherwise;
+# FETCHCONTENT_SOURCE_DIR_MLX points it at --mlx-src instead, so the wrapper is
+# compiled against exactly the MLX it is archived with, the pinned one.
+#
 # Invoked once per xcframework slice by .github/workflows/build-mlx-xcframework.yml.
 
 set -euo pipefail
@@ -79,9 +84,36 @@ echo "==> [${SLICE}] sysroot=${SYSROOT} arch=${ARCH} sdk=${SDK_PATH} generator=$
 
 mkdir -p "$OUT/lib" "$OUT/include"
 
+# Absolute paths from here on: CMake reads FETCHCONTENT_SOURCE_DIR_MLX relative
+# to the build tree, not to where this script was started, and the compiler
+# sees absolute source paths.
+for var in MLX_SRC MLX_C_SRC OUT; do
+    if [ ! -d "${!var}" ]; then
+        echo "error: not a directory: ${!var}" >&2
+        exit 1
+    fi
+done
+MLX_SRC=$(cd "$MLX_SRC" && pwd)
+MLX_C_SRC=$(cd "$MLX_C_SRC" && pwd)
+OUT=$(cd "$OUT" && pwd)
+
+# mlx-c ends every error message with the source file that raised it
+# (`__FILE__`), so without a prefix map each MLX error a user sees would carry
+# the build machine's checkout path. Map both checkouts to their names, under
+# the path as given and under the path with symlinks resolved (a temporary
+# directory on macOS has both).
+PREFIX_MAP="-ffile-prefix-map=${MLX_C_SRC}=mlx-c -ffile-prefix-map=${MLX_SRC}=mlx"
+MLX_SRC_REAL=$(cd "$MLX_SRC" && pwd -P)
+MLX_C_SRC_REAL=$(cd "$MLX_C_SRC" && pwd -P)
+if [ "$MLX_SRC_REAL" != "$MLX_SRC" ] || [ "$MLX_C_SRC_REAL" != "$MLX_C_SRC" ]; then
+    PREFIX_MAP="$PREFIX_MAP -ffile-prefix-map=${MLX_C_SRC_REAL}=mlx-c -ffile-prefix-map=${MLX_SRC_REAL}=mlx"
+fi
+
 # Common CMake flags for both mlx and mlx-c.
 COMMON_FLAGS=(
     -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_C_FLAGS="$PREFIX_MAP"
+    -DCMAKE_CXX_FLAGS="$PREFIX_MAP"
     -DCMAKE_SYSTEM_NAME="$SYSTEM_NAME"
     -DCMAKE_OSX_SYSROOT="$SDK_PATH"
     -DCMAKE_OSX_ARCHITECTURES="$ARCH"
@@ -95,13 +127,22 @@ COMMON_FLAGS=(
     -DMLX_BUILD_PYTHON_BINDINGS=OFF
 )
 
-# 1. Build MLX.
-MLX_BUILD="$MLX_SRC/build-${SLICE}"
-cmake -S "$MLX_SRC" -B "$MLX_BUILD" -G "$CMAKE_GENERATOR" "${COMMON_FLAGS[@]}"
-cmake --build "$MLX_BUILD" --config Release --target mlx
-cp "$MLX_BUILD"/libmlx.a "$OUT/lib/libmlx.a"
+# 1. Build mlx-c, and with it MLX from --mlx-src.
+MLX_C_BUILD="$MLX_C_SRC/build-${SLICE}"
+MLX_BUILD="$MLX_C_BUILD/_deps/mlx-build"
+cmake -S "$MLX_C_SRC" -B "$MLX_C_BUILD" -G "$CMAKE_GENERATOR" "${COMMON_FLAGS[@]}" \
+    -DFETCHCONTENT_SOURCE_DIR_MLX="$MLX_SRC"
+cmake --build "$MLX_C_BUILD" --config Release --target mlxc
 
-# Metal shaders are optional, but when present MLX writes them below the
+if [ ! -f "$MLX_BUILD/libmlx.a" ]; then
+    echo "error: the mlx-c build did not produce $MLX_BUILD/libmlx.a" >&2
+    echo "       (did mlx-c stop building MLX through FetchContent?)" >&2
+    exit 1
+fi
+cp "$MLX_BUILD"/libmlx.a "$OUT/lib/libmlx.a"
+cp "$MLX_C_BUILD"/libmlxc.a "$OUT/lib/libmlxc.a"
+
+# 2. Metal shaders are optional, but when present MLX writes them below the
 # generated backend tree (for example mlx/backend/metal/kernels/mlx.metallib).
 METALLIB_COUNT=0
 while IFS= read -r METALLIB; do
@@ -112,13 +153,6 @@ done < <(find "$MLX_BUILD" -type f -name '*.metallib')
 if [ "$METALLIB_COUNT" -eq 0 ]; then
     echo "warning: no .metallib produced for ${SLICE}; Metal kernels may be unavailable" >&2
 fi
-
-# 2. Build mlx-c, pointing it at the freshly built MLX.
-MLX_C_BUILD="$MLX_C_SRC/build-${SLICE}"
-cmake -S "$MLX_C_SRC" -B "$MLX_C_BUILD" -G "$CMAKE_GENERATOR" "${COMMON_FLAGS[@]}" \
-    -DMLX_DIR="$MLX_BUILD"
-cmake --build "$MLX_C_BUILD" --config Release --target mlxc
-cp "$MLX_C_BUILD"/libmlxc.a "$OUT/lib/libmlxc.a"
 
 # 3. Combine into a single archive for xcframework consumption.
 libtool -static -no_warning_for_no_symbols \
