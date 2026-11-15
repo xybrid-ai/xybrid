@@ -381,7 +381,10 @@ User-facing behavior is in `docs/backends/mlx.md`.
   shared paths out of `mlx_runtime`: put what a shared change can break into
   a test the Linux job runs instead. The MLX-linked steps live in
   `tools/scripts/check-mlx-runtime.sh`, shared by the pull-request job and
-  the nightly one; add a step there, not to either workflow.
+  the nightly one; add a step there, not to either workflow. The MLX jobs
+  save their Rust caches on master only (`save-if`): the repository's Actions
+  cache is at its 10 GB cap, and the nightly run keeps master's copies warm
+  for pull requests to restore.
 
 ### Releases
 

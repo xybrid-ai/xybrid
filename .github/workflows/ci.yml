@@ -402,9 +402,15 @@ jobs:
         with:
           toolchain: stable
           components: clippy
+      # The MLX jobs save their Rust caches on master only. The repository's
+      # Actions cache sits at its 10 GB cap, where an entry a pull request
+      # saves is evicted within hours, and these three jobs wrote 460 to
+      # 770 MB each per pull request. A pull request restores master's copy
+      # instead, and rebuilds only what it changed.
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ubuntu-mlx-non-linking
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       # The workspace clippy job never enables `llm-mlx`, so nothing else lints
       # this tier.
       - name: Clippy core MLX non-linking tier
@@ -462,9 +468,14 @@ jobs:
         with:
           toolchain: stable
           components: clippy
+      # One cache with the nightly job in test-mlx.yml, which builds the same
+      # tier on master every day and so keeps it from being evicted; this job
+      # runs too rarely on master to keep one alive itself. Saved on master
+      # only (see the `llm-mlx` job above).
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          key: macos-mlx-runtime
+          shared-key: mlx-runtime-tier
+          save-if: ${{ github.ref == 'refs/heads/master' }}
           # Per-image cache: build-script output records this image's Xcode
           # clang-runtime path, which other images may lack.
           env-vars: ImageOS

@@ -90,9 +90,12 @@ jobs:
         with:
           toolchain: stable
           components: clippy
+      # The cache ci.yml's `check (llm-mlx-runtime, macos)` restores: this
+      # nightly run is what keeps it warm on master.
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          key: mlx-runtime-tier
+          shared-key: mlx-runtime-tier
+          save-if: ${{ github.ref == 'refs/heads/master' }}
           # Per-image cache: build-script output records this image's Xcode
           # clang-runtime path, which other images may lack.
           env-vars: ImageOS
@@ -122,9 +125,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
           toolchain: stable
+      # Saved on master only, where this job runs every night; a pull
+      # request restores that copy (see ci.yml's `llm-mlx` job for why).
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: mlx-integration
+          save-if: ${{ github.ref == 'refs/heads/master' }}
           # Per-image cache: build-script output records this image's Xcode
           # clang-runtime path, which other images may lack.
           env-vars: ImageOS
