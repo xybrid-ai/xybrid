@@ -14,10 +14,11 @@
 //!
 //! Golden files live at `<bundle>/.golden/` next to the (gitignored) model
 //! fixtures; they are local artifacts, never committed. Capture Tier A with
-//! `tools/scripts/capture-golden-tokens.sh --self`. Tier B files are written
-//! by hand from a Python `mlx-lm` run, in the same JSON shape ([`GoldenFile`])
-//! with `tier: "upstream"`. All tests skip cleanly when bundles or goldens
-//! are absent, so fixture-less CI is unaffected.
+//! `tools/scripts/capture-golden-tokens.sh --self` and Tier B with
+//! `tools/scripts/capture-upstream-goldens.py`, which runs Python `mlx-lm` in
+//! float32 (what this implementation computes in) and writes the same JSON
+//! shape ([`GoldenFile`]) with `tier: "upstream"`. All tests skip cleanly
+//! when bundles or goldens are absent, so fixture-less CI is unaffected.
 
 #![cfg(all(
     feature = "llm-mlx-runtime",
@@ -444,7 +445,10 @@ fn golden_upstream_audit() {
     for (var, bundle) in &bundles {
         let upstream = load_goldens(bundle, "upstream-greedy-");
         if upstream.is_empty() {
-            eprintln!("skip: {var} has no upstream goldens (run capture --upstream)");
+            eprintln!(
+                "skip: {var} has no upstream goldens \
+                 (run tools/scripts/capture-upstream-goldens.py)"
+            );
             continue;
         }
         for (up_path, up) in upstream {

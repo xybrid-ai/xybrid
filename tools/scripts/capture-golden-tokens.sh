@@ -11,9 +11,9 @@
 # specific to the machine and the linked MLX version, and are never committed.
 #
 # Tier B goldens (`upstream-greedy-*.json`, captured from Python mlx-lm and
-# read by the ignored `golden_upstream_audit` test) are not produced by this
-# script. They use the same JSON shape (`GoldenFile` in the test) with
-# `tier: "upstream"` and a `margins_top2` list.
+# read by the ignored `golden_upstream_audit` test) come from
+# tools/scripts/capture-upstream-goldens.py, run after this script. Audit
+# against upstream whenever the MLX pin moves.
 
 set -euo pipefail
 
