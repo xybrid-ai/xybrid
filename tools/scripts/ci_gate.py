@@ -26,6 +26,21 @@ PATH_FILTERS = {
     "python_sdk": r"^(bindings/python/|tools/scripts/(gen_python_bolt\.py|build-python-bolt\.sh)$|tools/scripts/observability_capture/|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|crates/xybrid-sdk/|crates/xybrid-observability/|\.github/workflows/ci\.yml$)",
     "kotlin_jni": r"^(bindings/kotlin/|tools/scripts/gen_kotlin_bolt\.py$|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)",
     "apple_bolt": r"^(bindings/apple/|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)",
+    # The MLX backend itself: the two MLX crates, the adapter, the selector
+    # and their tests and benchmarks in core, the MLX pins, build scripts and
+    # setup action. Shared code is deliberately absent: the `llm-mlx`
+    # non-linking job compiles and tests the adapter on Linux for every code
+    # change, and test-mlx.yml runs the MLX-linked steps on master every
+    # night. A change to ci.yml runs it, as it runs every optional job.
+    "mlx_runtime": (
+        r"^(crates/(mlx-c-sys|xybrid-mlx)/"
+        r"|crates/xybrid-core/(src/runtime_adapter/(mlx/|selector\.rs$)"
+        r"|src/execution/strategies/mlx_embedding\.rs$"
+        r"|tests/mlx_|benches/(mlx_|llm_backend_compare))"
+        r"|vendor/mlx-apple/"
+        r"|tools/scripts/[^/]*mlx[^/]*\.sh$"
+        r"|\.github/(actions/mlx-xcframework/|workflows/ci\.yml$))"
+    ),
 }
 OPTIONAL_JOBS = {
     "tooling-tests": "relevant",
@@ -34,6 +49,7 @@ OPTIONAL_JOBS = {
     "python-sdk": "python_sdk",
     "kotlin-jni-drift": "kotlin_jni",
     "apple-bolt-drift": "apple_bolt",
+    "check-mlx-runtime-macos": "mlx_runtime",
 }
 
 

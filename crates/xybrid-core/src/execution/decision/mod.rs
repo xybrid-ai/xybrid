@@ -166,6 +166,7 @@ mod tests {
             voices: None,
             max_chunk_chars: None,
             trim_trailing_samples: None,
+            backend: None,
         }
     }
     fn request() -> Envelope {

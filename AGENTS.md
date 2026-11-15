@@ -274,6 +274,118 @@ contract is `docs/development/liquid-decision-protocol.md`, and
   differ). Keep llama.cpp's `src/` off the wrapper's include path: a second
   `ggml.h` breaks the iOS build.
 
+### MLX backend (Apple Silicon macOS, preview)
+
+SafeTensors LLM and embedding models run on MLX through
+`crates/xybrid-core/src/runtime_adapter/mlx/`, over `crates/xybrid-mlx` (safe
+wrappers) and `crates/mlx-c-sys` (bindgen, published as `xybrid-mlx-sys`).
+User-facing behavior is in `docs/backends/mlx.md`.
+
+- **Two tiers, no preset, and only cargo builds the second.** `llm-mlx`
+  compiles everything except the calls into MLX, on every target; it exists so
+  the Linux job can build and test the adapter. `llm-mlx-runtime` links
+  `vendor/mlx-apple/mlx.xcframework` and is a compile error off
+  `aarch64-apple-darwin`. Neither belongs in a `platform-*` preset: a preset
+  is what shipped and crates.io builds compile, and they cannot run MLX. Bazel
+  builds both MLX crates as empty shells, so no shipped artifact contains MLX.
+  For the same reason no binding exposes a backend option: one arrives with
+  the runtime, not before. Build the xcframework with
+  `tools/scripts/build-local-mlx-xcframework.sh`; nothing is published yet
+  (`release=unpublished` in `vendor/mlx-apple/UPSTREAM_VERSIONS.txt`, whose
+  pins are release commits, never tag-object hashes).
+- **The MLX pins move as a pair, and not below MLX v0.32.0.** An mlx-c release
+  is written against the MLX release its `CMakeLists.txt` names; the slice
+  build compiles mlx-c against the `mlx=` checkout
+  (`FETCHCONTENT_SOURCE_DIR_MLX`), so MLX is built once and the pair must
+  match. Before v0.32.0 a command buffer the GPU rejected killed the process;
+  from it, the failure is an error. `vendor/mlx-apple/README.md` has the bump
+  checklist, including the upstream audit
+  (`tools/scripts/capture-upstream-goldens.py`).
+- **MLX runs only when it is named.** A load that names no backend selects
+  the same backend and resolves the same registry artifact on a build with
+  MLX as on one without (`select_with_cfg`, `registry_format_for_load`), and
+  asks the registry nothing extra; tests assert both. MLX runs for an explicit
+  `mlx` (stage, loader, CLI, or the bundle's metadata), for a local SafeTensors
+  bundle of an architecture only it runs, or when it is the build's only local
+  text backend. Do not add a path that prefers it.
+- **MLX refuses what it cannot do.** Grammars and images are llama.cpp-only
+  and `reject_unsupported_generation` (`mlx/model.rs`) fails the request, as
+  the mistralrs backend does for tools. A new capability on `GenerationConfig`
+  or `RunOptions` is either implemented for MLX or refused there. Never
+  ignored. The same goes for architectures: `lfm3` is refused by name, because
+  LFM3 is not the LFM2 network.
+- **Shared with llama.cpp, not copied from it.** Chat templates render through
+  `runtime_adapter/jinja_template.rs`, tool definitions take their shape from
+  `ToolCallProtocol::template_tool_entries`, calls are parsed by
+  `runtime_adapter/tool_call`, and turns are filtered by
+  `streaming_postprocess`. `generate_turn` (`mlx/generate.rs`) is the MLX end
+  of that contract: chat markers end the turn, reasoning goes to
+  `reasoning_content`, tool-call blocks are held back from the stream, and a
+  stream ends with one empty terminal token carrying the parsed calls.
+  `generate_tokens` stays the unfiltered loop that batch raw prompts and the
+  token-level parity tests use. A change to how llama.cpp formats or filters a
+  turn belongs in the shared module, where MLX gets it too.
+- **A tool-bearing turn decodes with special tokens kept.** MLX's decoder
+  drops special tokens, and the markers around a tool call are special tokens
+  in the Gemma and LFM2 vocabularies. Only a request that offers tools keeps
+  them (never the token that ends the turn), so every other request decodes
+  byte for byte as before; the golden-token tests hold that.
+- **Two streams for the whole process, under one lock.** MLX streams belong
+  to the thread that created them, and xybrid loads a model on one thread and
+  runs it on others. `MlxStream` therefore hands out the streams mlx-c
+  registers for every thread (`mlx_stream_new_thread_unsafe`), one per device,
+  which MLX does not synchronize. Never call `mlx_default_*_stream_new` or
+  create another stream: an array built on a thread's own stream cannot be
+  evaluated anywhere else.
+- **One MLX operation at a time.** Two threads evaluating at once segfault
+  inside MLX. Every path that evaluates MLX arrays (a load, a generation, an
+  embedding run) takes `xybrid_mlx::exclusive()` first, before any adapter
+  lock. `tests/mlx_llm_chat.rs` runs two models at once to hold this.
+  `MlxArray::eval` and `async_eval` take the lock themselves (it is
+  reentrant), so the safe API cannot be raced; the operation-wide guard is
+  still needed, because a run keeps lazy graphs in flight between evaluations.
+- **Nothing outlives an operation.** The outermost `exclusive()` guard waits
+  for what the operation left in flight before it releases the lock, and takes
+  any error that work left on the streams (MLX would raise it from the next,
+  unrelated call). So a free lock means MLX is idle, and one run's late GPU
+  failure cannot fail the next run.
+- **A dropped model gives its memory back.** MLX frees arrays into a pool it
+  keeps, so the struct that owns a model's weights ends with a
+  `xybrid_mlx::ReleasePooledMemory` field (last, so the weights drop first),
+  and a load declares one before it materializes anything. It never waits for
+  the lock: an operation in flight clears the pool as it finishes. Tests
+  assert MLX's active and pooled bytes return to where they started.
+- **Every first MLX call goes through `ensure_metallib_resource`.** It installs
+  xybrid's error handler too; mlx-c's default one prints and exits the
+  process. A new `xybrid-mlx` entry point that can be a process's first MLX
+  call (an allocator query, say) calls it before touching the FFI.
+- **Real-weight tests run through `tools/scripts/run-mlx-real-tests.sh`**: one
+  process per test, then all in one process, with the crash report's backtrace
+  printed if a process dies. A hosted runner's virtual GPU rejects a command
+  buffer now and then; the script retries that one failure, recognized by
+  MLX's `[METAL] Command buffer execution failed` message, and nothing else.
+- **Label a model's runtime with `backend_label_for_metadata`**, not
+  `backend_label_from_template`: SafeTensors is Candle's format, and only the
+  metadata says a bundle runs on MLX.
+- **`mlx.metallib` is found relative to the image that links MLX.**
+  `crates/xybrid-mlx/src/resources.rs` mirrors MLX's own lookup (`dladdr`, then
+  `Resources/`). A distributed binary ships the file there or sets
+  `XYBRID_MLX_METALLIB`.
+- **MLX costs the rest of the repository one Linux job.**
+  `check (llm-mlx non-linking, ubuntu-latest)` runs the `llm-mlx` tier's whole
+  test suite for every code change; that is where a change to shared code
+  that breaks the adapter fails. `check (llm-mlx-runtime, macos)` links MLX
+  and runs only when `mlx_runtime` in `tools/scripts/ci_gate.py` matches,
+  which is the MLX backend itself (and, like every optional job, ci.yml).
+  `test-mlx.yml` runs the MLX-linked steps against master every night. Keep
+  shared paths out of `mlx_runtime`: put what a shared change can break into
+  a test the Linux job runs instead. The MLX-linked steps live in
+  `tools/scripts/check-mlx-runtime.sh`, shared by the pull-request job and
+  the nightly one; add a step there, not to either workflow. The MLX jobs
+  save their Rust caches on master only (`save-if`): the repository's Actions
+  cache is at its 10 GB cap, and the nightly run keeps master's copies warm
+  for pull requests to restore.
+
 ### Releases
 
 **Releases are cut by branch name, not by hand.** Push a `release/v<version>`

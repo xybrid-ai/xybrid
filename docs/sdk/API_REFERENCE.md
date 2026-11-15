@@ -176,6 +176,17 @@ models that are validated and ready to run offline. Deletion returns the number
 of physical roots removed. Do not delete a model while it is loading, or clear
 the cache while any model load is in flight.
 
+### Rust
+
+```rust
+pub struct Xybrid;
+
+impl Xybrid {
+    pub fn model(id: &str) -> ModelLoader;
+    pub fn pipeline(yaml: &str) -> PipelineResult<PipelineRef>;
+}
+```
+
 ### Implementation Status
 
 | Method | Dart | Kotlin | Swift | C# |
@@ -308,6 +319,21 @@ public class ModelLoader
 }
 ```
 
+### Rust
+
+```rust
+pub struct ModelLoader;
+
+impl ModelLoader {
+    pub fn from_registry(model_id: &str) -> Self;
+    pub fn from_bundle(path: impl Into<PathBuf>) -> SdkResult<Self>;
+    pub fn from_directory(path: impl Into<PathBuf>) -> SdkResult<Self>;
+    pub fn from_huggingface(repo: &str) -> Self;
+    pub fn with_backend(self, backend: BackendChoice) -> Self;
+    pub fn load(&self) -> SdkResult<XybridModel>;
+}
+```
+
 ### `fromDirectory()`
 
 Loads a model from a local directory containing a `model_metadata.json` and its referenced model files. Use this for models not in the xybrid registry — for example, custom-trained models, models downloaded from HuggingFace, or models bundled directly with your app.
@@ -400,6 +426,30 @@ var loader = ModelLoader.FromHuggingFace("xybrid-ai/kokoro-82m");
 using var model = loader.Load();
 var result = model.Run(Envelope.Text("Hello!"));
 ```
+
+### `with_backend()` (Rust)
+
+Pins local generation or embedding execution to a specific backend by setting
+`ModelMetadata.backend` when the loader materializes a model. Omit this call for
+automatic selection.
+This is a hard requirement: asking for `mlx` on a bundle that does not contain
+MLX-compatible SafeTensors metadata will fail during load or execution rather
+than silently falling back.
+
+```rust
+use xybrid_sdk::{BackendChoice, ModelLoader};
+
+// A local SafeTensors bundle, required to run on MLX.
+let model = ModelLoader::from_directory("./qwen3-mlx")?
+    .with_backend(BackendChoice::Mlx)
+    .load()?;
+```
+
+MLX is a preview for Apple Silicon Macs and needs a build with the
+`llm-mlx-runtime` feature; see [`docs/backends/mlx.md`](../backends/mlx.md)
+for what it runs and what it refuses (grammars, images). Only the Rust SDK
+has this override: no binding's published native library contains the MLX
+runtime, so the bindings get it together with the runtime.
 
 ### Implementation Status
 
@@ -664,7 +714,6 @@ class XybridModel {
     required ConversationContext context,
     GenerationConfig? config,
   });
-
   // Streaming TTS (audio chunk-by-chunk)
   // Emits each sentence-chunk's raw PCM (+ sample rate) as it is synthesized,
   // instead of one batched WAV, so playback can start after the first sentence.
@@ -766,6 +815,10 @@ impl XybridModel {
         options: &RunOptions,
         on_token: F,
     ) -> SdkResult<InferenceResult>;
+
+    // GGUF requires a compiled GGUF backend;
+    // MLX SafeTensors requires the Apple Silicon macOS MLX runtime.
+    pub fn supports_token_streaming(&self) -> bool;
 }
 ```
 
@@ -1691,6 +1744,18 @@ data class YuvColorInfo(
   val matrix: YuvColorMatrix,
   val range: YuvColorRange,
 )
+```
+
+### BackendChoice
+
+Explicit local generation or embedding backend override (Rust SDK only). Omit the override and the model loads as it would on a build without MLX.
+
+```rust
+pub enum BackendChoice {
+    Mlx,
+    LlamaCpp,
+    Mistral,
+}
 ```
 
 ### GenerationConfig (LLM Generation Parameters)

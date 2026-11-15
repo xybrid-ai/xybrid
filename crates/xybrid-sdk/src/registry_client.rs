@@ -46,10 +46,10 @@ use chrono::{DateTime, Utc};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -58,6 +58,7 @@ use xybrid_core::http::{
     parse_retry_after, CircuitBreaker, CircuitConfig, RetryAfterBudget, RetryPolicy,
     MAX_RETRY_AFTER,
 };
+use xybrid_core::runtime_adapter::{select_with_cfg, BackendChoice, SelectionParams, SelectorCfg};
 
 /// How often a retry backoff wakes to check for cancellation.
 const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -425,6 +426,253 @@ fn classify_download_source(url: &str) -> &'static str {
     }
 }
 
+pub(crate) fn format_cache_key(mask: &str, format: &str) -> String {
+    let format = sanitize_cache_component(format);
+    format!("{mask}__{format}")
+}
+
+/// Registry artifact format an explicit local backend loads.
+///
+/// `None` means the backend runs the registry's default variant.
+pub fn registry_format_for_backend(backend: BackendChoice) -> Option<&'static str> {
+    match backend {
+        BackendChoice::Mlx => Some("safetensors"),
+        BackendChoice::LlamaCpp => Some("gguf"),
+        BackendChoice::Mistral => None,
+    }
+}
+
+/// Parse a `backend` override as a pipeline or command line writes it.
+///
+/// Absent, empty and `auto` all mean no override.
+///
+/// # Errors
+///
+/// [`SdkError::ConfigError`] when the name is not a backend.
+pub fn parse_backend_override(backend: Option<&str>) -> Result<Option<BackendChoice>, SdkError> {
+    let Some(raw_backend) = backend else {
+        return Ok(None);
+    };
+
+    BackendChoice::parse(raw_backend)
+        .map_err(|err| SdkError::ConfigError(format!("Invalid backend override: {}", err)))
+}
+
+/// The registry format a load of `model_id` asks for.
+///
+/// With no `backend` that is the registry's default variant (`None`) on every
+/// build. MLX is opt-in: a build that can run it resolves the same artifact as
+/// one that cannot, and nothing is asked of the registry here. The one
+/// exception is a GGUF copy that an earlier `backend: llamacpp` load
+/// extracted: it is the same model on the same backend, so it is reused
+/// instead of downloaded again.
+///
+/// An explicit `backend` is a hard requirement. It fails here, before anything
+/// is downloaded, when this build or host cannot run it or when it cannot run
+/// the model's task; otherwise the format is that backend's
+/// ([`registry_format_for_backend`]). The task comes from a copy already
+/// extracted on this machine when there is one, else from the registry.
+///
+/// # Errors
+///
+/// [`SdkError::ConfigError`] when `backend` is unusable here or does not run
+/// the model's task, and the registry's error when the task has to be fetched
+/// and cannot be.
+pub fn registry_format_for_load(
+    client: &RegistryClient,
+    model_id: &str,
+    backend: Option<BackendChoice>,
+    cfg: &SelectorCfg,
+) -> Result<Option<&'static str>, SdkError> {
+    let Some(backend) = backend else {
+        return Ok(cached_llamacpp_copy_format(client, model_id, cfg));
+    };
+
+    // Before the registry is asked for the task: an unusable backend fails
+    // the same way online and offline.
+    require_usable_backend(model_id, backend, cfg)?;
+    let task = registry_task_for_explicit_backend(client, model_id, backend)?;
+    explicit_backend_format(model_id, task.as_deref(), backend)
+}
+
+/// [`registry_format_for_load`] for an explicit `backend` whose model task is
+/// already known, with no registry or cache involved.
+///
+/// # Errors
+///
+/// [`SdkError::ConfigError`] when `backend` is unusable here or does not run
+/// `task`.
+pub(crate) fn registry_format_for_explicit_backend(
+    model_id: &str,
+    task: Option<&str>,
+    backend: BackendChoice,
+    cfg: &SelectorCfg,
+) -> Result<Option<&'static str>, SdkError> {
+    require_usable_backend(model_id, backend, cfg)?;
+    explicit_backend_format(model_id, task, backend)
+}
+
+fn selector_error_to_sdk(err: xybrid_core::runtime_adapter::SelectorError) -> SdkError {
+    SdkError::ConfigError(err.to_string())
+}
+
+fn require_usable_backend(
+    model_id: &str,
+    backend: BackendChoice,
+    cfg: &SelectorCfg,
+) -> Result<(), SdkError> {
+    let params = SelectionParams::new(model_id).with_explicit(Some(backend));
+    select_with_cfg(&params, cfg)
+        .map(|_| ())
+        .map_err(selector_error_to_sdk)
+}
+
+/// Embedding registry models have one local text-backend path, MLX
+/// SafeTensors: the llama.cpp adapter here generates text only. An explicit
+/// `backend: llamacpp` for a known embedding task therefore fails before a
+/// GGUF that cannot produce an embedding is requested.
+fn explicit_backend_format(
+    model_id: &str,
+    task: Option<&str>,
+    backend: BackendChoice,
+) -> Result<Option<&'static str>, SdkError> {
+    if task.and_then(registry_backend_selectable_kind) == Some("embed")
+        && backend != BackendChoice::Mlx
+    {
+        return Err(SdkError::ConfigError(format!(
+            "{} backend does not support registry embedding model `{}`; use backend: auto or backend: mlx",
+            backend.as_str(),
+            model_id
+        )));
+    }
+
+    Ok(registry_format_for_backend(backend))
+}
+
+fn registry_task_for_explicit_backend(
+    client: &RegistryClient,
+    model_id: &str,
+    selected: BackendChoice,
+) -> Result<Option<String>, SdkError> {
+    // Offline-first: the task recorded in an extracted copy's metadata is the
+    // registry's answer, so a cached model needs no registry round trip.
+    if let Some(task) = offline_cached_registry_task(client, model_id, selected) {
+        return Ok(Some(task));
+    }
+
+    match client.get_model(model_id) {
+        Ok(detail) => Ok(Some(detail.task)),
+        Err(err) if registry_metadata_error_can_fall_back_to_default(&err) => {
+            Ok(offline_cached_registry_task(client, model_id, selected))
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn offline_cached_registry_task(
+    client: &RegistryClient,
+    model_id: &str,
+    selected: BackendChoice,
+) -> Option<String> {
+    let preferred = registry_format_for_backend(selected);
+    let mut formats = Vec::new();
+
+    if let Some(format) = preferred {
+        formats.push(format);
+    }
+
+    for format in ["safetensors", "gguf"] {
+        if !formats.contains(&format) {
+            formats.push(format);
+        }
+    }
+
+    for format in formats {
+        if let Some(model_dir) = client.resolve_offline_with_format(model_id, format) {
+            if let Some(task) = cached_model_task(&model_dir) {
+                return Some(task);
+            }
+        }
+    }
+
+    client
+        .resolve_offline(model_id)
+        .and_then(|model_dir| cached_model_task(&model_dir))
+}
+
+fn cached_model_task(model_dir: &PathBuf) -> Option<String> {
+    let metadata = std::fs::read_to_string(model_dir.join("model_metadata.json")).ok()?;
+    let metadata: serde_json::Value = serde_json::from_str(&metadata).ok()?;
+
+    metadata
+        .get("metadata")
+        .and_then(|metadata| metadata.get("task"))
+        .or_else(|| metadata.get("task"))
+        .and_then(|task| task.as_str())
+        .map(str::to_string)
+}
+
+fn registry_backend_selectable_kind(task: &str) -> Option<&'static str> {
+    match xybrid_core::execution::template::stage_kind_from_task(task) {
+        Some(kind @ ("llm" | "embed")) => Some(kind),
+        _ => None,
+    }
+}
+
+/// `Some("gguf")` when a load with no override should reuse the GGUF copy an
+/// explicit `backend: llamacpp` load left on this machine. Local file system
+/// only. A SafeTensors copy left by `backend: mlx` is never picked up this
+/// way: that would move the model to MLX without being asked.
+fn cached_llamacpp_copy_format(
+    client: &RegistryClient,
+    model_id: &str,
+    cfg: &SelectorCfg,
+) -> Option<&'static str> {
+    (cfg.llamacpp_compiled
+        && client
+            .resolve_offline_with_format(model_id, "gguf")
+            .is_some())
+    .then_some("gguf")
+}
+
+pub(crate) fn registry_metadata_error_can_fall_back_to_default(err: &SdkError) -> bool {
+    matches!(
+        err,
+        SdkError::Offline { .. }
+            | SdkError::NetworkError { .. }
+            | SdkError::Timeout { .. }
+            | SdkError::CircuitOpen(_)
+            // Non-transient registry answers must not brick a fully-cached
+            // model either: a delisted id (404), auth misconfig (401/403) or
+            // persistent 429 falls back to the offline format resolution, and
+            // paths that genuinely need the registry fail later with the
+            // specific error. Loads ran entirely offline-first before format
+            // selection existed.
+            | SdkError::ModelNotFound(_)
+            | SdkError::ConfigError(_)
+            | SdkError::RateLimited { .. }
+    )
+}
+
+fn sanitize_cache_component(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    if sanitized.is_empty() {
+        "unknown".to_string()
+    } else {
+        sanitized
+    }
+}
+
 fn sanitize_binding(binding: &str) -> &str {
     let valid = !binding.is_empty()
         && binding
@@ -533,6 +781,11 @@ impl RegistryClient {
     /// (defaulting to [`DEFAULT_BINDING`] when unset). Per-instance overrides
     /// go through [`Self::with_binding`].
     pub fn new(api_urls: Vec<String>) -> Result<Self, SdkError> {
+        let cache = CacheManager::new()?;
+        Self::new_with_cache(api_urls, cache)
+    }
+
+    fn new_with_cache(api_urls: Vec<String>, cache: CacheManager) -> Result<Self, SdkError> {
         if api_urls.is_empty() {
             return Err(SdkError::ConfigError(
                 "No registry URLs provided".to_string(),
@@ -544,8 +797,6 @@ impl RegistryClient {
             .timeout_connect(Duration::from_millis(CONNECT_TIMEOUT_MS))
             .timeout(Duration::from_millis(REQUEST_TIMEOUT_MS))
             .build();
-
-        let cache = CacheManager::new()?;
 
         // Create circuit breakers for each URL
         let circuits: Vec<Arc<CircuitBreaker>> = api_urls
@@ -572,6 +823,15 @@ impl RegistryClient {
             retry_after_limit: MAX_RETRY_AFTER,
             binding: get_binding(),
         })
+    }
+
+    #[cfg(test)]
+    fn with_url_and_cache_dir(
+        api_url: impl Into<String>,
+        cache_dir: PathBuf,
+    ) -> Result<Self, SdkError> {
+        let cache = CacheManager::with_dir(cache_dir)?;
+        Self::new_with_cache(vec![api_url.into()], cache)
     }
 
     /// Override the binding identifier reported via the `X-Xybrid-Client` header.
@@ -711,6 +971,29 @@ impl RegistryClient {
     /// Tries primary URL first, falls back to secondary on failure.
     /// Automatically retries on transient failures and respects circuit breaker.
     pub fn resolve(&self, mask: &str, platform: Option<&str>) -> Result<ResolvedVariant, SdkError> {
+        self.resolve_with_format_option(mask, platform, None)
+    }
+
+    /// Resolve a model mask to the best variant for the given platform and format.
+    ///
+    /// This is used by backend overrides that require a different artifact
+    /// format than the registry's platform default, for example MLX
+    /// SafeTensors instead of llama.cpp GGUF on macOS.
+    pub fn resolve_with_format(
+        &self,
+        mask: &str,
+        platform: Option<&str>,
+        format: &str,
+    ) -> Result<ResolvedVariant, SdkError> {
+        self.resolve_with_format_option(mask, platform, Some(format))
+    }
+
+    fn resolve_with_format_option(
+        &self,
+        mask: &str,
+        platform: Option<&str>,
+        format: Option<&str>,
+    ) -> Result<ResolvedVariant, SdkError> {
         let platform = platform.map(String::from).unwrap_or_else(detect_platform);
         // OS version is a functional input to artifact selection, independent
         // of the optional client telemetry header. Never send the host's
@@ -722,17 +1005,28 @@ impl RegistryClient {
         );
 
         self.execute_with_fallback(|api_url| {
-            let url = resolve_url(
+            let mut url = resolve_url(
                 api_url,
                 mask,
                 &platform,
                 xybrid_core::features::enabled(),
                 os.as_deref(),
             );
+            if let Some(format) = format {
+                url.push_str("&format=");
+                url.push_str(format);
+            }
             let req = self.apply_client_header(self.agent.get(&url));
             let response = req.call();
             self.handle_response_with_404(response, "resolve model", |response| {
-                resolve_not_found(response, mask, &platform)
+                match (resolve_not_found(response, mask, &platform), format) {
+                    // A format-pinned lookup that the registry simply cannot
+                    // serve names the format, so the caller sees why.
+                    (SdkError::ModelNotFound(_), Some(format)) => SdkError::ModelNotFound(format!(
+                        "Model '{mask}' not found or no compatible variant for platform '{platform}' and format '{format}'"
+                    )),
+                    (err, _) => err,
+                }
             })
         })
         .and_then(|response| {
@@ -1014,7 +1308,22 @@ impl RegistryClient {
     /// Check if a model is cached locally.
     pub fn is_cached(&self, mask: &str, platform: Option<&str>) -> Result<bool, SdkError> {
         let resolved = self.resolve(mask, platform)?;
-        let cache_path = self.get_cache_path(&resolved);
+        self.is_resolved_cached(&resolved)
+    }
+
+    /// Check if a model variant with an explicit format preference is cached locally.
+    pub fn is_cached_with_format(
+        &self,
+        mask: &str,
+        platform: Option<&str>,
+        format: &str,
+    ) -> Result<bool, SdkError> {
+        let resolved = self.resolve_with_format(mask, platform, format)?;
+        self.is_resolved_cached(&resolved)
+    }
+
+    fn is_resolved_cached(&self, resolved: &ResolvedVariant) -> Result<bool, SdkError> {
+        let cache_path = self.get_cache_path(resolved);
 
         if !cache_path.exists() {
             return Ok(false);
@@ -1078,13 +1387,45 @@ impl RegistryClient {
         F: Fn(DownloadStatus),
     {
         let resolved = self.resolve(mask, platform)?;
+        self.fetch_resolved(mask, &resolved, cancel, &progress_callback)
+    }
+
+    /// Fetch a model bundle with an explicit registry format preference.
+    pub fn fetch_with_format<F>(
+        &self,
+        mask: &str,
+        platform: Option<&str>,
+        format: &str,
+        progress_callback: F,
+    ) -> Result<PathBuf, SdkError>
+    where
+        F: Fn(DownloadStatus),
+    {
+        let resolved = self.resolve_with_format(mask, platform, format)?;
+        self.fetch_resolved(
+            mask,
+            &resolved,
+            Arc::new(AtomicBool::new(false)),
+            &progress_callback,
+        )
+    }
+
+    /// Download (or reuse the cached) `.xyb` bundle for an already-resolved
+    /// variant, driving one progress bar through to the terminal `Ready` frame.
+    fn fetch_resolved(
+        &self,
+        mask: &str,
+        resolved: &ResolvedVariant,
+        cancel: Arc<AtomicBool>,
+        progress_callback: &dyn Fn(DownloadStatus),
+    ) -> Result<PathBuf, SdkError> {
         let reporter = ProgressReporter::new(
-            Some(total_declared_bytes(&resolved)),
+            Some(total_declared_bytes(resolved)),
             1 + resolved.artifacts.len(),
             cancel,
-            &progress_callback,
+            progress_callback,
         );
-        let path = self.fetch_bundle(mask, &resolved, &reporter)?;
+        let path = self.fetch_bundle(mask, resolved, &reporter)?;
         // Hash verification and extraction run after the last byte, with no
         // chunk loop to check the flag — so re-check here rather than
         // announcing `Ready` for a download the caller already stopped. The
@@ -1317,28 +1658,118 @@ impl RegistryClient {
 
         // Resolve first to check if passthrough
         let resolved = self.resolve(mask, platform)?;
-        self.fetch_extracted_resolved(mask, &resolved, cancel, progress_callback)
+        self.fetch_extracted_resolved(mask, None, &resolved, cancel, &progress_callback)
     }
 
-    /// The download half of [`Self::fetch_extracted_cancellable`], for a
-    /// variant the caller has already resolved.
+    /// Fetch and extract a model with an explicit registry format preference.
     ///
-    /// A speculative load resolves first to decide whether it may serve from
-    /// the cloud, then downloads that same variant here instead of resolving
-    /// again. Progress and cancellation behave as in
-    /// [`Self::fetch_extracted_cancellable`]. There is no offline-cache check:
-    /// callers run [`Self::resolve_offline`] before resolving.
-    pub(crate) fn fetch_extracted_resolved<F>(
+    /// Explicit format requests use a variant-specific extraction directory so
+    /// a default GGUF cache entry cannot shadow an MLX SafeTensors request for
+    /// the same model mask.
+    pub fn fetch_extracted_with_format<F>(
         &self,
         mask: &str,
-        resolved: &ResolvedVariant,
+        platform: Option<&str>,
+        format: &str,
+        progress_callback: F,
+    ) -> Result<PathBuf, SdkError>
+    where
+        F: Fn(DownloadStatus),
+    {
+        self.fetch_extracted_with_format_cancellable(
+            mask,
+            platform,
+            format,
+            Arc::new(AtomicBool::new(false)),
+            progress_callback,
+        )
+    }
+
+    /// Fetch and extract `mask`, honouring a resolved registry format
+    /// preference when there is one.
+    ///
+    /// `None` is the registry default variant under the bare mask; `Some`
+    /// uses the format-variant cache entry. Every SDK download path (`load`,
+    /// speculative background download, `start_download`) goes through here
+    /// so they all land in, and reuse, the same cache entry.
+    pub(crate) fn fetch_extracted_preferring_format<F>(
+        &self,
+        mask: &str,
+        platform: Option<&str>,
+        format: Option<&str>,
         cancel: Arc<AtomicBool>,
         progress_callback: F,
     ) -> Result<PathBuf, SdkError>
     where
         F: Fn(DownloadStatus),
     {
-        let declared_bytes = total_declared_bytes(resolved);
+        match format {
+            Some(format) => self.fetch_extracted_with_format_cancellable(
+                mask,
+                platform,
+                format,
+                cancel,
+                progress_callback,
+            ),
+            None => self.fetch_extracted_cancellable(mask, platform, cancel, progress_callback),
+        }
+    }
+
+    /// [`Self::fetch_extracted_with_format`] with a caller-owned cancellation
+    /// flag.
+    fn fetch_extracted_with_format_cancellable<F>(
+        &self,
+        mask: &str,
+        platform: Option<&str>,
+        format: &str,
+        cancel: Arc<AtomicBool>,
+        progress_callback: F,
+    ) -> Result<PathBuf, SdkError>
+    where
+        F: Fn(DownloadStatus),
+    {
+        let cache_key = format_cache_key(mask, format);
+
+        // Offline-first, mirroring `fetch_extracted`: a fully-extracted
+        // format-variant copy must load without touching the network (or the
+        // circuit breaker) — otherwise a cached MLX model cannot load offline.
+        if let Some(extract_dir) = self.resolve_offline_with_format(mask, format) {
+            crate::observability::record_load_cache_hit(true);
+            debug!(
+                "Using locally extracted model '{}' ({format}) at {} (skipping registry)",
+                mask,
+                extract_dir.display()
+            );
+            progress_callback(DownloadStatus::ready(0, None));
+            return Ok(extract_dir);
+        }
+
+        let resolved = self.resolve_with_format(mask, platform, format)?;
+        self.fetch_extracted_resolved(
+            mask,
+            Some(&cache_key),
+            &resolved,
+            cancel,
+            &progress_callback,
+        )
+    }
+
+    /// Download and extract an already-resolved variant into `cache_key`'s
+    /// extraction directory (the bare mask when `None`), driving one progress
+    /// bar through to the terminal `Ready` frame.
+    pub(crate) fn fetch_extracted_resolved(
+        &self,
+        mask: &str,
+        cache_key: Option<&str>,
+        resolved: &ResolvedVariant,
+        cancel: Arc<AtomicBool>,
+        progress_callback: &dyn Fn(DownloadStatus),
+    ) -> Result<PathBuf, SdkError> {
+        let (declared_bytes, artifact_count) = if resolved.passthrough {
+            passthrough_progress_plan(resolved)
+        } else {
+            (total_declared_bytes(resolved), 1 + resolved.artifacts.len())
+        };
         if declared_bytes > 0 {
             crate::observability::record_load_size(declared_bytes);
         }
@@ -1352,21 +1783,29 @@ impl RegistryClient {
         };
         let reporter = ProgressReporter::new(
             Some(declared_bytes),
-            1 + resolved.artifacts.len(),
+            artifact_count,
             cancel,
             &observed_progress,
         );
 
         let extract_dir = if resolved.passthrough {
-            // Passthrough: download raw model file directly, write metadata from registry
-            self.fetch_passthrough(mask, resolved, &reporter)
+            // Passthrough: download raw model files directly, write metadata from registry
+            self.fetch_passthrough_with_cache_key(
+                mask,
+                cache_key.unwrap_or(mask),
+                resolved,
+                &reporter,
+            )
         } else {
             // Standard flow: download .xyb bundle, then extract
             let xyb_path = self.fetch_bundle(mask, resolved, &reporter)?;
-            self.cache.ensure_extracted(&xyb_path)
+            match cache_key {
+                Some(cache_key) => self.cache.ensure_extracted_with_id(&xyb_path, cache_key),
+                None => self.cache.ensure_extracted(&xyb_path),
+            }
         }?;
-        // Same reasoning as `fetch_cancellable`: the tail past the last byte
-        // has no chunk loop, so a cancel landing there must not report `Ready`.
+        // Same reasoning as `fetch_resolved`: the tail past the last byte has
+        // no chunk loop, so a cancel landing there must not report `Ready`.
         if reporter.is_cancelled() {
             return Err(ProgressReporter::cancelled_error());
         }
@@ -1378,47 +1817,34 @@ impl RegistryClient {
     ///
     /// For passthrough variants, there is no .xyb bundle. The model file (e.g., a GGUF)
     /// is downloaded directly from the source HuggingFace repo, and `model_metadata.json`
-    /// is written from the inline metadata in the registry response.
-    fn fetch_passthrough(
+    /// is written from the inline metadata in the registry response. Files land
+    /// in `cache_key`'s extraction directory.
+    fn fetch_passthrough_with_cache_key(
         &self,
         mask: &str,
+        cache_key: &str,
         resolved: &ResolvedVariant,
         reporter: &ProgressReporter<'_>,
     ) -> Result<PathBuf, SdkError> {
-        let extract_dir = self.cache.extraction_dir(mask);
-        let model_file_path = extract_dir.join(&resolved.file);
+        let extract_dir = self.cache.extraction_dir(cache_key);
         let metadata_path = extract_dir.join("model_metadata.json");
+        let mut required_files = passthrough_declared_files(resolved)?;
 
         // Idempotency check: if model file + metadata exist, check cache validity
         if metadata_path.exists() {
-            let mut cache_valid =
-                self.passthrough_file_is_valid(&model_file_path, &resolved.sha256)?;
-            for artifact in &resolved.artifacts {
-                let artifact_path = extract_dir.join(&artifact.file);
-                cache_valid &= self.passthrough_file_is_valid(&artifact_path, &artifact.sha256)?;
-            }
-
-            if cache_valid {
-                crate::observability::record_load_cache_hit(true);
-                if resolved.sha256.is_empty()
-                    || resolved
-                        .artifacts
-                        .iter()
-                        .any(|artifact| artifact.sha256.is_empty())
-                {
-                    warn!(
-                        "Passthrough cache hit for '{}' (one or more files lack hash verification) at {}",
-                        mask,
-                        extract_dir.display()
-                    );
-                } else {
+            append_existing_index_shards(&extract_dir, &mut required_files)?;
+            if passthrough_files_exist(&extract_dir, &required_files)? {
+                ensure_indexed_safetensors_hash_coverage(resolved, &extract_dir, &required_files)?;
+                if passthrough_cached_files_verified(&extract_dir, resolved, &required_files)? {
+                    crate::observability::record_load_cache_hit(true);
                     info!(
                         "Passthrough cache hit for '{}' at {}",
                         mask,
                         extract_dir.display()
                     );
+                    return Ok(extract_dir);
                 }
-                return Ok(extract_dir);
+                info!("Passthrough hash mismatch for '{}', re-downloading", mask);
             }
             info!(
                 "Passthrough cache incomplete or hash mismatch for '{}', re-downloading",
@@ -1431,29 +1857,21 @@ impl RegistryClient {
             .map_err(|e| SdkError::cache_src("Failed to create extraction directory", e))?;
 
         crate::observability::record_load_cache_hit(false);
-        self.download_passthrough_file(
-            mask,
-            &resolved.file,
-            &resolved.download_url,
-            &model_file_path,
-            resolved.size_bytes,
-            reporter,
-            &resolved.sha256,
-        )?;
+        for file in passthrough_download_order(resolved, &required_files) {
+            self.ensure_passthrough_file(mask, resolved, &extract_dir, &file, reporter)?;
+        }
 
-        // Note: download_passthrough_file already handles telemetry + SHA256 per file.
-        // Download additional artifacts (e.g. mmproj for VLM models)
-        for artifact in &resolved.artifacts {
-            let artifact_path = extract_dir.join(&artifact.file);
-            self.download_passthrough_file(
-                mask,
-                &artifact.file,
-                &artifact.download_url,
-                &artifact_path,
-                artifact.size_bytes,
-                reporter,
-                &artifact.sha256,
-            )?;
+        append_existing_index_shards(&extract_dir, &mut required_files)?;
+        ensure_indexed_safetensors_hash_coverage(resolved, &extract_dir, &required_files)?;
+        for file in passthrough_download_order(resolved, &required_files) {
+            self.ensure_passthrough_file(mask, resolved, &extract_dir, &file, reporter)?;
+        }
+
+        if !passthrough_files_exist(&extract_dir, &required_files)? {
+            return Err(SdkError::cache(format!(
+                "Passthrough variant for '{}' is incomplete after download",
+                mask
+            )));
         }
 
         // Write model_metadata.json from registry response
@@ -1476,79 +1894,76 @@ impl RegistryClient {
 
         Ok(extract_dir)
     }
-
-    fn passthrough_file_is_valid(
-        &self,
-        file_path: &PathBuf,
-        expected_sha256: &str,
-    ) -> Result<bool, SdkError> {
-        if !file_path.exists() {
-            return Ok(false);
-        }
-        if expected_sha256.is_empty() {
-            return Ok(true);
-        }
-        if let Some(cached_hash) = read_cached_hash(file_path) {
-            return Ok(cached_hash == expected_sha256);
-        }
-        let computed = compute_sha256(file_path)?;
-        let matches = computed == expected_sha256;
-        if matches {
-            write_cached_hash(file_path, &computed);
-        }
-        Ok(matches)
-    }
-
-    fn download_passthrough_file(
+    fn ensure_passthrough_file(
         &self,
         mask: &str,
-        file_name: &str,
-        download_url: &str,
-        dest: &PathBuf,
-        size_bytes: u64,
+        resolved: &ResolvedVariant,
+        extract_dir: &Path,
+        file: &str,
         reporter: &ProgressReporter<'_>,
-        expected_sha256: &str,
     ) -> Result<(), SdkError> {
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)?;
+        let path = passthrough_destination(extract_dir, file)?;
+        let expected_sha256 = passthrough_expected_sha256(resolved, file)?;
+
+        if path.exists() {
+            let Some(expected_sha256) = expected_sha256 else {
+                return Ok(());
+            };
+            if let Some(cached_hash) = read_cached_hash(&path) {
+                if cached_hash == expected_sha256 {
+                    return Ok(());
+                }
+            }
+            std::fs::remove_file(&path).ok();
+            remove_cached_hash(&path);
         }
 
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                SdkError::cache(format!(
+                    "Failed to create passthrough file directory '{}': {}",
+                    parent.display(),
+                    e
+                ))
+            })?;
+        }
+
+        let url = passthrough_download_url(resolved, file)?;
         info!(
             "Passthrough download '{}' file '{}' from {}",
-            mask, file_name, download_url
+            mask, file, url
         );
+
         // Same reasoning as the standard fetch path: we time the
         // network transfer alone so the cost dashboard sees a clean
         // bytes-on-the-wire signal.
         let download_started = Instant::now();
-        self.download_with_progress(download_url, dest, reporter)?;
+        let declared_size = passthrough_declared_size(resolved, file);
+        self.download_with_progress(&url, &path, reporter)?;
         let download_duration = download_started.elapsed();
 
-        let bytes_downloaded = std::fs::metadata(dest)
+        let bytes_downloaded = std::fs::metadata(&path)
             .map(|m| m.len())
-            .unwrap_or(size_bytes);
+            .unwrap_or(declared_size);
         reporter.finish_file(bytes_downloaded);
         crate::telemetry::publish_model_download(
             mask,
             bytes_downloaded,
-            classify_download_source(download_url),
+            classify_download_source(&url),
             download_duration.as_millis().min(u32::MAX as u128) as u32,
         );
 
-        if !expected_sha256.is_empty() {
-            let hash = compute_sha256(dest)?;
+        if let Some(expected_sha256) = expected_sha256 {
+            let hash = compute_sha256(&path)?;
             if hash != expected_sha256 {
-                std::fs::remove_file(dest).ok();
+                std::fs::remove_file(&path).ok();
                 return Err(SdkError::cache(format!(
                     "Passthrough SHA256 mismatch for '{}': expected {}, got {}",
-                    file_name, expected_sha256, hash
+                    file, expected_sha256, hash
                 )));
             }
-            write_cached_hash(dest, &hash);
-            info!(
-                "Passthrough SHA256 verified for '{}' file '{}'",
-                mask, file_name
-            );
+            write_cached_hash(&path, &hash);
+            info!("Passthrough SHA256 verified for '{}' file '{}'", mask, file);
         }
 
         Ok(())
@@ -1580,6 +1995,21 @@ impl RegistryClient {
     /// registry updates.
     pub fn resolve_offline(&self, mask: &str) -> Option<PathBuf> {
         self.cache.existing_extraction_dir(mask)
+    }
+
+    /// Try to locate a ready-to-use explicitly formatted model variant offline.
+    pub fn resolve_offline_with_format(&self, mask: &str, format: &str) -> Option<PathBuf> {
+        let cache_key = format_cache_key(mask, format);
+        if self.cache.is_extracted(&cache_key) {
+            Some(self.cache.extraction_dir(&cache_key))
+        } else {
+            None
+        }
+    }
+
+    /// Get the extraction directory for an explicitly formatted model variant.
+    pub fn extraction_dir_with_format(&self, mask: &str, format: &str) -> PathBuf {
+        self.cache.extraction_dir(&format_cache_key(mask, format))
     }
 
     /// List all model IDs that are currently available for offline use.
@@ -2019,6 +2449,361 @@ fn remove_cached_hash(bundle_path: &PathBuf) {
     let _ = std::fs::remove_file(&hash_path);
 }
 
+fn passthrough_declared_files(resolved: &ResolvedVariant) -> Result<BTreeSet<String>, SdkError> {
+    let mut files = BTreeSet::new();
+    insert_passthrough_file(&mut files, &resolved.file)?;
+
+    for artifact in &resolved.artifacts {
+        insert_passthrough_file(&mut files, &artifact.file)?;
+    }
+
+    if let Some(metadata) = &resolved.model_metadata {
+        if let Some(model_file) = metadata
+            .get("execution_template")
+            .and_then(|template| template.get("model_file"))
+            .and_then(|file| file.as_str())
+        {
+            insert_passthrough_file(&mut files, model_file)?;
+        }
+
+        if let Some(file_list) = metadata.get("files").and_then(|files| files.as_array()) {
+            for file in file_list.iter().filter_map(|file| file.as_str()) {
+                insert_passthrough_file(&mut files, file)?;
+            }
+        }
+    }
+
+    Ok(files)
+}
+
+fn insert_passthrough_file(files: &mut BTreeSet<String>, file: &str) -> Result<(), SdkError> {
+    validate_passthrough_file(file)?;
+    files.insert(file.to_string());
+    Ok(())
+}
+
+fn validate_passthrough_file(file: &str) -> Result<(), SdkError> {
+    if file.is_empty() {
+        return Err(SdkError::cache(
+            "Passthrough artifact path must not be empty",
+        ));
+    }
+    if file.contains(['\\', '?', '#']) {
+        return Err(SdkError::cache(format!(
+            "Unsafe passthrough artifact path '{}'",
+            file
+        )));
+    }
+
+    let path = Path::new(file);
+    if path
+        .components()
+        .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err(SdkError::cache(format!(
+            "Unsafe passthrough artifact path '{}'",
+            file
+        )));
+    }
+
+    Ok(())
+}
+
+fn passthrough_destination(extract_dir: &Path, file: &str) -> Result<PathBuf, SdkError> {
+    validate_passthrough_file(file)?;
+    Ok(extract_dir.join(file))
+}
+
+fn passthrough_files_exist(extract_dir: &Path, files: &BTreeSet<String>) -> Result<bool, SdkError> {
+    for file in files {
+        if !passthrough_destination(extract_dir, file)?.is_file() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn validate_sha256_value<'a>(file: &str, hash: &'a str) -> Result<&'a str, SdkError> {
+    if hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        Ok(hash)
+    } else {
+        Err(SdkError::cache(format!(
+            "Invalid SHA256 for passthrough artifact '{}'",
+            file
+        )))
+    }
+}
+
+fn passthrough_expected_sha256<'a>(
+    resolved: &'a ResolvedVariant,
+    file: &str,
+) -> Result<Option<&'a str>, SdkError> {
+    if let Some(hash) = resolved.file_sha256.get(file) {
+        return validate_sha256_value(file, hash).map(Some);
+    }
+    if file == resolved.file && !resolved.sha256.is_empty() {
+        return validate_sha256_value(file, &resolved.sha256).map(Some);
+    }
+    if let Some(artifact) = passthrough_artifact_for_file(resolved, file) {
+        if !artifact.sha256.is_empty() {
+            return validate_sha256_value(file, &artifact.sha256).map(Some);
+        }
+    }
+    Ok(None)
+}
+
+fn passthrough_cached_files_verified(
+    extract_dir: &Path,
+    resolved: &ResolvedVariant,
+    files: &BTreeSet<String>,
+) -> Result<bool, SdkError> {
+    let mut saw_hash = false;
+    let mut has_unverified_files = false;
+    for file in files {
+        let path = passthrough_destination(extract_dir, file)?;
+        let Some(expected_hash) = passthrough_expected_sha256(resolved, file)? else {
+            has_unverified_files = true;
+            continue;
+        };
+        saw_hash = true;
+        if read_cached_hash(&path).as_deref() == Some(expected_hash) {
+            continue;
+        }
+
+        let hash = compute_sha256(&path)?;
+        if hash != expected_hash {
+            std::fs::remove_file(&path).ok();
+            remove_cached_hash(&path);
+            return Ok(false);
+        }
+        write_cached_hash(&path, &hash);
+    }
+
+    if !saw_hash {
+        warn!(
+            "Passthrough cache hit for '{}' (no hash verification)",
+            resolved.file
+        );
+    } else if has_unverified_files {
+        warn!(
+            "Passthrough cache hit for '{}' (one or more files lack hash verification)",
+            resolved.file
+        );
+    }
+    Ok(true)
+}
+
+fn ensure_indexed_safetensors_hash_coverage(
+    resolved: &ResolvedVariant,
+    extract_dir: &Path,
+    files: &BTreeSet<String>,
+) -> Result<(), SdkError> {
+    for index_file in files
+        .iter()
+        .filter(|file| file.ends_with(".safetensors.index.json"))
+    {
+        let index_path = passthrough_destination(extract_dir, index_file)?;
+        if !index_path.is_file() {
+            return Err(SdkError::cache(format!(
+                "Indexed SafeTensors manifest '{}' must be downloaded before shard integrity can be verified",
+                index_file
+            )));
+        }
+        if passthrough_expected_sha256(resolved, index_file)?.is_none() {
+            return Err(SdkError::cache(format!(
+                "Indexed SafeTensors passthrough variant '{}' requires SHA256 for index '{}'",
+                resolved.file, index_file
+            )));
+        }
+
+        for shard in safetensors_index_shards(&index_path)? {
+            if passthrough_expected_sha256(resolved, &shard)?.is_none() {
+                return Err(SdkError::cache(format!(
+                    "Indexed SafeTensors passthrough variant '{}' requires SHA256 for shard '{}'",
+                    resolved.file, shard
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn append_existing_index_shards(
+    extract_dir: &Path,
+    files: &mut BTreeSet<String>,
+) -> Result<(), SdkError> {
+    let index_files: Vec<String> = files
+        .iter()
+        .filter(|file| file.ends_with(".safetensors.index.json"))
+        .cloned()
+        .collect();
+
+    for index_file in index_files {
+        let index_path = passthrough_destination(extract_dir, &index_file)?;
+        if !index_path.exists() {
+            continue;
+        }
+        for shard in safetensors_index_shards(&index_path)? {
+            insert_passthrough_file(files, &shard)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn safetensors_index_shards(index_path: &Path) -> Result<Vec<String>, SdkError> {
+    let raw = std::fs::read_to_string(index_path).map_err(|e| {
+        SdkError::cache(format!(
+            "Failed to read SafeTensors index '{}': {}",
+            index_path.display(),
+            e
+        ))
+    })?;
+    let index: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
+        SdkError::cache(format!(
+            "Failed to parse SafeTensors index '{}': {}",
+            index_path.display(),
+            e
+        ))
+    })?;
+    let weight_map = index
+        .get("weight_map")
+        .and_then(|value| value.as_object())
+        .ok_or_else(|| {
+            SdkError::cache(format!(
+                "SafeTensors index '{}' is missing weight_map",
+                index_path.display()
+            ))
+        })?;
+
+    let mut shards = BTreeSet::new();
+    for value in weight_map.values() {
+        let shard = value.as_str().ok_or_else(|| {
+            SdkError::cache(format!(
+                "SafeTensors index '{}' contains a non-string shard path",
+                index_path.display()
+            ))
+        })?;
+        validate_passthrough_file(shard)?;
+        shards.insert(shard.to_string());
+    }
+
+    Ok(shards.into_iter().collect())
+}
+
+fn passthrough_artifact_for_file<'a>(
+    resolved: &'a ResolvedVariant,
+    file: &str,
+) -> Option<&'a ResolvedArtifact> {
+    resolved
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.file == file)
+}
+
+/// Progress totals for a passthrough download: `(declared bytes, file count)`.
+///
+/// Passthrough variants can pull files beyond the main file and its
+/// artifacts (the metadata `files` list, tokenizer/config siblings), and those
+/// carry no declared size. Same rule as [`total_declared_bytes`]: one unsized
+/// file makes the byte total unknown, so progress falls back to completed
+/// files over this count. SafeTensors shards discovered from an index file
+/// after it lands are not counted up front; undeclared ones only add bytes.
+fn passthrough_progress_plan(resolved: &ResolvedVariant) -> (u64, usize) {
+    let Ok(files) = passthrough_declared_files(resolved) else {
+        // The fetch itself rejects the invalid path with a proper error.
+        return (0, 0);
+    };
+    let mut total: u64 = 0;
+    for file in &files {
+        let size = passthrough_declared_size(resolved, file);
+        if size == 0 {
+            return (0, files.len());
+        }
+        total = total.saturating_add(size);
+    }
+    (total, files.len())
+}
+
+/// Order passthrough downloads the way the registry declares them: the main
+/// file, then each artifact, then everything else (metadata `files`, index
+/// shards) alphabetically. Progress reads naturally that way — the weights
+/// land first — rather than in the set's lexical order.
+fn passthrough_download_order(
+    resolved: &ResolvedVariant,
+    required_files: &BTreeSet<String>,
+) -> Vec<String> {
+    let declared = std::iter::once(resolved.file.as_str()).chain(
+        resolved
+            .artifacts
+            .iter()
+            .map(|artifact| artifact.file.as_str()),
+    );
+    let mut ordered: Vec<String> = Vec::with_capacity(required_files.len());
+    for file in declared {
+        if required_files.contains(file) && !ordered.iter().any(|seen| seen == file) {
+            ordered.push(file.to_string());
+        }
+    }
+    for file in required_files {
+        if !ordered.contains(file) {
+            ordered.push(file.clone());
+        }
+    }
+    ordered
+}
+
+fn passthrough_declared_size(resolved: &ResolvedVariant, file: &str) -> u64 {
+    if file == resolved.file {
+        resolved.size_bytes
+    } else {
+        passthrough_artifact_for_file(resolved, file)
+            .map(|artifact| artifact.size_bytes)
+            .unwrap_or(0)
+    }
+}
+
+fn passthrough_download_url(resolved: &ResolvedVariant, file: &str) -> Result<String, SdkError> {
+    validate_passthrough_file(file)?;
+    if file == resolved.file {
+        return Ok(resolved.download_url.clone());
+    }
+    if let Some(artifact) = passthrough_artifact_for_file(resolved, file) {
+        return Ok(artifact.download_url.clone());
+    }
+
+    sibling_download_url(&resolved.download_url, file)
+}
+
+fn sibling_download_url(base_url: &str, file: &str) -> Result<String, SdkError> {
+    validate_passthrough_file(file)?;
+    let base_without_query = base_url.split_once('?').map_or(base_url, |(base, _)| base);
+    let Some((base_dir, _)) = base_without_query.rsplit_once('/') else {
+        return Err(SdkError::cache(format!(
+            "Cannot derive sibling URL for '{}' from '{}'",
+            file, base_url
+        )));
+    };
+
+    Ok(format!("{}/{}", base_dir, file))
+}
+
+/// Calculate total size of a directory.
+fn dir_size(path: &PathBuf) -> Result<u64, SdkError> {
+    let mut total: u64 = 0;
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        let metadata = entry.metadata()?;
+        if metadata.is_file() {
+            total += metadata.len();
+        } else if metadata.is_dir() {
+            total += dir_size(&entry.path())?;
+        }
+    }
+    Ok(total)
+}
+
 // ============================================================================
 // API Response Types
 // ============================================================================
@@ -2120,6 +2905,18 @@ pub struct ResolvedVariant {
     /// Additional files required by this variant, such as VLM mmproj siblings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifacts: Vec<ResolvedArtifact>,
+    /// Per-file SHA256 hashes for passthrough variants with sibling files.
+    ///
+    /// Indexed SafeTensors passthrough variants must provide entries for the
+    /// `.index.json` file and every referenced shard before the SDK will load
+    /// them. The top-level `sha256` remains accepted for `file`.
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        alias = "file_hashes",
+        alias = "files_sha256"
+    )]
+    pub file_sha256: BTreeMap<String, String>,
     /// Whether this is a passthrough variant (direct download, no .xyb bundle)
     #[serde(default)]
     pub passthrough: bool,
@@ -2148,8 +2945,9 @@ pub struct ResolvedArtifact {
 /// reach chat models. A passthrough variant is the only kind whose
 /// `model_metadata.json` arrives inline with the resolve response; a bundle's
 /// stays inside the `.xyb` until it is downloaded. The variant qualifies when
-/// that inline metadata parses as [`ModelMetadata`] and declares a `Gguf` or
-/// `VisionLanguage` template. Bundles and passthrough variants with missing,
+/// that inline metadata parses as [`ModelMetadata`] and declares a `Gguf`,
+/// `VisionLanguage`, or MLX text-generation template. Bundles and passthrough
+/// variants with missing,
 /// malformed or unknown metadata do not.
 pub(crate) fn resolved_is_chat(resolved: &ResolvedVariant) -> bool {
     if !resolved.passthrough {
@@ -2165,7 +2963,7 @@ pub(crate) fn resolved_is_chat(resolved: &ResolvedVariant) -> bool {
         matches!(
             metadata.execution_template,
             ExecutionTemplate::Gguf { .. } | ExecutionTemplate::VisionLanguage { .. }
-        )
+        ) || xybrid_core::execution::template::is_mlx_llm_safetensors_metadata(&metadata)
     })
 }
 
@@ -2213,6 +3011,59 @@ mod tests {
     use crate::cache::layout::CacheLayout;
     use chrono::TimeZone;
     use std::sync::Mutex;
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        format!("{:x}", hasher.finalize())
+    }
+
+    fn linux_llamacpp_selector_cfg() -> SelectorCfg {
+        SelectorCfg {
+            target: "linux-x86_64".to_string(),
+            host_is_apple_arm64: false,
+            mlx_compiled: false,
+            llamacpp_compiled: true,
+            mistral_compiled: false,
+            mlx_runtime_ok: false,
+        }
+    }
+
+    fn macos_all_backends_selector_cfg() -> SelectorCfg {
+        SelectorCfg {
+            target: "macos-aarch64".to_string(),
+            host_is_apple_arm64: true,
+            mlx_compiled: true,
+            llamacpp_compiled: true,
+            mistral_compiled: true,
+            mlx_runtime_ok: true,
+        }
+    }
+
+    fn write_cached_task_metadata(
+        client: &RegistryClient,
+        model_id: &str,
+        format: &str,
+        task: &str,
+    ) {
+        let model_dir = client.extraction_dir_with_format(model_id, format);
+        std::fs::create_dir_all(&model_dir).unwrap();
+        // `CacheManager::extraction_is_ready` only treats a directory as an
+        // offline-usable extraction when model_metadata.json parses as a full
+        // ModelMetadata and every declared file exists, so write a real
+        // (file-less) metadata document instead of a bare task blob.
+        let mut metadata =
+            xybrid_core::execution::ModelMetadata::onnx(model_id, "1.0", "model.onnx");
+        metadata.files = Vec::new();
+        metadata
+            .metadata
+            .insert("task".to_string(), serde_json::json!(task));
+        std::fs::write(
+            model_dir.join("model_metadata.json"),
+            serde_json::to_string(&metadata).unwrap(),
+        )
+        .unwrap();
+    }
 
     fn create_vlm_bundle(temp_dir: &tempfile::TempDir, model_id: &str) -> PathBuf {
         let model_dir = temp_dir.path().join("bundle_model_files");
@@ -2778,9 +3629,10 @@ mod tests {
         let dir = client
             .fetch_extracted_resolved(
                 "reused",
+                None,
                 &resolved,
                 Arc::new(AtomicBool::new(false)),
-                |status| seen.lock().unwrap().push(status),
+                &|status| seen.lock().unwrap().push(status),
             )
             .expect("a resolved variant should download");
 
@@ -2813,7 +3665,7 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&cancel);
         let err = client
-            .fetch_extracted_resolved("reused", &resolved, cancel, move |status| {
+            .fetch_extracted_resolved("reused", None, &resolved, cancel, &move |status| {
                 if status.downloaded_bytes > 0 {
                     flag.store(true, Ordering::Relaxed);
                 }
@@ -2859,6 +3711,14 @@ mod tests {
                 serde_json::json!({ "type": "VisionLanguage", "model_file": "model.gguf" })
             ),
         )));
+        assert!(resolved_is_chat(&variant(
+            true,
+            with_template(serde_json::json!({
+                "type": "SafeTensors",
+                "model_file": "model.safetensors",
+                "architecture": "qwen3"
+            })),
+        )));
 
         let not_chat = [
             (
@@ -2899,6 +3759,17 @@ mod tests {
                     with_template(
                         serde_json::json!({ "type": "Onnx", "model_file": "model.onnx" }),
                     ),
+                ),
+            ),
+            (
+                "an MLX embedding model",
+                variant(
+                    true,
+                    with_template(serde_json::json!({
+                        "type": "SafeTensors",
+                        "model_file": "model.safetensors",
+                        "architecture": "nomic_bert"
+                    })),
                 ),
             ),
         ];
@@ -3469,6 +4340,90 @@ mod tests {
     }
 
     #[test]
+    fn an_explicit_backend_this_build_cannot_run_is_refused() {
+        let err = registry_format_for_explicit_backend(
+            "qwen3-4b",
+            None,
+            BackendChoice::Mlx,
+            &linux_llamacpp_selector_cfg(),
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("MLX backend requested but not available"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn an_explicit_backend_maps_to_its_registry_format() {
+        let cfg = macos_all_backends_selector_cfg();
+        for (backend, format) in [
+            (BackendChoice::Mlx, Some("safetensors")),
+            (BackendChoice::LlamaCpp, Some("gguf")),
+            // mistral.rs runs the registry's default variant.
+            (BackendChoice::Mistral, None),
+        ] {
+            assert_eq!(
+                registry_format_for_explicit_backend(
+                    "qwen3-4b",
+                    Some("text-generation"),
+                    backend,
+                    &cfg
+                )
+                .unwrap(),
+                format,
+                "{backend}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_embedding_model_accepts_only_mlx_as_an_explicit_backend() {
+        let cfg = macos_all_backends_selector_cfg();
+        let err = registry_format_for_explicit_backend(
+            "nomic-embed-text-v1.5",
+            Some("text-embedding"),
+            BackendChoice::LlamaCpp,
+            &cfg,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("does not support registry embedding model"),
+            "{err}"
+        );
+
+        assert_eq!(
+            registry_format_for_explicit_backend(
+                "nomic-embed-text-v1.5",
+                Some("text-embedding"),
+                BackendChoice::Mlx,
+                &cfg,
+            )
+            .unwrap(),
+            Some("safetensors")
+        );
+    }
+
+    #[test]
+    fn a_backend_override_parses_auto_and_absent_as_no_override() {
+        assert_eq!(parse_backend_override(None).unwrap(), None);
+        assert_eq!(parse_backend_override(Some("auto")).unwrap(), None);
+        assert_eq!(parse_backend_override(Some("")).unwrap(), None);
+        assert_eq!(
+            parse_backend_override(Some("MLX")).unwrap(),
+            Some(BackendChoice::Mlx)
+        );
+        let err = parse_backend_override(Some("onnx")).unwrap_err();
+        assert!(
+            err.to_string().contains("Invalid backend override"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn cache_entries_include_extracted_runtime_cache() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let cache_root = temp_dir.path().join("cache");
@@ -3500,6 +4455,126 @@ mod tests {
         assert_eq!(
             stats.total_size_bytes,
             (metadata.len() + weights.len()) as u64
+        );
+    }
+
+    #[test]
+    fn a_load_with_no_override_resolves_the_default_variant_on_every_build() {
+        // MLX is opt-in. Whatever the registry lists, a load that names no
+        // backend resolves the default variant under the bare mask and asks
+        // the registry nothing: a build that can run MLX loads exactly what a
+        // build that cannot does.
+        let server = httpmock::MockServer::start();
+        let detail = server.mock(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/v1/models/qwen3.5-0.8b");
+            then.status(200).json_body(serde_json::json!({
+                "id": "qwen3.5-0.8b",
+                "family": "qwen",
+                "task": "text-generation",
+                "parameters": 800_000_000u64,
+                "description": "Qwen 3.5 0.8B",
+                "variants": {
+                    "universal": {
+                        "platform": "universal", "format": "gguf", "quantization": "q4_k_m",
+                        "size_bytes": 1, "hf_repo": "xybrid-ai/q", "file": "q.gguf"
+                    },
+                    "macos-arm64": {
+                        "platform": "macos-arm64", "format": "safetensors",
+                        "quantization": "fp16", "size_bytes": 1, "hf_repo": "xybrid-ai/q-mlx",
+                        "file": "model.safetensors"
+                    }
+                }
+            }));
+        });
+        let tmp = tempfile::TempDir::new().unwrap();
+        let client =
+            RegistryClient::with_url_and_cache_dir(server.base_url(), tmp.path().to_path_buf())
+                .unwrap();
+
+        let non_linking_mac = SelectorCfg {
+            mlx_runtime_ok: false,
+            ..macos_all_backends_selector_cfg()
+        };
+        for cfg in [
+            linux_llamacpp_selector_cfg(),
+            non_linking_mac,
+            macos_all_backends_selector_cfg(),
+        ] {
+            assert_eq!(
+                registry_format_for_load(&client, "qwen3.5-0.8b", None, &cfg).unwrap(),
+                None,
+                "{} (mlx runtime: {})",
+                cfg.target,
+                cfg.mlx_runtime_ok
+            );
+        }
+        detail.assert_hits(0);
+
+        // Naming MLX is what asks for the SafeTensors variant.
+        assert_eq!(
+            registry_format_for_load(
+                &client,
+                "qwen3.5-0.8b",
+                Some(BackendChoice::Mlx),
+                &macos_all_backends_selector_cfg()
+            )
+            .unwrap(),
+            Some("safetensors")
+        );
+        detail.assert_hits(1);
+    }
+
+    #[test]
+    fn a_load_with_no_override_never_picks_up_a_cached_mlx_copy() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let client =
+            RegistryClient::with_url_and_cache_dir("http://127.0.0.1:9", tmp.path().to_path_buf())
+                .unwrap();
+        let cfg = macos_all_backends_selector_cfg();
+
+        // `backend: mlx` left a SafeTensors copy behind. A later load that
+        // names no backend must not move to MLX because of it.
+        let mlx_only = format!("offline-mlx-{}", uuid::Uuid::new_v4());
+        write_cached_task_metadata(&client, &mlx_only, "safetensors", "text-generation");
+        assert_eq!(
+            registry_format_for_load(&client, &mlx_only, None, &cfg).unwrap(),
+            None
+        );
+
+        // A GGUF copy left by `backend: llamacpp` is the same backend the
+        // default runs on, so it is reused rather than downloaded again.
+        let gguf_copy = format!("offline-gguf-{}", uuid::Uuid::new_v4());
+        write_cached_task_metadata(&client, &gguf_copy, "gguf", "text-generation");
+        assert_eq!(
+            registry_format_for_load(&client, &gguf_copy, None, &cfg).unwrap(),
+            Some("gguf")
+        );
+    }
+
+    #[test]
+    fn an_explicit_backend_uses_the_cached_task_when_the_registry_is_unreachable() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let client =
+            RegistryClient::with_url_and_cache_dir("http://127.0.0.1:9", tmp.path().to_path_buf())
+                .unwrap();
+        let cfg = macos_all_backends_selector_cfg();
+
+        let embed = format!("offline-embed-{}", uuid::Uuid::new_v4());
+        write_cached_task_metadata(&client, &embed, "safetensors", "text-embedding");
+        let err = registry_format_for_load(&client, &embed, Some(BackendChoice::LlamaCpp), &cfg)
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("does not support registry embedding model"),
+            "{err}"
+        );
+
+        let llm = format!("offline-llm-{}", uuid::Uuid::new_v4());
+        write_cached_task_metadata(&client, &llm, "gguf", "text-generation");
+        assert_eq!(
+            registry_format_for_load(&client, &llm, Some(BackendChoice::LlamaCpp), &cfg).unwrap(),
+            Some("gguf")
         );
     }
 
@@ -4583,6 +5658,7 @@ mod tests {
             sha256: "abc123".to_string(),
             min_os: Vec::new(),
             artifacts: Vec::new(),
+            file_sha256: BTreeMap::new(),
             passthrough: false,
             model_metadata: None,
         };
@@ -4604,6 +5680,49 @@ mod tests {
         let client = RegistryClient::default_client().unwrap();
         // A random model ID should not be extracted
         assert!(!client.is_extracted("nonexistent-model-12345"));
+    }
+
+    #[test]
+    fn fetch_extracted_preferring_format_reuses_cached_variant_without_network() {
+        // `load()`, the speculative download and `start_download()` all resolve
+        // a format first. A variant already extracted under its format key must
+        // come straight back from the cache (an unreachable registry proves no
+        // request is made), so one path never re-downloads what another fetched.
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let client =
+            RegistryClient::with_url_and_cache_dir("http://127.0.0.1:9", temp_dir.path().into())
+                .unwrap();
+        let model_id = "variant-cache-model";
+        let metadata = xybrid_core::execution::ModelMetadata::safetensors(
+            model_id,
+            "1.0",
+            "model.safetensors",
+            "qwen3",
+        );
+        let variant_dir = client.extraction_dir_with_format(model_id, "safetensors");
+        std::fs::create_dir_all(&variant_dir).unwrap();
+        std::fs::write(variant_dir.join("model.safetensors"), b"weights").unwrap();
+        std::fs::write(
+            variant_dir.join("model_metadata.json"),
+            serde_json::to_string(&metadata).unwrap(),
+        )
+        .unwrap();
+
+        let dir = client
+            .fetch_extracted_preferring_format(
+                model_id,
+                None,
+                Some("safetensors"),
+                Arc::new(AtomicBool::new(false)),
+                |_| {},
+            )
+            .expect("a cached format variant loads without the registry");
+
+        assert_eq!(dir, variant_dir);
+        assert!(
+            client.resolve_offline(model_id).is_none(),
+            "the format variant must not be confused with the default entry"
+        );
     }
 
     #[test]
@@ -4847,6 +5966,378 @@ mod tests {
         assert!(expected.contains("core_version="), "{}", expected);
         assert!(expected.contains("platform="), "{}", expected);
         assert!(expected.contains("backends="), "{}", expected);
+    }
+
+    #[test]
+    fn resolve_with_format_sends_format_query_param() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let resolve_mock = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/models/test-model/resolve")
+                .query_param("platform", "macos-arm64")
+                .query_param("format", "safetensors");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(
+                    r#"{"mask":"test-model","platform":"macos-arm64","resolved":{"hf_repo":"o/r","file":"mlx.xyb","download_url":"https://x","format":"safetensors","quantization":"fp16","size_bytes":1,"sha256":""}}"#,
+                );
+        });
+
+        let client = RegistryClient::with_url(server.base_url()).unwrap();
+        let resolved = client
+            .resolve_with_format("test-model", Some("macos-arm64"), "safetensors")
+            .expect("resolve_with_format should succeed");
+
+        assert_eq!(resolved.file, "mlx.xyb");
+        assert_eq!(resolved.format, "safetensors");
+        resolve_mock.assert();
+    }
+
+    #[test]
+    fn passthrough_indexed_safetensors_downloads_referenced_shards() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let model_id = format!("test-indexed-{}", uuid::Uuid::new_v4());
+        let index_body = serde_json::json!({
+            "metadata": {},
+            "weight_map": {
+                "model.embed_tokens.weight": "model-00001-of-00002.safetensors",
+                "model.layers.0.weight": "model-00002-of-00002.safetensors"
+            }
+        })
+        .to_string();
+        let index_sha256 = sha256_hex(index_body.as_bytes());
+        let shard_1_sha256 = sha256_hex(b"shard-1");
+        let shard_2_sha256 = sha256_hex(b"shard-2");
+        let resolve_body = format!(
+            r#"{{
+                "mask":"{model_id}",
+                "platform":"macos-arm64",
+                "resolved":{{
+                    "hf_repo":"xybrid-ai/{model_id}",
+                    "file":"model.safetensors.index.json",
+                    "download_url":"{}/model.safetensors.index.json",
+                    "format":"safetensors",
+                    "quantization":"bf16",
+                    "size_bytes":{},
+                    "sha256":"{index_sha256}",
+                    "file_sha256":{{
+                        "model-00001-of-00002.safetensors":"{shard_1_sha256}",
+                        "model-00002-of-00002.safetensors":"{shard_2_sha256}"
+                    }},
+                    "passthrough":true,
+                    "model_metadata":{{
+                        "model_id":"{model_id}",
+                        "version":"1.0",
+                        "execution_template":{{
+                            "type":"Safetensors",
+                            "model_file":"model.safetensors.index.json",
+                            "architecture":"qwen3"
+                        }},
+                        "preprocessing":[],
+                        "postprocessing":[],
+                        "files":[
+                            "config.json",
+                            "tokenizer.json",
+                            "model.safetensors.index.json"
+                        ],
+                        "metadata":{{"task":"text-generation"}}
+                    }}
+                }}
+            }}"#,
+            server.base_url(),
+            index_body.len(),
+        );
+
+        let resolve_mock = server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/v1/models/{model_id}/resolve"))
+                .query_param_exists("platform")
+                .query_param("format", "safetensors");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(resolve_body);
+        });
+        let config_mock = server.mock(|when, then| {
+            when.method(GET).path("/config.json");
+            then.status(200).body("{}");
+        });
+        let tokenizer_mock = server.mock(|when, then| {
+            when.method(GET).path("/tokenizer.json");
+            then.status(200).body("{}");
+        });
+        let index_mock = server.mock(|when, then| {
+            when.method(GET).path("/model.safetensors.index.json");
+            then.status(200).body(index_body.clone());
+        });
+        let shard_1_mock = server.mock(|when, then| {
+            when.method(GET).path("/model-00001-of-00002.safetensors");
+            then.status(200).body("shard-1");
+        });
+        let shard_2_mock = server.mock(|when, then| {
+            when.method(GET).path("/model-00002-of-00002.safetensors");
+            then.status(200).body("shard-2");
+        });
+
+        let client =
+            RegistryClient::with_url_and_cache_dir(server.base_url(), temp_dir.path().into())
+                .unwrap();
+        let dir = client
+            .fetch_extracted_with_format(&model_id, Some("macos-arm64"), "safetensors", |_| {})
+            .expect("indexed passthrough safetensors should fetch");
+
+        resolve_mock.assert();
+        config_mock.assert();
+        tokenizer_mock.assert();
+        index_mock.assert();
+        shard_1_mock.assert();
+        shard_2_mock.assert();
+        assert!(dir.join("model_metadata.json").is_file());
+        assert!(dir.join("config.json").is_file());
+        assert!(dir.join("tokenizer.json").is_file());
+        assert!(dir.join("model.safetensors.index.json").is_file());
+        assert!(dir.join("model-00001-of-00002.safetensors").is_file());
+        assert!(dir.join("model-00002-of-00002.safetensors").is_file());
+    }
+
+    #[test]
+    fn passthrough_indexed_safetensors_requires_shard_sha256() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let model_id = format!("test-indexed-{}", uuid::Uuid::new_v4());
+        let index_body = serde_json::json!({
+            "metadata": {},
+            "weight_map": {
+                "model.embed_tokens.weight": "model-00001-of-00001.safetensors"
+            }
+        })
+        .to_string();
+        let index_sha256 = sha256_hex(index_body.as_bytes());
+        let resolve_body = format!(
+            r#"{{
+                "mask":"{model_id}",
+                "platform":"macos-arm64",
+                "resolved":{{
+                    "hf_repo":"xybrid-ai/{model_id}",
+                    "file":"model.safetensors.index.json",
+                    "download_url":"{}/model.safetensors.index.json",
+                    "format":"safetensors",
+                    "quantization":"bf16",
+                    "size_bytes":{},
+                    "sha256":"{index_sha256}",
+                    "passthrough":true,
+                    "model_metadata":{{
+                        "model_id":"{model_id}",
+                        "version":"1.0",
+                        "execution_template":{{
+                            "type":"Safetensors",
+                            "model_file":"model.safetensors.index.json",
+                            "architecture":"qwen3"
+                        }},
+                        "preprocessing":[],
+                        "postprocessing":[],
+                        "files":["model.safetensors.index.json"],
+                        "metadata":{{"task":"text-generation"}}
+                    }}
+                }}
+            }}"#,
+            server.base_url(),
+            index_body.len(),
+        );
+
+        server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/v1/models/{model_id}/resolve"))
+                .query_param_exists("platform")
+                .query_param("format", "safetensors");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(resolve_body);
+        });
+        server.mock(|when, then| {
+            when.method(GET).path("/model.safetensors.index.json");
+            then.status(200).body(index_body);
+        });
+
+        let client =
+            RegistryClient::with_url_and_cache_dir(server.base_url(), temp_dir.path().into())
+                .unwrap();
+        let extraction_dir = client.extraction_dir_with_format(&model_id, "safetensors");
+        let err = client
+            .fetch_extracted_with_format(&model_id, Some("macos-arm64"), "safetensors", |_| {})
+            .expect_err("indexed shards without hashes should be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("requires SHA256 for shard 'model-00001-of-00001.safetensors'"),
+            "{err}"
+        );
+        assert!(!extraction_dir
+            .join("model-00001-of-00001.safetensors")
+            .exists());
+    }
+
+    #[test]
+    fn passthrough_indexed_safetensors_rejects_shard_sha256_mismatch() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let model_id = format!("test-indexed-{}", uuid::Uuid::new_v4());
+        let index_body = serde_json::json!({
+            "metadata": {},
+            "weight_map": {
+                "model.embed_tokens.weight": "model-00001-of-00001.safetensors"
+            }
+        })
+        .to_string();
+        let index_sha256 = sha256_hex(index_body.as_bytes());
+        let wrong_shard_sha256 = sha256_hex(b"different-shard");
+        let resolve_body = format!(
+            r#"{{
+                "mask":"{model_id}",
+                "platform":"macos-arm64",
+                "resolved":{{
+                    "hf_repo":"xybrid-ai/{model_id}",
+                    "file":"model.safetensors.index.json",
+                    "download_url":"{}/model.safetensors.index.json",
+                    "format":"safetensors",
+                    "quantization":"bf16",
+                    "size_bytes":{},
+                    "sha256":"{index_sha256}",
+                    "file_sha256":{{
+                        "model-00001-of-00001.safetensors":"{wrong_shard_sha256}"
+                    }},
+                    "passthrough":true,
+                    "model_metadata":{{
+                        "model_id":"{model_id}",
+                        "version":"1.0",
+                        "execution_template":{{
+                            "type":"Safetensors",
+                            "model_file":"model.safetensors.index.json",
+                            "architecture":"qwen3"
+                        }},
+                        "preprocessing":[],
+                        "postprocessing":[],
+                        "files":["model.safetensors.index.json"],
+                        "metadata":{{"task":"text-generation"}}
+                    }}
+                }}
+            }}"#,
+            server.base_url(),
+            index_body.len(),
+        );
+
+        server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/v1/models/{model_id}/resolve"))
+                .query_param_exists("platform")
+                .query_param("format", "safetensors");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(resolve_body);
+        });
+        server.mock(|when, then| {
+            when.method(GET).path("/model.safetensors.index.json");
+            then.status(200).body(index_body);
+        });
+        server.mock(|when, then| {
+            when.method(GET).path("/model-00001-of-00001.safetensors");
+            then.status(200).body("actual-shard");
+        });
+
+        let client =
+            RegistryClient::with_url_and_cache_dir(server.base_url(), temp_dir.path().into())
+                .unwrap();
+        let err = client
+            .fetch_extracted_with_format(&model_id, Some("macos-arm64"), "safetensors", |_| {})
+            .expect_err("shard hash mismatch should be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("Passthrough SHA256 mismatch for 'model-00001-of-00001.safetensors'"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn passthrough_indexed_safetensors_rejects_unsafe_shard_paths() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let model_id = format!("test-indexed-{}", uuid::Uuid::new_v4());
+        let index_body = serde_json::json!({
+            "metadata": {},
+            "weight_map": {
+                "model.embed_tokens.weight": "../escape.safetensors"
+            }
+        })
+        .to_string();
+        let resolve_body = format!(
+            r#"{{
+                "mask":"{model_id}",
+                "platform":"macos-arm64",
+                "resolved":{{
+                    "hf_repo":"xybrid-ai/{model_id}",
+                    "file":"model.safetensors.index.json",
+                    "download_url":"{}/model.safetensors.index.json",
+                    "format":"safetensors",
+                    "quantization":"bf16",
+                    "size_bytes":{},
+                    "sha256":"",
+                    "passthrough":true,
+                    "model_metadata":{{
+                        "model_id":"{model_id}",
+                        "version":"1.0",
+                        "execution_template":{{
+                            "type":"Safetensors",
+                            "model_file":"model.safetensors.index.json",
+                            "architecture":"qwen3"
+                        }},
+                        "preprocessing":[],
+                        "postprocessing":[],
+                        "files":["model.safetensors.index.json"],
+                        "metadata":{{"task":"text-generation"}}
+                    }}
+                }}
+            }}"#,
+            server.base_url(),
+            index_body.len(),
+        );
+
+        server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/v1/models/{model_id}/resolve"))
+                .query_param_exists("platform")
+                .query_param("format", "safetensors");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(resolve_body);
+        });
+        server.mock(|when, then| {
+            when.method(GET).path("/model.safetensors.index.json");
+            then.status(200).body(index_body);
+        });
+
+        let client =
+            RegistryClient::with_url_and_cache_dir(server.base_url(), temp_dir.path().into())
+                .unwrap();
+        let err = client
+            .fetch_extracted_with_format(&model_id, Some("macos-arm64"), "safetensors", |_| {})
+            .expect_err("unsafe indexed shard path should be rejected");
+
+        assert!(
+            err.to_string().contains("Unsafe passthrough artifact path"),
+            "{err}"
+        );
+        assert!(!temp_dir.path().join("escape.safetensors").exists());
     }
 
     #[test]

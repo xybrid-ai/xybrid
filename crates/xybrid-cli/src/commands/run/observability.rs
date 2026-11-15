@@ -183,13 +183,7 @@ fn request(metadata: &ModelMetadata, input: &Envelope) -> InferenceRequest {
         }
         _ => "predict",
     };
-    let backend = xybrid_core::execution::template::backend_label_from_template(
-        &metadata.execution_template,
-        metadata
-            .metadata
-            .get("backend")
-            .and_then(|value| value.as_str()),
-    );
+    let backend = xybrid_core::execution::template::backend_label_for_metadata(metadata);
     let mut request = InferenceRequest::new(operation, backend.map(runtime).unwrap_or("xybrid"))
         .with_model(&metadata.model_id)
         .with_location(Location::Local);
@@ -538,6 +532,7 @@ mod tests {
                 Some("prompt-private"),
                 &[],
                 &[],
+                None,
                 None,
                 None,
                 false,
