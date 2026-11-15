@@ -31,12 +31,15 @@ cargo test  --workspace --features ort-download         # CI: test (matrix)
 `--features ort-download` locally so feature-gated paths don't surprise you.
 
 CI gates: two required checks protect `master`, `CI Success` (`ci.yml`) and
-`Bazel graph + RBE targets` (`bazel.yml`). `ci.yml` runs the three commands
-above (`test` on Linux only), the feature checks (`check-*`, `clippy-llm`,
-`test-llm`), `api-contract`, observability, the Web and Python SDKs and the
-binding drift jobs. `tools/scripts/ci_gate.py` decides which jobs a change
-needs, and `CI Success` fails unless each one passed or was skipped for that
-reason. `.github/workflows/README.md` maps every workflow.
+`Bazel graph + RBE targets` (`bazel.yml`). `ci.yml` runs `Repo checks` (the
+workflow index, version sync and every `tools/scripts/tests` test, on every
+change), the three commands above (`test` on Linux only), the feature checks
+(`check-*`, `clippy-llm`, `test-llm`), `api-contract`, observability, the Web
+and Python SDKs, the binding drift jobs and the backend lanes (Candle,
+whisper.cpp, policy routing, llama.cpp). `tools/scripts/ci_gate.py` decides
+which jobs a change needs, and `CI Success` fails unless each job it requires
+passed or was skipped for that reason; lanes in its `ADVISORY_JOBS` report
+without gating. `.github/workflows/README.md` maps every workflow.
 
 Crate-wide lint opt-outs go in `lib.rs` at the crate root (see e.g.
 `crates/xybrid-core/src/lib.rs`). Don't sprinkle `#[allow(...)]` at call sites —
@@ -600,7 +603,7 @@ Pushing `release/v*` triggers `release-prep.yml`, which:
 
 Install snippets in the READMEs and docs pages that name a release are pins in
 `PINS` (`tools/scripts/install_pins.py`). A new snippet shape, or a new page
-carrying one, gets an entry there or no bump rewrites it. CI's `Version sync`
+carrying one, gets an entry there or no bump rewrites it. CI's `Repo checks`
 job runs `version-sync.sh --check` and `test_install_pins.py` on every PR,
 docs-only ones included: a stale or dropped pin fails, and so does a known shape
 on an unlisted page or a package named with a version no pin owns. Pins follow
@@ -660,7 +663,7 @@ is generated from the workflow files, and these rules keep it true:
   queue behind the last (`llamacpp-update.yml`, `star-history.yml`).
 - **Regenerate the map.** After touching any workflow, run
   `python3 tools/scripts/gen_workflow_index.py`. CI runs it with `--check` (job
-  `Workflow index`) and fails on drift or a broken rule. A rebase can bring in
+  `Repo checks`) and fails on drift or a broken rule. A rebase can bring in
   master workflows written without these rules; fix them on your branch.
 - **Rename workflow files rarely.** GitHub ties run history and code-scanning
   configurations (CodeQL `codeql.yml:analyze`, Scorecard `scorecard.yml:analysis`)
@@ -677,14 +680,15 @@ is generated from the workflow files, and these rules keep it true:
   `tools/scripts/tests/`; a new cargo invocation is a step in the `ci.yml` job
   with the same runner and feature family; a new backend or real-model suite is
   one `ci.yml` job built from the shared actions in `.github/actions/`
-  (`setup-rust`, `install-boltffi`, `free-disk-space`) and gated on its flag,
-  the flag's path rule and `OPTIONAL_JOBS` entry in `tools/scripts/ci_gate.py`
-  with its `tooling-changes` output line, and one `CI Success` `needs` entry; a
-  new binding or platform is a lane file, the one new file this allows: its PR
-  lists it in `WORKFLOW_FILES`. `setup-rust` and `install-boltffi` save their
-  caches from `master` only. macOS runs 5 jobs at once for the whole
-  organization, so add steps to an existing macOS job. The full rules are in the
-  workflow README, "Adding CI".
+  (`setup-rust`, `install-boltffi`, `fetch-model`, `free-disk-space`), one
+  `LANE_PATHS` row and `OPTIONAL_JOBS` entry in `tools/scripts/ci_gate.py` with
+  its `tooling-changes` output and, once reliable, one `CI Success` `needs`
+  entry (`ADVISORY_JOBS` until then); a new binding or platform is a lane file,
+  the one new file this allows: its PR lists it in `WORKFLOW_FILES`.
+  `setup-rust`, `install-boltffi` and `fetch-model` save their caches from
+  `master` only. macOS runs 5 jobs at once for the whole organization, so add
+  steps to an existing macOS job. The full rules are in the workflow README,
+  "Adding CI".
 - **Job names are matched as checks; never rename them.** `CI Success`
   (`ci.yml`) and `Bazel graph + RBE targets` (`bazel.yml`)
   gate `master` through branch protection. `tools/scripts/llamacpp_update.py`
