@@ -277,14 +277,19 @@ class RequiredGateTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 check_jobs(needs)
 
-    def test_mlx_runtime_job_runs_for_what_reaches_the_mlx_runtime(self):
+    def test_mlx_runtime_job_runs_only_for_the_mlx_backend_itself(self):
         for path in (
             "crates/mlx-c-sys/build.rs", "crates/xybrid-mlx/src/array.rs",
-            "crates/xybrid-core/src/ir/envelope.rs", "crates/xybrid-sdk/src/registry_client.rs",
-            "crates/xybrid-cli/src/commands/run.rs", "crates/xybrid-llama/src/generation.rs",
-            "macros/src/lib.rs", "vendor/mlx-apple/UPSTREAM_VERSIONS.txt", "vendor/llama-cpp",
-            "tools/scripts/build-mlx-slice.sh", "tools/scripts/test-fetch-mlx-xcframework.sh",
-            "Cargo.lock", ".github/workflows/ci.yml", ".github/actions/mlx-xcframework/action.yml",
+            "crates/xybrid-core/src/runtime_adapter/mlx/generate.rs",
+            "crates/xybrid-core/src/runtime_adapter/selector.rs",
+            "crates/xybrid-core/src/execution/strategies/mlx_embedding.rs",
+            "crates/xybrid-core/tests/mlx_llm_chat.rs",
+            "crates/xybrid-core/benches/mlx_embedding.rs",
+            "crates/xybrid-core/benches/llm_backend_compare.rs",
+            "vendor/mlx-apple/UPSTREAM_VERSIONS.txt",
+            "tools/scripts/build-mlx-slice.sh", "tools/scripts/check-mlx-runtime.sh",
+            "tools/scripts/test-fetch-mlx-xcframework.sh",
+            ".github/actions/mlx-xcframework/action.yml", ".github/workflows/ci.yml",
         ):
             with self.subTest(path=path):
                 self.assertEqual(classify("pull_request", pr_files(path))["mlx_runtime"], "true")
@@ -292,7 +297,18 @@ class RequiredGateTests(unittest.TestCase):
                 needs["check-mlx-runtime-macos"] = {"result": "skipped"}
                 with self.assertRaises(ValueError):
                     check_jobs(needs)
+        # Shared code does not start the macOS job: the non-linking job covers
+        # it on Linux, and test-mlx.yml links MLX against master every night.
         for path in (
+            "crates/xybrid-core/src/ir/envelope.rs",
+            "crates/xybrid-core/src/runtime_adapter/llm.rs",
+            "crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs",
+            "crates/xybrid-core/src/runtime_adapter/selector.rs.orig",
+            "crates/xybrid-core/tests/llama_cpp_chat.rs",
+            "crates/xybrid-sdk/src/registry_client.rs", "crates/xybrid-cli/src/commands/run.rs",
+            "crates/xybrid-llama/src/generation.rs", "crates/llama-cpp-sys/build.rs",
+            "macros/src/lib.rs", "vendor/llama-cpp", "Cargo.lock", "Cargo.toml",
+            "crates/xybrid-core/Cargo.toml", "crates/xybrid-sdk/Cargo.toml",
             "crates/xybrid-bolt/src/lib.rs", "bindings/kotlin/build.gradle.kts",
             "bindings/web/src/index.ts", "tools/scripts/ci_gate.py",
             "vendor/llama-cpp-notes.txt", ".github/workflows/build-mlx-xcframework.yml",

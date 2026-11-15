@@ -387,8 +387,10 @@ jobs:
 
   # The `llm-mlx` tier compiles everything about the MLX backend except the
   # calls into MLX itself (selection, registry formats, config and weight
-  # validation, chat templates, sampling), so it runs on Linux for every code
-  # change and catches most breakage without a macOS runner.
+  # validation, chat templates, sampling). It runs on Linux for every code
+  # change, with that tier's whole test suite, so a change to shared code that
+  # breaks the MLX adapter is caught here and the macOS job below can stay off
+  # pull requests that do not touch MLX.
   check-mlx-non-linking:
     needs: tooling-changes
     if: needs.tooling-changes.outputs.full_ci == 'true'
@@ -407,24 +409,23 @@ jobs:
       # this tier.
       - name: Clippy core MLX non-linking tier
         run: cargo clippy -p xybrid-core --no-default-features --features llm-mlx --all-targets -- -D warnings
-      - name: Check core MLX non-linking tier
-        run: cargo check -p xybrid-core --no-default-features --features llm-mlx
       - name: Check SDK MLX non-linking tier
         run: cargo check -p xybrid-sdk --no-default-features --features llm-mlx
       - name: Check CLI MLX non-linking tier
         run: cargo check -p xybrid-cli --no-default-features --features llm-mlx
-      - name: Test MLX selector and non-linking routing
-        run: cargo test -p xybrid-core --no-default-features --features llm-mlx runtime_adapter::selector --lib
-      - name: Test MLX executor non-linking routing
-        run: cargo test -p xybrid-core --no-default-features --features llm-mlx execution::executor::tests::test_executor_dispatches_mlx_embedding_before_generic_safetensors_runtime --lib
-      - name: Test SDK MLX registry-format selection
-        run: cargo test -p xybrid-sdk --no-default-features --features llm-mlx registry_format --lib
-      - name: Test CLI MLX registry-format selection
+      - name: Test core MLX non-linking tier
+        run: cargo test -p xybrid-core --no-default-features --features llm-mlx --lib
+      - name: Test SDK MLX non-linking tier
+        run: cargo test -p xybrid-sdk --no-default-features --features llm-mlx --lib
+      - name: Test CLI MLX non-linking tier
         run: cargo test -p xybrid-cli --no-default-features --features llm-mlx --bin xybrid
-      - name: Check MLX benchmark non-linking build
-        run: cargo bench -p xybrid-core --no-default-features --features llm-mlx --bench llm_backend_compare --no-run
-      - name: Check MLX embedding benchmark non-linking build
-        run: cargo bench -p xybrid-core --no-default-features --features llm-mlx --bench mlx_embedding --no-run
+      # `llm-mlx-runtime` is refused on every target but Apple Silicon macOS
+      # by one `cfg`, so this host proves it for iOS too. The check reuses
+      # this job's target directory: the dependencies are already built.
+      - name: Test MLX runtime platform gate
+        env:
+          XYBRID_MLX_GATE_TARGET_DIR: target
+        run: bash tools/scripts/test-mlx-runtime-gate.sh
       - name: Test MLX xcframework fetch script pin status
         run: bash tools/scripts/test-fetch-mlx-xcframework.sh
       - name: Test MLX xcframework slice build script
@@ -433,15 +434,20 @@ jobs:
         run: bash tools/scripts/test-build-local-mlx-xcframework.sh
       - name: Test real-weight MLX test runner
         run: bash tools/scripts/test-run-mlx-real-tests.sh
+      - name: Test MLX runtime-tier runner
+        run: bash tools/scripts/test-check-mlx-runtime.sh
       - name: Test staged MLX fixture checks
         run: bash tools/scripts/test-integration-download-staged.sh
       - name: Test MLX benchmark wrapper host gates
         run: bash tools/scripts/test-bench-scripts.sh
 
-  # The only job that links MLX and runs it. It needs Apple Silicon and, while
-  # no xcframework release is pinned, a source build of MLX, so it runs only
-  # when something that reaches the MLX runtime changed (`mlx_runtime` in
-  # tools/scripts/ci_gate.py).
+  # The only ci.yml job that links MLX and runs it. It needs Apple Silicon
+  # and, while no xcframework release is pinned, a source build of MLX, so it
+  # runs only for a change to the MLX backend itself (`mlx_runtime` in
+  # tools/scripts/ci_gate.py). Every other code change is covered by the
+  # `llm-mlx` job above, and test-mlx.yml runs this job's steps on master
+  # every night, which is where a change to shared code that compiles but
+  # breaks MLX at run time shows up.
   check-mlx-runtime-macos:
     needs: tooling-changes
     if: needs.tooling-changes.outputs.mlx_runtime == 'true'
@@ -455,7 +461,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
           toolchain: stable
-          targets: aarch64-apple-ios
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
@@ -463,48 +468,16 @@ jobs:
           # Per-image cache: build-script output records this image's Xcode
           # clang-runtime path, which other images may lack.
           env-vars: ImageOS
-      - name: Check iOS core MLX non-linking target
-        run: |
-          CARGO_TARGET_DIR="${RUNNER_TEMP}/xybrid-ios-mlx-non-linking-target" \
-            cargo build -p xybrid-core --target aarch64-apple-ios --no-default-features --features llm-mlx
-      - name: Check iOS MLX runtime gate
-        run: bash tools/scripts/test-ios-mlx-runtime-gate.sh
-      - name: Clean iOS MLX build artifacts
-        run: rm -rf "${RUNNER_TEMP}/xybrid-ios-mlx-non-linking-target"
       - name: Materialize the MLX xcframework
         uses: ./.github/actions/mlx-xcframework
-      - name: Check xybrid-mlx-sys bindings
-        run: cargo check -p xybrid-mlx-sys --features bindings
-      - name: Test xybrid-mlx-sys bindings
-        run: cargo test -p xybrid-mlx-sys --features bindings
-      - name: Check xybrid-mlx bindings
-        run: cargo check -p xybrid-mlx --features bindings
-      - name: Test xybrid-mlx bindings
-        run: cargo test -p xybrid-mlx --features bindings
-      - name: Clippy xybrid-mlx-sys bindings
-        run: cargo clippy -p xybrid-mlx-sys --features bindings --all-targets -- -D warnings
-      - name: Clippy xybrid-mlx bindings
-        run: cargo clippy -p xybrid-mlx --features bindings --all-targets -- -D warnings
-      - name: Clippy xybrid-core MLX runtime
-        run: cargo clippy -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp --all-targets -- -D warnings
-      - name: Test xybrid-core MLX runtime
-        run: cargo test -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp --lib
-      - name: Test MLX LLM runtime smoke
-        run: cargo test -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp --test mlx_llm_chat
-      - name: Test MLX embedding runtime smoke
-        run: cargo test -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp --test mlx_embedding
-      - name: Check xybrid-sdk MLX runtime
-        run: cargo check -p xybrid-sdk --no-default-features --features llm-mlx-runtime,llm-llamacpp
-      - name: Test xybrid-sdk MLX runtime
-        run: cargo test -p xybrid-sdk --no-default-features --features llm-mlx-runtime,llm-llamacpp --lib
-      - name: Check xybrid-cli MLX runtime
-        run: cargo check -p xybrid-cli --no-default-features --features llm-mlx-runtime,llm-llamacpp
-      - name: Test xybrid-cli MLX runtime
-        run: cargo test -p xybrid-cli --no-default-features --features llm-mlx-runtime,llm-llamacpp --bin xybrid
-      - name: Check MLX vs llama.cpp benchmark
-        run: cargo bench -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp --bench llm_backend_compare --no-run
-      - name: Check MLX embedding benchmark
-        run: cargo bench -p xybrid-core --no-default-features --features llm-mlx-runtime,llm-llamacpp --bench mlx_embedding --no-run
+      # One list of steps, shared with the nightly run in test-mlx.yml. A
+      # hosted runner's GPU is virtual and now and then rejects a command
+      # buffer; the script retries that one failure, recognized by MLX's
+      # message, and prints and counts every occurrence.
+      - name: Lint and test the MLX runtime tier
+        env:
+          XYBRID_MLX_GPU_RETRIES: 2
+        run: bash tools/scripts/check-mlx-runtime.sh
 
   clippy-llm:
     needs: tooling-changes

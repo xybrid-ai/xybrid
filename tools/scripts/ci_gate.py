@@ -26,12 +26,21 @@ PATH_FILTERS = {
     "python_sdk": r"^(bindings/python/|tools/scripts/(gen_python_bolt\.py|build-python-bolt\.sh)$|tools/scripts/observability_capture/|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|crates/xybrid-sdk/|crates/xybrid-observability/|\.github/workflows/ci\.yml$)",
     "kotlin_jni": r"^(bindings/kotlin/|tools/scripts/gen_kotlin_bolt\.py$|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)",
     "apple_bolt": r"^(bindings/apple/|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)",
-    # What the one MLX-linked job builds and runs: the MLX crates, the crates
-    # that carry the adapter, backend selection and its CLI surface (with the
-    # llama.cpp crates it links beside them), their proc-macros, the MLX pins,
-    # build scripts and setup action, and the lockfile. The `llm-mlx` non-linking job runs
-    # for every code change, so a change elsewhere still compiles this tier.
-    "mlx_runtime": r"^(crates/(mlx-c-sys|xybrid-mlx|xybrid-core|xybrid-sdk|xybrid-cli|xybrid-llama|llama-cpp-sys)/|macros/|vendor/(mlx-apple/|llama-cpp$)|tools/scripts/([^/]*mlx[^/]*|test-bench-scripts|bench-llm-backends)\.sh$|Cargo\.(toml|lock)$|\.github/workflows/ci\.yml$|\.github/actions/mlx-xcframework/)",
+    # The MLX backend itself: the two MLX crates, the adapter, the selector
+    # and their tests and benchmarks in core, the MLX pins, build scripts and
+    # setup action. Shared code is deliberately absent: the `llm-mlx`
+    # non-linking job compiles and tests the adapter on Linux for every code
+    # change, and test-mlx.yml runs the MLX-linked steps on master every
+    # night. A change to ci.yml runs it, as it runs every optional job.
+    "mlx_runtime": (
+        r"^(crates/(mlx-c-sys|xybrid-mlx)/"
+        r"|crates/xybrid-core/(src/runtime_adapter/(mlx/|selector\.rs$)"
+        r"|src/execution/strategies/mlx_embedding\.rs$"
+        r"|tests/mlx_|benches/(mlx_|llm_backend_compare))"
+        r"|vendor/mlx-apple/"
+        r"|tools/scripts/[^/]*mlx[^/]*\.sh$"
+        r"|\.github/(actions/mlx-xcframework/|workflows/ci\.yml$))"
+    ),
 }
 OPTIONAL_JOBS = {
     "tooling-tests": "relevant",
