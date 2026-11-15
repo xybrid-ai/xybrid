@@ -39,6 +39,7 @@ on:
       - "tools/scripts/bazel-output.sh"
       - "tools/scripts/write-buildbuddy-rc.sh"
       - "tools/scripts/observability_capture/**"
+      - ".github/actions/**"
       - ".github/workflows/unity-editor.yml"
       # Markdown inside any path above cannot affect this build.
       - "!**.md"
@@ -56,6 +57,7 @@ on:
       - "tools/scripts/bazel-output.sh"
       - "tools/scripts/write-buildbuddy-rc.sh"
       - "tools/scripts/observability_capture/**"
+      - ".github/actions/**"
       - ".github/workflows/unity-editor.yml"
       # Markdown inside any path above cannot affect this build.
       - "!**.md"
@@ -129,11 +131,7 @@ jobs:
       # this one, which has nothing to do with Android:
       #   "No Android SDK apis found in the Android SDK at /usr/local/lib/android/sdk"
       - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
-            /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force || true
-          df -h /
+        uses: ./.github/actions/free-disk-space
 
       # Same gitignored-file pattern the Bazel workflow uses: the key never
       # lands in a committable file. Absent secret (forks) -> no :remote config.

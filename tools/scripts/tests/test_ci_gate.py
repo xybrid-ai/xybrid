@@ -210,6 +210,19 @@ class ChangeSelectionTests(unittest.TestCase):
         outputs = classify("pull_request", pr_files(".github/workflows/ci.yml"))
         self.assertTrue(all(value == "true" for value in outputs.values()))
 
+    def test_shared_setup_actions_run_every_gate(self):
+        for path in (
+            ".github/actions/setup-rust/action.yml",
+            ".github/actions/install-boltffi/action.yml",
+            ".github/actions/free-disk-space/action.yml",
+            ".github/actions/new-action/action.yml",
+        ):
+            with self.subTest(path=path):
+                outputs = classify("pull_request", pr_files(path))
+                self.assertTrue(all(value == "true" for value in outputs.values()))
+        # A README beside an action is still documentation.
+        self.assertEqual(classify("pull_request", pr_files(".github/actions/README.md"))["full_ci"], "false")
+
     def test_empty_or_capped_results_run_every_gate(self):
         for event, payload in (
             ("pull_request", []), ("push", {"files": []}),

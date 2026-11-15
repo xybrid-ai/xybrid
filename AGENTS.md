@@ -676,10 +676,13 @@ is generated from the workflow files, and these rules keep it true:
   `ci.yml`. A seconds-long check that needs no toolchain is a test under
   `tools/scripts/tests/`; a new cargo invocation is a step in the `ci.yml` job
   with the same runner and feature family; a new backend or real-model suite is
-  one `ci.yml` job, one path rule in `tools/scripts/ci_gate.py` and one `CI
-  Success` `needs` entry; a new binding or platform is a lane file. macOS runs 5
-  jobs at once for the whole organization, so add steps to an existing macOS
-  job. The full rules are in the workflow README, "Adding CI".
+  one `ci.yml` job built from the shared actions in `.github/actions/`
+  (`setup-rust`, `install-boltffi`, `free-disk-space`), one path rule in
+  `tools/scripts/ci_gate.py` and one `CI Success` `needs` entry; a new binding
+  or platform is a lane file. `setup-rust` and `install-boltffi` save their
+  caches from `master` only. macOS runs 5 jobs at once for the whole
+  organization, so add steps to an existing macOS job. The full rules are in the
+  workflow README, "Adding CI".
 - **Job names are matched as checks; never rename them.** `CI Success`
   (`ci.yml`) and `Bazel graph + RBE targets` (`bazel.yml`)
   gate `master` through branch protection. `tools/scripts/llamacpp_update.py`

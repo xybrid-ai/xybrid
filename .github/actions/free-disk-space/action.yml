@@ -1,0 +1,32 @@
+name: Free disk space
+description: >
+  Delete preinstalled toolchains a Linux job never uses (.NET, GHC, CodeQL)
+  and unused Docker images, then print the free space.
+
+# A full debug build of the workspace, or Bazel's repository fetches, outgrow
+# the ~14 GB an ubuntu-latest runner has free. When the disk fills, the job dies
+# with "No space left on device" and loses its logs with it.
+inputs:
+  remove-android:
+    description: >
+      Also delete /usr/local/lib/android. Leave it `false` in any job that sets
+      up the Android SDK or NDK, or runs Bazel: rules_android's
+      android_sdk_repository reads the SDK while fetching repositories, so
+      deleting it fails analysis of every target, Android or not.
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Free disk space
+      shell: bash
+      env:
+        REMOVE_ANDROID: ${{ inputs.remove-android }}
+      run: |
+        paths=(/usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL)
+        if [ "$REMOVE_ANDROID" = "true" ]; then
+          paths+=(/usr/local/lib/android)
+        fi
+        sudo rm -rf "${paths[@]}"
+        sudo docker image prune --all --force || true
+        df -h /

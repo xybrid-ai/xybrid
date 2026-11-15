@@ -34,6 +34,7 @@ on:
       - 'vendor/ort-android/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
+      - '.github/actions/**'
       - '.github/workflows/build-android.yml'
       # Docs-only changes under the paths above (READMEs, examples) never
       # affect the native build — exclude markdown so they don't trigger it.
@@ -72,6 +73,7 @@ on:
       - 'vendor/ort-android/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
+      - '.github/actions/**'
       - '.github/workflows/build-android.yml'
       - '!**.md'
   workflow_dispatch:
@@ -105,16 +107,10 @@ jobs:
       # The 4-ABI llama.cpp compile can exhaust the ~14 GB free on ubuntu-latest
       # when the prebuilt-natives fast path misses (observed: the runner itself
       # died with "No space left on device", taking its logs with it). Reclaim
-      # space from preinstalled toolchains this build never touches — same step
-      # as ci.yml's test job, EXCEPT /usr/local/lib/android, which this job's
-      # Android SDK/NDK setup actually uses.
+      # space from preinstalled toolchains this build never touches; the action
+      # keeps /usr/local/lib/android, which this job's Android SDK/NDK setup uses.
       - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
-            /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force || true
-          df -h /
-
+        uses: ./.github/actions/free-disk-space
 
       # Cache Android NDK to avoid the ~1.5GB download on every build.
       - name: Cache Android NDK
