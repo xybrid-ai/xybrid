@@ -112,12 +112,17 @@ jobs:
       # that cannot find it fail instead of skip. The script runs each test in
       # its own process (MLX aborts the process on some failures, and one
       # abort must not hide the other tests or its own name), then all of
-      # them in one process. That pass repeats: what it catches, an abort
-      # between one model's work and the next, depends on timing.
+      # them in one process, three times.
+      #
+      # A hosted runner's GPU is virtual, and now and then it rejects a
+      # command buffer; MLX answers that by aborting the process. The script
+      # retries that one death, recognized by its backtrace, and prints and
+      # counts every occurrence. Any other crash or failure is final.
       - name: Test MLX on real weights
         env:
           XYBRID_MLX_REQUIRE: XYBRID_MLX_QWEN_DIR,XYBRID_MLX_QWEN_4BIT_DIR
           XYBRID_MLX_TOGETHER_RUNS: 3
+          XYBRID_MLX_GPU_RETRIES: 2
         run: |
           export XYBRID_MLX_QWEN_DIR="${GITHUB_WORKSPACE}/${MLX_FIXTURE}"
           export XYBRID_MLX_QWEN_4BIT_DIR="${GITHUB_WORKSPACE}/${MLX_FIXTURE}"

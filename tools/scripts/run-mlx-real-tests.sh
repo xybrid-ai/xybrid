@@ -13,7 +13,15 @@
 #      This is the pass that catches what only shows between tests.
 #
 # When a process dies, the backtrace from its macOS crash report is printed,
-# so the log shows where MLX threw.
+# so the log shows where MLX threw, with the system log's last lines from the
+# process: MLX's own message dies with it, and Metal logs why it failed.
+#
+# One death is retried, and only where XYBRID_MLX_GPU_RETRIES asks for it: the
+# GPU rejecting a command buffer (`mlx::core::gpu::check_error` on the crashed
+# thread). A hosted runner's virtual GPU does that now and then, to any
+# process, and it says nothing about the code under test. Every occurrence is
+# still printed and counted. Any other crash, and any failed assertion, fails
+# the run at once.
 #
 # Usage:
 #   XYBRID_MLX_QWEN_DIR=... XYBRID_MLX_QWEN_4BIT_DIR=... \
@@ -27,6 +35,7 @@
 #
 # XYBRID_MLX_TEST_BIN runs an already-built test binary instead of building.
 # XYBRID_MLX_TOGETHER_RUNS repeats the one-process pass (default 1).
+# XYBRID_MLX_GPU_RETRIES is how often a GPU rejection is retried (default 0).
 
 set -uo pipefail
 
@@ -45,6 +54,7 @@ REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 TEST_CWD="$REPO_ROOT/crates/xybrid-core"
 CRASH_REPORTS="${XYBRID_MLX_CRASH_REPORTS:-$HOME/Library/Logs/DiagnosticReports}"
 TOGETHER_RUNS="${XYBRID_MLX_TOGETHER_RUNS:-1}"
+GPU_RETRIES="${XYBRID_MLX_GPU_RETRIES:-0}"
 # Seconds to wait for the system to write a crash report after a process dies.
 CRASH_REPORT_WAIT="${XYBRID_MLX_CRASH_REPORT_WAIT:-20}"
 
@@ -98,11 +108,28 @@ for filter in "${FILTERS[@]}"; do
     fi
 done
 
+# Memory the system could hand out right now, and swap in use.
+memory_line() {
+    command -v vm_stat >/dev/null 2>&1 || return 0
+    local available
+    available=$(vm_stat | awk '
+        /page size of/ { page = $8 }
+        /Pages free|Pages inactive|Pages speculative/ { gsub("\\.", "", $NF); pages += $NF }
+        END { if (page) printf "%d", pages * page / 1048576 }')
+    echo "   memory available: ${available:-?} MB; swap $(sysctl -n vm.swapusage 2>/dev/null |
+        awk '{ print $4, $6 }')"
+}
+
+# Set by print_crash_report: whether the crashed thread was MLX failing a
+# command buffer the GPU rejected.
+GPU_REJECTED=0
+
 # Print the crash report the system wrote for a process that died after
 # `$1` was created: what it died of, and the crashed thread's backtrace. For
 # an uncaught C++ exception that thread still holds the frames that threw.
 print_crash_report() {
-    local marker="$1" report="" waited=0
+    local marker="$1" report="" waited=0 frames
+    GPU_REJECTED=0
     # The report is written a moment after the process dies.
     while :; do
         report=$(find "$CRASH_REPORTS" -maxdepth 1 -name "$(basename "$BIN")*.ips" \
@@ -119,7 +146,7 @@ print_crash_report() {
     fi
     echo "   crash report: $report"
     # The first line of an .ips file is a separate JSON header.
-    tail -n +2 "$report" | jq -r '
+    if ! frames=$(tail -n +2 "$report" | jq -r '
         def frame($images):
             "     " + ($images[.imageIndex].name // "?") + "  "
             + (.symbol // ("+" + (.imageOffset | tostring)));
@@ -132,30 +159,57 @@ print_crash_report() {
            else empty end),
           "   crashed thread:",
           ([.threads[] | select(.triggered)][0].frames[:40][] | frame($images))
-    ' || echo "   (the crash report could not be read)"
+    '); then
+        echo "   (the crash report could not be read)"
+        return
+    fi
+    printf '%s\n' "$frames"
+    case "$frames" in
+        *"mlx::core::gpu::check_error"*) GPU_REJECTED=1 ;;
+    esac
+    if command -v log >/dev/null 2>&1; then
+        echo "   system log, last lines from the process:"
+        log show --last 2m --style compact \
+            --predicate "processImagePath ENDSWITH \"$(basename "$BIN")\"" 2>/dev/null |
+            tail -n 25 | sed 's/^/     /' || true
+    fi
 }
 
 failed=()
+gpu_rejections=0
 
 # Run the test binary with the given libtest arguments and record a failure
-# under the label `$1`. A process that died gets its crash report printed.
+# under the label `$1`. A process that died gets its crash report printed,
+# and is run again if the GPU rejected its work and retries remain.
 run_pass() {
-    local label="$1" marker="$SCRATCH/marker" status
+    local label="$1" marker="$SCRATCH/marker" status retries=0
     shift
-    : > "$marker"
-    (cd "$TEST_CWD" && "$BIN" "$@")
-    status=$?
-    if [ "$status" -eq 0 ]; then
-        return
-    fi
-    # 128 + signal: the process died instead of failing an assertion.
-    if [ "$status" -gt 128 ]; then
-        failed+=("$label (signal $((status - 128)))")
+    while :; do
+        memory_line
+        : > "$marker"
+        (cd "$TEST_CWD" && "$BIN" "$@")
+        status=$?
+        if [ "$status" -eq 0 ]; then
+            return
+        fi
+        # 128 + signal: the process died instead of failing an assertion.
+        if [ "$status" -le 128 ]; then
+            failed+=("$label (exit $status)")
+            return
+        fi
         echo "-- $label died with signal $((status - 128))"
         print_crash_report "$marker"
-    else
-        failed+=("$label (exit $status)")
-    fi
+        if [ "$GPU_REJECTED" -eq 1 ]; then
+            gpu_rejections=$((gpu_rejections + 1))
+            if [ "$retries" -lt "$GPU_RETRIES" ]; then
+                retries=$((retries + 1))
+                echo "-- the GPU rejected a command buffer; retry $retries of $GPU_RETRIES"
+                continue
+            fi
+        fi
+        failed+=("$label (signal $((status - 128)))")
+        return
+    done
 }
 
 for test in "${TESTS[@]}"; do
@@ -171,6 +225,9 @@ while [ "$run" -le "$TOGETHER_RUNS" ]; do
 done
 
 echo "== summary"
+if [ "$gpu_rejections" -gt 0 ]; then
+    echo "the GPU rejected a command buffer $gpu_rejections time(s); see the backtraces above"
+fi
 if [ "${#failed[@]}" -eq 0 ]; then
     echo "all ${#TESTS[@]} real-weight tests passed, alone and in one process"
     exit 0
