@@ -45,7 +45,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use xybrid_core::abort::{AbortReason, CloudFallbackAbort};
 use xybrid_core::runtime_adapter::llm::{ChatMessage, GenerationConfig, LlmBackend};
@@ -76,11 +76,14 @@ fn qwen_bundle_dir() -> Option<PathBuf> {
     bundle_dir("XYBRID_MLX_QWEN_DIR").or_else(|| bundle_dir("XYBRID_MLX_QWEN_4B_DIR"))
 }
 
+/// One MLX test at a time. A test that fails while holding the lock leaves it
+/// poisoned; the lock guards no data, so the next test takes it anyway.
+/// Otherwise one failure reports as a failure of every test after it.
 fn mlx_test_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
         .lock()
-        .expect("MLX integration test lock poisoned")
+        .unwrap_or_else(PoisonError::into_inner)
 }
 
 fn short_greedy_config() -> GenerationConfig {

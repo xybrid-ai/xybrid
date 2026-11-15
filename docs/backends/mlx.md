@@ -183,7 +183,10 @@ The directory has `model-*.safetensors` shards without the index that maps tenso
 
 ### `[METAL] Command buffer execution failed`
 
-Metal could not run the work MLX gave it; the rest of the message is Metal's reason. `Insufficient Memory` means the model and its working memory do not fit in what the GPU can use right now: close other GPU-heavy applications, use a smaller or more heavily quantized bundle, or run the model's GGUF variant on llama.cpp. The process and the loaded model survive the error.
+Metal could not run the work MLX gave it; the rest of the message is Metal's reason. The process and the loaded model survive the error.
+
+- `Insufficient Memory`: the model and its working memory do not fit in what the GPU can use right now. Close other GPU-heavy applications, use a smaller or more heavily quantized bundle, or run the model's GGUF variant on llama.cpp.
+- `Caused GPU Timeout Error`: the GPU did not finish the work in time. Virtual GPUs do this under load (the hosted macOS CI runners hit it now and then), and a real one can when it is heavily contended. Run the request again.
 
 ### `unsupported quantization`
 

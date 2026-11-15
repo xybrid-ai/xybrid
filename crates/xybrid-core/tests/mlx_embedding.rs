@@ -28,7 +28,7 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 use xybrid_core::execution::{ModelMetadata, TemplateExecutor};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
@@ -38,11 +38,14 @@ fn nomic_dir() -> Option<PathBuf> {
     std::env::var_os("XYBRID_MLX_NOMIC_DIR").map(PathBuf::from)
 }
 
+/// One MLX test at a time. A test that fails while holding the lock leaves it
+/// poisoned; the lock guards no data, so the next test takes it anyway.
+/// Otherwise one failure reports as a failure of every test after it.
 fn mlx_test_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
         .lock()
-        .expect("MLX embedding integration test lock poisoned")
+        .unwrap_or_else(PoisonError::into_inner)
 }
 
 #[test]

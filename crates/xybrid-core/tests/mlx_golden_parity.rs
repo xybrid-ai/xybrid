@@ -27,7 +27,7 @@
 ))]
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use xybrid_core::runtime_adapter::llm::GenerationConfig;
@@ -172,11 +172,14 @@ fn staged_bundles() -> Vec<(String, PathBuf)> {
         .collect()
 }
 
+/// One MLX test at a time. A test that fails while holding the lock leaves it
+/// poisoned; the lock guards no data, so the next test takes it anyway.
+/// Otherwise one failure reports as a failure of every test after it.
 fn mlx_test_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
         .lock()
-        .expect("MLX golden test lock poisoned")
+        .unwrap_or_else(PoisonError::into_inner)
 }
 
 // =============================================================================
