@@ -41,9 +41,8 @@ policy routing, llama.cpp) and the lanes it calls: the SDKs
 `build-react-native.yml`, `unity-editor.yml`) and conformance
 (`test-choice-conformance.yml`, `test-decision-conformance.yml`).
 `tools/scripts/ci_gate.py` decides which jobs a change needs, and `CI Success`
-fails unless each job it requires passed or was skipped for that reason; lanes
-in its `ADVISORY_JOBS` report without gating. `.github/workflows/README.md` maps
-every workflow.
+fails unless each job it requires, every lane included, passed or was skipped
+for that reason. `.github/workflows/README.md` maps every workflow.
 
 Crate-wide lint opt-outs go in `lib.rs` at the crate root (see e.g.
 `crates/xybrid-core/src/lib.rs`). Don't sprinkle `#[allow(...)]` at call sites —
@@ -685,14 +684,14 @@ is generated from the workflow files, and these rules keep it true:
   backend or real-model suite is one `ci.yml` job built from the shared actions
   in `.github/actions/` (`setup-rust`, `install-boltffi`, `fetch-model`,
   `free-disk-space`), one `LANE_PATHS` row and `OPTIONAL_JOBS` entry in
-  `tools/scripts/ci_gate.py` with its `tooling-changes` output and, once
-  reliable, one `CI Success` `needs` entry (`ADVISORY_JOBS` until then); a new
-  binding or platform is a lane file. `setup-rust`, `install-boltffi` and
-  `fetch-model` save their caches from `master` only. macOS runs 5 jobs at once
-  for the whole organization, so add steps to an existing macOS job: the check
-  also holds `ci.yml` and its lane files to `MACOS_JOB_BUDGET` macOS jobs, which
-  a new one raises in the same PR with a reason. The full rules are in the
-  workflow README, "Adding CI".
+  `tools/scripts/ci_gate.py` with its `tooling-changes` output and one `CI
+  Success` `needs` entry (a lane that turns flaky goes to `ADVISORY_JOBS` while
+  it is fixed); a new binding or platform is a lane file. `setup-rust`,
+  `install-boltffi` and `fetch-model` save their caches from `master` only.
+  macOS runs 5 jobs at once for the whole organization, so add steps to an
+  existing macOS job: the check also holds `ci.yml` and its lane files to
+  `MACOS_JOB_BUDGET` macOS jobs, which a new one raises in the same PR with a
+  reason. The full rules are in the workflow README, "Adding CI".
 - **Job names are matched as checks; never rename them.** `CI Success`
   (`ci.yml`) and `Bazel graph + RBE targets` (`bazel.yml`)
   gate `master` through branch protection. `tools/scripts/llamacpp_update.py`
