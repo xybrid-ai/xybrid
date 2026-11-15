@@ -61,8 +61,8 @@ asr-whispercpp = ["xybrid-sdk/asr-whispercpp"]
 # duplication was needed for local `#[cfg(feature = ...)]` checks — that was
 # stale: no `candle*` cfg has ever appeared in this crate's src/.)
 platform-android = ["xybrid-sdk/platform-android", "llm-llamacpp", "huggingface"]
-platform-ios = ["xybrid-sdk/platform-ios", "llm-llamacpp", "llm-mlx", "huggingface"]
-platform-macos = ["xybrid-sdk/platform-macos", "llm-llamacpp", "llm-mlx", "huggingface"]
+platform-ios = ["xybrid-sdk/platform-ios", "llm-llamacpp", "huggingface"]
+platform-macos = ["xybrid-sdk/platform-macos", "llm-llamacpp", "huggingface"]
 platform-desktop = ["xybrid-sdk/platform-desktop", "llm-llamacpp", "huggingface"]
 
 

@@ -90,8 +90,7 @@ pub use context::{FfiConversationContext, FfiMessageRole};
 pub use device::{FfiThermalState, XybridDevice};
 pub use envelope::FfiEnvelope;
 pub use model::{
-    FfiBackend, FfiCloudFallbackAbort, FfiCloudFallbackReason, FfiGenerationConfig, FfiModel,
-    FfiModelLoader, FfiRunOptions, FfiStreamEvent, FfiStreamToken,
+    FfiGenerationConfig, FfiModel, FfiModelLoader, FfiRunOptions, FfiStreamEvent, FfiStreamToken,
 };
 pub use pipeline::FfiPipeline;
 pub use result::FfiResult;

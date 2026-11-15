@@ -95,10 +95,10 @@ platform-android = ["xybrid-core/ort-dynamic", "llm-llamacpp-vision", "asr-whisp
 
 # iOS: CoreML + Metal acceleration + llama.cpp
 # (`ort-coreml` is ONNX Runtime's CoreML execution provider — unrelated to Candle.)
-platform-ios = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "coreml", "llm-llamacpp-vision", "asr-whispercpp", "llm-mlx"]
+platform-ios = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "coreml", "llm-llamacpp-vision", "asr-whispercpp"]
 
 # macOS: CoreML + Metal + llama.cpp
-platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "coreml", "llm-llamacpp-vision", "asr-whispercpp", "llm-mlx"]
+platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "coreml", "llm-llamacpp-vision", "asr-whispercpp"]
 
 # Desktop (Linux/Windows): CPU with llama.cpp
 platform-desktop = ["xybrid-core/ort-download", "llm-llamacpp-vision", "asr-whispercpp"]

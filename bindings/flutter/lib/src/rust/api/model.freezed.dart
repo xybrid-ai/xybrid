@@ -504,7 +504,6 @@ mixin _$FfiStreamEvent {
     required TResult Function(FfiStreamToken field0) token,
     required TResult Function(FfiResult field0) complete,
     required TResult Function(String field0) error,
-    required TResult Function(FfiCloudFallbackAbort field0) cloudFallbackAbort,
   }) =>
       throw _privateConstructorUsedError;
   @optionalTypeArgs
@@ -512,7 +511,6 @@ mixin _$FfiStreamEvent {
     TResult? Function(FfiStreamToken field0)? token,
     TResult? Function(FfiResult field0)? complete,
     TResult? Function(String field0)? error,
-    TResult? Function(FfiCloudFallbackAbort field0)? cloudFallbackAbort,
   }) =>
       throw _privateConstructorUsedError;
   @optionalTypeArgs
@@ -520,7 +518,6 @@ mixin _$FfiStreamEvent {
     TResult Function(FfiStreamToken field0)? token,
     TResult Function(FfiResult field0)? complete,
     TResult Function(String field0)? error,
-    TResult Function(FfiCloudFallbackAbort field0)? cloudFallbackAbort,
     required TResult orElse(),
   }) =>
       throw _privateConstructorUsedError;
@@ -529,8 +526,6 @@ mixin _$FfiStreamEvent {
     required TResult Function(FfiStreamEvent_Token value) token,
     required TResult Function(FfiStreamEvent_Complete value) complete,
     required TResult Function(FfiStreamEvent_Error value) error,
-    required TResult Function(FfiStreamEvent_CloudFallbackAbort value)
-        cloudFallbackAbort,
   }) =>
       throw _privateConstructorUsedError;
   @optionalTypeArgs
@@ -538,8 +533,6 @@ mixin _$FfiStreamEvent {
     TResult? Function(FfiStreamEvent_Token value)? token,
     TResult? Function(FfiStreamEvent_Complete value)? complete,
     TResult? Function(FfiStreamEvent_Error value)? error,
-    TResult? Function(FfiStreamEvent_CloudFallbackAbort value)?
-        cloudFallbackAbort,
   }) =>
       throw _privateConstructorUsedError;
   @optionalTypeArgs
@@ -547,8 +540,6 @@ mixin _$FfiStreamEvent {
     TResult Function(FfiStreamEvent_Token value)? token,
     TResult Function(FfiStreamEvent_Complete value)? complete,
     TResult Function(FfiStreamEvent_Error value)? error,
-    TResult Function(FfiStreamEvent_CloudFallbackAbort value)?
-        cloudFallbackAbort,
     required TResult orElse(),
   }) =>
       throw _privateConstructorUsedError;
@@ -648,7 +639,6 @@ class _$FfiStreamEvent_TokenImpl extends FfiStreamEvent_Token {
     required TResult Function(FfiStreamToken field0) token,
     required TResult Function(FfiResult field0) complete,
     required TResult Function(String field0) error,
-    required TResult Function(FfiCloudFallbackAbort field0) cloudFallbackAbort,
   }) {
     return token(field0);
   }
@@ -659,7 +649,6 @@ class _$FfiStreamEvent_TokenImpl extends FfiStreamEvent_Token {
     TResult? Function(FfiStreamToken field0)? token,
     TResult? Function(FfiResult field0)? complete,
     TResult? Function(String field0)? error,
-    TResult? Function(FfiCloudFallbackAbort field0)? cloudFallbackAbort,
   }) {
     return token?.call(field0);
   }
@@ -670,7 +659,6 @@ class _$FfiStreamEvent_TokenImpl extends FfiStreamEvent_Token {
     TResult Function(FfiStreamToken field0)? token,
     TResult Function(FfiResult field0)? complete,
     TResult Function(String field0)? error,
-    TResult Function(FfiCloudFallbackAbort field0)? cloudFallbackAbort,
     required TResult orElse(),
   }) {
     if (token != null) {
@@ -685,8 +673,6 @@ class _$FfiStreamEvent_TokenImpl extends FfiStreamEvent_Token {
     required TResult Function(FfiStreamEvent_Token value) token,
     required TResult Function(FfiStreamEvent_Complete value) complete,
     required TResult Function(FfiStreamEvent_Error value) error,
-    required TResult Function(FfiStreamEvent_CloudFallbackAbort value)
-        cloudFallbackAbort,
   }) {
     return token(this);
   }
@@ -697,8 +683,6 @@ class _$FfiStreamEvent_TokenImpl extends FfiStreamEvent_Token {
     TResult? Function(FfiStreamEvent_Token value)? token,
     TResult? Function(FfiStreamEvent_Complete value)? complete,
     TResult? Function(FfiStreamEvent_Error value)? error,
-    TResult? Function(FfiStreamEvent_CloudFallbackAbort value)?
-        cloudFallbackAbort,
   }) {
     return token?.call(this);
   }
@@ -709,8 +693,6 @@ class _$FfiStreamEvent_TokenImpl extends FfiStreamEvent_Token {
     TResult Function(FfiStreamEvent_Token value)? token,
     TResult Function(FfiStreamEvent_Complete value)? complete,
     TResult Function(FfiStreamEvent_Error value)? error,
-    TResult Function(FfiStreamEvent_CloudFallbackAbort value)?
-        cloudFallbackAbort,
     required TResult orElse(),
   }) {
     if (token != null) {
@@ -809,7 +791,6 @@ class _$FfiStreamEvent_CompleteImpl extends FfiStreamEvent_Complete {
     required TResult Function(FfiStreamToken field0) token,
     required TResult Function(FfiResult field0) complete,
     required TResult Function(String field0) error,
-    required TResult Function(FfiCloudFallbackAbort field0) cloudFallbackAbort,
   }) {
     return complete(field0);
   }
@@ -820,7 +801,6 @@ class _$FfiStreamEvent_CompleteImpl extends FfiStreamEvent_Complete {
     TResult? Function(FfiStreamToken field0)? token,
     TResult? Function(FfiResult field0)? complete,
     TResult? Function(String field0)? error,
-    TResult? Function(FfiCloudFallbackAbort field0)? cloudFallbackAbort,
   }) {
     return complete?.call(field0);
   }
@@ -831,7 +811,6 @@ class _$FfiStreamEvent_CompleteImpl extends FfiStreamEvent_Complete {
     TResult Function(FfiStreamToken field0)? token,
     TResult Function(FfiResult field0)? complete,
     TResult Function(String field0)? error,
-    TResult Function(FfiCloudFallbackAbort field0)? cloudFallbackAbort,
     required TResult orElse(),
   }) {
     if (complete != null) {
@@ -846,8 +825,6 @@ class _$FfiStreamEvent_CompleteImpl extends FfiStreamEvent_Complete {
     required TResult Function(FfiStreamEvent_Token value) token,
     required TResult Function(FfiStreamEvent_Complete value) complete,
     required TResult Function(FfiStreamEvent_Error value) error,
-    required TResult Function(FfiStreamEvent_CloudFallbackAbort value)
-        cloudFallbackAbort,
   }) {
     return complete(this);
   }
@@ -858,8 +835,6 @@ class _$FfiStreamEvent_CompleteImpl extends FfiStreamEvent_Complete {
     TResult? Function(FfiStreamEvent_Token value)? token,
     TResult? Function(FfiStreamEvent_Complete value)? complete,
     TResult? Function(FfiStreamEvent_Error value)? error,
-    TResult? Function(FfiStreamEvent_CloudFallbackAbort value)?
-        cloudFallbackAbort,
   }) {
     return complete?.call(this);
   }
@@ -870,8 +845,6 @@ class _$FfiStreamEvent_CompleteImpl extends FfiStreamEvent_Complete {
     TResult Function(FfiStreamEvent_Token value)? token,
     TResult Function(FfiStreamEvent_Complete value)? complete,
     TResult Function(FfiStreamEvent_Error value)? error,
-    TResult Function(FfiStreamEvent_CloudFallbackAbort value)?
-        cloudFallbackAbort,
     required TResult orElse(),
   }) {
     if (complete != null) {
@@ -969,7 +942,6 @@ class _$FfiStreamEvent_ErrorImpl extends FfiStreamEvent_Error {
     required TResult Function(FfiStreamToken field0) token,
     required TResult Function(FfiResult field0) complete,
     required TResult Function(String field0) error,
-    required TResult Function(FfiCloudFallbackAbort field0) cloudFallbackAbort,
   }) {
     return error(field0);
   }
@@ -980,7 +952,6 @@ class _$FfiStreamEvent_ErrorImpl extends FfiStreamEvent_Error {
     TResult? Function(FfiStreamToken field0)? token,
     TResult? Function(FfiResult field0)? complete,
     TResult? Function(String field0)? error,
-    TResult? Function(FfiCloudFallbackAbort field0)? cloudFallbackAbort,
   }) {
     return error?.call(field0);
   }
@@ -991,7 +962,6 @@ class _$FfiStreamEvent_ErrorImpl extends FfiStreamEvent_Error {
     TResult Function(FfiStreamToken field0)? token,
     TResult Function(FfiResult field0)? complete,
     TResult Function(String field0)? error,
-    TResult Function(FfiCloudFallbackAbort field0)? cloudFallbackAbort,
     required TResult orElse(),
   }) {
     if (error != null) {
@@ -1006,8 +976,6 @@ class _$FfiStreamEvent_ErrorImpl extends FfiStreamEvent_Error {
     required TResult Function(FfiStreamEvent_Token value) token,
     required TResult Function(FfiStreamEvent_Complete value) complete,
     required TResult Function(FfiStreamEvent_Error value) error,
-    required TResult Function(FfiStreamEvent_CloudFallbackAbort value)
-        cloudFallbackAbort,
   }) {
     return error(this);
   }
@@ -1018,8 +986,6 @@ class _$FfiStreamEvent_ErrorImpl extends FfiStreamEvent_Error {
     TResult? Function(FfiStreamEvent_Token value)? token,
     TResult? Function(FfiStreamEvent_Complete value)? complete,
     TResult? Function(FfiStreamEvent_Error value)? error,
-    TResult? Function(FfiStreamEvent_CloudFallbackAbort value)?
-        cloudFallbackAbort,
   }) {
     return error?.call(this);
   }
@@ -1030,8 +996,6 @@ class _$FfiStreamEvent_ErrorImpl extends FfiStreamEvent_Error {
     TResult Function(FfiStreamEvent_Token value)? token,
     TResult Function(FfiStreamEvent_Complete value)? complete,
     TResult Function(FfiStreamEvent_Error value)? error,
-    TResult Function(FfiStreamEvent_CloudFallbackAbort value)?
-        cloudFallbackAbort,
     required TResult orElse(),
   }) {
     if (error != null) {
@@ -1053,172 +1017,6 @@ abstract class FfiStreamEvent_Error extends FfiStreamEvent {
   /// with the given fields replaced by the non-null parameter values.
   @JsonKey(includeFromJson: false, includeToJson: false)
   _$$FfiStreamEvent_ErrorImplCopyWith<_$FfiStreamEvent_ErrorImpl>
-      get copyWith => throw _privateConstructorUsedError;
-}
-
-/// @nodoc
-abstract class _$$FfiStreamEvent_CloudFallbackAbortImplCopyWith<$Res> {
-  factory _$$FfiStreamEvent_CloudFallbackAbortImplCopyWith(
-          _$FfiStreamEvent_CloudFallbackAbortImpl value,
-          $Res Function(_$FfiStreamEvent_CloudFallbackAbortImpl) then) =
-      __$$FfiStreamEvent_CloudFallbackAbortImplCopyWithImpl<$Res>;
-  @useResult
-  $Res call({FfiCloudFallbackAbort field0});
-}
-
-/// @nodoc
-class __$$FfiStreamEvent_CloudFallbackAbortImplCopyWithImpl<$Res>
-    extends _$FfiStreamEventCopyWithImpl<$Res,
-        _$FfiStreamEvent_CloudFallbackAbortImpl>
-    implements _$$FfiStreamEvent_CloudFallbackAbortImplCopyWith<$Res> {
-  __$$FfiStreamEvent_CloudFallbackAbortImplCopyWithImpl(
-      _$FfiStreamEvent_CloudFallbackAbortImpl _value,
-      $Res Function(_$FfiStreamEvent_CloudFallbackAbortImpl) _then)
-      : super(_value, _then);
-
-  /// Create a copy of FfiStreamEvent
-  /// with the given fields replaced by the non-null parameter values.
-  @pragma('vm:prefer-inline')
-  @override
-  $Res call({
-    Object? field0 = null,
-  }) {
-    return _then(_$FfiStreamEvent_CloudFallbackAbortImpl(
-      null == field0
-          ? _value.field0
-          : field0 // ignore: cast_nullable_to_non_nullable
-              as FfiCloudFallbackAbort,
-    ));
-  }
-}
-
-/// @nodoc
-
-class _$FfiStreamEvent_CloudFallbackAbortImpl
-    extends FfiStreamEvent_CloudFallbackAbort {
-  const _$FfiStreamEvent_CloudFallbackAbortImpl(this.field0) : super._();
-
-  @override
-  final FfiCloudFallbackAbort field0;
-
-  @override
-  String toString() {
-    return 'FfiStreamEvent.cloudFallbackAbort(field0: $field0)';
-  }
-
-  @override
-  bool operator ==(Object other) {
-    return identical(this, other) ||
-        (other.runtimeType == runtimeType &&
-            other is _$FfiStreamEvent_CloudFallbackAbortImpl &&
-            (identical(other.field0, field0) || other.field0 == field0));
-  }
-
-  @override
-  int get hashCode => Object.hash(runtimeType, field0);
-
-  /// Create a copy of FfiStreamEvent
-  /// with the given fields replaced by the non-null parameter values.
-  @JsonKey(includeFromJson: false, includeToJson: false)
-  @override
-  @pragma('vm:prefer-inline')
-  _$$FfiStreamEvent_CloudFallbackAbortImplCopyWith<
-          _$FfiStreamEvent_CloudFallbackAbortImpl>
-      get copyWith => __$$FfiStreamEvent_CloudFallbackAbortImplCopyWithImpl<
-          _$FfiStreamEvent_CloudFallbackAbortImpl>(this, _$identity);
-
-  @override
-  @optionalTypeArgs
-  TResult when<TResult extends Object?>({
-    required TResult Function(FfiStreamToken field0) token,
-    required TResult Function(FfiResult field0) complete,
-    required TResult Function(String field0) error,
-    required TResult Function(FfiCloudFallbackAbort field0) cloudFallbackAbort,
-  }) {
-    return cloudFallbackAbort(field0);
-  }
-
-  @override
-  @optionalTypeArgs
-  TResult? whenOrNull<TResult extends Object?>({
-    TResult? Function(FfiStreamToken field0)? token,
-    TResult? Function(FfiResult field0)? complete,
-    TResult? Function(String field0)? error,
-    TResult? Function(FfiCloudFallbackAbort field0)? cloudFallbackAbort,
-  }) {
-    return cloudFallbackAbort?.call(field0);
-  }
-
-  @override
-  @optionalTypeArgs
-  TResult maybeWhen<TResult extends Object?>({
-    TResult Function(FfiStreamToken field0)? token,
-    TResult Function(FfiResult field0)? complete,
-    TResult Function(String field0)? error,
-    TResult Function(FfiCloudFallbackAbort field0)? cloudFallbackAbort,
-    required TResult orElse(),
-  }) {
-    if (cloudFallbackAbort != null) {
-      return cloudFallbackAbort(field0);
-    }
-    return orElse();
-  }
-
-  @override
-  @optionalTypeArgs
-  TResult map<TResult extends Object?>({
-    required TResult Function(FfiStreamEvent_Token value) token,
-    required TResult Function(FfiStreamEvent_Complete value) complete,
-    required TResult Function(FfiStreamEvent_Error value) error,
-    required TResult Function(FfiStreamEvent_CloudFallbackAbort value)
-        cloudFallbackAbort,
-  }) {
-    return cloudFallbackAbort(this);
-  }
-
-  @override
-  @optionalTypeArgs
-  TResult? mapOrNull<TResult extends Object?>({
-    TResult? Function(FfiStreamEvent_Token value)? token,
-    TResult? Function(FfiStreamEvent_Complete value)? complete,
-    TResult? Function(FfiStreamEvent_Error value)? error,
-    TResult? Function(FfiStreamEvent_CloudFallbackAbort value)?
-        cloudFallbackAbort,
-  }) {
-    return cloudFallbackAbort?.call(this);
-  }
-
-  @override
-  @optionalTypeArgs
-  TResult maybeMap<TResult extends Object?>({
-    TResult Function(FfiStreamEvent_Token value)? token,
-    TResult Function(FfiStreamEvent_Complete value)? complete,
-    TResult Function(FfiStreamEvent_Error value)? error,
-    TResult Function(FfiStreamEvent_CloudFallbackAbort value)?
-        cloudFallbackAbort,
-    required TResult orElse(),
-  }) {
-    if (cloudFallbackAbort != null) {
-      return cloudFallbackAbort(this);
-    }
-    return orElse();
-  }
-}
-
-abstract class FfiStreamEvent_CloudFallbackAbort extends FfiStreamEvent {
-  const factory FfiStreamEvent_CloudFallbackAbort(
-          final FfiCloudFallbackAbort field0) =
-      _$FfiStreamEvent_CloudFallbackAbortImpl;
-  const FfiStreamEvent_CloudFallbackAbort._() : super._();
-
-  @override
-  FfiCloudFallbackAbort get field0;
-
-  /// Create a copy of FfiStreamEvent
-  /// with the given fields replaced by the non-null parameter values.
-  @JsonKey(includeFromJson: false, includeToJson: false)
-  _$$FfiStreamEvent_CloudFallbackAbortImplCopyWith<
-          _$FfiStreamEvent_CloudFallbackAbortImpl>
       get copyWith => throw _privateConstructorUsedError;
 }
 

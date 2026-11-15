@@ -2,18 +2,6 @@
 
 ## Unreleased
 
-* `load()` and `loadWithProgress()` take an optional `backend:`
-  (`XybridBackend.auto`, `.mlx`, `.llamaCpp`, `.mistral`) that pins the local
-  LLM or embedding backend. An explicit backend is a hard requirement: the
-  load fails if the native library cannot provide it. `XybridBackend.mlx` (a
-  preview for Apple Silicon macOS) is not in the published package; it needs a
-  native library built with the `llm-mlx-runtime` feature.
-* `XybridModel.supportsTokenStreaming()` reports whether a model streams token
-  by token.
-* A stream that stops for cloud fallback says why: `StreamToken` gains
-  `cloudFallbackReason` and `isCloudFallbackAbort`. Generated FRB glue updated
-  for these types.
-
 ## 0.19.0
 
 * Fixed: pipeline stages with no explicit target or cloud provider now download
