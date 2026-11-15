@@ -292,46 +292,129 @@ fn synthetic_qwen_streaming_abort_after_n_tokens_preserves_error_and_resets_stat
     );
 }
 
-/// Tool calling and grammar-constrained decoding are llama.cpp-only. A request
-/// that carries either fails on MLX before any token is generated, on every
-/// generation entry point, instead of answering without them.
+/// Grammar-constrained decoding is llama.cpp-only. A request that carries a
+/// grammar fails on MLX before any token is generated, on every generation
+/// entry point, instead of answering without it.
 #[test]
-fn synthetic_qwen_refuses_tools_and_grammar_on_every_entry_point() {
+fn synthetic_qwen_refuses_grammar_on_every_entry_point() {
     let _guard = mlx_test_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     write_synthetic_qwen_bundle(tmp.path());
     let adapter =
         MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default()).expect("load synthetic qwen3");
 
-    let tool = xybrid_core::gateway::Tool::function(
-        "lookup_weather",
-        "Look up the weather",
-        serde_json::json!({ "type": "object", "properties": {} }),
-    );
-    let with_tools = short_greedy_config().with_tools([tool]);
-    let with_grammar = short_greedy_config().with_grammar("root ::= \"ok\"");
+    let config = short_greedy_config().with_grammar("root ::= \"ok\"");
     let messages = [ChatMessage::user("Hello")];
 
-    for (config, refusal) in [
-        (&with_tools, "does not support tool calling"),
+    let streamed = Arc::new(Mutex::new(0usize));
+    let counting = || -> StreamingCallback<'static> {
+        let streamed = streamed.clone();
+        Box::new(move |_token: PartialToken| {
+            *streamed.lock().unwrap() += 1;
+            Ok(())
+        })
+    };
+    let results = [
+        LlmBackend::generate(&adapter, &messages, &config).map(drop),
+        LlmBackend::generate_raw(&adapter, "Hello", &config).map(drop),
+        LlmBackend::generate_streaming(&adapter, &messages, &config, counting()).map(drop),
+        LlmBackend::generate_raw_streaming(&adapter, "Hello", &config, counting()).map(drop),
+    ];
+    for result in results {
+        let err = result.expect_err("MLX must refuse the request");
+        assert!(
+            matches!(err, AdapterError::InvalidInput(_)),
+            "expected an invalid-input refusal, got {err:?}"
+        );
+        let message = err.to_string();
+        assert!(
+            message.contains("does not support grammar-constrained generation"),
+            "{message}"
+        );
+        assert!(
+            message.contains("backend: llamacpp"),
+            "the refusal names the backend that can serve the request: {message}"
+        );
+    }
+    assert_eq!(*streamed.lock().unwrap(), 0, "nothing may be generated");
+}
+
+fn weather_tool() -> xybrid_core::gateway::Tool {
+    xybrid_core::gateway::Tool::function(
+        "get_weather",
+        "Get the current weather for a city",
+        serde_json::json!({
+            "type": "object",
+            "properties": { "city": { "type": "string", "description": "City name" } },
+            "required": ["city"]
+        }),
+    )
+}
+
+/// ChatML that lists its tools the way LFM2's template does: each entry
+/// inlined with `tojson`.
+const TOOL_LISTING_TEMPLATE: &str = concat!(
+    "{%- if tools %}",
+    "{{- '<|im_start|>system\nList of tools: [' }}",
+    "{%- for tool in tools %}{{- tool | tojson }}{%- if not loop.last %}, {% endif %}{%- endfor %}",
+    "{{- ']<|im_end|>\n' }}",
+    "{%- endif %}",
+    "{%- for message in messages %}",
+    "{{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>\n' }}",
+    "{%- endfor %}",
+    "{%- if add_generation_prompt %}{{- '<|im_start|>assistant\n' }}{%- endif %}"
+);
+
+/// The same turns, with no mention of `tools`.
+const TOOL_BLIND_TEMPLATE: &str = concat!(
+    "{%- for message in messages %}",
+    "{{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>\n' }}",
+    "{%- endfor %}",
+    "{%- if add_generation_prompt %}{{- '<|im_start|>assistant\n' }}{%- endif %}"
+);
+
+fn write_chat_template(dir: &Path, template: &str) {
+    std::fs::write(
+        dir.join("tokenizer_config.json"),
+        serde_json::json!({ "chat_template": template }).to_string(),
+    )
+    .expect("write tokenizer_config.json");
+}
+
+/// Tools reach a model through its chat template. A bundle whose template
+/// cannot carry them refuses the request before any token is generated,
+/// instead of answering as if no tools had been offered.
+#[test]
+fn synthetic_qwen_refuses_tools_its_template_cannot_carry() {
+    let _guard = mlx_test_lock();
+    let config = short_greedy_config().with_tools([weather_tool()]);
+    let messages = [ChatMessage::user("Hello")];
+
+    for (template, refusal) in [
+        (None, "has no chat template"),
         (
-            &with_grammar,
-            "does not support grammar-constrained generation",
+            Some(TOOL_BLIND_TEMPLATE),
+            "does not render tool definitions",
         ),
     ] {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_synthetic_qwen_bundle(tmp.path());
+        if let Some(template) = template {
+            write_chat_template(tmp.path(), template);
+        }
+        let adapter = MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default())
+            .expect("load synthetic qwen3");
+
         let streamed = Arc::new(Mutex::new(0usize));
-        let counting = || -> StreamingCallback<'static> {
-            let streamed = streamed.clone();
-            Box::new(move |_token: PartialToken| {
-                *streamed.lock().unwrap() += 1;
-                Ok(())
-            })
-        };
+        let streamed_for_cb = streamed.clone();
+        let counting: StreamingCallback<'static> = Box::new(move |_token: PartialToken| {
+            *streamed_for_cb.lock().unwrap() += 1;
+            Ok(())
+        });
         let results = [
-            LlmBackend::generate(&adapter, &messages, config).map(drop),
-            LlmBackend::generate_raw(&adapter, "Hello", config).map(drop),
-            LlmBackend::generate_streaming(&adapter, &messages, config, counting()).map(drop),
-            LlmBackend::generate_raw_streaming(&adapter, "Hello", config, counting()).map(drop),
+            LlmBackend::generate(&adapter, &messages, &config).map(drop),
+            LlmBackend::generate_streaming(&adapter, &messages, &config, counting).map(drop),
+            LlmBackend::render_chat_prompt(&adapter, &messages, &config).map(drop),
         ];
         for result in results {
             let err = result.expect_err("MLX must refuse the request");
@@ -341,13 +424,282 @@ fn synthetic_qwen_refuses_tools_and_grammar_on_every_entry_point() {
             );
             let message = err.to_string();
             assert!(message.contains(refusal), "{message}");
-            assert!(
-                message.contains("backend: llamacpp"),
-                "the refusal names the backend that can serve the request: {message}"
-            );
+            assert!(message.contains("drop `tools`"), "{message}");
         }
         assert_eq!(*streamed.lock().unwrap(), 0, "nothing may be generated");
     }
+}
+
+/// A bundle whose template lists tools runs a tool-bearing request on every
+/// entry point. The weights here are random, so no call comes out; what this
+/// pins is the plumbing: the definitions are in the prompt in the template's
+/// shape, the stream still ends with exactly one terminal token, and the
+/// streamed raw prompt a tool-result continuation uses runs too.
+#[test]
+fn synthetic_qwen_runs_a_tool_bearing_request() {
+    let _guard = mlx_test_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_synthetic_qwen_bundle(tmp.path());
+    write_chat_template(tmp.path(), TOOL_LISTING_TEMPLATE);
+    let adapter =
+        MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default()).expect("load synthetic qwen3");
+    let config = GenerationConfig {
+        max_tokens: 8,
+        ..short_greedy_config()
+    }
+    .with_tools([weather_tool()]);
+    let messages = [ChatMessage::user("Hello")];
+
+    let prompt = LlmBackend::render_chat_prompt(&adapter, &messages, &config)
+        .expect("render the chat prompt");
+    // The bare function object, as LFM2-family templates list it: no
+    // `{"type": "function", "function": ...}` wrapper.
+    assert!(prompt.contains(r#""name":"get_weather""#), "{prompt}");
+    assert!(prompt.contains("List of tools: [{"), "{prompt}");
+    assert!(!prompt.contains(r#""type":"function""#), "{prompt}");
+    assert!(prompt.ends_with("<|im_start|>assistant\n"), "{prompt}");
+
+    let batch = LlmBackend::generate(&adapter, &messages, &config).expect("batch generate");
+    assert!(batch.tokens_generated > 0);
+
+    for raw in [false, true] {
+        let seen: Arc<Mutex<Vec<PartialToken>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen_for_cb = seen.clone();
+        let cb: StreamingCallback<'_> = Box::new(move |token: PartialToken| {
+            seen_for_cb.lock().unwrap().push(token);
+            Ok(())
+        });
+        let out = if raw {
+            LlmBackend::generate_raw_streaming(&adapter, &prompt, &config, cb)
+        } else {
+            LlmBackend::generate_streaming(&adapter, &messages, &config, cb)
+        }
+        .expect("streamed generate");
+        let seen = seen.lock().unwrap();
+        let terminal: Vec<_> = seen.iter().filter(|t| t.finish_reason.is_some()).collect();
+        assert_eq!(terminal.len(), 1, "raw={raw}: one terminal token");
+        assert!(
+            seen.last().is_some_and(|t| t.finish_reason.is_some()),
+            "raw={raw}: the terminal token comes last"
+        );
+        assert_eq!(
+            terminal[0].finish_reason.as_deref(),
+            Some(out.finish_reason.as_str()),
+            "raw={raw}"
+        );
+    }
+}
+
+fn lfm25_bundle_dir() -> Option<PathBuf> {
+    let dir =
+        bundle_dir("XYBRID_MLX_LFM25_4BIT_DIR").or_else(|| bundle_dir("XYBRID_MLX_LFM25_DIR"));
+    if dir.is_none() {
+        eprintln!("SKIP: XYBRID_MLX_LFM25_4BIT_DIR / XYBRID_MLX_LFM25_DIR not set");
+    }
+    dir
+}
+
+fn gemma_bundle_dir() -> Option<PathBuf> {
+    let dir =
+        bundle_dir("XYBRID_MLX_GEMMA_4BIT_DIR").or_else(|| bundle_dir("XYBRID_MLX_GEMMA_DIR"));
+    if dir.is_none() {
+        eprintln!("SKIP: XYBRID_MLX_GEMMA_4BIT_DIR / XYBRID_MLX_GEMMA_DIR not set");
+    }
+    dir
+}
+
+/// The request master's llama.cpp tool tests make, so the two backends are
+/// held to the same call.
+const WEATHER_QUESTION: &str = "What's the weather in Paris?";
+
+/// A real model, offered a tool, calls it: the request's tools reach the
+/// prompt, the call comes back in the model's own notation, and the shared
+/// parser reads it. Streamed, the call's text is held back and the terminal
+/// token carries the parsed call.
+fn assert_bundle_calls_a_tool(dir: &Path, label: &str) {
+    let adapter = MlxLlmAdapter::load(dir, &MlxLlmConfig::default()).expect("load the bundle");
+    let tools = [weather_tool()];
+    let config = GenerationConfig {
+        max_tokens: 64,
+        ..short_greedy_config()
+    }
+    .with_tools(tools.clone());
+    let messages = [ChatMessage::user(WEATHER_QUESTION)];
+
+    let batch = LlmBackend::generate(&adapter, &messages, &config).expect("batch generate");
+    eprintln!("{label} tool turn: {:?}", batch.text);
+    let calls =
+        xybrid_core::runtime_adapter::tool_call::parse_tool_calls_with_tools(&batch.text, &tools);
+    assert_eq!(calls.len(), 1, "{label}: one tool call in {:?}", batch.text);
+    assert_eq!(calls[0].function.name, "get_weather");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&calls[0].function.arguments)
+            .expect("arguments are JSON"),
+        serde_json::json!({ "city": "Paris" })
+    );
+
+    let seen: Arc<Mutex<Vec<PartialToken>>> = Arc::new(Mutex::new(Vec::new()));
+    let seen_for_cb = seen.clone();
+    let cb: StreamingCallback<'_> = Box::new(move |token: PartialToken| {
+        seen_for_cb.lock().unwrap().push(token);
+        Ok(())
+    });
+    let streamed =
+        LlmBackend::generate_streaming(&adapter, &messages, &config, cb).expect("streamed");
+    assert_eq!(streamed.finish_reason, "tool_calls", "{label}");
+    assert_eq!(
+        streamed.text, batch.text,
+        "{label}: greedy, so the two paths agree"
+    );
+    let seen = seen.lock().unwrap();
+    let shown: String = seen.iter().map(|t| t.token.as_str()).collect();
+    assert!(
+        !shown.contains("get_weather") && !shown.contains("tool_call"),
+        "{label}: the call must not reach the text stream: {shown:?}"
+    );
+    let terminal = seen.last().expect("a terminal token");
+    assert_eq!(terminal.finish_reason.as_deref(), Some("tool_calls"));
+    assert_eq!(
+        terminal.tool_calls.len(),
+        1,
+        "{label}: the terminal token carries the call"
+    );
+    assert_eq!(terminal.tool_calls[0].function.name, "get_weather");
+
+    // Keeping the tool markers must not leak chat markers into a turn that
+    // offers no tools: that one decodes as it always did.
+    let plain = LlmBackend::generate(
+        &adapter,
+        &[ChatMessage::user("Say hello in one short sentence.")],
+        &GenerationConfig {
+            max_tokens: 24,
+            ..short_greedy_config()
+        },
+    )
+    .expect("a turn without tools");
+    assert!(
+        !plain.text.contains('<') && !plain.text.trim().is_empty(),
+        "{label}: {:?}",
+        plain.text
+    );
+}
+
+/// The whole tool cycle through the executor, as an SDK run drives it: the
+/// model calls the tool, the caller sends the result back, and the model
+/// answers from it. The second turn is a continuation the executor composes
+/// onto the first prompt in the model's own protocol and runs as a raw
+/// prompt.
+fn assert_bundle_answers_from_a_tool_result(dir: &Path, architecture: &str, label: &str) {
+    use xybrid_core::execution::{ModelMetadata, TemplateExecutor};
+    use xybrid_core::gateway::ToolCall;
+    use xybrid_core::ir::{Envelope, EnvelopeKind, ToolCallResult};
+
+    fn text(output: &Envelope) -> &str {
+        match &output.kind {
+            EnvelopeKind::Text(text) => text,
+            other => panic!("expected text output, got {other:?}"),
+        }
+    }
+    fn tool_calls(output: &Envelope) -> Vec<ToolCall> {
+        output
+            .metadata
+            .get(Envelope::TOOL_CALLS_METADATA_KEY)
+            .map(|raw| serde_json::from_str(raw).expect("tool_calls metadata is a ToolCall array"))
+            .unwrap_or_default()
+    }
+
+    let metadata = ModelMetadata::safetensors(label, "1.0", "model.safetensors", architecture);
+    let mut executor = TemplateExecutor::with_base_path(dir.to_str().expect("utf-8 path"));
+    let config = GenerationConfig {
+        max_tokens: 96,
+        ..short_greedy_config()
+    }
+    .with_tools([weather_tool()]);
+
+    let first = executor
+        .execute(
+            &metadata,
+            &Envelope::new(EnvelopeKind::Text(WEATHER_QUESTION.to_string())),
+            Some(&config),
+        )
+        .expect("the tool-bearing turn runs");
+    let calls = tool_calls(&first);
+    eprintln!("{label} call turn: {:?} -> {calls:?}", text(&first));
+    assert_eq!(calls.len(), 1, "{label}: {:?}", text(&first));
+    assert_eq!(calls[0].function.name, "get_weather");
+    assert_eq!(
+        first.metadata.get("finish_reason").map(String::as_str),
+        Some("tool_calls")
+    );
+
+    let continuation = Envelope::tool_results(
+        WEATHER_QUESTION,
+        text(&first),
+        &[ToolCallResult {
+            call_id: calls[0].id.clone(),
+            name: calls[0].function.name.clone(),
+            content: serde_json::json!({ "temperature_c": 21, "condition": "sunny" }),
+        }],
+    );
+    let answer = executor
+        .execute(&metadata, &continuation, Some(&config))
+        .expect("the tool-result turn runs");
+    eprintln!("{label} answer turn: {:?}", text(&answer));
+    assert!(
+        tool_calls(&answer).is_empty(),
+        "{label}: {:?}",
+        text(&answer)
+    );
+    assert!(text(&answer).contains("21"), "{label}: {:?}", text(&answer));
+    assert!(
+        !text(&answer).contains('<'),
+        "{label}: protocol markers must not reach the answer: {:?}",
+        text(&answer)
+    );
+    assert_eq!(
+        answer.metadata.get("finish_reason").map(String::as_str),
+        Some("stop")
+    );
+}
+
+/// LFM2.5 writes a pythonic call between `<|tool_call_start|>` markers.
+#[test]
+fn real_lfm25_calls_a_tool_when_staged() {
+    let _guard = mlx_test_lock();
+    let Some(dir) = lfm25_bundle_dir() else {
+        return;
+    };
+    assert_bundle_calls_a_tool(&dir, "lfm2.5");
+}
+
+#[test]
+fn real_lfm25_answers_from_a_tool_result_when_staged() {
+    let _guard = mlx_test_lock();
+    let Some(dir) = lfm25_bundle_dir() else {
+        return;
+    };
+    assert_bundle_answers_from_a_tool_result(&dir, "lfm2", "lfm2.5");
+}
+
+/// Gemma 4 writes `call:name{...}` between `<|tool_call>` markers, with
+/// `<|"|>` around strings. All of them are special tokens in its vocabulary:
+/// this is the bundle that shows a tool-bearing turn keeps them in the text.
+#[test]
+fn real_gemma_calls_a_tool_when_staged() {
+    let _guard = mlx_test_lock();
+    let Some(dir) = gemma_bundle_dir() else {
+        return;
+    };
+    assert_bundle_calls_a_tool(&dir, "gemma4");
+}
+
+#[test]
+fn real_gemma_answers_from_a_tool_result_when_staged() {
+    let _guard = mlx_test_lock();
+    let Some(dir) = gemma_bundle_dir() else {
+        return;
+    };
+    assert_bundle_answers_from_a_tool_result(&dir, "gemma4", "gemma4");
 }
 
 /// A streamed chat turn delivers text deltas, then one empty terminal token
@@ -699,7 +1051,7 @@ fn synthetic_lfm_bundle_runs_runtime_forward_without_external_fixture() {
     write_synthetic_lfm_bundle(tmp.path());
 
     let adapter =
-        MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default()).expect("load synthetic lfm3");
+        MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default()).expect("load synthetic lfm2");
     let out = LlmBackend::generate_raw(
         &adapter,
         "Hello",
@@ -1601,7 +1953,7 @@ fn write_synthetic_lfm_bundle(dir: &Path) {
     const KERNEL: usize = 3;
 
     let cfg = serde_json::json!({
-        "model_type": "lfm3",
+        "model_type": "lfm2",
         "hidden_size": HIDDEN,
         "num_hidden_layers": 2,
         "num_attention_heads": HEADS,

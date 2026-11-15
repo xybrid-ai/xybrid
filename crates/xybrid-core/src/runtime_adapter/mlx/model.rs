@@ -40,7 +40,7 @@ use crate::runtime_adapter::llm::{
 use crate::runtime_adapter::AdapterError;
 
 use super::chat_template::ChatTemplate;
-use super::generate::{self, GenerateParams};
+use super::generate::{self, GenerateParams, TurnStops};
 use super::kv_cache::KvCache;
 use super::sampler::SamplerError;
 use super::tokenizer as tokenizer_loader;
@@ -130,6 +130,12 @@ pub enum MlxLlmError {
     #[error("MLX model config failed validation: {0}")]
     ConfigInvalid(String),
 
+    /// The request asked for something this bundle cannot honor (tools its
+    /// chat template does not render). The caller's to fix, not a runtime
+    /// failure: maps to [`AdapterError::InvalidInput`].
+    #[error("{0}")]
+    InvalidRequest(String),
+
     /// Streaming callback returned an error. Keep the original boxed
     /// error intact so cloud-fallback abort markers survive the
     /// backend-specific MLX layer.
@@ -166,6 +172,7 @@ impl From<MlxLlmError> for AdapterError {
             MlxLlmError::StreamingCallback(error) => {
                 AdapterError::from_streaming_callback_error(error)
             }
+            MlxLlmError::InvalidRequest(message) => AdapterError::InvalidInput(message),
             _ => AdapterError::RuntimeError(e.to_string()),
         }
     }
@@ -238,18 +245,10 @@ impl MlxLlmConfig {
     }
 }
 
-/// Tool calling and grammar-constrained decoding are llama.cpp-only today.
-/// Fail closed rather than silently generating without them: the same policy
-/// as the mistralrs backend and the SDK's cloud-fallback guard.
+/// Grammar-constrained decoding is llama.cpp-only today. Fail closed rather
+/// than silently generating without it: the same policy as the mistralrs
+/// backend and the SDK's cloud-fallback guard.
 fn reject_unsupported_generation(config: &GenerationConfig) -> LlmResult<()> {
-    if !config.tools.is_empty() {
-        return Err(AdapterError::InvalidInput(
-            "the MLX backend does not support tool calling; run tool-bearing requests on the \
-             llama.cpp backend (`backend: llamacpp`, a GGUF variant) or drop `tools` from the \
-             request"
-                .to_string(),
-        ));
-    }
     if config.grammar.is_some() {
         return Err(AdapterError::InvalidInput(
             "the MLX backend does not support grammar-constrained generation; run \
@@ -708,12 +707,24 @@ impl MlxLlmAdapter {
         self.config.reasoning && !matches!(self.architecture(), Some(ModelArchitecture::Gemma4))
     }
 
-    fn prompt_from_messages(&self, messages: &[ChatMessage]) -> MlxLlmResult<String> {
+    fn prompt_from_messages(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[crate::gateway::Tool],
+    ) -> MlxLlmResult<String> {
         if self.loaded.is_none() {
             return Err(MlxLlmError::NotLoaded);
         }
         if self.chat_template().is_some() {
-            return generate::render_prompt(self, messages);
+            return generate::render_prompt(self, messages, tools);
+        }
+        if !tools.is_empty() {
+            return Err(MlxLlmError::InvalidRequest(
+                "this MLX bundle has no chat template, so tool definitions cannot be rendered \
+                 into the prompt; load a bundle whose chat template supports tools or drop \
+                 `tools` from the request"
+                    .to_string(),
+            ));
         }
         match messages {
             [ChatMessage {
@@ -915,14 +926,27 @@ impl LlmBackend for MlxLlmAdapter {
         }
         reject_unsupported_generation(config)?;
         let prompt = self
-            .prompt_from_messages(messages)
+            .prompt_from_messages(messages, &config.tools)
             .map_err(AdapterError::from)?;
-        generate::generate_chat(self, &prompt, config, None).map_err(AdapterError::from)
+        generate::generate_turn(self, &prompt, config, TurnStops::Chat, None)
+            .map_err(AdapterError::from)
     }
 
-    /// Raw prompts keep the caller's text as generated: only
+    /// The prompt [`Self::generate`] would run, tool definitions included.
+    /// The executor composes a tool-result continuation onto it.
+    fn render_chat_prompt(
+        &self,
+        messages: &[ChatMessage],
+        config: &GenerationConfig,
+    ) -> LlmResult<String> {
+        self.prompt_from_messages(messages, &config.tools)
+            .map_err(AdapterError::from)
+    }
+
+    /// A batch raw prompt keeps the caller's text as generated: only
     /// `config.stop_sequences` end the run, and neither chat markers nor
-    /// reasoning blocks are filtered (the llama.cpp backend's raw contract).
+    /// reasoning blocks are filtered (the llama.cpp backend's contract for
+    /// it; the executor cleans up a tool-result continuation itself).
     fn generate_raw(&self, prompt: &str, config: &GenerationConfig) -> LlmResult<GenerationOutput> {
         if self.loaded.is_none() {
             return Err(MlxLlmError::NotLoaded.into());
@@ -943,14 +967,19 @@ impl LlmBackend for MlxLlmAdapter {
         }
         reject_unsupported_generation(config)?;
         let prompt = self
-            .prompt_from_messages(messages)
+            .prompt_from_messages(messages, &config.tools)
             .map_err(AdapterError::from)?;
-        generate::generate_chat(self, &prompt, config, Some(on_token)).map_err(AdapterError::from)
+        generate::generate_turn(self, &prompt, config, TurnStops::Chat, Some(on_token))
+            .map_err(AdapterError::from)
     }
 
-    /// Streams a raw prompt token by token, with [`Self::generate_raw`]'s
-    /// contract. Without this override the trait default would buffer the
-    /// whole output and emit it as one chunk.
+    /// Streams a raw prompt as it generates, with the llama.cpp backend's
+    /// contract for a streamed raw prompt: only `config.stop_sequences` end
+    /// the run and no chat marker is filtered, but reasoning blocks are kept
+    /// out of the stream and returned apart, and tool-call blocks are held
+    /// back when the request offers tools. The executor relies on that for a
+    /// streamed tool-result continuation. Without this override the trait
+    /// default would buffer the whole output and emit it as one chunk.
     fn generate_raw_streaming(
         &self,
         prompt: &str,
@@ -961,7 +990,7 @@ impl LlmBackend for MlxLlmAdapter {
             return Err(MlxLlmError::NotLoaded.into());
         }
         reject_unsupported_generation(config)?;
-        generate::generate_tokens(self, prompt, GenerateParams::new(config), Some(on_token))
+        generate::generate_turn(self, prompt, config, TurnStops::Raw, Some(on_token))
             .map_err(AdapterError::from)
     }
 

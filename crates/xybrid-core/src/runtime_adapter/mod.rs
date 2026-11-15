@@ -99,6 +99,12 @@ pub(crate) mod llm_telemetry;
 #[cfg(any(feature = "llm-llamacpp", feature = "llm-mlx"))]
 pub(crate) mod streaming_postprocess;
 
+// Minijinja renderer for a model's own chat template (HuggingFace context,
+// tool definitions, plain-JSON `tojson`). The llama.cpp and MLX adapters
+// render through this one module so a template means the same prompt on both.
+#[cfg(any(feature = "llm-llamacpp", feature = "llm-mlx"))]
+mod jinja_template;
+
 // MistralBackend (feature-gated, uses mistral.rs - desktop only, NOT Android)
 // Requires +fp16 on ARM which causes SIGILL on devices without ARMv8.2-A FP16
 #[cfg(feature = "llm-mistral")]

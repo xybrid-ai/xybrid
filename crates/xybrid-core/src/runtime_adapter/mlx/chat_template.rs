@@ -1,32 +1,29 @@
-//! HuggingFace chat-template renderer for the MLX adapter (US-014).
+//! Chat templates for the MLX adapter.
 //!
-//! MLX-LM bundles ship a `tokenizer_config.json` containing a `chat_template`
-//! field — a Jinja2 template that turns a `[{role, content}]` message list
-//! into the raw text the model was trained on. Qwen 3 uses ChatML, Gemma 4
-//! uses its own `<start_of_turn>` markers, and LFM uses a Llama-style
-//! `[INST] ... [/INST]` variant. Rather than ship per-model templates, we
-//! read the bundle's template and render it via [`minijinja`].
+//! MLX-LM bundles ship the Jinja2 template the model was trained with, in
+//! `tokenizer_config.json`'s `chat_template` field or in a
+//! `chat_template.jinja` beside it. It turns a `[{role, content}]` message
+//! list, and any tool definitions, into the raw text the model expects. Qwen 3
+//! uses ChatML, Gemma 4 its own `<|turn>` markers, LFM2 ChatML with a tool
+//! list. Rather than ship per-model templates, this module loads the bundle's
+//! own and renders it.
 //!
-//! Design notes:
+//! Rendering itself is [`crate::runtime_adapter::jinja_template`], the one
+//! renderer both local text backends use: the same HuggingFace context
+//! (`messages`, `add_generation_prompt`, `bos_token`, `eos_token`,
+//! `enable_thinking`, `tools`), the same plain-JSON `tojson`, the same
+//! handling of `{% generation %}` tags. A template therefore renders the same
+//! prompt from an MLX bundle as from the GGUF of the same model.
 //!
-//! - The renderer is stateless: construct a fresh [`ChatTemplate`] per bundle
-//!   and keep it in [`super::model::LoadedState`]. `Send + Sync` so the
-//!   adapter stays thread-shareable.
-//! - We pass the standard HuggingFace variables: `messages` (list of
-//!   `{role, content}` maps), `add_generation_prompt` (bool), the tokenizer's
-//!   `bos_token` / `eos_token`, and model-family render switches such as
-//!   `enable_thinking`. That covers every template in the MLX-LM zoo today.
-//! - We do NOT support `tools` / function-calling templates yet — MLX-LM
-//!   models that use them (e.g. Hermes) are not on the US-018 priority list.
-//!   Adding them later is a single new variable in [`RenderOptions`].
+//! [`ChatTemplate`] is stateless and `Send + Sync`: one is loaded per bundle
+//! and kept in [`super::model::LoadedState`].
 
 use std::fs;
 use std::path::Path;
 
-use minijinja::{context, Environment, Value};
-use minijinja_contrib::pycompat::unknown_method_callback;
 use serde::Deserialize;
 
+use crate::runtime_adapter::jinja_template::{self, JinjaChatTemplate};
 use crate::runtime_adapter::llm::ChatMessage;
 
 /// Errors from chat-template loading or rendering.
@@ -143,6 +140,12 @@ pub struct RenderOptions {
     /// Qwen 3 and Gemma 4 instruction templates both honor this switch to
     /// skip reasoning-channel scaffolding for direct user-facing answers.
     pub enable_thinking: bool,
+    /// Tool definitions for the template's `tools` variable, as a JSON array
+    /// already in the shape the template expects (see
+    /// `ToolCallProtocol::template_tool_entries`). `None` leaves `tools`
+    /// undefined, as HuggingFace's `apply_chat_template` does for a request
+    /// without tools.
+    pub tools: Option<serde_json::Value>,
 }
 
 impl Default for RenderOptions {
@@ -150,6 +153,7 @@ impl Default for RenderOptions {
         Self {
             add_generation_prompt: true,
             enable_thinking: true,
+            tools: None,
         }
     }
 }
@@ -249,51 +253,46 @@ impl ChatTemplate {
         })
     }
 
-    /// Render a message list to a prompt string. The Jinja context mirrors
-    /// the HuggingFace transformers tokenizer's `apply_chat_template` —
-    /// templates copied verbatim from any MLX-LM bundle render without
-    /// modification.
+    /// The template's Jinja source, as the bundle ships it. The tool-call
+    /// protocol a model speaks is read off its markers.
+    pub fn source(&self) -> &str {
+        &self.template
+    }
+
+    /// Render a message list to a prompt string, with the context
+    /// HuggingFace's `apply_chat_template` builds, so a template copied
+    /// verbatim from any MLX-LM bundle renders without modification.
+    ///
+    /// `enable_thinking` is always passed, never left undefined: templates
+    /// such as Qwen 3's close the think block only for an explicit `false`
+    /// and treat a missing flag as thinking on.
+    ///
+    /// # Errors
+    ///
+    /// [`ChatTemplateError::Render`] when the template does not compile or
+    /// fails to render.
     pub fn render(
         &self,
         messages: &[ChatMessage],
         options: &RenderOptions,
     ) -> ChatTemplateResult<String> {
-        // Build an Environment per-call. minijinja's envs are cheap to
-        // construct (~1us) and the alternative — caching a compiled template
-        // on the struct — would require a self-referential lifetime or
-        // `Arc<Environment<'static>>` with a leaked template string. The
-        // per-call cost is invisible relative to the forward pass.
-        let mut env = Environment::new();
-        env.set_unknown_method_callback(unknown_method_callback);
-        env.add_template("chat", &self.template)
-            .map_err(|e| ChatTemplateError::Render(format!("compile: {e}")))?;
-
-        // Messages flow into the template as a list of maps. Using
-        // `Value::from_serialize` preserves the `{role, content}` shape
-        // every HF template expects.
-        let messages_value: Vec<Value> = messages
-            .iter()
-            .map(|m| {
-                Value::from_serialize(serde_json::json!({
-                    "role": m.role.as_str(),
-                    "content": &m.content,
-                }))
-            })
-            .collect();
-
-        let ctx = context! {
-            messages => messages_value,
-            add_generation_prompt => options.add_generation_prompt,
-            enable_thinking => options.enable_thinking,
-            bos_token => self.bos_token.clone().unwrap_or_default(),
-            eos_token => self.eos_token.clone().unwrap_or_default(),
+        let template = JinjaChatTemplate::new(
+            self.template.as_str(),
+            self.bos_token.clone(),
+            self.eos_token.clone(),
+        );
+        let options = jinja_template::RenderOptions {
+            add_generation_prompt: options.add_generation_prompt,
+            enable_thinking: Some(options.enable_thinking),
+            tools: options.tools.clone(),
         };
-
-        let tmpl = env
-            .get_template("chat")
-            .map_err(|e| ChatTemplateError::Render(format!("lookup: {e}")))?;
-        tmpl.render(ctx)
-            .map_err(|e| ChatTemplateError::Render(format!("render: {e}")))
+        template
+            .render(messages, &options)
+            .map_err(|err| match err {
+                jinja_template::JinjaTemplateError::Render(message) => {
+                    ChatTemplateError::Render(message)
+                }
+            })
     }
 }
 
@@ -547,6 +546,82 @@ mod tests {
     /// `ChatTemplate` should be Send + Sync so it can live inside
     /// `MlxLlmAdapter` (which the runtime selector boxes as
     /// `Box<dyn LlmBackend + Send + Sync>`).
+    /// The tool-listing half of LFM2.5's shipped template.
+    const LFM2_TOOLS_TEMPLATE: &str = concat!(
+        "{{- bos_token -}}",
+        "{%- if tools -%}",
+        "{{- '<|im_start|>system\nList of tools: [' -}}",
+        "{%- for tool in tools -%}",
+        "{%- if tool is not string -%}{%- set tool = tool | tojson -%}{%- endif -%}",
+        "{{- tool -}}{%- if not loop.last -%}{{- ', ' -}}{%- endif -%}",
+        "{%- endfor -%}",
+        "{{- ']<|im_end|>\n' -}}",
+        "{%- endif -%}",
+        "{%- for message in messages -%}",
+        "{{- '<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>\n' -}}",
+        "{%- endfor -%}",
+        "{%- if add_generation_prompt -%}{{- '<|im_start|>assistant\n' -}}{%- endif -%}"
+    );
+
+    #[test]
+    fn tools_reach_the_template_as_plain_json() {
+        let tmpl = ChatTemplate::from_str(LFM2_TOOLS_TEMPLATE).with_bos("<|startoftext|>");
+        let tools = serde_json::json!([{
+            "name": "compare",
+            "description": "true when a < b",
+            "parameters": { "type": "object", "properties": {} }
+        }]);
+        let out = tmpl
+            .render(
+                &[ChatMessage::user("Hello")],
+                &RenderOptions {
+                    tools: Some(tools),
+                    ..RenderOptions::default()
+                },
+            )
+            .unwrap();
+
+        assert!(
+            out.starts_with("<|startoftext|><|im_start|>system\nList of tools: [{"),
+            "{out}"
+        );
+        assert!(out.contains(r#""name":"compare""#), "{out}");
+        // Plain JSON, as `apply_chat_template` renders it: `<` is not
+        // HTML-escaped to `\u003c`.
+        assert!(out.contains("true when a < b"), "{out}");
+        assert!(out.ends_with("<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n"));
+    }
+
+    #[test]
+    fn a_request_without_tools_leaves_the_tool_list_out() {
+        let tmpl = ChatTemplate::from_str(LFM2_TOOLS_TEMPLATE);
+        let out = tmpl
+            .render(&[ChatMessage::user("Hello")], &RenderOptions::default())
+            .unwrap();
+        assert_eq!(
+            out,
+            "<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n"
+        );
+    }
+
+    /// LFM2.5-230M's template marks assistant spans with HuggingFace's
+    /// `{% generation %}` tags. They are a rendering no-op, and minijinja
+    /// rejects them as unknown statements unless they are neutralized.
+    #[test]
+    fn generation_tags_render_as_nothing() {
+        let tmpl = ChatTemplate::from_str(concat!(
+            "{%- for message in messages -%}",
+            "{{- '<|im_start|>' + message.role + '\n' -}}",
+            "{%- generation -%}{{- message.content -}}{%- endgeneration -%}",
+            "{{- '<|im_end|>\n' -}}",
+            "{%- endfor -%}"
+        ));
+        let out = tmpl
+            .render(&[ChatMessage::user("Hello")], &RenderOptions::default())
+            .unwrap();
+        assert_eq!(out, "<|im_start|>user\nHello<|im_end|>\n");
+    }
+
     #[test]
     fn template_is_send_and_sync() {
         fn assert_send_sync<T: Send + Sync>() {}

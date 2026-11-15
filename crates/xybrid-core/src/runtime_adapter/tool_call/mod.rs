@@ -194,6 +194,29 @@ impl ToolCallProtocol {
         }
     }
 
+    /// The entries of the `tools` array a chat template of this protocol is
+    /// rendered with. The shape is template-dependent:
+    ///
+    /// - Structured Gemma templates index `tool['function']['name']`, so
+    ///   they need the FULL OpenAI wrapper
+    ///   (`{"type": "function", "function": {...}}`).
+    /// - LFM2-family (and HF-generic `tojson`-the-entry) templates get the
+    ///   BARE function objects (`{name, description, parameters}`): they
+    ///   inline each entry verbatim into their system-prompt tool list, and
+    ///   the wrapper shape is not what those models were trained on
+    ///   (verified against the LFM2.5-230M/350M templates).
+    /// - LFM3's template unwraps `tool.function` when present and lists the
+    ///   function object either way, so it takes the bare shape too.
+    pub(crate) fn template_tool_entries(self, tools: &[Tool]) -> serde_json::Result<Vec<Value>> {
+        match self {
+            Self::Gemma | Self::FunctionGemma => tools.iter().map(serde_json::to_value).collect(),
+            Self::Lfm2 | Self::Lfm3 => tools
+                .iter()
+                .map(|tool| serde_json::to_value(&tool.function))
+                .collect(),
+        }
+    }
+
     pub(crate) fn detect_from_prompt(prompt: &str) -> Option<Self> {
         if prompt.contains(FUNCTION_GEMMA_DECLARATION_START)
             || prompt.contains(FUNCTION_GEMMA_DECLARATION_END)
@@ -247,6 +270,22 @@ pub(crate) fn is_lfm3_template(template: &str) -> bool {
     ]
     .iter()
     .all(|marker| template.contains(marker))
+}
+
+/// Whether a rendered prompt carries every tool the request offered: each
+/// non-empty tool name appears in it, and there is at least one. A template
+/// that ignores its `tools` variable renders a prompt the model cannot call
+/// tools from; both backends refuse such a request instead of answering
+/// without the tools.
+pub(crate) fn tool_names_rendered(prompt: &str, tools: &[Tool]) -> bool {
+    let mut names = tools
+        .iter()
+        .map(|tool| tool.function.name.as_str())
+        .filter(|name| !name.is_empty());
+    match names.next() {
+        Some(first_name) => prompt.contains(first_name) && names.all(|name| prompt.contains(name)),
+        None => false,
+    }
 }
 
 /// Parses supported tool-call blocks from model output.

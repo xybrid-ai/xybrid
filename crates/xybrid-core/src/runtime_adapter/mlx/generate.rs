@@ -5,8 +5,10 @@
 //! pass, the sampler, optional streaming-callback fan-out, and telemetry
 //! emission. The adapter's [`LlmBackend::generate`] /
 //! [`LlmBackend::generate_raw`] / [`LlmBackend::generate_streaming`]
-//! methods are thin shims over [`generate_tokens`] (for the token-by-token
-//! loop) and [`render_prompt`] (for chat-template application).
+//! methods are thin shims over [`generate_tokens`] (the token-by-token
+//! loop), [`generate_turn`] (that loop with the chat-output contract: stop
+//! markers, reasoning, tool calls) and [`render_prompt`] (chat-template
+//! application).
 //!
 //! # Split of responsibility
 //!
@@ -23,6 +25,7 @@
 //! stop-sequence logic), and the error points the caller at the missing runtime
 //! feature.
 
+use crate::gateway::Tool;
 use crate::runtime_adapter::llm::{
     ChatMessage, GenerationConfig, GenerationOutput, PartialToken, StreamingCallback,
 };
@@ -32,6 +35,9 @@ use crate::runtime_adapter::streaming_postprocess::{
     trim_partial_stop_suffix, truncate_at_first_stop, StreamingTextFilter, CHAT_STOP_PATTERNS,
     CHAT_STOP_PATTERNS_BROKEN,
 };
+use crate::runtime_adapter::tool_call::{
+    parse_tool_calls_with_tools, tool_names_rendered, ToolCallProtocol,
+};
 
 use std::time::Instant;
 
@@ -39,25 +45,55 @@ use super::chat_template::RenderOptions;
 use super::model::{MlxLlmAdapter, MlxLlmError, MlxLlmResult};
 use super::sampler::Sampler;
 
-/// Render a chat-message list into the raw prompt string the tokenizer
-/// sees. Loads the bundle's chat template from `tokenizer_config.json`
-/// (cached on the adapter's [`LoadedState`](super::model)), applies it with
-/// `add_generation_prompt = true` so the LLM continues mid-turn. The template
-/// is asked for its reasoning channel only for a reasoning model (see
-/// [`MlxLlmAdapter::reasoning_enabled`]); every other model gets a direct
-/// answer.
-pub fn render_prompt(adapter: &MlxLlmAdapter, messages: &[ChatMessage]) -> MlxLlmResult<String> {
-    let template = adapter
-        .chat_template()
-        .ok_or(MlxLlmError::NotLoaded)?
-        .clone();
+/// Render a chat-message list, and any tool definitions, into the raw prompt
+/// string the tokenizer sees. Uses the bundle's own chat template (cached on
+/// the adapter's [`LoadedState`](super::model)) with
+/// `add_generation_prompt = true`, so the model continues mid-turn. The
+/// template is asked for its reasoning channel only for a reasoning model
+/// (see [`MlxLlmAdapter::reasoning_enabled`]); every other model gets a
+/// direct answer.
+///
+/// Tools reach the model the way they do on the llama.cpp backend: as the
+/// template's `tools` variable, in the shape that template's protocol
+/// expects.
+///
+/// # Errors
+///
+/// [`MlxLlmError::InvalidRequest`] when the request offers tools and the
+/// bundle's template does not render them: the model would answer without
+/// knowing the tools exist.
+pub fn render_prompt(
+    adapter: &MlxLlmAdapter,
+    messages: &[ChatMessage],
+    tools: &[Tool],
+) -> MlxLlmResult<String> {
+    let template = adapter.chat_template().ok_or(MlxLlmError::NotLoaded)?;
+    let tool_entries = if tools.is_empty() {
+        None
+    } else {
+        let protocol = ToolCallProtocol::detect_from_template(template.source());
+        let entries = protocol.template_tool_entries(tools).map_err(|e| {
+            MlxLlmError::InvalidRequest(format!("tool definition failed to serialize: {e}"))
+        })?;
+        Some(serde_json::Value::Array(entries))
+    };
     let options = RenderOptions {
         enable_thinking: adapter.reasoning_enabled(),
+        tools: tool_entries,
         ..RenderOptions::default()
     };
-    template
+    let prompt = template
         .render(messages, &options)
-        .map_err(|e| MlxLlmError::ConfigInvalid(format!("chat template render failed: {e}")))
+        .map_err(|e| MlxLlmError::ConfigInvalid(format!("chat template render failed: {e}")))?;
+    if !tools.is_empty() && !tool_names_rendered(&prompt, tools) {
+        return Err(MlxLlmError::InvalidRequest(
+            "this bundle's chat template does not render tool definitions, so tool-bearing \
+             requests cannot be honored; load a tool-capable model or drop `tools` from the \
+             request"
+                .to_string(),
+        ));
+    }
+    Ok(prompt)
 }
 
 /// High-level generation parameters shared across generate / stream / chat.
@@ -92,19 +128,39 @@ impl<'cfg> GenerateParams<'cfg> {
     }
 }
 
-/// Stop patterns a streamed chat turn is cut at: the caller's stop sequences
-/// plus the chat-template markers every backend filters.
-fn chat_stream_stop_patterns(config: &GenerationConfig) -> Vec<String> {
-    merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS)
+/// Which markers end a filtered turn besides the caller's stop sequences.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnStops {
+    /// A chat turn: chat-template markers end it too.
+    Chat,
+    /// A streamed raw prompt: only the caller's stop sequences. The executor
+    /// adds the turn markers of the protocol it composed (tool
+    /// continuations); other raw callers know their own.
+    Raw,
 }
 
-/// The patterns the finished text is cut at: the streamed ones plus the
-/// variants a tokenizer leaves when it splits the leading `<` off a marker.
-/// Those would match ordinary text mid-stream, so they run on final text only.
-fn chat_final_stop_patterns(config: &GenerationConfig) -> Vec<String> {
-    let mut extras: Vec<&str> = CHAT_STOP_PATTERNS.to_vec();
-    extras.extend_from_slice(CHAT_STOP_PATTERNS_BROKEN);
-    merge_stop_patterns(&config.stop_sequences, &extras)
+/// Stop patterns a streamed turn is cut at: the caller's stop sequences plus,
+/// for a chat turn, the chat-template markers every backend filters.
+fn stream_stop_patterns(config: &GenerationConfig, stops: TurnStops) -> Vec<String> {
+    match stops {
+        TurnStops::Chat => merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS),
+        TurnStops::Raw => config.stop_sequences.clone(),
+    }
+}
+
+/// The patterns the finished text is cut at: the streamed ones plus, for a
+/// chat turn, the variants a tokenizer leaves when it splits the leading `<`
+/// off a marker. Those would match ordinary text mid-stream, so they run on
+/// final text only.
+fn final_stop_patterns(config: &GenerationConfig, stops: TurnStops) -> Vec<String> {
+    match stops {
+        TurnStops::Chat => {
+            let mut extras: Vec<&str> = CHAT_STOP_PATTERNS.to_vec();
+            extras.extend_from_slice(CHAT_STOP_PATTERNS_BROKEN);
+            merge_stop_patterns(&config.stop_sequences, &extras)
+        }
+        TurnStops::Raw => config.stop_sequences.clone(),
+    }
 }
 
 /// Apply the chat-output contract to a finished turn: cut at the first stop
@@ -133,29 +189,38 @@ fn finish_chat_output(
     truncated_by_budget
 }
 
-/// Run one chat turn for a prompt rendered by [`render_prompt`], with the
-/// chat-output contract the llama.cpp backend has (`streaming_postprocess`):
+/// Run one filtered turn for a prompt, with the output contract the
+/// llama.cpp backend has (`streaming_postprocess`):
 ///
-/// - the turn ends on the caller's stop sequences and on chat-template
-///   markers, and neither appears in the text;
+/// - the turn ends on the caller's stop sequences and, for [`TurnStops::Chat`],
+///   on chat-template markers, and neither appears in the text;
 /// - reasoning blocks never reach the answer or the token stream, and are
 ///   returned in [`GenerationOutput::reasoning_content`];
 /// - a streamed turn delivers filtered text deltas, then one empty terminal
-///   token that carries `finish_reason` and the final text.
+///   token that carries `finish_reason` and the final text;
+/// - when the request offers tools, tool-call blocks are held back from the
+///   stream, the terminal token carries the calls parsed from the final text,
+///   and a turn that made any ends with `finish_reason = "tool_calls"`. The
+///   blocks stay in the returned text, where the executor parses them for the
+///   response envelope.
 ///
-/// [`generate_tokens`] stays the unfiltered loop underneath: raw prompts and
-/// the token-level parity tests use it directly.
-pub fn generate_chat<'cb>(
+/// Chat turns go through here streamed or not, with a prompt from
+/// [`render_prompt`]. A raw prompt goes through here only when it is
+/// streamed: [`generate_tokens`] stays the unfiltered loop underneath, which
+/// batch raw prompts and the token-level parity tests use directly.
+pub fn generate_turn<'cb>(
     adapter: &MlxLlmAdapter,
     prompt: &str,
     config: &GenerationConfig,
+    stops: TurnStops,
     on_token: Option<StreamingCallback<'cb>>,
 ) -> MlxLlmResult<GenerationOutput> {
-    let stream_patterns = chat_stream_stop_patterns(config);
-    let final_patterns = chat_final_stop_patterns(config);
+    let stream_patterns = stream_stop_patterns(config, stops);
+    let final_patterns = final_stop_patterns(config, stops);
     // A template can open the reasoning channel itself (LFM3 with thinking
     // on); the model's output then starts mid-thought with no opener.
     let primed = is_reasoning_primed(prompt);
+    let offers_tools = !config.tools.is_empty();
 
     // The decode loop ends on a chat marker the tokenizer renders as text,
     // not only on the caller's stops, instead of running out its budget.
@@ -173,6 +238,9 @@ pub fn generate_chat<'cb>(
     } else {
         StreamingTextFilter::new(stream_patterns)
     };
+    if offers_tools {
+        filter = filter.with_tool_call_suppression();
+    }
     let mut emitted = 0usize;
     let mut output = {
         let forward: StreamingCallback<'_> = Box::new(|raw: PartialToken| {
@@ -196,10 +264,29 @@ pub fn generate_chat<'cb>(
     };
     let truncated_by_budget = finish_chat_output(&mut output, &final_patterns, primed);
 
+    // The finish reason follows a real parse of the final text, the same
+    // criterion the executor uses for the response envelope, so the terminal
+    // token and the envelope cannot disagree. A block the filter held back
+    // but that does not parse is not a tool call.
+    let tool_calls = if offers_tools {
+        parse_tool_calls_with_tools(&output.text, &config.tools)
+    } else {
+        Vec::new()
+    };
+    if !tool_calls.is_empty() {
+        output.finish_reason = "tool_calls".to_string();
+    }
+    let tool_block_suppressed = offers_tools && filter.saw_tool_call_block();
+
     // A primed turn that ended without closing its reasoning block streamed
     // nothing: the final cleanup surfaces that text as the answer, so the
-    // stream delivers it too.
-    if emitted == 0 && primed && !truncated_by_budget && !output.text.is_empty() {
+    // stream delivers it too. Not when the silence was a tool block.
+    if emitted == 0
+        && primed
+        && !truncated_by_budget
+        && !tool_block_suppressed
+        && !output.text.is_empty()
+    {
         on_token(PartialToken::new(
             output.text.clone(),
             emitted,
@@ -210,11 +297,19 @@ pub fn generate_chat<'cb>(
     }
 
     // The terminal token is the only place the callback learns how the turn
-    // ended, so it goes out even when the filter held back every delta.
+    // ended, so it goes out even when the filter held back every delta. It is
+    // also the typed handoff for tool calls: their blocks were kept out of the
+    // stream on purpose, so the parsed calls ride here.
     if output.tokens_generated > 0 {
+        let final_cumulative = if tool_block_suppressed {
+            filter.cumulative_emitted().to_string()
+        } else {
+            output.text.clone()
+        };
         on_token(
-            PartialToken::new(String::new(), emitted, output.text.clone())
-                .with_finish_reason(output.finish_reason.as_str()),
+            PartialToken::new(String::new(), emitted, final_cumulative)
+                .with_finish_reason(output.finish_reason.as_str())
+                .with_tool_calls(tool_calls, &output.text),
         )
         .map_err(MlxLlmError::StreamingCallback)?;
     }
@@ -368,6 +463,7 @@ fn decode_generated_text(
     tokenizer: &tokenizers::Tokenizer,
     generated_ids: &[i64],
     previous_text: &str,
+    skip_special_tokens: bool,
 ) -> MlxLlmResult<(String, String)> {
     let ids: Vec<u32> = generated_ids
         .iter()
@@ -375,7 +471,7 @@ fn decode_generated_text(
         .collect::<MlxLlmResult<_>>()?;
     let stable_len = stable_decode_prefix_len(tokenizer, &ids);
     let decoded = tokenizer
-        .decode(&ids[..stable_len], true)
+        .decode(&ids[..stable_len], skip_special_tokens)
         .map_err(|e| MlxLlmError::TokenizerLoad(format!("generated decode failed: {e}")))?;
     // Byte-level decoders can surface an incomplete trailing scalar as U+FFFD.
     // Hold that unstable suffix until a later token completes it.
@@ -614,7 +710,15 @@ mod runtime {
             // (byte-fallback `<0xNN>` runs, multi-byte scalars split across
             // ids); the held-back text is emitted once a later token completes
             // it. Replaces the previous O(tokens²) full-prefix re-decode.
-            let mut detok = needs_incremental_text.then(|| tokenizer.decode_stream(true));
+            // A request that offers tools keeps special tokens in the text:
+            // the markers around a tool call are special tokens in the LFM2
+            // and Gemma vocabularies, and the shared parser finds calls by
+            // them. Chat markers then appear as text too, as they do on the
+            // llama.cpp backend, and the same stop patterns cut them. Every
+            // other request decodes as before, special tokens dropped.
+            let skip_special_tokens = params.config.tools.is_empty();
+            let mut detok =
+                needs_incremental_text.then(|| tokenizer.decode_stream(skip_special_tokens));
             let longest_stop = params
                 .config
                 .stop_sequences
@@ -681,7 +785,12 @@ mod runtime {
                 // every token. Plain batch generation can defer tokenizer decode
                 // until the end. Either way this host-side work overlaps the GPU
                 // computing the already-dispatched next token.
-                let token_text = if let Some(detok) = detok.as_mut() {
+                // With special tokens kept, the token that ends the turn must
+                // not become text; with them dropped it decodes to nothing.
+                let ends_turn = eos_tokens.contains(&next_token);
+                let token_text = if !skip_special_tokens && ends_turn {
+                    String::new()
+                } else if let Some(detok) = detok.as_mut() {
                     let id = token_id_to_u32("generated", next_token)?;
                     let segment = detok
                         .step(id)
@@ -700,7 +809,7 @@ mod runtime {
                 chunk_timestamps.push(now);
 
                 // EOS check.
-                if eos_tokens.contains(&next_token) {
+                if ends_turn {
                     finish_reason = "stop";
                     emit_callback(
                         callback.as_mut(),
@@ -788,7 +897,16 @@ mod runtime {
 
             let tokens_generated = generated.len();
             if !needs_incremental_text {
-                cumulative_text = decode_generated_text(tokenizer, &generated, "")?.1;
+                // As above: with special tokens kept, not the one that ended
+                // the turn.
+                let ended_on_eos = generated.last().is_some_and(|id| eos_tokens.contains(id));
+                let text_ids = if !skip_special_tokens && ended_on_eos {
+                    &generated[..generated.len() - 1]
+                } else {
+                    &generated[..]
+                };
+                cumulative_text =
+                    decode_generated_text(tokenizer, text_ids, "", skip_special_tokens)?.1;
             }
             let fields =
                 mlx_streaming_fields(start, &chunk_timestamps, prompt_ids.len(), tokens_generated);
@@ -852,7 +970,7 @@ mod runtime {
                 prefill_tps: fields.prefill_tps,
                 // Text-only MLX path: no image preprocessing leg to time.
                 image_preprocess_ms: None,
-                // The raw loop returns text as generated; `generate_chat`
+                // The raw loop returns text as generated; `generate_turn`
                 // splits reasoning blocks off a chat turn afterwards.
                 reasoning_content: None,
             })
@@ -1149,7 +1267,7 @@ mod tests {
             stop_sequences: vec!["END".to_string()],
             ..Default::default()
         };
-        let patterns = chat_final_stop_patterns(&config);
+        let patterns = final_stop_patterns(&config, TurnStops::Chat);
 
         // The loop reports "stop" for a stop sequence and leaves it in place.
         let mut output = chat_output("  the answer END trailing", "stop");
@@ -1176,7 +1294,7 @@ mod tests {
 
     #[test]
     fn finish_chat_output_splits_reasoning_off_the_answer() {
-        let patterns = chat_final_stop_patterns(&GenerationConfig::default());
+        let patterns = final_stop_patterns(&GenerationConfig::default(), TurnStops::Chat);
 
         // The model opened the block itself.
         let mut output = chat_output("<think>weigh it</think>Four.", "stop");
@@ -1360,7 +1478,7 @@ mod tests {
         for id in ids {
             generated.push(id);
             let (delta, decoded) =
-                super::decode_generated_text(&tokenizer, &generated, &cumulative)
+                super::decode_generated_text(&tokenizer, &generated, &cumulative, true)
                     .expect("decode generated text");
             streamed_deltas.push_str(&delta);
             cumulative = decoded;
@@ -1436,6 +1554,7 @@ mod tests {
                 ChatMessage::assistant("Hi there!"),
                 ChatMessage::user("What's 2+2?"),
             ],
+            &[],
         )
         .expect("prompt render");
         assert!(
