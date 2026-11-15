@@ -885,6 +885,10 @@ pub fn is_mlx_embedding_safetensors_metadata(metadata: &ModelMetadata) -> bool {
         == Some("embed")
 }
 
+/// Architectures a SafeTensors LLM bundle is handed to the MLX adapter for.
+/// `lfm3` is in the list so that the adapter gets to refuse it by name and
+/// point at llama.cpp: LFM3 is not the LFM2 architecture and MLX does not run
+/// it (see `runtime_adapter::mlx::model::dispatch_architecture`).
 fn is_mlx_llm_safetensors_architecture(architecture: &str) -> bool {
     matches!(
         architecture.trim().to_ascii_lowercase().as_str(),

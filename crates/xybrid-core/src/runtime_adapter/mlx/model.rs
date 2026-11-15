@@ -65,7 +65,7 @@ pub enum MlxLlmError {
     /// family appears upstream.
     #[error(
         "unsupported MLX model architecture `{model_type}` — supported MLX architectures are \
-         qwen3, gemma4, and lfm2/lfm/lfm3; run this model through llama.cpp instead \
+         qwen3, gemma4, and lfm2/lfm; run this model through llama.cpp instead \
          (`--backend llamacpp`, registry format gguf)"
     )]
     UnsupportedArchitecture { model_type: String },
@@ -779,10 +779,16 @@ fn dispatch_architecture(model_type: &str) -> MlxLlmResult<ModelArchitecture> {
         "qwen3" => Ok(ModelArchitecture::Qwen35),
         // US-012: Gemma 4 family.
         "gemma4" => Ok(ModelArchitecture::Gemma4),
-        // US-013: LFM 2 / 2.5 / 3.5 family. Upstream MLX bundles use
-        // `"lfm2"` for current public LFM2 releases, `"lfm"` for some
-        // LFM 2 / 3 bundles, and `"lfm3"` for LFM 3.5 specifically.
-        "lfm2" | "lfm" | "lfm3" => Ok(ModelArchitecture::Lfm35),
+        // LFM2 and LFM2.5. Upstream bundles say `"lfm2"`; `"lfm"` is an
+        // older spelling of the same architecture.
+        //
+        // `"lfm3"` is deliberately not here. LFM3 (`Lfm3ForCausalLM`) is a
+        // different network: sliding-window attention layers, sandwich
+        // norms, a longer convolution cache, per-layer-type RoPE. Running it
+        // through the LFM2 forward pass would at best fail on a missing
+        // tensor and at worst answer wrongly, so it falls through to the
+        // refusal below, which names llama.cpp.
+        "lfm2" | "lfm" => Ok(ModelArchitecture::Lfm35),
         other => Err(MlxLlmError::UnsupportedArchitecture {
             model_type: other.to_string(),
         }),
@@ -1180,7 +1186,7 @@ mod tests {
             "tie_word_embeddings": true,
             "head_dim": 4,
         });
-        if matches!(model_type, "lfm2" | "lfm" | "lfm3") {
+        if matches!(model_type, "lfm2" | "lfm") {
             cfg["layer_types"] = serde_json::json!(["conv", "full_attention"]);
             cfg["conv_l_cache"] = serde_json::json!(3);
         }
@@ -1255,7 +1261,7 @@ mod tests {
                 };
                 expected_weight_keys(&g_cfg)
             }
-            "lfm2" | "lfm" | "lfm3" => {
+            "lfm2" | "lfm" => {
                 use super::super::arch::lfm35::{expected_weight_keys, Lfm35Config};
                 let l_cfg = Lfm35Config {
                     model_type: model_type.into(),
@@ -1340,7 +1346,8 @@ mod tests {
 
         assert!(msg.contains("qwen3"), "got: {msg}");
         assert!(msg.contains("gemma4"), "got: {msg}");
-        assert!(msg.contains("lfm2/lfm/lfm3"), "got: {msg}");
+        assert!(msg.contains("lfm2/lfm;"), "got: {msg}");
+        assert!(!msg.contains("lfm3"), "LFM3 is not supported: {msg}");
         assert!(msg.contains("--backend llamacpp"), "got: {msg}");
         assert!(msg.contains("gguf"), "got: {msg}");
         assert!(
@@ -1385,15 +1392,18 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_accepts_lfm2_lfm_and_lfm3() {
-        // US-013: LFM model_type strings drift across public MLX bundles,
-        // but all three currently share the same hybrid builder topology.
+    fn dispatch_accepts_lfm2_and_lfm_and_refuses_lfm3() {
         let z = dispatch_architecture("lfm2").expect("lfm2 dispatch");
         assert!(matches!(z, ModelArchitecture::Lfm35));
         let a = dispatch_architecture("lfm").expect("lfm dispatch");
         assert!(matches!(a, ModelArchitecture::Lfm35));
-        let b = dispatch_architecture("lfm3").expect("lfm3 dispatch");
-        assert!(matches!(b, ModelArchitecture::Lfm35));
+        // LFM3 is not the LFM2 architecture; see `dispatch_architecture`.
+        let err = dispatch_architecture("lfm3").expect_err("lfm3 is not an LFM2");
+        assert!(
+            matches!(&err, MlxLlmError::UnsupportedArchitecture { model_type } if model_type == "lfm3"),
+            "{err}"
+        );
+        assert!(err.to_string().contains("llama.cpp"), "{err}");
     }
 
     #[test]
@@ -1411,20 +1421,18 @@ mod tests {
     }
 
     #[test]
-    fn load_lfm3_returns_loaded_adapter() {
-        // US-013 end-to-end: bundle with `model_type = "lfm3"` loads
-        // without the UnsupportedArchitecture error. The dummy bundle
-        // ships a mixed conv+attention layer schedule (layer 0 conv,
-        // layer 1 attention), so the hybrid weight-key schedule is
-        // exercised on the happy path.
+    fn load_refuses_an_lfm3_bundle_by_name() {
+        // An LFM3 bundle must not load as an LFM2: the error names the
+        // architecture and the backend that runs it.
         let tmp = TempDir::new().unwrap();
         write_dummy_bundle(tmp.path(), "lfm3");
-        let adapter = MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default()).expect("load ok");
-        assert!(LlmBackend::is_loaded(&adapter));
-        assert!(matches!(
-            adapter.architecture(),
-            Some(ModelArchitecture::Lfm35)
-        ));
+        let err = MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::default())
+            .expect_err("lfm3 is not an LFM2");
+        assert!(
+            matches!(&err, MlxLlmError::UnsupportedArchitecture { model_type } if model_type == "lfm3"),
+            "{err}"
+        );
+        assert!(err.to_string().contains("llama.cpp"), "{err}");
     }
 
     #[test]

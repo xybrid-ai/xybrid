@@ -9,7 +9,7 @@
 //! - [`qwen35`] — Qwen 3 family (US-011, `model_type = "qwen3"`).
 //! - [`gemma4`] — Gemma 4 family (US-012, `model_type = "gemma4"`).
 //! - [`lfm35`] — Liquid Foundation Model 2 / 2.5 / 3.5 family (US-013,
-//!   `model_type = "lfm2"`, `"lfm"` or `"lfm3"`).
+//!   `model_type = "lfm2"` or `"lfm"`; LFM3 is a different architecture).
 //! - [`bert`] — BERT-family encoders for embeddings (US-015,
 //!   `model_type = "bert"` or `"nomic_bert"`).
 

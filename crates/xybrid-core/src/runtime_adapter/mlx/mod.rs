@@ -2,7 +2,7 @@
 //!
 //! This module hosts the MLX SafeTensors adapters: the local LLM adapter,
 //! embedding adapter, config loaders, tokenizer/chat-template support, KV
-//! cache, architecture-specific builders (Qwen 3, Gemma 4, LFM 2/2.5/3.5,
+//! cache, architecture-specific builders (Qwen 3, Gemma 4, LFM 2/2.5,
 //! BERT/nomic-BERT), and trait wiring into the execution stack.
 //!
 //! # Feature tiers

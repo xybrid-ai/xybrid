@@ -35,9 +35,9 @@
 //!    state for incremental decode.
 //!
 //! Reference (upstream): <https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/lfm2.py>
-//! (LFM 3 / 3.5 inherit LFM 2's hybrid conv+attention topology on the
-//! MLX-LM side; the family ID is `"lfm2"`, `"lfm"` or `"lfm3"` in the config
-//! header per this PRD).
+//! The family ID in the config header is `"lfm2"` or `"lfm"`. LFM3 keeps the
+//! hybrid conv+attention idea but is a different network (sliding-window
+//! attention layers, sandwich norms), and this builder refuses it.
 
 use std::collections::HashSet;
 use std::fs;
@@ -62,14 +62,14 @@ pub enum LayerKind {
     FullAttention,
 }
 
-/// Full LFM 2 / 2.5 / 3.5 `config.json` subset the builder needs.
+/// The subset of an LFM2 / LFM2.5 `config.json` the builder needs.
 ///
-/// Fields mirror the HuggingFace config layout (`model_type = "lfm2"`,
-/// `"lfm"`, or `"lfm3"`). Missing fields fall back to upstream defaults
-/// where they exist.
+/// Fields mirror the HuggingFace config layout (`model_type = "lfm2"` or
+/// `"lfm"`). Missing fields fall back to upstream defaults where they
+/// exist.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Lfm35Config {
-    /// `"lfm2"`, `"lfm"` or `"lfm3"` — all route to this builder.
+    /// `"lfm2"` or `"lfm"`: both route to this builder. LFM3 does not.
     pub model_type: String,
     /// Model hidden / embedding dimension.
     pub hidden_size: usize,
@@ -172,7 +172,7 @@ impl Lfm35Config {
     }
 
     fn validate(&self) -> MlxLlmResult<()> {
-        if !matches!(self.model_type.as_str(), "lfm2" | "lfm" | "lfm3") {
+        if !matches!(self.model_type.as_str(), "lfm2" | "lfm") {
             return Err(MlxLlmError::UnsupportedArchitecture {
                 model_type: self.model_type.clone(),
             });
@@ -1370,7 +1370,7 @@ mod tests {
 
     fn dummy_config(n_layers: usize, tied: bool) -> Lfm35Config {
         Lfm35Config {
-            model_type: "lfm3".into(),
+            model_type: "lfm2".into(),
             hidden_size: 16,
             num_hidden_layers: n_layers,
             num_attention_heads: 4,
@@ -1504,11 +1504,18 @@ mod tests {
         assert!(cfg.validate().is_ok());
     }
 
+    /// LFM3 is a different architecture (sliding-window attention, sandwich
+    /// norms); this builder must not take it for an LFM2.
     #[test]
-    fn model_type_lfm3_is_accepted() {
-        let cfg = dummy_config(1, true);
-        assert_eq!(cfg.model_type, "lfm3");
-        assert!(cfg.validate().is_ok());
+    fn model_type_lfm3_is_refused() {
+        let mut cfg = dummy_config(1, true);
+        cfg.model_type = "lfm3".into();
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            matches!(&err, MlxLlmError::UnsupportedArchitecture { model_type } if model_type == "lfm3"),
+            "{err}"
+        );
+        assert!(err.to_string().contains("llama.cpp"), "{err}");
     }
 
     #[test]
@@ -1777,7 +1784,7 @@ mod tests {
         // configs sometimes write `rms_norm_eps`. The alias keeps both
         // working without touching downstream metadata.
         let raw = serde_json::json!({
-            "model_type": "lfm3",
+            "model_type": "lfm2",
             "hidden_size": 16,
             "num_hidden_layers": 1,
             "num_attention_heads": 4,
