@@ -151,7 +151,7 @@ XYBRID_MLX_QWEN_DIR=/path/to/Qwen3-0.6B \
 
 `tools/scripts/capture-golden-tokens.sh --self` records the tokens a staged bundle decodes to at the current commit; `--test mlx_golden_parity` then fails if a later change alters them. Capture before changing decode code.
 
-`tools/scripts/capture-upstream-goldens.py` records what Python mlx-lm decodes for the same prompts, in float32, and the ignored `golden_upstream_audit` test compares the two. Streams that part at a near-tie are expected (the two stacks order their arithmetic differently); a difference at the first token, or where upstream's margin is wide, is a numerics bug. Run it when the MLX pin moves. On the current pin, Qwen3 0.6B (MLX 4-bit) matches mlx-lm token for token up to a near-tie on both canonical prompts (upstream margins 0.045 and 0.006 in log-probability).
+`tools/scripts/capture-upstream-goldens.py` records what Python mlx-lm decodes for the same prompts, and the ignored `golden_upstream_audit` test compares the two. Streams that part at a near-tie are expected: the Qwen and LFM adapters compute in the checkpoint's own dtype, as mlx-lm does by default, and in bfloat16 each stack's logits are off by a few rounding steps in its own way. The reference is therefore computed in float32, to measure how close the two candidates really were. A difference at the first token, or where that margin is wide, is a numerics bug. Run it when the MLX pin moves. On the current pin, Qwen3 0.6B matches mlx-lm token for token up to a near-tie on both canonical prompts: margins of 0.045 and 0.006 in log-probability for the MLX 4-bit bundle, 0.043 and 0.005 for the BF16 one.
 
 ## Troubleshooting
 

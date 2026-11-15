@@ -20,10 +20,14 @@ Run it after `capture-golden-tokens.sh --self`, with the same bundles staged:
 Install the `mlx` release vendor/mlx-apple/UPSTREAM_VERSIONS.txt pins, so both
 stacks run the same kernels.
 
-The reference is computed in float32, which is what xybrid computes in.
-mlx-lm's default is the checkpoint's own dtype, and for a bfloat16 bundle that
-leaves logprobs in steps of 0.125 to 0.5: margins that coarse cannot tell a
-near-tie from a real difference. `--native-dtype` keeps mlx-lm's default.
+The reference is computed in float32, to measure how close the two candidates
+really are at the step where the streams part. Both stacks themselves compute
+in the checkpoint's own dtype (xybrid's Qwen and LFM adapters do, as mlx-lm
+does by default), and for a bfloat16 bundle that rounds every logit to steps
+of about 0.125: each stack is then off by a few such steps, in its own way,
+and the two part wherever the true margin is smaller than that. Margins read
+from a bfloat16 run are quantized the same way and cannot tell a near-tie from
+a real difference. `--native-dtype` keeps mlx-lm's default.
 
 Goldens are written to <bundle>/.golden/ and are never committed.
 """

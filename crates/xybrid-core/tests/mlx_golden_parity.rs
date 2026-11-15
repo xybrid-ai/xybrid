@@ -16,9 +16,12 @@
 //! fixtures; they are local artifacts, never committed. Capture Tier A with
 //! `tools/scripts/capture-golden-tokens.sh --self` and Tier B with
 //! `tools/scripts/capture-upstream-goldens.py`, which runs Python `mlx-lm` in
-//! float32 (what this implementation computes in) and writes the same JSON
-//! shape ([`GoldenFile`]) with `tier: "upstream"`. All tests skip cleanly
-//! when bundles or goldens are absent, so fixture-less CI is unaffected.
+//! float32 and writes the same JSON shape ([`GoldenFile`]) with
+//! `tier: "upstream"`. Float32 is the measuring stick, not what either stack
+//! runs in: both compute in the checkpoint's dtype, and a bfloat16 run's own
+//! margins are too coarse to tell a near-tie from a real difference. All
+//! tests skip cleanly when bundles or goldens are absent, so fixture-less CI
+//! is unaffected.
 
 #![cfg(all(
     feature = "llm-mlx-runtime",
