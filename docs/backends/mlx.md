@@ -38,7 +38,7 @@ MLX is behind two Cargo features:
 cargo build -p xybrid-cli --features platform-macos,llm-mlx-runtime
 ```
 
-The pins are in [`vendor/mlx-apple/UPSTREAM_VERSIONS.txt`](../../vendor/mlx-apple/UPSTREAM_VERSIONS.txt). No prebuilt xcframework is published yet (`release=unpublished`), so `fetch-mlx-xcframework.sh` has nothing to download and the source build is the only path; see [`vendor/mlx-apple/README.md`](../../vendor/mlx-apple/README.md). A build outside this repository sets `MLX_XCFRAMEWORK_PATH` to an `mlx.xcframework`.
+The pins are in [`vendor/mlx-apple/UPSTREAM_VERSIONS.txt`](../../vendor/mlx-apple/UPSTREAM_VERSIONS.txt): MLX v0.32.4 and mlx-c v0.8.0. No prebuilt xcframework is published yet (`release=unpublished`), so `fetch-mlx-xcframework.sh` has nothing to download and the source build is the only path; see [`vendor/mlx-apple/README.md`](../../vendor/mlx-apple/README.md). A build outside this repository sets `MLX_XCFRAMEWORK_PATH` to an `mlx.xcframework`.
 
 ### Shipping a binary that links MLX
 
@@ -117,6 +117,7 @@ Other differences from llama.cpp:
 
 - **One MLX operation at a time.** MLX does not tolerate two threads evaluating at once, so loads, generations and embedding runs are serialized across the whole process. Two MLX models never run in parallel; the second waits. A streaming generation holds its turn until it ends, so a token callback must not block on another thread's MLX call (an embedding of the text so far, say): that call is waiting for the stream to finish. Do such work on the callback's own thread, or after the stream.
 - **Unloading frees memory when MLX is idle.** A dropped or unloaded model's memory goes back to the system at once, or, if another MLX model is mid-run, when that run finishes.
+- **A GPU failure is an error, not a crash.** If Metal rejects the work (the system is out of GPU memory, most often), the load or run that was waiting for it fails with `[METAL] Command buffer execution failed` and Metal's reason. The model stays loaded and the next run starts clean.
 - **No prompt reuse across turns.** Every call evaluates its whole prompt again. A long conversation costs more per turn than on llama.cpp, which keeps the shared prefix.
 - **Gemma reasoning.** A reasoning model's thinking is split off the answer and returned as `reasoning_content`, as on llama.cpp. Gemma 4 always answers directly, on both backends.
 
@@ -127,7 +128,7 @@ Other differences from llama.cpp:
 CI runs the MLX runtime on Apple Silicon in two lanes, both only when something that reaches the runtime changed. The non-linking tier is checked on Linux for every code change.
 
 - `check (llm-mlx-runtime, macos)` in `ci.yml` uses synthetic, randomly initialized bundles written by the tests themselves, through the adapters, the executor, the SDK and the CLI.
-- `Test MLX (integration, real model)` in `test-mlx.yml` downloads one small real bundle, the `qwen3-0.6b-4bit-mlx` fixture (335 MB, pinned by revision and checksum), and runs the chat, streaming, cancellation, two-models-at-once and memory-release tests on it, then the bundle through the CLI. `tools/scripts/run-mlx-real-tests.sh` runs each test in its own process and then all of them in one, and prints the crash report's backtrace if a process dies.
+- `Test MLX (integration, real model)` in `test-mlx.yml` downloads one small real bundle, the `qwen3-0.6b-4bit-mlx` fixture (335 MB, pinned by revision and checksum), and runs the chat, streaming, cancellation, two-models-at-once and memory-release tests on it, then the bundle through the CLI. `tools/scripts/run-mlx-real-tests.sh` runs each test in its own process and then all of them in one, and prints the crash report's backtrace if a process dies. A hosted runner's GPU is virtual and rejects a command buffer now and then; the script retries that one failure, by MLX's message, and prints Metal's reason each time.
 
 The other real-weight tests are for bundles too large to download in CI. They run only when an environment variable points at a bundle staged on disk, and skip otherwise:
 
@@ -149,6 +150,8 @@ XYBRID_MLX_QWEN_DIR=/path/to/Qwen3-0.6B \
 `./integration-tests/download.sh qwen3-0.6b-4bit-mlx` downloads the CI fixture; point `XYBRID_MLX_QWEN_DIR` and `XYBRID_MLX_QWEN_4BIT_DIR` at `integration-tests/fixtures/models/qwen3-0.6b-4bit-mlx`. For a staged fixture, `download.sh <fixture-id>` prints where it comes from and does not download it.
 
 `tools/scripts/capture-golden-tokens.sh --self` records the tokens a staged bundle decodes to at the current commit; `--test mlx_golden_parity` then fails if a later change alters them. Capture before changing decode code.
+
+`tools/scripts/capture-upstream-goldens.py` records what Python mlx-lm decodes for the same prompts, in float32, and the ignored `golden_upstream_audit` test compares the two. Streams that part at a near-tie are expected (the two stacks order their arithmetic differently); a difference at the first token, or where upstream's margin is wide, is a numerics bug. Run it when the MLX pin moves. On the current pin, Qwen3 0.6B (MLX 4-bit) matches mlx-lm token for token up to a near-tie on both canonical prompts (upstream margins 0.045 and 0.006 in log-probability).
 
 ## Troubleshooting
 
@@ -177,6 +180,10 @@ See [What MLX does not do](#what-mlx-does-not-do). Load the model with `backend:
 ### `MLX sharded SafeTensors bundles require model.safetensors.index.json`
 
 The directory has `model-*.safetensors` shards without the index that maps tensors to them. Download the index with the shards.
+
+### `[METAL] Command buffer execution failed`
+
+Metal could not run the work MLX gave it; the rest of the message is Metal's reason. `Insufficient Memory` means the model and its working memory do not fit in what the GPU can use right now: close other GPU-heavy applications, use a smaller or more heavily quantized bundle, or run the model's GGUF variant on llama.cpp. The process and the loaded model survive the error.
 
 ### `unsupported quantization`
 

@@ -47,7 +47,7 @@ pub fn cache_memory() -> MlxResult<usize> {
 
 /// Version string of the MLX library this process is linked against.
 ///
-/// Reports the *runtime* version (e.g. `"0.31.1"`), which is the
+/// Reports the *runtime* version (e.g. `"0.32.4"`), which is the
 /// authoritative identity for numerics provenance — golden-token captures
 /// record it and verification asserts it matches before comparing streams.
 pub fn version() -> MlxResult<String> {

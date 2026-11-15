@@ -120,25 +120,80 @@ pub(crate) fn check_rc(rc: i32, ctx: &'static str) -> Result<(), MlxError> {
     }
 }
 
-/// Create a fresh default CPU stream handle.
+/// A stream every thread of the process shares.
 ///
-/// # Safety
-///
-/// Safe to call from any thread at any time. The returned handle owns
-/// exactly one reference to the underlying stream and must be freed via
-/// [`stream_free`] exactly once.
-pub(crate) unsafe fn default_cpu_stream() -> mlx_stream {
-    sys::mlx_default_cpu_stream_new()
+/// MLX streams are thread affine: a stream's command encoder is registered
+/// with the thread that created it, and evaluating on it from another thread
+/// fails. xybrid loads a model on one thread and runs it on others, so it uses
+/// the streams mlx-c registers globally instead
+/// (`mlx_stream_new_thread_unsafe`), one per device for the whole process.
+/// MLX does not synchronize them; `crate::exclusive` does.
+struct SharedStream(mlx_stream);
+
+// SAFETY: the handle points at an `{index, device}` pair that is never
+// written after creation. Reading it from several threads, to clone the
+// handle or to pass it to an op, is not a data race. Everything that encodes
+// into or waits on the stream itself runs under `crate::exclusive`.
+unsafe impl Send for SharedStream {}
+// SAFETY: as for `Send`.
+unsafe impl Sync for SharedStream {}
+
+static SHARED_GPU_STREAM: OnceLock<Result<SharedStream, String>> = OnceLock::new();
+static SHARED_CPU_STREAM: OnceLock<Result<SharedStream, String>> = OnceLock::new();
+
+fn shared_stream_slot(
+    device_type: sys::mlx_device_type,
+) -> &'static OnceLock<Result<SharedStream, String>> {
+    if device_type == sys::mlx_device_type__MLX_GPU {
+        &SHARED_GPU_STREAM
+    } else {
+        &SHARED_CPU_STREAM
+    }
 }
 
-/// Create a fresh default GPU stream handle.
+/// The process-wide stream for a device, created on first use.
+///
+/// The returned handle is borrowed: clone it with [`stream_clone`], never
+/// free it.
 ///
 /// # Safety
 ///
-/// Same contract as [`default_cpu_stream`]. Requires the Metal runtime to
-/// be reachable at call time — on Apple hardware that is always true.
-pub(crate) unsafe fn default_gpu_stream() -> mlx_stream {
-    sys::mlx_default_gpu_stream_new()
+/// The error handler must be installed ([`ensure_error_handler`]), and for
+/// the GPU the Metal library must be in place
+/// (`crate::resources::ensure_metallib_resource`).
+pub(crate) unsafe fn shared_stream(
+    device_type: sys::mlx_device_type,
+) -> Result<mlx_stream, MlxError> {
+    let slot = shared_stream_slot(device_type);
+    let created = match slot.get() {
+        Some(created) => created,
+        None => {
+            // Creating the stream registers it in a table MLX does not lock,
+            // and every evaluation reads that table. Take the MLX lock first,
+            // and before the `OnceLock`, so the order is the same on every
+            // thread.
+            let _mlx = crate::exclusive();
+            slot.get_or_init(|| {
+                let device = sys::mlx_device_new_type(device_type, 0);
+                let stream = sys::mlx_stream_new_thread_unsafe(device);
+                let _ = sys::mlx_device_free(device);
+                if stream.ctx.is_null() {
+                    let _ = sys::mlx_stream_free(stream);
+                    Err(take_recorded_error()
+                        .filter(|message| !message.is_empty())
+                        .unwrap_or_else(|| "the MLX runtime failed to initialise".to_string()))
+                } else {
+                    Ok(SharedStream(stream))
+                }
+            })
+        }
+    };
+    match created {
+        Ok(stream) => Ok(stream.0),
+        Err(message) => Err(MlxError::Internal(format!(
+            "could not create the MLX stream: {message}"
+        ))),
+    }
 }
 
 /// Retain-copy a stream handle.
@@ -424,26 +479,29 @@ pub(crate) unsafe fn set_cache_limit(limit: usize) -> Result<usize, MlxError> {
     Ok(previous)
 }
 
-/// Wait for the work in flight on MLX's default GPU and CPU streams.
+/// Wait for the work in flight on the shared GPU and CPU streams, and take
+/// the error it left behind, if any.
 ///
 /// A scheduled evaluation keeps the arrays it reads alive until it completes,
-/// on MLX's own threads. After this returns, arrays that were dropped while
-/// it ran have been freed.
+/// on MLX's own threads; after this returns, arrays that were dropped while
+/// it ran have been freed. MLX also keeps the error of a failed evaluation
+/// (a command buffer the GPU rejected, say) on the stream and raises it from
+/// the next call that touches the stream. Synchronizing raises it here.
+///
+/// A stream that was never created has nothing in flight and is skipped.
 ///
 /// # Safety
 ///
 /// The caller holds the MLX lock (`exclusive`): synchronizing ends the GPU
 /// stream's open command buffer, which no other thread may be encoding into.
-pub(crate) unsafe fn synchronize_default_streams() -> Result<(), MlxError> {
+pub(crate) unsafe fn synchronize_shared_streams() -> Result<(), MlxError> {
     let mut first_error = None;
-    for stream in [
-        sys::mlx_default_gpu_stream_new(),
-        sys::mlx_default_cpu_stream_new(),
-    ] {
-        if let Err(error) = check_rc(sys::mlx_synchronize(stream), "mlx_synchronize") {
-            first_error.get_or_insert(error);
+    for slot in [&SHARED_GPU_STREAM, &SHARED_CPU_STREAM] {
+        if let Some(Ok(stream)) = slot.get() {
+            if let Err(error) = check_rc(sys::mlx_synchronize(stream.0), "mlx_synchronize") {
+                first_error.get_or_insert(error);
+            }
         }
-        stream_free(stream);
     }
     first_error.map_or(Ok(()), Err)
 }
@@ -477,7 +535,7 @@ pub(crate) unsafe fn cache_memory() -> Result<usize, MlxError> {
     Ok(bytes)
 }
 
-/// Read the linked MLX library's version string (e.g. `"0.31.1"`).
+/// Read the linked MLX library's version string (e.g. `"0.32.4"`).
 ///
 /// # Safety
 ///
@@ -1491,7 +1549,10 @@ pub(crate) unsafe fn array_data_u64(arr: mlx_array) -> Result<Vec<u64>, MlxError
 }
 
 /// Dispatch `mlx_fast_scaled_dot_product_attention(res, q, k, v, scale,
-/// mask_mode, mask_or_null, sinks_or_null, s)`.
+/// mask_mode, mask_or_null, sinks_or_null, force_fused, s)`.
+///
+/// `force_fused` is always `false`: MLX chooses between its fused kernel and
+/// the decomposed fallback, as it does for mlx-lm.
 ///
 /// `mask_mode` is a C string — callers pass `"causal"` for the causal mask or
 /// `""` (empty) for no mode. When supplying an explicit additive mask, pass
@@ -1516,7 +1577,7 @@ pub(crate) unsafe fn op_sdpa(
 ) -> Result<mlx_array, MlxError> {
     let mut res = sys::mlx_array_new();
     let rc = sys::mlx_fast_scaled_dot_product_attention(
-        &mut res, q, k, v, scale, mask_mode, mask_arr, sinks, s,
+        &mut res, q, k, v, scale, mask_mode, mask_arr, sinks, false, s,
     );
     if let Err(err) = check_rc(rc, "mlx_fast_scaled_dot_product_attention") {
         let _ = sys::mlx_array_free(res);

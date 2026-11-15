@@ -56,12 +56,36 @@ needed for download-based installs through `fetch-mlx-xcframework.sh`.
 
 The current pins are the commits of two upstream releases:
 
-- `mlx` v0.31.1 (`ce45c525`)
-- `mlx-c` v0.6.0 (`0726ca92`)
+- `mlx` v0.32.4 (`36969c09`)
+- `mlx-c` v0.8.0 (`a26f2d58`)
 
-Pin the commit a tag points at, never an annotated tag object's hash. Bump them
-in a dedicated PR when a newer MLX is required. CI can validate the runtime
-from source pins before a published xcframework artifact exists.
+Pin the commit a tag points at, never an annotated tag object's hash. CI can
+validate the runtime from source pins before a published xcframework artifact
+exists.
+
+**The two pins move together.** An mlx-c release is written against one MLX
+release, named as `GIT_TAG` in its `CMakeLists.txt`; pin that MLX. The slice
+build compiles mlx-c against the `mlx=` checkout, so a pair that does not match
+fails to compile or, worse, links two different ideas of MLX's types.
+
+**Do not pin an MLX older than v0.32.0.** Before it, a command buffer the GPU
+rejected (out of memory, a device error) made MLX throw on Metal's own thread,
+where nothing can catch it: the host process died. From v0.32.0 the failure
+comes back as an error from the call that waited for the work.
+
+When bumping:
+
+1. Rebuild (`./tools/scripts/build-local-mlx-xcframework.sh`) and run the MLX
+   tests; bindgen regenerates the bindings, and a changed mlx-c signature is a
+   compile error in `crates/xybrid-mlx/src/ffi.rs`.
+2. Re-capture the goldens (`tools/scripts/capture-golden-tokens.sh --self`),
+   which are specific to the linked MLX, and audit them against Python mlx-lm
+   on the same MLX release (`tools/scripts/capture-upstream-goldens.py`, then
+   the ignored `golden_upstream_audit` test). A divergence at a near-tie is
+   noise; one at index 0, or at a wide margin, is a numerics change.
+3. Re-read how MLX registers streams and reports errors
+   (`crates/xybrid-mlx/src/stream.rs`, `src/exclusive.rs`): xybrid's use of
+   process-wide streams under one lock rests on both.
 
 ## Fresh-Clone Setup
 

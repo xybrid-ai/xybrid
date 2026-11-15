@@ -801,7 +801,7 @@ mod tests {
     //!
     //! The PRD (US-005) asks us to verify that `MlxArray::drop` decrements
     //! the underlying mlx_array refcount by calling `mlx_array_get_count`.
-    //! That symbol does **not** exist in mlx-c v0.6.0 — there is no public
+    //! That symbol does **not** exist in mlx-c — there is no public
     //! refcount getter. The equivalent observable invariant is "the
     //! payload's destructor fires exactly once, and only after the last
     //! wrapper is dropped". We verify that directly by constructing the

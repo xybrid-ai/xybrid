@@ -1,27 +1,22 @@
 #!/usr/bin/env bash
-# run-mlx-real-tests.sh — run the real-weight MLX tests so a crash is explained.
+# run-mlx-real-tests.sh — run the real-weight MLX tests, and explain a failure.
 #
-# MLX reports some failures by throwing where no caller can catch (a Metal
-# command buffer that fails throws from its completion handler), and the
-# process aborts. Run only in one process, the first such test takes the
-# others down with it and the log names none of them. So the tests run twice:
+# The tests run twice:
 #
-#   1. One process per test. A crash is attributed to its test and the
-#      remaining tests still run.
+#   1. One process per test. A failure, or a crash, is attributed to its test
+#      and the remaining tests still run.
 #   2. All together in one process, the way an application holds its models:
 #      loads, generations and drops follow one another on different threads.
 #      This is the pass that catches what only shows between tests.
 #
-# When a process dies, the backtrace from its macOS crash report is printed,
-# so the log shows where MLX threw, with the system log's last lines from the
-# process: MLX's own message dies with it, and Metal logs why it failed.
+# When a process dies, the backtrace from its macOS crash report is printed.
 #
-# One death is retried, and only where XYBRID_MLX_GPU_RETRIES asks for it: the
-# GPU rejecting a command buffer (`mlx::core::gpu::check_error` on the crashed
-# thread). A hosted runner's virtual GPU does that now and then, to any
-# process, and it says nothing about the code under test. Every occurrence is
-# still printed and counted. Any other crash, and any failed assertion, fails
-# the run at once.
+# One failure is retried, and only where XYBRID_MLX_GPU_RETRIES asks for it:
+# the GPU rejecting a command buffer, which MLX reports as
+# "[METAL] Command buffer execution failed: <Metal's reason>". A hosted
+# runner's virtual GPU does that now and then, to any process, and it says
+# nothing about the code under test. Every occurrence is still printed, with
+# Metal's reason, and counted. Any other failure, and any crash, is final.
 #
 # Usage:
 #   XYBRID_MLX_QWEN_DIR=... XYBRID_MLX_QWEN_4BIT_DIR=... \
@@ -120,16 +115,11 @@ memory_line() {
         awk '{ print $4, $6 }')"
 }
 
-# Set by print_crash_report: whether the crashed thread was MLX failing a
-# command buffer the GPU rejected.
-GPU_REJECTED=0
-
 # Print the crash report the system wrote for a process that died after
 # `$1` was created: what it died of, and the crashed thread's backtrace. For
 # an uncaught C++ exception that thread still holds the frames that threw.
 print_crash_report() {
-    local marker="$1" report="" waited=0 frames
-    GPU_REJECTED=0
+    local marker="$1" report="" waited=0
     # The report is written a moment after the process dies.
     while :; do
         report=$(find "$CRASH_REPORTS" -maxdepth 1 -name "$(basename "$BIN")*.ips" \
@@ -146,7 +136,7 @@ print_crash_report() {
     fi
     echo "   crash report: $report"
     # The first line of an .ips file is a separate JSON header.
-    if ! frames=$(tail -n +2 "$report" | jq -r '
+    tail -n +2 "$report" | jq -r '
         def frame($images):
             "     " + ($images[.imageIndex].name // "?") + "  "
             + (.symbol // ("+" + (.imageOffset | tostring)));
@@ -159,55 +149,50 @@ print_crash_report() {
            else empty end),
           "   crashed thread:",
           ([.threads[] | select(.triggered)][0].frames[:40][] | frame($images))
-    '); then
-        echo "   (the crash report could not be read)"
-        return
-    fi
-    printf '%s\n' "$frames"
-    case "$frames" in
-        *"mlx::core::gpu::check_error"*) GPU_REJECTED=1 ;;
-    esac
-    if command -v log >/dev/null 2>&1; then
-        echo "   system log, last lines from the process:"
-        log show --last 2m --style compact \
-            --predicate "processImagePath ENDSWITH \"$(basename "$BIN")\"" 2>/dev/null |
-            tail -n 25 | sed 's/^/     /' || true
-    fi
+    ' || echo "   (the crash report could not be read)"
 }
+
+# What MLX says when the GPU fails a command buffer it was given.
+GPU_REJECTION="[METAL] Command buffer execution failed"
 
 failed=()
 gpu_rejections=0
 
 # Run the test binary with the given libtest arguments and record a failure
-# under the label `$1`. A process that died gets its crash report printed,
-# and is run again if the GPU rejected its work and retries remain.
+# under the label `$1`. A process that died gets its crash report printed. A
+# run the GPU rejected is run again while retries remain.
 run_pass() {
-    local label="$1" marker="$SCRATCH/marker" status retries=0
+    local label="$1" marker="$SCRATCH/marker" output="$SCRATCH/output.txt" status retries=0
     shift
     while :; do
         memory_line
         : > "$marker"
-        (cd "$TEST_CWD" && "$BIN" "$@")
+        (
+            cd "$TEST_CWD" && "$BIN" "$@" 2>&1 | tee "$output"
+            exit "${PIPESTATUS[0]}"
+        )
         status=$?
         if [ "$status" -eq 0 ]; then
             return
         fi
         # 128 + signal: the process died instead of failing an assertion.
-        if [ "$status" -le 128 ]; then
-            failed+=("$label (exit $status)")
+        if [ "$status" -gt 128 ]; then
+            echo "-- $label died with signal $((status - 128))"
+            print_crash_report "$marker"
+            failed+=("$label (signal $((status - 128)))")
             return
         fi
-        echo "-- $label died with signal $((status - 128))"
-        print_crash_report "$marker"
-        if [ "$GPU_REJECTED" -eq 1 ]; then
+        if grep -qF -- "$GPU_REJECTION" "$output"; then
             gpu_rejections=$((gpu_rejections + 1))
+            echo "-- the GPU rejected a command buffer:"
+            grep -F -- "$GPU_REJECTION" "$output" | head -3 | sed 's/^/   /'
             if [ "$retries" -lt "$GPU_RETRIES" ]; then
                 retries=$((retries + 1))
-                echo "-- the GPU rejected a command buffer; retry $retries of $GPU_RETRIES"
+                echo "-- retry $retries of $GPU_RETRIES"
                 continue
             fi
         fi
-        failed+=("$label (signal $((status - 128)))")
+        failed+=("$label (exit $status)")
         return
     done
 }
@@ -226,7 +211,7 @@ done
 
 echo "== summary"
 if [ "$gpu_rejections" -gt 0 ]; then
-    echo "the GPU rejected a command buffer $gpu_rejections time(s); see the backtraces above"
+    echo "the GPU rejected a command buffer $gpu_rejections time(s); Metal's reason is above"
 fi
 if [ "${#failed[@]}" -eq 0 ]; then
     echo "all ${#TESTS[@]} real-weight tests passed, alone and in one process"

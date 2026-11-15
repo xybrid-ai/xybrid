@@ -19,8 +19,8 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 # A stand-in for the libtest binary: lists its tests, and runs the ones named
 # after `--exact`. `aborts_like_mlx` dies on SIGABRT, as an uncaught MLX
 # exception does; `fails_an_assertion` exits the way a failed test does;
-# `gpu_rejects` dies on SIGABRT its first $FAKE_GPU_REJECTIONS runs, leaving
-# the crash report MLX leaves when the GPU fails a command buffer.
+# `gpu_rejects` fails its first $FAKE_GPU_REJECTIONS runs with the error MLX
+# returns when the GPU fails a command buffer.
 FAKE_BIN="$TMP_ROOT/mlx_llm_chat-fake"
 cat > "$FAKE_BIN" <<'EOF'
 #!/usr/bin/env bash
@@ -53,15 +53,9 @@ for name in "${selected[@]}"; do
             rejected=$(cat "$FAKE_REJECTED" 2>/dev/null || echo 0)
             if [ "$rejected" -lt "${FAKE_GPU_REJECTIONS:-0}" ]; then
                 echo $((rejected + 1)) > "$FAKE_REJECTED"
-                {
-                    echo '{"app_name":"fake"}'
-                    echo '{"exception":{"type":"EXC_CRASH","signal":"SIGABRT"},
-                           "usedImages":[{"name":"fake"}],
-                           "threads":[{"triggered":true,"frames":[
-                             {"imageIndex":0,"symbol":"__cxa_throw"},
-                             {"imageIndex":0,"symbol":"mlx::core::gpu::check_error(MTL::CommandBuffer*)"}]}]}'
-                } > "$XYBRID_MLX_CRASH_REPORTS/$(basename "$0")-$rejected.ips"
-                kill -ABRT $$
+                echo "generation failed: [METAL] Command buffer execution failed:" \
+                    "Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)." >&2
+                status=101
             fi
             ;;
     esac
@@ -132,8 +126,8 @@ FAKE_GPU_REJECTIONS=2 XYBRID_MLX_GPU_RETRIES=2 XYBRID_MLX_TOGETHER_RUNS=0 \
     || fail "a GPU rejection within the retry budget must pass"
 [ "$(grep -c '^ran flaky_gpu_rejects$' "$FAKE_RAN")" = "3" ] \
     || fail "expected two retries after two rejections, got: $(cat "$FAKE_RAN")"
-expect_output "mlx::core::gpu::check_error"
-expect_output "the GPU rejected a command buffer; retry 2 of 2"
+expect_output "kIOGPUCommandBufferCallbackErrorOutOfMemory"
+expect_output "retry 2 of 2"
 expect_output "the GPU rejected a command buffer 2 time(s)"
 
 # 6. Past the budget, and by default, a GPU rejection fails the run.
@@ -143,7 +137,7 @@ if FAKE_GPU_REJECTIONS=2 XYBRID_MLX_GPU_RETRIES=1 XYBRID_MLX_TOGETHER_RUNS=0 \
     "$RUNNER" llm-mlx-runtime flaky_ > "$TMP_ROOT/out.txt" 2>&1; then
     fail "a GPU rejection past the retry budget must fail the run"
 fi
-expect_output "flaky_gpu_rejects (signal 6)"
+expect_output "flaky_gpu_rejects (exit 101)"
 : > "$FAKE_RAN"
 rm -f "$FAKE_REJECTED"
 if FAKE_GPU_REJECTIONS=1 XYBRID_MLX_TOGETHER_RUNS=0 \
@@ -153,14 +147,16 @@ fi
 [ "$(grep -c '^ran flaky_gpu_rejects$' "$FAKE_RAN")" = "1" ] \
     || fail "no retry is expected by default, got: $(cat "$FAKE_RAN")"
 
-# 7. Any other crash is never retried, whatever the budget.
-: > "$FAKE_RAN"
-if XYBRID_MLX_GPU_RETRIES=5 XYBRID_MLX_TOGETHER_RUNS=0 \
-    "$RUNNER" llm-mlx-runtime aborts_like_mlx > "$TMP_ROOT/out.txt" 2>&1; then
-    fail "a crash that is not a GPU rejection must fail the run"
-fi
-[ "$(grep -c '^ran real_two_aborts_like_mlx$' "$FAKE_RAN")" = "1" ] \
-    || fail "a crash that is not a GPU rejection must not be retried, got: $(cat "$FAKE_RAN")"
+# 7. Nothing else is retried, whatever the budget: not a crash, not a failure.
+for other in aborts_like_mlx fails_an_assertion; do
+    : > "$FAKE_RAN"
+    if XYBRID_MLX_GPU_RETRIES=5 XYBRID_MLX_TOGETHER_RUNS=0 \
+        "$RUNNER" llm-mlx-runtime "$other" > "$TMP_ROOT/out.txt" 2>&1; then
+        fail "$other must fail the run"
+    fi
+    [ "$(grep -c "^ran real_.*_$other\$" "$FAKE_RAN")" = "1" ] \
+        || fail "$other must not be retried, got: $(cat "$FAKE_RAN")"
+done
 
 # 8. A filter that matches nothing (a renamed test) is an error, not a pass.
 : > "$FAKE_RAN"

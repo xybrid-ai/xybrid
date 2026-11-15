@@ -92,14 +92,17 @@ fn a_release_inside_an_operation_waits_for_its_outermost_guard() {
 
 /// A model dropped while its last evaluation is still in flight: the
 /// evaluation keeps the arrays it reads alive until it completes, on MLX's
-/// own threads. The release waits for it, so the memory is not freed into
-/// the pool just after the pool was cleared.
+/// own threads. The operation waits for it as it ends, before the pool is
+/// cleared, so the memory is not freed into the pool just after.
 fn assert_release_waits_for_work_in_flight(stream: &MlxStream) {
     clear_cache().expect("clear cache");
     let (active_before, pooled_before) = (active_memory().expect("active memory"), pooled());
 
     for round in 0..20 {
         {
+            // An operation, as a generation is: evaluations it schedules run
+            // in the background until it ends.
+            let _operation = exclusive();
             let weights =
                 MlxArray::from_slice_f32(&vec![1.0f32; 1 << 22], &[1 << 22]).expect("array");
             let mut output = ops::add(&weights, &weights, Some(stream)).expect("add");
@@ -107,9 +110,11 @@ fn assert_release_waits_for_work_in_flight(stream: &MlxStream) {
                 output = ops::mul(&output, &weights, Some(stream)).expect("mul");
             }
             async_eval(&[&output]).expect("async eval");
-            // Dropped with the evaluation still running.
+            // The model is dropped with the evaluation still running, and
+            // asks for its memory back.
+            drop((weights, output));
+            release_pooled_memory();
         }
-        release_pooled_memory();
 
         assert!(
             active_memory().expect("active memory") <= active_before,

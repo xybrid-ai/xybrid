@@ -1,10 +1,11 @@
 //! Process-wide serialization of MLX work.
 //!
-//! MLX evaluates graphs on per-device default streams that every thread in
-//! the process shares. Building and evaluating graphs from two threads at
-//! once corrupts that shared state: two models generating at the same time
-//! end in a segfault inside MLX, whichever architectures they are. One model
-//! used from many threads in turn is fine.
+//! xybrid evaluates graphs on one stream per device that every thread in the
+//! process shares (see [`crate::MlxStream`]), and MLX does not synchronize
+//! those streams. Evaluating from two threads at once corrupts their state:
+//! two models generating at the same time end in a segfault inside MLX,
+//! whichever architectures they are. One model used from many threads in turn
+//! is fine.
 //!
 //! [`exclusive`] is the one lock every MLX-evaluating operation takes: a model
 //! load (weights are materialized into MLX arrays), a generation, an embedding
@@ -15,6 +16,22 @@
 //! lock themselves, so no use of the safe API can evaluate from two threads at
 //! once. An operation that spans several evaluations, with lazy graphs in
 //! flight between them, still takes it once around the whole run.
+//!
+//! # Nothing outlives an operation
+//!
+//! When the outermost guard on a thread drops, it first waits for whatever
+//! the operation left in flight (the evaluation a generation scheduled for a
+//! token it never needed, say). Two things follow. The lock being free means
+//! MLX is idle, not merely unowned. And an evaluation that failed after the
+//! operation stopped waiting for it (the GPU rejecting a command buffer)
+//! cannot surface in the next operation: MLX keeps such an error on the
+//! stream and raises it from the next call that touches it, so it is taken
+//! here and logged. An evaluation the operation did wait for reports its
+//! failure to the operation itself, as an error.
+//!
+//! [`async_eval`](crate::async_eval) called outside an operation therefore
+//! completes before it returns; it runs in the background only under a guard
+//! held around the whole run.
 //!
 //! A generation holds the lock for its whole run, streaming callbacks
 //! included: it has the next token's graph in flight while a callback runs,
@@ -87,8 +104,10 @@ impl Drop for MlxExclusive {
     fn drop(&mut self) {
         HELD.with(|held| held.set(held.get() - 1));
         if let Some(lock) = self._lock.take() {
-            // Outermost guard: the operation is over. Clear the pool if a
-            // model was dropped while it ran.
+            // Outermost guard: the operation is over. Leave nothing in
+            // flight behind it, then clear the pool if a model was dropped
+            // while it ran.
+            settle();
             clear_pool_if_requested();
             drop(lock);
             // A request can arrive after the check above and find the lock
@@ -102,10 +121,10 @@ impl Drop for MlxExclusive {
 /// operation is running.
 ///
 /// Never waits for the lock. When MLX is idle the pool is cleared before this
-/// returns, after any evaluation still completing in the background has
-/// let go of the arrays it read. When an operation is in flight, on this
-/// thread or another, the pool is cleared as that operation releases the
-/// lock, so dropping a model never blocks behind someone else's generation.
+/// returns. When an operation is in flight, on this thread or another, the
+/// pool is cleared as that operation releases the lock, after the work it
+/// left in flight has let go of the arrays it read, so dropping a model never
+/// blocks behind someone else's generation.
 pub fn release_pooled_memory() {
     POOL_RELEASE_REQUESTED.store(true, Ordering::SeqCst);
     release_pool_if_idle();
@@ -130,7 +149,19 @@ fn release_pool_if_idle() {
     clear_pool_if_requested();
 }
 
-/// Clear the pool if that was requested. The caller holds [`MLX_WORK`].
+/// Wait for the work an operation left in flight, and take the error it left
+/// on the streams, if any. The caller holds [`MLX_WORK`]. See the
+/// [module docs](self).
+fn settle() {
+    // SAFETY: the caller holds the lock, as synchronizing requires.
+    if let Err(error) = unsafe { crate::ffi::synchronize_shared_streams() } {
+        tracing::warn!(%error, "mlx.operation.left_failed_work");
+    }
+}
+
+/// Clear the pool if that was requested. The caller holds [`MLX_WORK`], and
+/// MLX is idle: every operation settles before it releases the lock, so the
+/// arrays a dropped model's last evaluation read have reached the pool.
 fn clear_pool_if_requested() {
     if POOL_RELEASE_REQUESTED.swap(false, Ordering::SeqCst) {
         // Nothing is pooled before MLX's first use (a load that failed
@@ -138,15 +169,8 @@ fn clear_pool_if_requested() {
         if !crate::resources::metallib_ready() {
             return;
         }
-        // A model dropped right after its last evaluation is still held by
-        // that evaluation until it completes; wait, so its memory reaches
-        // the pool before the pool is cleared, not after.
-        // SAFETY: the caller holds the lock, as both calls require; live
-        // arrays are unaffected.
-        let released = unsafe {
-            crate::ffi::synchronize_default_streams().and_then(|()| crate::ffi::clear_cache())
-        };
-        if let Err(error) = released {
+        // SAFETY: the caller holds the lock; live arrays are unaffected.
+        if let Err(error) = unsafe { crate::ffi::clear_cache() } {
             tracing::warn!(%error, "mlx.release_pooled_memory.failed");
         }
     }
@@ -222,6 +246,70 @@ mod tests {
         drop(outer);
         waiter.join().expect("waiter");
         assert_eq!(entered.load(Ordering::SeqCst), 1);
+    }
+
+    /// An array whose evaluation fails on MLX's own thread, not the
+    /// caller's: the inverse of a singular matrix, which the CPU stream's
+    /// worker computes. It stands in for work the GPU rejects, which fails on
+    /// Metal's thread and reaches the caller through the same mechanism.
+    fn fails_on_the_stream_thread() -> crate::MlxArray {
+        use mlx_c_sys::bindings as sys;
+
+        let stream = crate::MlxStream::default_cpu().expect("cpu stream");
+        let singular = crate::MlxArray::from_slice_f32(&[0.0; 4], &[2, 2]).expect("array");
+        // SAFETY: both handles are live for the call, and `inverse` is a
+        // fresh handle that mlx-c fills in.
+        unsafe {
+            let mut inverse = sys::mlx_array_new();
+            let rc = sys::mlx_linalg_inv(&mut inverse, singular.as_raw(), stream.as_raw());
+            assert_eq!(
+                rc, 0,
+                "building the graph does not fail; evaluating it does"
+            );
+            crate::MlxArray::from_raw(inverse)
+        }
+    }
+
+    fn evaluates_on_the_cpu_stream() -> Vec<f32> {
+        let stream = crate::MlxStream::default_cpu().expect("cpu stream");
+        let ones = crate::MlxArray::from_slice_f32(&[1.0, 2.0], &[2]).expect("array");
+        crate::ops::add(&ones, &ones, Some(&stream))
+            .expect("add")
+            .to_vec_f32()
+            .expect("an evaluation after a failed one")
+    }
+
+    /// Work that fails on MLX's thread comes back as an error from the call
+    /// that waited for it (before MLX v0.32 it ended the process), and the
+    /// failure is spent: the next evaluation runs.
+    #[test]
+    fn work_that_fails_on_mlx_s_thread_is_an_error_and_is_then_spent() {
+        let error = fails_on_the_stream_thread()
+            .eval()
+            .expect_err("a singular matrix has no inverse");
+        assert!(error.to_string().contains("Inverse"), "{error}");
+
+        assert_eq!(evaluates_on_the_cpu_stream(), [2.0, 4.0]);
+    }
+
+    /// An operation schedules work and ends without waiting for it, as a
+    /// generation does with the token it never needed. If that work fails,
+    /// MLX leaves the error on the stream for whoever touches it next. The
+    /// guard takes it as the operation ends, so the next operation, on this
+    /// thread or another, is not the one to fail.
+    #[test]
+    fn work_an_operation_did_not_wait_for_cannot_fail_the_next_operation() {
+        {
+            let _operation = exclusive();
+            let failing = fails_on_the_stream_thread();
+            crate::async_eval(&[&failing]).expect("scheduling does not fail");
+        }
+
+        assert_eq!(evaluates_on_the_cpu_stream(), [2.0, 4.0]);
+        let elsewhere = std::thread::spawn(evaluates_on_the_cpu_stream)
+            .join()
+            .expect("an evaluation on another thread");
+        assert_eq!(elsewhere, [2.0, 4.0]);
     }
 
     #[test]

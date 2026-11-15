@@ -289,6 +289,14 @@ User-facing behavior is in `docs/backends/mlx.md`.
   `tools/scripts/build-local-mlx-xcframework.sh`; nothing is published yet
   (`release=unpublished` in `vendor/mlx-apple/UPSTREAM_VERSIONS.txt`, whose
   pins are release commits, never tag-object hashes).
+- **The MLX pins move as a pair, and not below MLX v0.32.0.** An mlx-c release
+  is written against the MLX release its `CMakeLists.txt` names; the slice
+  build compiles mlx-c against the `mlx=` checkout
+  (`FETCHCONTENT_SOURCE_DIR_MLX`), so MLX is built once and the pair must
+  match. Before v0.32.0 a command buffer the GPU rejected killed the process;
+  from it, the failure is an error. `vendor/mlx-apple/README.md` has the bump
+  checklist, including the upstream audit
+  (`tools/scripts/capture-upstream-goldens.py`).
 - **MLX refuses what it cannot do.** Tools and grammars are llama.cpp-only and
   `reject_unsupported_generation` (`mlx/model.rs`) fails the request, as the
   mistralrs backend does for tools. A new capability on `GenerationConfig` or
@@ -298,6 +306,13 @@ User-facing behavior is in `docs/backends/mlx.md`.
   end the turn, reasoning goes to `reasoning_content`, a stream ends with one
   empty terminal token. `generate_tokens` stays the unfiltered loop that raw
   prompts and the token-level parity tests use.
+- **Two streams for the whole process, under one lock.** MLX streams belong
+  to the thread that created them, and xybrid loads a model on one thread and
+  runs it on others. `MlxStream` therefore hands out the streams mlx-c
+  registers for every thread (`mlx_stream_new_thread_unsafe`), one per device,
+  which MLX does not synchronize. Never call `mlx_default_*_stream_new` or
+  create another stream: an array built on a thread's own stream cannot be
+  evaluated anywhere else.
 - **One MLX operation at a time.** Two threads evaluating at once segfault
   inside MLX. Every path that evaluates MLX arrays (a load, a generation, an
   embedding run) takes `xybrid_mlx::exclusive()` first, before any adapter
@@ -305,6 +320,11 @@ User-facing behavior is in `docs/backends/mlx.md`.
   `MlxArray::eval` and `async_eval` take the lock themselves (it is
   reentrant), so the safe API cannot be raced; the operation-wide guard is
   still needed, because a run keeps lazy graphs in flight between evaluations.
+- **Nothing outlives an operation.** The outermost `exclusive()` guard waits
+  for what the operation left in flight before it releases the lock, and takes
+  any error that work left on the streams (MLX would raise it from the next,
+  unrelated call). So a free lock means MLX is idle, and one run's late GPU
+  failure cannot fail the next run.
 - **A dropped model gives its memory back.** MLX frees arrays into a pool it
   keeps, so the struct that owns a model's weights ends with a
   `xybrid_mlx::ReleasePooledMemory` field (last, so the weights drop first),
@@ -317,9 +337,9 @@ User-facing behavior is in `docs/backends/mlx.md`.
   call (an allocator query, say) calls it before touching the FFI.
 - **Real-weight tests run through `tools/scripts/run-mlx-real-tests.sh`**: one
   process per test, then all in one process, with the crash report's backtrace
-  printed when a process dies. MLX and the Metal stack abort on failures no
-  caller can catch, and a bare `cargo test` names neither the test nor the
-  frame.
+  printed if a process dies. A hosted runner's virtual GPU rejects a command
+  buffer now and then; the script retries that one failure, recognized by
+  MLX's `[METAL] Command buffer execution failed` message, and nothing else.
 - **Automatic registry selection must not change other builds.** Only a build
   that can run MLX asks the registry for a `safetensors` variant
   (`registry_format_for_auto_local_backend`). Every other build resolves the

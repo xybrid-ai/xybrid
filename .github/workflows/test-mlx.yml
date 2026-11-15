@@ -115,9 +115,10 @@ jobs:
       # them in one process, three times.
       #
       # A hosted runner's GPU is virtual, and now and then it rejects a
-      # command buffer; MLX answers that by aborting the process. The script
-      # retries that one death, recognized by its backtrace, and prints and
-      # counts every occurrence. Any other crash or failure is final.
+      # command buffer; MLX returns that as an error carrying Metal's reason.
+      # The script retries that one failure, recognized by MLX's message, and
+      # prints and counts every occurrence. Any other failure or crash is
+      # final.
       - name: Test MLX on real weights
         env:
           XYBRID_MLX_REQUIRE: XYBRID_MLX_QWEN_DIR,XYBRID_MLX_QWEN_4BIT_DIR

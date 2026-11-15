@@ -14,8 +14,8 @@
 # `mlx=` and `mlx-c=` pins.
 
 # Upstream commits to build from (full 40-char SHAs).
-mlx=ce45c52505c8158ea48d2a54e8caae05efd86bfe
-mlx-c=0726ca922fc902c4c61ef9c27d94132be418e945
+mlx=36969c094354086e15d2a327a9c50feb20b9cf11
+mlx-c=a26f2d584a14ec619ae8db9a09be03becd47598a
 
 # Published release artifact for download-based installs. Leave these as
 # `unpublished` until a `mlx-v*` tag has been cut; the local source-build
