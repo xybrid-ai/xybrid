@@ -1,34 +1,23 @@
 //! Registry artifact-format selection shared by CLI commands.
 
 use xybrid_core::runtime_adapter::SelectorCfg;
-pub(crate) use xybrid_sdk::registry_client::registry_format_for_auto_local_backend;
 use xybrid_sdk::registry_client::{
-    registry_format_preference_for_backend_override_with_registry_context, RegistryClient,
-    RegistryFormatPreference,
+    parse_backend_override, registry_format_for_load, RegistryClient,
 };
 use xybrid_sdk::SdkError;
 
-/// Resolve the artifact format for a CLI registry stage.
+/// Resolve the artifact format a CLI command fetches for a registry model.
 ///
-/// Automatic loads ask the selector to pick the best locally executable
-/// backend. Explicit overrides request the format for that backend before
-/// downloading, so `--backend mlx` fetches SafeTensors while `--backend
-/// llamacpp` fetches GGUF for LLM tasks.
+/// With no `--backend` (or `--backend auto`) that is the registry's default
+/// variant. An explicit backend requests its own format before anything is
+/// downloaded, so `--backend mlx` fetches SafeTensors and `--backend llamacpp`
+/// fetches GGUF, and fails here when this build cannot run it.
 pub(crate) fn registry_format_for_stage_backend(
     client: &RegistryClient,
     model_id: &str,
     backend_override: Option<&str>,
     cfg: &SelectorCfg,
 ) -> Result<Option<&'static str>, SdkError> {
-    match registry_format_preference_for_backend_override_with_registry_context(
-        client,
-        model_id,
-        backend_override,
-        cfg,
-    )? {
-        RegistryFormatPreference::Auto => {
-            registry_format_for_auto_local_backend(client, model_id, cfg)
-        }
-        RegistryFormatPreference::ExplicitBackend { format } => Ok(format),
-    }
+    let backend = parse_backend_override(backend_override)?;
+    registry_format_for_load(client, model_id, backend, cfg)
 }

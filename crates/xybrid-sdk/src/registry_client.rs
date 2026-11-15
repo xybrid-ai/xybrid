@@ -58,9 +58,7 @@ use xybrid_core::http::{
     parse_retry_after, CircuitBreaker, CircuitConfig, RetryAfterBudget, RetryPolicy,
     MAX_RETRY_AFTER,
 };
-use xybrid_core::runtime_adapter::{
-    select_with_cfg, BackendChoice, RegistryView, SelectionParams, SelectorCfg,
-};
+use xybrid_core::runtime_adapter::{select_with_cfg, BackendChoice, SelectionParams, SelectorCfg};
 
 /// How often a retry backoff wakes to check for cancellation.
 const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -433,10 +431,9 @@ pub(crate) fn format_cache_key(mask: &str, format: &str) -> String {
     format!("{mask}__{format}")
 }
 
-/// Return the registry artifact format implied by an explicit local backend.
+/// Registry artifact format an explicit local backend loads.
 ///
-/// `None` means the backend does not currently map to a registry format
-/// preference, so callers should use the registry's platform default.
+/// `None` means the backend runs the registry's default variant.
 pub fn registry_format_for_backend(backend: BackendChoice) -> Option<&'static str> {
     match backend {
         BackendChoice::Mlx => Some("safetensors"),
@@ -445,166 +442,111 @@ pub fn registry_format_for_backend(backend: BackendChoice) -> Option<&'static st
     }
 }
 
-/// Registry format routing decision for a user-provided backend override.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RegistryFormatPreference {
-    /// No explicit backend was provided, or the override was `auto`.
-    /// Callers should run the normal automatic selector.
-    Auto,
-    /// A concrete backend override was validated. `None` means the backend
-    /// is available but does not imply a registry artifact format preference
-    /// today, so callers should use the registry default rather than auto
-    /// selecting a different backend.
-    ExplicitBackend {
-        /// Registry artifact format preference, when one exists.
-        format: Option<&'static str>,
-    },
-}
-
-/// Parse a backend override into a registry format preference without checking
-/// whether that backend can run on this host.
+/// Parse a `backend` override as a pipeline or command line writes it.
 ///
-/// Prefer [`registry_format_preference_for_backend_override`] for SDK and CLI
-/// load paths: it validates explicit backend availability through the runtime
-/// selector and preserves explicit backends like `mistral` that do not map to a
-/// format-specific registry artifact.
-pub fn registry_format_for_backend_override(
-    backend: Option<&str>,
-) -> Result<Option<&'static str>, SdkError> {
-    let Some(raw_backend) = backend else {
-        return Ok(None);
-    };
-
-    let choice = BackendChoice::parse(raw_backend)
-        .map_err(|err| SdkError::ConfigError(format!("Invalid backend override: {}", err)))?;
-
-    Ok(choice.and_then(registry_format_for_backend))
-}
-
-fn selector_error_to_sdk(err: xybrid_core::runtime_adapter::SelectorError) -> SdkError {
-    SdkError::ConfigError(err.to_string())
-}
-
-struct EmptyRegistryView;
-
-impl RegistryView for EmptyRegistryView {
-    fn has_variant(&self, _model_id: &str, _format: &str) -> bool {
-        false
-    }
-}
-
-/// Parse and validate a user or pipeline backend override before resolving a
-/// registry artifact format.
+/// Absent, empty and `auto` all mean no override.
 ///
-/// This is the path SDK pipelines and CLI commands should use: explicit
-/// `backend: mlx` / `--backend mlx` is a hard requirement, so it must fail on
-/// hosts where MLX is not actually usable instead of blindly requesting a
-/// SafeTensors artifact that cannot run.
-pub fn registry_format_preference_for_backend_override(
-    model_id: &str,
-    backend: Option<&str>,
-    cfg: &SelectorCfg,
-) -> Result<RegistryFormatPreference, SdkError> {
-    registry_format_preference_for_backend_override_with_task(model_id, None, backend, cfg)
-}
-
-/// Parse and validate a backend override using live registry task context when
-/// available, falling back to cached `model_metadata.json` task context during
-/// transient/offline registry metadata failures.
-pub fn registry_format_preference_for_backend_override_with_registry_context(
-    client: &RegistryClient,
-    model_id: &str,
-    backend: Option<&str>,
-    cfg: &SelectorCfg,
-) -> Result<RegistryFormatPreference, SdkError> {
-    let Some(choice) = parse_backend_override_choice(backend)? else {
-        return Ok(RegistryFormatPreference::Auto);
-    };
-
-    registry_format_preference_for_backend_choice_with_registry_context(
-        client, model_id, choice, cfg,
-    )
-}
-
-/// Validate a parsed explicit backend choice using registry task context, with
-/// an offline cached-metadata fallback for already-fetched variants.
-pub fn registry_format_preference_for_backend_choice_with_registry_context(
-    client: &RegistryClient,
-    model_id: &str,
-    choice: BackendChoice,
-    cfg: &SelectorCfg,
-) -> Result<RegistryFormatPreference, SdkError> {
-    let params = SelectionParams::new(model_id).with_explicit(Some(choice));
-    let selected =
-        select_with_cfg(&params, &EmptyRegistryView, cfg).map_err(selector_error_to_sdk)?;
-    let task = registry_task_for_explicit_backend(client, model_id, selected)?;
-
-    registry_format_preference_for_selected_backend(model_id, task.as_deref(), selected)
-}
-
-/// Parse and validate a user or pipeline backend override with optional
-/// registry task context.
+/// # Errors
 ///
-/// Embedding registry tasks only have a local MLX SafeTensors execution path in
-/// this codebase today. The llama.cpp adapter is text-generation-only here, so
-/// explicit `backend: llamacpp` / `--backend llamacpp` for a known embedding
-/// task must fail before requesting a GGUF artifact that cannot produce an
-/// embedding envelope.
-pub fn registry_format_preference_for_backend_override_with_task(
-    model_id: &str,
-    task: Option<&str>,
-    backend: Option<&str>,
-    cfg: &SelectorCfg,
-) -> Result<RegistryFormatPreference, SdkError> {
-    let Some(choice) = parse_backend_override_choice(backend)? else {
-        return Ok(RegistryFormatPreference::Auto);
-    };
-
-    registry_format_preference_for_backend_choice_with_task(model_id, task, choice, cfg)
-}
-
-/// Validate a parsed explicit backend choice with optional registry task
-/// context and return the artifact format implied by that backend.
-pub fn registry_format_preference_for_backend_choice_with_task(
-    model_id: &str,
-    task: Option<&str>,
-    choice: BackendChoice,
-    cfg: &SelectorCfg,
-) -> Result<RegistryFormatPreference, SdkError> {
-    let params = SelectionParams::new(model_id).with_explicit(Some(choice));
-    let selected =
-        select_with_cfg(&params, &EmptyRegistryView, cfg).map_err(selector_error_to_sdk)?;
-
-    registry_format_preference_for_selected_backend(model_id, task, selected)
-}
-
-fn registry_format_preference_for_selected_backend(
-    model_id: &str,
-    task: Option<&str>,
-    selected: BackendChoice,
-) -> Result<RegistryFormatPreference, SdkError> {
-    if task.and_then(registry_backend_selectable_kind) == Some("embed")
-        && selected != BackendChoice::Mlx
-    {
-        return Err(SdkError::ConfigError(format!(
-            "{} backend does not support registry embedding model `{}`; use backend: auto or backend: mlx",
-            selected.as_str(),
-            model_id
-        )));
-    }
-
-    Ok(RegistryFormatPreference::ExplicitBackend {
-        format: registry_format_for_backend(selected),
-    })
-}
-
-fn parse_backend_override_choice(backend: Option<&str>) -> Result<Option<BackendChoice>, SdkError> {
+/// [`SdkError::ConfigError`] when the name is not a backend.
+pub fn parse_backend_override(backend: Option<&str>) -> Result<Option<BackendChoice>, SdkError> {
     let Some(raw_backend) = backend else {
         return Ok(None);
     };
 
     BackendChoice::parse(raw_backend)
         .map_err(|err| SdkError::ConfigError(format!("Invalid backend override: {}", err)))
+}
+
+/// The registry format a load of `model_id` asks for.
+///
+/// With no `backend` that is the registry's default variant (`None`) on every
+/// build. MLX is opt-in: a build that can run it resolves the same artifact as
+/// one that cannot, and nothing is asked of the registry here. The one
+/// exception is a GGUF copy that an earlier `backend: llamacpp` load
+/// extracted: it is the same model on the same backend, so it is reused
+/// instead of downloaded again.
+///
+/// An explicit `backend` is a hard requirement. It fails here, before anything
+/// is downloaded, when this build or host cannot run it or when it cannot run
+/// the model's task; otherwise the format is that backend's
+/// ([`registry_format_for_backend`]). The task comes from a copy already
+/// extracted on this machine when there is one, else from the registry.
+///
+/// # Errors
+///
+/// [`SdkError::ConfigError`] when `backend` is unusable here or does not run
+/// the model's task, and the registry's error when the task has to be fetched
+/// and cannot be.
+pub fn registry_format_for_load(
+    client: &RegistryClient,
+    model_id: &str,
+    backend: Option<BackendChoice>,
+    cfg: &SelectorCfg,
+) -> Result<Option<&'static str>, SdkError> {
+    let Some(backend) = backend else {
+        return Ok(cached_llamacpp_copy_format(client, model_id, cfg));
+    };
+
+    // Before the registry is asked for the task: an unusable backend fails
+    // the same way online and offline.
+    require_usable_backend(model_id, backend, cfg)?;
+    let task = registry_task_for_explicit_backend(client, model_id, backend)?;
+    explicit_backend_format(model_id, task.as_deref(), backend)
+}
+
+/// [`registry_format_for_load`] for an explicit `backend` whose model task is
+/// already known, with no registry or cache involved.
+///
+/// # Errors
+///
+/// [`SdkError::ConfigError`] when `backend` is unusable here or does not run
+/// `task`.
+pub(crate) fn registry_format_for_explicit_backend(
+    model_id: &str,
+    task: Option<&str>,
+    backend: BackendChoice,
+    cfg: &SelectorCfg,
+) -> Result<Option<&'static str>, SdkError> {
+    require_usable_backend(model_id, backend, cfg)?;
+    explicit_backend_format(model_id, task, backend)
+}
+
+fn selector_error_to_sdk(err: xybrid_core::runtime_adapter::SelectorError) -> SdkError {
+    SdkError::ConfigError(err.to_string())
+}
+
+fn require_usable_backend(
+    model_id: &str,
+    backend: BackendChoice,
+    cfg: &SelectorCfg,
+) -> Result<(), SdkError> {
+    let params = SelectionParams::new(model_id).with_explicit(Some(backend));
+    select_with_cfg(&params, cfg)
+        .map(|_| ())
+        .map_err(selector_error_to_sdk)
+}
+
+/// Embedding registry models have one local text-backend path, MLX
+/// SafeTensors: the llama.cpp adapter here generates text only. An explicit
+/// `backend: llamacpp` for a known embedding task therefore fails before a
+/// GGUF that cannot produce an embedding is requested.
+fn explicit_backend_format(
+    model_id: &str,
+    task: Option<&str>,
+    backend: BackendChoice,
+) -> Result<Option<&'static str>, SdkError> {
+    if task.and_then(registry_backend_selectable_kind) == Some("embed")
+        && backend != BackendChoice::Mlx
+    {
+        return Err(SdkError::ConfigError(format!(
+            "{} backend does not support registry embedding model `{}`; use backend: auto or backend: mlx",
+            backend.as_str(),
+            model_id
+        )));
+    }
+
+    Ok(registry_format_for_backend(backend))
 }
 
 fn registry_task_for_explicit_backend(
@@ -677,112 +619,20 @@ fn registry_backend_selectable_kind(task: &str) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn select_auto_registry_format_for_detail(
-    model_id: &str,
-    detail: &ModelDetail,
-    cfg: &SelectorCfg,
-) -> Result<Option<&'static str>, SdkError> {
-    if registry_backend_selectable_kind(&detail.task).is_none() {
-        return Ok(None);
-    }
-
-    let selected = match select_with_cfg(&SelectionParams::new(model_id), detail, cfg) {
-        Ok(selected) => selected,
-        // Auto selection only picks a *preferred* variant. A build with no
-        // local LLM runtime (an ONNX-only embedding build, say) keeps the
-        // registry default: the model may not need an LLM backend at all, and
-        // if it does, execution reports the missing feature.
-        Err(xybrid_core::runtime_adapter::SelectorError::NoBackendAvailable { .. }) => {
-            return Ok(None)
-        }
-        Err(err) => return Err(selector_error_to_sdk(err)),
-    };
-
-    // Only MLX asks for a variant other than the registry default. Every
-    // other selection keeps the default under the bare mask, exactly as a
-    // build without MLX resolves it.
-    if selected == BackendChoice::Mlx && detail.has_variant(model_id, "safetensors") {
-        Ok(Some("safetensors"))
-    } else {
-        Ok(None)
-    }
-}
-
-/// Whether this build can run MLX on this host: the non-linking tier alone
-/// (`llm-mlx` without `llm-mlx-runtime`) or a failed Metal probe cannot.
-fn mlx_runtime_usable(cfg: &SelectorCfg) -> bool {
-    cfg.host_is_apple_arm64 && cfg.mlx_compiled && cfg.mlx_runtime_ok
-}
-
-/// Resolve the registry format preference for an automatic local backend load.
-///
-/// `None` is the registry's default variant, cached under the bare model
-/// mask. That is the answer on every build that cannot run MLX, with no
-/// registry request made here: such a build loads exactly as it did before
-/// MLX existed.
-///
-/// A build with a working MLX runtime (Apple Silicon, `llm-mlx-runtime`,
-/// Metal probe passed) prefers the registry's SafeTensors variant of an LLM
-/// or embedding model when the registry lists one, and resolves
-/// `Some("safetensors")`. A SafeTensors variant in the registry is therefore
-/// a promise that MLX can load it: an architecture or quantization this
-/// build's MLX adapter does not support fails the load with an error naming
-/// `backend: llamacpp`, and is not retried with the default variant.
-///
-/// A copy already extracted on this machine always wins, whichever variant
-/// it is, so a cached model loads without the registry.
-///
-/// # Errors
-///
-/// Returns the registry error when model metadata cannot be fetched and the
-/// failure is not one a cached model can fall back from.
-pub fn registry_format_for_auto_local_backend(
-    client: &RegistryClient,
-    model_id: &str,
-    cfg: &SelectorCfg,
-) -> Result<Option<&'static str>, SdkError> {
-    // Offline-first, like `fetch_extracted`: a model already extracted on this
-    // machine must load without a registry round trip (or its retries).
-    if let Some(format) = offline_auto_registry_format(client, model_id, cfg) {
-        return Ok(Some(format));
-    }
-    if client.resolve_offline(model_id).is_some() || !mlx_runtime_usable(cfg) {
-        return Ok(None);
-    }
-
-    match client.get_model(model_id) {
-        Ok(detail) => select_auto_registry_format_for_detail(model_id, &detail, cfg),
-        Err(err) if registry_metadata_error_can_fall_back_to_default(&err) => Ok(None),
-        Err(err) => Err(err),
-    }
-}
-
-/// The format-variant copy of `model_id` already extracted on this machine
-/// that an automatic load should use, if any: an MLX SafeTensors copy when
-/// this build can run MLX, else a GGUF copy an explicit `backend: llamacpp`
-/// load left behind. Local file system only.
-pub(crate) fn offline_auto_registry_format(
+/// `Some("gguf")` when a load with no override should reuse the GGUF copy an
+/// explicit `backend: llamacpp` load left on this machine. Local file system
+/// only. A SafeTensors copy left by `backend: mlx` is never picked up this
+/// way: that would move the model to MLX without being asked.
+fn cached_llamacpp_copy_format(
     client: &RegistryClient,
     model_id: &str,
     cfg: &SelectorCfg,
 ) -> Option<&'static str> {
-    if mlx_runtime_usable(cfg)
-        && client
-            .resolve_offline_with_format(model_id, "safetensors")
-            .is_some()
-    {
-        return Some("safetensors");
-    }
-
-    if cfg.llamacpp_compiled
+    (cfg.llamacpp_compiled
         && client
             .resolve_offline_with_format(model_id, "gguf")
-            .is_some()
-    {
-        return Some("gguf");
-    }
-
-    None
+            .is_some())
+    .then_some("gguf")
 }
 
 pub(crate) fn registry_metadata_error_can_fall_back_to_default(err: &SdkError) -> bool {
@@ -3021,14 +2871,6 @@ pub struct VariantInfo {
     pub min_os: Vec<String>,
 }
 
-impl RegistryView for ModelDetail {
-    fn has_variant(&self, _model_id: &str, format: &str) -> bool {
-        self.variants
-            .values()
-            .any(|variant| variant.format.eq_ignore_ascii_case(format))
-    }
-}
-
 /// Response from GET /v1/models/registry/{mask}/resolve
 #[derive(Debug, Deserialize)]
 struct ResolveResponse {
@@ -4498,10 +4340,11 @@ mod tests {
     }
 
     #[test]
-    fn explicit_registry_format_override_rejects_unavailable_mlx() {
-        let err = registry_format_preference_for_backend_override(
+    fn an_explicit_backend_this_build_cannot_run_is_refused() {
+        let err = registry_format_for_explicit_backend(
             "qwen3-4b",
-            Some("mlx"),
+            None,
+            BackendChoice::Mlx,
             &linux_llamacpp_selector_cfg(),
         )
         .unwrap_err();
@@ -4514,52 +4357,69 @@ mod tests {
     }
 
     #[test]
-    fn explicit_registry_format_override_keeps_mistral_on_registry_default() {
-        let preference = registry_format_preference_for_backend_override(
-            "qwen3-4b",
-            Some("mistral"),
-            &macos_all_backends_selector_cfg(),
-        )
-        .unwrap();
-
-        assert_eq!(
-            preference,
-            RegistryFormatPreference::ExplicitBackend { format: None }
-        );
+    fn an_explicit_backend_maps_to_its_registry_format() {
+        let cfg = macos_all_backends_selector_cfg();
+        for (backend, format) in [
+            (BackendChoice::Mlx, Some("safetensors")),
+            (BackendChoice::LlamaCpp, Some("gguf")),
+            // mistral.rs runs the registry's default variant.
+            (BackendChoice::Mistral, None),
+        ] {
+            assert_eq!(
+                registry_format_for_explicit_backend(
+                    "qwen3-4b",
+                    Some("text-generation"),
+                    backend,
+                    &cfg
+                )
+                .unwrap(),
+                format,
+                "{backend}"
+            );
+        }
     }
 
     #[test]
-    fn explicit_registry_format_override_rejects_llamacpp_for_embedding_task() {
-        let err = registry_format_preference_for_backend_override_with_task(
+    fn an_embedding_model_accepts_only_mlx_as_an_explicit_backend() {
+        let cfg = macos_all_backends_selector_cfg();
+        let err = registry_format_for_explicit_backend(
             "nomic-embed-text-v1.5",
             Some("text-embedding"),
-            Some("llamacpp"),
-            &macos_all_backends_selector_cfg(),
+            BackendChoice::LlamaCpp,
+            &cfg,
         )
         .unwrap_err();
-
         assert!(
             err.to_string()
                 .contains("does not support registry embedding model"),
             "{err}"
         );
+
+        assert_eq!(
+            registry_format_for_explicit_backend(
+                "nomic-embed-text-v1.5",
+                Some("text-embedding"),
+                BackendChoice::Mlx,
+                &cfg,
+            )
+            .unwrap(),
+            Some("safetensors")
+        );
     }
 
     #[test]
-    fn explicit_registry_format_override_allows_mlx_for_embedding_task() {
-        let preference = registry_format_preference_for_backend_override_with_task(
-            "nomic-embed-text-v1.5",
-            Some("text-embedding"),
-            Some("mlx"),
-            &macos_all_backends_selector_cfg(),
-        )
-        .unwrap();
-
+    fn a_backend_override_parses_auto_and_absent_as_no_override() {
+        assert_eq!(parse_backend_override(None).unwrap(), None);
+        assert_eq!(parse_backend_override(Some("auto")).unwrap(), None);
+        assert_eq!(parse_backend_override(Some("")).unwrap(), None);
         assert_eq!(
-            preference,
-            RegistryFormatPreference::ExplicitBackend {
-                format: Some("safetensors")
-            }
+            parse_backend_override(Some("MLX")).unwrap(),
+            Some(BackendChoice::Mlx)
+        );
+        let err = parse_backend_override(Some("onnx")).unwrap_err();
+        assert!(
+            err.to_string().contains("Invalid backend override"),
+            "{err}"
         );
     }
 
@@ -4599,10 +4459,11 @@ mod tests {
     }
 
     #[test]
-    fn auto_format_asks_the_registry_nothing_on_a_build_that_cannot_run_mlx() {
-        // A build without a working MLX runtime has one variant to load, the
-        // registry default under the bare mask, and loads it as it did before
-        // MLX existed: no model-detail request, no format-keyed cache entry.
+    fn a_load_with_no_override_resolves_the_default_variant_on_every_build() {
+        // MLX is opt-in. Whatever the registry lists, a load that names no
+        // backend resolves the default variant under the bare mask and asks
+        // the registry nothing: a build that can run MLX loads exactly what a
+        // build that cannot does.
         let server = httpmock::MockServer::start();
         let detail = server.mock(|when, then| {
             when.method(httpmock::Method::GET)
@@ -4635,22 +4496,27 @@ mod tests {
             mlx_runtime_ok: false,
             ..macos_all_backends_selector_cfg()
         };
-        for cfg in [linux_llamacpp_selector_cfg(), non_linking_mac] {
+        for cfg in [
+            linux_llamacpp_selector_cfg(),
+            non_linking_mac,
+            macos_all_backends_selector_cfg(),
+        ] {
             assert_eq!(
-                registry_format_for_auto_local_backend(&client, "qwen3.5-0.8b", &cfg).unwrap(),
+                registry_format_for_load(&client, "qwen3.5-0.8b", None, &cfg).unwrap(),
                 None,
-                "{}",
-                cfg.target
+                "{} (mlx runtime: {})",
+                cfg.target,
+                cfg.mlx_runtime_ok
             );
         }
         detail.assert_hits(0);
 
-        // The same registry answer makes an MLX-capable build prefer the
-        // SafeTensors variant.
+        // Naming MLX is what asks for the SafeTensors variant.
         assert_eq!(
-            registry_format_for_auto_local_backend(
+            registry_format_for_load(
                 &client,
                 "qwen3.5-0.8b",
+                Some(BackendChoice::Mlx),
                 &macos_all_backends_selector_cfg()
             )
             .unwrap(),
@@ -4660,64 +4526,56 @@ mod tests {
     }
 
     #[test]
-    fn explicit_registry_context_uses_cached_embedding_task_when_registry_unreachable() {
+    fn a_load_with_no_override_never_picks_up_a_cached_mlx_copy() {
         let tmp = tempfile::TempDir::new().unwrap();
         let client =
             RegistryClient::with_url_and_cache_dir("http://127.0.0.1:9", tmp.path().to_path_buf())
                 .unwrap();
-        let model_id = format!("offline-embed-{}", uuid::Uuid::new_v4());
-        write_cached_task_metadata(&client, &model_id, "safetensors", "text-embedding");
+        let cfg = macos_all_backends_selector_cfg();
 
-        let err = registry_format_preference_for_backend_override_with_registry_context(
-            &client,
-            &model_id,
-            Some("llamacpp"),
-            &macos_all_backends_selector_cfg(),
-        )
-        .unwrap_err();
+        // `backend: mlx` left a SafeTensors copy behind. A later load that
+        // names no backend must not move to MLX because of it.
+        let mlx_only = format!("offline-mlx-{}", uuid::Uuid::new_v4());
+        write_cached_task_metadata(&client, &mlx_only, "safetensors", "text-generation");
+        assert_eq!(
+            registry_format_for_load(&client, &mlx_only, None, &cfg).unwrap(),
+            None
+        );
 
+        // A GGUF copy left by `backend: llamacpp` is the same backend the
+        // default runs on, so it is reused rather than downloaded again.
+        let gguf_copy = format!("offline-gguf-{}", uuid::Uuid::new_v4());
+        write_cached_task_metadata(&client, &gguf_copy, "gguf", "text-generation");
+        assert_eq!(
+            registry_format_for_load(&client, &gguf_copy, None, &cfg).unwrap(),
+            Some("gguf")
+        );
+    }
+
+    #[test]
+    fn an_explicit_backend_uses_the_cached_task_when_the_registry_is_unreachable() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let client =
+            RegistryClient::with_url_and_cache_dir("http://127.0.0.1:9", tmp.path().to_path_buf())
+                .unwrap();
+        let cfg = macos_all_backends_selector_cfg();
+
+        let embed = format!("offline-embed-{}", uuid::Uuid::new_v4());
+        write_cached_task_metadata(&client, &embed, "safetensors", "text-embedding");
+        let err = registry_format_for_load(&client, &embed, Some(BackendChoice::LlamaCpp), &cfg)
+            .unwrap_err();
         assert!(
             err.to_string()
                 .contains("does not support registry embedding model"),
             "{err}"
         );
-    }
 
-    #[test]
-    fn explicit_registry_context_preserves_cached_llamacpp_llm_when_registry_unreachable() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let client =
-            RegistryClient::with_url_and_cache_dir("http://127.0.0.1:9", tmp.path().to_path_buf())
-                .unwrap();
-        let model_id = format!("offline-llm-{}", uuid::Uuid::new_v4());
-        write_cached_task_metadata(&client, &model_id, "gguf", "text-generation");
-
-        let preference = registry_format_preference_for_backend_override_with_registry_context(
-            &client,
-            &model_id,
-            Some("llamacpp"),
-            &macos_all_backends_selector_cfg(),
-        )
-        .unwrap();
-
+        let llm = format!("offline-llm-{}", uuid::Uuid::new_v4());
+        write_cached_task_metadata(&client, &llm, "gguf", "text-generation");
         assert_eq!(
-            preference,
-            RegistryFormatPreference::ExplicitBackend {
-                format: Some("gguf")
-            }
+            registry_format_for_load(&client, &llm, Some(BackendChoice::LlamaCpp), &cfg).unwrap(),
+            Some("gguf")
         );
-    }
-
-    #[test]
-    fn auto_registry_format_override_returns_auto() {
-        let preference = registry_format_preference_for_backend_override(
-            "qwen3-4b",
-            Some("auto"),
-            &macos_all_backends_selector_cfg(),
-        )
-        .unwrap();
-
-        assert_eq!(preference, RegistryFormatPreference::Auto);
     }
 
     #[test]
@@ -5983,91 +5841,6 @@ mod tests {
             .unwrap()
             .with_binding("flutter");
         assert_eq!(client.binding(), "flutter");
-    }
-
-    #[test]
-    fn auto_registry_format_keeps_default_variant_when_no_llm_backend_is_compiled() {
-        // An ONNX-only build (no llama.cpp / mistral.rs / MLX) must still load
-        // an embedding or LLM-task registry model from its default variant.
-        // Auto format selection is a preference, not a gate.
-        let no_llm_backend = SelectorCfg {
-            target: "linux-x86_64".to_string(),
-            host_is_apple_arm64: false,
-            mlx_compiled: false,
-            llamacpp_compiled: false,
-            mistral_compiled: false,
-            mlx_runtime_ok: false,
-        };
-
-        for task in ["sentence-embedding", "text-generation"] {
-            let detail = ModelDetail {
-                id: "all-minilm".to_string(),
-                family: "minilm".to_string(),
-                task: task.to_string(),
-                parameters: 22_000_000,
-                description: "test".to_string(),
-                default_variant: None,
-                variants: std::collections::HashMap::from([(
-                    "onnx-fp32".to_string(),
-                    VariantInfo {
-                        platform: "universal".to_string(),
-                        format: "onnx".to_string(),
-                        quantization: "fp32".to_string(),
-                        size_bytes: 1,
-                        hf_repo: "xybrid-ai/test".to_string(),
-                        file: "model.onnx".to_string(),
-                        min_os: Vec::new(),
-                    },
-                )]),
-            };
-
-            let format =
-                select_auto_registry_format_for_detail("all-minilm", &detail, &no_llm_backend)
-                    .unwrap_or_else(|err| panic!("task `{task}` must not fail: {err}"));
-            assert_eq!(format, None, "task `{task}`");
-        }
-    }
-
-    #[test]
-    fn model_detail_registry_view_matches_variant_formats() {
-        let detail = ModelDetail {
-            id: "qwen3.5-3b".to_string(),
-            family: "qwen".to_string(),
-            task: "text-generation".to_string(),
-            parameters: 3_000_000_000,
-            description: "test".to_string(),
-            default_variant: None,
-            variants: std::collections::HashMap::from([
-                (
-                    "llamacpp-q4".to_string(),
-                    VariantInfo {
-                        platform: "macos-arm64".to_string(),
-                        format: "gguf".to_string(),
-                        quantization: "q4_k_m".to_string(),
-                        size_bytes: 1,
-                        hf_repo: "xybrid-ai/test".to_string(),
-                        file: "model.gguf".to_string(),
-                        min_os: Vec::new(),
-                    },
-                ),
-                (
-                    "mlx-fp16".to_string(),
-                    VariantInfo {
-                        platform: "macos-arm64".to_string(),
-                        format: "SafeTensors".to_string(),
-                        quantization: "fp16".to_string(),
-                        size_bytes: 1,
-                        hf_repo: "xybrid-ai/test".to_string(),
-                        file: "model.safetensors".to_string(),
-                        min_os: Vec::new(),
-                    },
-                ),
-            ]),
-        };
-
-        assert!(detail.has_variant("qwen3.5-3b", "safetensors"));
-        assert!(detail.has_variant("qwen3.5-3b", "gguf"));
-        assert!(!detail.has_variant("qwen3.5-3b", "onnx"));
     }
 
     #[test]

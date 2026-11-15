@@ -165,7 +165,7 @@ pub use whisper_cpp::WhisperCppRuntime;
 pub use inference_backend::{BackendError, BackendResult, InferenceBackend, RuntimeType};
 pub use selector::{
     current_target, mlx_runtime_available, select_llm_backend, select_with_cfg, BackendChoice,
-    RegistryView, SelectionParams, SelectorCfg, SelectorError,
+    SelectionParams, SelectorCfg, SelectorError,
 };
 pub use traits::ModelRuntime;
 

@@ -1,29 +1,27 @@
-//! Runtime backend selector — picks the best local text backend for a model.
+//! Runtime backend selector: which local text backend runs a model.
 //!
-//! US-016. The selector implements a 5-branch priority:
+//! MLX is opt-in. The selector returns it only when the caller names it, or
+//! when it is the only local text backend this build has:
 //!
-//! 1. An explicit `backend:` override (from `model_metadata.json` or a
-//!    pipeline-stage YAML) wins, when that backend is compiled into this
-//!    build and (for MLX) the Metal runtime probe succeeds.
-//! 2. Apple Silicon macOS host + `llm-mlx` feature + registry has a `format: safetensors`
-//!    variant for this model + [`mlx_runtime_available`] returns true →
-//!    [`BackendChoice::Mlx`].
-//! 3. Else [`BackendChoice::LlamaCpp`] if compiled in.
-//! 4. Else [`BackendChoice::Mistral`] if compiled in.
+//! 1. An explicit `backend:` override (from `model_metadata.json`, a
+//!    pipeline-stage YAML, the SDK's `with_backend` or the CLI's `--backend`)
+//!    wins, when that backend is compiled into this build and, for MLX, the
+//!    Metal runtime probe succeeds.
+//! 2. Else [`BackendChoice::LlamaCpp`] if compiled in.
+//! 3. Else [`BackendChoice::Mistral`] if compiled in.
+//! 4. Else [`BackendChoice::Mlx`] if this build can run it.
 //! 5. Else [`SelectorError::NoBackendAvailable`].
 //!
-//! The selector is intentionally runtime-agnostic at its surface: it takes
-//! a [`RegistryView`] trait object rather than a concrete `RegistryClient`,
-//! so unit tests supply a tiny mock and downstream crates are free to wire
-//! in their own registry types.
+//! So `backend: auto` picks the same backend on a build with MLX as on one
+//! without: MLX refuses grammars and images, and a request that works on
+//! llama.cpp must not start failing because the build gained a runtime.
 //!
-//! Explicit overrides that point at an unusable backend — not compiled for
+//! Explicit overrides that point at an unusable backend (not compiled for
 //! this build, not supported by this target, or blocked by the MLX runtime
-//! probe — produce [`SelectorError::ExplicitBackendUnavailable`] with the
-//! current target triple and the list of actually usable backends. This is
-//! the source of the "MLX backend requested but not available on this
-//! platform (target: linux-x86_64). Available backends: [llamacpp, mistral]"
-//! error the PRD calls for.
+//! probe) produce [`SelectorError::ExplicitBackendUnavailable`] with the
+//! current target and the list of backends that are usable, e.g. "MLX backend
+//! requested but not available on this platform (target: linux-x86_64).
+//! Available backends: [llamacpp]".
 
 use std::sync::OnceLock;
 use thiserror::Error;
@@ -153,24 +151,6 @@ fn fmt_backend_uppercase(b: &BackendChoice) -> &'static str {
 }
 
 // =============================================================================
-// RegistryView
-// =============================================================================
-
-/// Minimal view the selector needs over the model registry.
-///
-/// Only `has_variant(model_id, format)` is required: the selector needs to
-/// know whether the registry has (for example) a `format: safetensors` variant for
-/// a given model. Keeping the trait this small lets the downstream
-/// `RegistryClient` in `xybrid-sdk` implement it trivially while unit tests
-/// use a 5-line `HashMap`-backed stub.
-pub trait RegistryView {
-    /// True if the registry knows about a variant of `model_id` that uses
-    /// the given `format` (matching the `VariantInfo.format` field —
-    /// typically `"gguf"`, `"onnx"`, or `"safetensors"`).
-    fn has_variant(&self, model_id: &str, format: &str) -> bool;
-}
-
-// =============================================================================
 // SelectorCfg + capability probes
 // =============================================================================
 
@@ -293,8 +273,8 @@ pub struct SelectionParams<'a> {
     /// The model ID being resolved (e.g. `qwen3.5-3b`).
     pub model_id: &'a str,
     /// Explicit backend override from `model_metadata.json`'s `backend:`
-    /// field or a pipeline-stage YAML `backend:` field. `None` means
-    /// "let the selector decide via the default priority".
+    /// field, a pipeline-stage YAML `backend:` field, the SDK or the CLI.
+    /// `None` means "let the selector decide via the default priority".
     pub explicit: Option<BackendChoice>,
 }
 
@@ -317,30 +297,32 @@ impl<'a> SelectionParams<'a> {
     }
 }
 
-/// Pick the backend for `model_id` against the given registry, using the
-/// current build's capabilities.
-///
-/// The function name is kept for API compatibility; the selector is also used
-/// for backend-selectable embedding models.
+/// Pick the backend for `model_id` with no override, using the current
+/// build's capabilities. Embedding models that can run on a text backend go
+/// through the same selection.
 ///
 /// Equivalent to
-/// `select_with_cfg(&SelectionParams::new(model_id), registry, &SelectorCfg::current())`.
-pub fn select_llm_backend(
-    model_id: &str,
-    registry: &dyn RegistryView,
-) -> Result<BackendChoice, SelectorError> {
-    select_with_cfg(
-        &SelectionParams::new(model_id),
-        registry,
-        &SelectorCfg::current(),
-    )
+/// `select_with_cfg(&SelectionParams::new(model_id), &SelectorCfg::current())`.
+///
+/// # Errors
+///
+/// [`SelectorError::NoBackendAvailable`] when this build has no local text
+/// backend.
+pub fn select_llm_backend(model_id: &str) -> Result<BackendChoice, SelectorError> {
+    select_with_cfg(&SelectionParams::new(model_id), &SelectorCfg::current())
 }
 
-/// Same as [`select_llm_backend`] but with a pre-built [`SelectorCfg`]
-/// (enables unit tests to simulate arbitrary hosts).
+/// Same as [`select_llm_backend`], with an optional explicit backend and a
+/// pre-built [`SelectorCfg`] (so tests can simulate any host).
+///
+/// # Errors
+///
+/// [`SelectorError::ExplicitBackendUnavailable`] when the requested backend
+/// cannot run on this build or host, and
+/// [`SelectorError::NoBackendAvailable`] when no backend was requested and
+/// none is compiled in.
 pub fn select_with_cfg(
     params: &SelectionParams<'_>,
-    registry: &dyn RegistryView,
     cfg: &SelectorCfg,
 ) -> Result<BackendChoice, SelectorError> {
     let available = cfg.available_backends();
@@ -371,22 +353,7 @@ pub fn select_with_cfg(
         });
     }
 
-    // (2) Apple Silicon macOS + llm-mlx + registry has SafeTensors + runtime available → Mlx
-    if cfg.host_is_apple_arm64
-        && cfg.mlx_compiled
-        && cfg.mlx_runtime_ok
-        && registry.has_variant(params.model_id, "safetensors")
-    {
-        log_decision(
-            params.model_id,
-            BackendChoice::Mlx,
-            &available,
-            "apple_silicon + safetensors variant + runtime ok",
-        );
-        return Ok(BackendChoice::Mlx);
-    }
-
-    // (3) llama.cpp.
+    // (2) llama.cpp. MLX is never preferred over it: see the module docs.
     if cfg.llamacpp_compiled {
         log_decision(
             params.model_id,
@@ -397,7 +364,7 @@ pub fn select_with_cfg(
         return Ok(BackendChoice::LlamaCpp);
     }
 
-    // (4) mistral.rs.
+    // (3) mistral.rs.
     if cfg.mistral_compiled {
         log_decision(
             params.model_id,
@@ -408,13 +375,10 @@ pub fn select_with_cfg(
         return Ok(BackendChoice::Mistral);
     }
 
-    // (5) MLX without a registry-reported SafeTensors variant. On an
-    // mlx-only build (no llamacpp/mistral) a registry view that cannot
-    // answer `has_variant` — the SDK's EmptyRegistryView, local bundles —
-    // must not report "no local text backend compiled in" while MLX is
-    // compiled and probe-verified. Whether the model actually is MLX
-    // SafeTensors is decided downstream at load; this branch only refuses
-    // to claim nothing is available.
+    // (4) MLX, on a build whose only local text backend it is. Whether the
+    // model is an MLX SafeTensors bundle is decided at load; this branch
+    // only refuses to report "no local text backend compiled in" while MLX
+    // is compiled and probe-verified.
     if cfg.host_is_apple_arm64 && cfg.mlx_compiled && cfg.mlx_runtime_ok {
         log_decision(
             params.model_id,
@@ -425,7 +389,7 @@ pub fn select_with_cfg(
         return Ok(BackendChoice::Mlx);
     }
 
-    // (6) Nothing available.
+    // (5) Nothing available.
     log::info!(
         "backend_selector: chosen_backend=err \
          available_backends=[{}] reason=\"no local text backend compiled in\" model_id={}",
@@ -456,31 +420,6 @@ fn log_decision(model_id: &str, chosen: BackendChoice, available: &[BackendChoic
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-
-    /// In-memory registry stub used by unit tests. `variants[(model_id,
-    /// format)] == true` iff that pair should resolve.
-    #[derive(Default)]
-    struct MockRegistry {
-        variants: HashMap<(String, String), bool>,
-    }
-
-    impl MockRegistry {
-        fn with_variant(mut self, model_id: &str, format: &str) -> Self {
-            self.variants
-                .insert((model_id.to_string(), format.to_string()), true);
-            self
-        }
-    }
-
-    impl RegistryView for MockRegistry {
-        fn has_variant(&self, model_id: &str, format: &str) -> bool {
-            self.variants
-                .get(&(model_id.to_string(), format.to_string()))
-                .copied()
-                .unwrap_or(false)
-        }
-    }
 
     /// Build a fully-permissive cfg (every backend compiled, MLX probe ok,
     /// Apple Silicon macOS host). Individual tests toggle fields off.
@@ -629,11 +568,10 @@ mod tests {
     #[test]
     fn branch_1_explicit_override_wins_when_backend_available() {
         let cfg = apple_arm64_everything();
-        let reg = MockRegistry::default().with_variant("qwen3.5-3b", "safetensors");
         let params =
             SelectionParams::new("qwen3.5-3b").with_explicit(Some(BackendChoice::LlamaCpp));
         assert_eq!(
-            select_with_cfg(&params, &reg, &cfg).unwrap(),
+            select_with_cfg(&params, &cfg).unwrap(),
             BackendChoice::LlamaCpp,
         );
     }
@@ -641,10 +579,9 @@ mod tests {
     #[test]
     fn branch_1_explicit_mlx_on_non_apple_returns_descriptive_error() {
         let cfg = linux_x86_64_llamacpp_only();
-        let reg = MockRegistry::default();
         let params = SelectionParams::new("qwen3.5-3b").with_explicit(Some(BackendChoice::Mlx));
 
-        let err = select_with_cfg(&params, &reg, &cfg).unwrap_err();
+        let err = select_with_cfg(&params, &cfg).unwrap_err();
         // Matches the PRD's required error shape (word-for-word):
         //   "MLX backend requested but not available on this platform
         //    (target: linux-x86_64). Available backends: [llamacpp, mistral]"
@@ -676,9 +613,8 @@ mod tests {
         // failed (e.g. headless CI) — same error shape as "not compiled".
         let mut cfg = apple_arm64_everything();
         cfg.mlx_runtime_ok = false;
-        let reg = MockRegistry::default().with_variant("qwen3.5-3b", "safetensors");
         let params = SelectionParams::new("qwen3.5-3b").with_explicit(Some(BackendChoice::Mlx));
-        let err = select_with_cfg(&params, &reg, &cfg).unwrap_err();
+        let err = select_with_cfg(&params, &cfg).unwrap_err();
         assert!(matches!(
             err,
             SelectorError::ExplicitBackendUnavailable {
@@ -690,84 +626,92 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Branch (2): Apple Silicon macOS + SafeTensors registry + runtime → Mlx
+    // MLX is opt-in: no override never selects it over another backend
     // ------------------------------------------------------------------
 
     #[test]
-    fn branch_2_apple_arm64_mlx_registry_runtime_selects_mlx() {
+    fn no_override_keeps_llamacpp_on_a_build_that_can_run_mlx() {
         let cfg = apple_arm64_everything();
-        let reg = MockRegistry::default().with_variant("qwen3.5-3b", "safetensors");
         let params = SelectionParams::new("qwen3.5-3b");
         assert_eq!(
-            select_with_cfg(&params, &reg, &cfg).unwrap(),
-            BackendChoice::Mlx,
-        );
-    }
-
-    #[test]
-    fn branch_2_no_mlx_registry_variant_falls_through_to_llamacpp() {
-        let cfg = apple_arm64_everything();
-        // Registry has gguf but NOT SafeTensors.
-        let reg = MockRegistry::default().with_variant("qwen3.5-3b", "gguf");
-        let params = SelectionParams::new("qwen3.5-3b");
-        assert_eq!(
-            select_with_cfg(&params, &reg, &cfg).unwrap(),
+            select_with_cfg(&params, &cfg).unwrap(),
             BackendChoice::LlamaCpp,
         );
     }
 
     #[test]
-    fn branch_2_runtime_probe_failed_falls_through_to_llamacpp() {
+    fn no_override_keeps_mistral_over_mlx_when_llamacpp_is_absent() {
         let mut cfg = apple_arm64_everything();
+        cfg.llamacpp_compiled = false;
+        let params = SelectionParams::new("qwen3.5-3b");
+        assert_eq!(
+            select_with_cfg(&params, &cfg).unwrap(),
+            BackendChoice::Mistral,
+        );
+    }
+
+    #[test]
+    fn no_override_selects_the_same_backend_with_and_without_mlx() {
+        let with_mlx = apple_arm64_everything();
+        let mut without_mlx = apple_arm64_everything();
+        without_mlx.mlx_compiled = false;
+        without_mlx.mlx_runtime_ok = false;
+        let params = SelectionParams::new("qwen3.5-3b");
+        assert_eq!(
+            select_with_cfg(&params, &with_mlx).unwrap(),
+            select_with_cfg(&params, &without_mlx).unwrap(),
+        );
+    }
+
+    #[test]
+    fn an_explicit_mlx_override_selects_mlx() {
+        let cfg = apple_arm64_everything();
+        let params = SelectionParams::new("qwen3.5-3b").with_explicit(Some(BackendChoice::Mlx));
+        assert_eq!(select_with_cfg(&params, &cfg).unwrap(), BackendChoice::Mlx);
+    }
+
+    #[test]
+    fn an_mlx_only_build_selects_mlx_without_an_override() {
+        let mut cfg = apple_arm64_everything();
+        cfg.llamacpp_compiled = false;
+        cfg.mistral_compiled = false;
+        let params = SelectionParams::new("qwen3.5-3b");
+        assert_eq!(select_with_cfg(&params, &cfg).unwrap(), BackendChoice::Mlx);
+    }
+
+    #[test]
+    fn an_mlx_only_build_without_a_runtime_has_no_backend() {
+        let mut cfg = apple_arm64_everything();
+        cfg.llamacpp_compiled = false;
+        cfg.mistral_compiled = false;
         cfg.mlx_runtime_ok = false;
-        let reg = MockRegistry::default().with_variant("qwen3.5-3b", "safetensors");
         let params = SelectionParams::new("qwen3.5-3b");
-        assert_eq!(
-            select_with_cfg(&params, &reg, &cfg).unwrap(),
-            BackendChoice::LlamaCpp,
-        );
-    }
-
-    #[test]
-    fn branch_2_ios_non_runtime_mlx_falls_through_to_llamacpp() {
-        let cfg = SelectorCfg {
-            target: "ios-aarch64".to_string(),
-            host_is_apple_arm64: false,
-            mlx_compiled: true,
-            llamacpp_compiled: true,
-            mistral_compiled: false,
-            mlx_runtime_ok: false,
-        };
-        let reg = MockRegistry::default().with_variant("qwen3.5-3b", "safetensors");
-        let params = SelectionParams::new("qwen3.5-3b");
-
-        assert_eq!(
-            select_with_cfg(&params, &reg, &cfg).unwrap(),
-            BackendChoice::LlamaCpp,
-        );
+        assert!(matches!(
+            select_with_cfg(&params, &cfg),
+            Err(SelectorError::NoBackendAvailable { .. })
+        ));
     }
 
     // ------------------------------------------------------------------
-    // Branch (3): LlamaCpp fallback
+    // Branch (2): LlamaCpp
     // ------------------------------------------------------------------
 
     #[test]
-    fn branch_3_llamacpp_when_not_apple() {
+    fn branch_2_llamacpp_when_not_apple() {
         let cfg = linux_x86_64_llamacpp_only();
-        let reg = MockRegistry::default();
         let params = SelectionParams::new("qwen3.5-3b");
         assert_eq!(
-            select_with_cfg(&params, &reg, &cfg).unwrap(),
+            select_with_cfg(&params, &cfg).unwrap(),
             BackendChoice::LlamaCpp,
         );
     }
 
     // ------------------------------------------------------------------
-    // Branch (4): Mistral fallback
+    // Branch (3): Mistral fallback
     // ------------------------------------------------------------------
 
     #[test]
-    fn branch_4_mistral_when_no_llamacpp() {
+    fn branch_3_mistral_when_no_llamacpp() {
         let cfg = SelectorCfg {
             target: "linux-x86_64".to_string(),
             host_is_apple_arm64: false,
@@ -776,10 +720,9 @@ mod tests {
             mistral_compiled: true,
             mlx_runtime_ok: false,
         };
-        let reg = MockRegistry::default();
         let params = SelectionParams::new("qwen3.5-3b");
         assert_eq!(
-            select_with_cfg(&params, &reg, &cfg).unwrap(),
+            select_with_cfg(&params, &cfg).unwrap(),
             BackendChoice::Mistral,
         );
     }
@@ -798,9 +741,8 @@ mod tests {
             mistral_compiled: false,
             mlx_runtime_ok: false,
         };
-        let reg = MockRegistry::default();
         let params = SelectionParams::new("qwen3.5-3b");
-        let err = select_with_cfg(&params, &reg, &cfg).unwrap_err();
+        let err = select_with_cfg(&params, &cfg).unwrap_err();
         match err {
             SelectorError::NoBackendAvailable {
                 model_id,
@@ -838,48 +780,5 @@ mod tests {
         let a = mlx_runtime_available();
         let b = mlx_runtime_available();
         assert_eq!(a, b);
-    }
-
-    // ------------------------------------------------------------------
-    // Apple Silicon macOS integration test (US-016 AC).
-    //
-    // Runs on macOS arm64 CI when `llm-mlx-runtime + llm-llamacpp` are both
-    // compiled in: loads qwen3.5-3b against a mock registry that
-    // advertises both GGUF and SafeTensors variants and asserts the selector
-    // routes to MLX. Other targets use the non-runtime `llm-mlx`
-    // checks; `llm-mlx-runtime` is intentionally a macOS arm64-only build.
-    // ------------------------------------------------------------------
-
-    #[cfg(all(
-        feature = "llm-mlx-runtime",
-        feature = "llm-llamacpp",
-        target_os = "macos",
-        target_arch = "aarch64"
-    ))]
-    #[test]
-    fn integration_apple_silicon_routes_qwen3_with_both_variants_to_mlx() {
-        let reg = MockRegistry::default()
-            .with_variant("qwen3.5-3b", "gguf")
-            .with_variant("qwen3.5-3b", "safetensors");
-        let cfg = SelectorCfg::current();
-
-        // Sanity — we ought to be on an Apple Silicon build with both
-        // features compiled in, otherwise the test is a no-op per the
-        // cfg-gate.
-        assert!(cfg.host_is_apple_arm64);
-        assert!(cfg.mlx_compiled);
-        assert!(cfg.llamacpp_compiled);
-
-        if !cfg.mlx_runtime_ok {
-            // Headless CI without a Metal device — the probe legitimately
-            // failed; the selector should fall through to llama.cpp and
-            // we verify THAT instead, so CI stays green.
-            let chosen = select_with_cfg(&SelectionParams::new("qwen3.5-3b"), &reg, &cfg).unwrap();
-            assert_eq!(chosen, BackendChoice::LlamaCpp);
-            return;
-        }
-
-        let chosen = select_with_cfg(&SelectionParams::new("qwen3.5-3b"), &reg, &cfg).unwrap();
-        assert_eq!(chosen, BackendChoice::Mlx);
     }
 }

@@ -12,10 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use xybrid_core::context::{DeviceMetrics, StageDescriptor, DEVICE_CLASS_SCHEMA_VERSION};
 use xybrid_core::device::ResourceMonitor;
 use xybrid_core::execution::choice::{validate_choice_request, EntryPoint};
-use xybrid_core::execution_template::{
-    is_mlx_embedding_safetensors_metadata, is_mlx_llm_safetensors_metadata, stage_kind_from_task,
-    ExecutionTemplate, ModelMetadata,
-};
+use xybrid_core::execution_template::{ExecutionTemplate, ModelMetadata};
 use xybrid_core::executor::prepare_stage_input;
 use xybrid_core::ir::{Choice, ChoiceScores, Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::routing_engine::LocalAvailability;
@@ -25,9 +22,7 @@ use xybrid_core::orchestrator::{
 };
 use xybrid_core::pipeline::{ExecutionTarget, IntegrationProvider, StageOptions};
 use xybrid_core::pipeline_config::{PipelineConfig, StageConfig};
-use xybrid_core::runtime_adapter::{
-    select_with_cfg, BackendChoice, RegistryView, SelectionParams, SelectorCfg,
-};
+use xybrid_core::runtime_adapter::{BackendChoice, SelectorCfg};
 use xybrid_core::target::{Platform, TargetResolver};
 use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_sdk::registry_client::RegistryClient;
@@ -1728,88 +1723,19 @@ fn apply_backend_override_with_selector_cfg(
     Ok(())
 }
 
+/// The SDK's check, so `xybrid run --backend` and `ModelLoader::with_backend`
+/// accept and refuse the same bundles.
 fn validate_local_backend_override(
     metadata: &ModelMetadata,
     choice: BackendChoice,
     cfg: &SelectorCfg,
 ) -> Result<()> {
-    if !metadata_uses_local_backend_selector(metadata) {
-        return Ok(());
-    }
-
-    validate_local_backend_artifact_compatibility(metadata, choice)?;
-
-    select_with_cfg(
-        &SelectionParams::new(&metadata.model_id).with_explicit(Some(choice)),
-        &NoRegistryVariants,
-        cfg,
-    )
-    .map(|_| ())
-    .map_err(|err| anyhow::anyhow!(err.to_string()))
-}
-
-fn metadata_uses_local_backend_selector(metadata: &ModelMetadata) -> bool {
-    if matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. })
-        || is_mlx_llm_safetensors_metadata(metadata)
-        || is_mlx_embedding_safetensors_metadata(metadata)
-    {
-        return true;
-    }
-
-    metadata
-        .metadata
-        .get("task")
-        .and_then(|v| v.as_str())
-        .and_then(stage_kind_from_task)
-        .is_some_and(|kind| matches!(kind, "llm" | "embed"))
-}
-
-fn validate_local_backend_artifact_compatibility(
-    metadata: &ModelMetadata,
-    choice: BackendChoice,
-) -> Result<()> {
-    match &metadata.execution_template {
-        ExecutionTemplate::Gguf { .. } => match choice {
-            BackendChoice::Mlx => Err(anyhow::anyhow!(
-                "backend `mlx` does not support local GGUF model `{}`; use `auto`, `llamacpp`, or `mistral`",
-                metadata.model_id
-            )),
-            BackendChoice::LlamaCpp | BackendChoice::Mistral => Ok(()),
-        },
-        ExecutionTemplate::SafeTensors { architecture, .. } => match choice {
-            BackendChoice::Mlx => {
-                if metadata_is_mlx_compatible_safetensors(metadata) {
-                    Ok(())
-                } else {
-                    Err(anyhow::anyhow!(
-                        "backend `mlx` does not support local SafeTensors architecture `{}` for model `{}`",
-                        architecture.as_deref().unwrap_or("unknown"),
-                        metadata.model_id
-                    ))
-                }
-            }
-            BackendChoice::LlamaCpp | BackendChoice::Mistral => Err(anyhow::anyhow!(
-                "backend `{}` does not support local SafeTensors model `{}`; use `auto` or `mlx`",
-                choice.as_str(),
-                metadata.model_id
-            )),
-        },
-        _ => Ok(()),
-    }
-}
-
-fn metadata_is_mlx_compatible_safetensors(metadata: &ModelMetadata) -> bool {
-    let mut forced = metadata.clone();
-    forced.backend = Some("mlx".to_string());
-    is_mlx_llm_safetensors_metadata(&forced) || is_mlx_embedding_safetensors_metadata(&forced)
-}
-
-struct NoRegistryVariants;
-
-impl RegistryView for NoRegistryVariants {
-    fn has_variant(&self, _model_id: &str, _format: &str) -> bool {
-        false
-    }
+    xybrid_sdk::model::validate_local_backend_override(metadata, choice, cfg).map_err(|err| {
+        match err {
+            xybrid_sdk::SdkError::ConfigError(message) => anyhow::anyhow!(message),
+            other => anyhow::anyhow!(other.to_string()),
+        }
+    })
 }
 
 fn run_inference(
@@ -2678,7 +2604,7 @@ stages:
     }
 
     #[test]
-    fn resolve_pipeline_stages_auto_fetches_selector_format_variant() {
+    fn a_stage_that_names_mlx_fetches_the_safetensors_variant() {
         let server = MockServer::start();
         let model_id = format!("test-llm-{}", uuid::Uuid::new_v4());
         let download_url = format!("{}/model.safetensors", server.base_url());
@@ -2766,6 +2692,7 @@ stages:
   - id: llm
     model: {model_id}
     target: device
+    backend: mlx
 "#
         ))
         .unwrap();
@@ -2781,14 +2708,14 @@ stages:
 
         assert!(
             detail_mock.hits() > 0,
-            "run pipeline auto stage resolution must inspect model variants"
+            "an explicit backend is checked against the model's task"
         );
         assert!(
             resolve_mock.hits() > 0,
-            "run pipeline auto stage resolution must send the selector-chosen format query"
+            "`backend: mlx` must ask for the SafeTensors variant"
         );
         download_mock.assert();
-        assert_eq!(stages[0].backend, None);
+        assert_eq!(stages[0].backend.as_deref(), Some("mlx"));
         assert!(stages[0]
             .bundle_path
             .as_deref()

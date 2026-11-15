@@ -71,9 +71,7 @@ pub use result::{FfiPipelineExecutionResult, FfiStageExecutionResult};
 
 use crate::model::SdkError;
 use crate::registry_client::{
-    registry_format_for_auto_local_backend, registry_format_for_backend,
-    registry_format_preference_for_backend_override_with_registry_context, RegistryClient,
-    RegistryFormatPreference,
+    parse_backend_override, registry_format_for_backend, registry_format_for_load, RegistryClient,
 };
 use crate::result::{output_type_for_envelope, OutputType};
 use crate::run_options::RunOptions;
@@ -135,19 +133,8 @@ fn stage_registry_format(
     stage_config: &xybrid_core::pipeline_config::StageConfig,
     cfg: &SelectorCfg,
 ) -> PipelineResult<Option<&'static str>> {
-    let model_id = stage_config.model_id();
-
-    match registry_format_preference_for_backend_override_with_registry_context(
-        client,
-        &model_id,
-        stage_config.backend(),
-        cfg,
-    )? {
-        RegistryFormatPreference::Auto => {
-            registry_format_for_auto_local_backend(client, &model_id, cfg)
-        }
-        RegistryFormatPreference::ExplicitBackend { format } => Ok(format),
-    }
+    let backend = parse_backend_override(stage_config.backend())?;
+    registry_format_for_load(client, &stage_config.model_id(), backend, cfg)
 }
 
 /// Whether the variant a stage will load is already on this machine: its
@@ -3180,7 +3167,7 @@ stages:
     }
 
     #[test]
-    fn pipeline_load_auto_resolves_mlx_variant_format_when_selector_prefers_it() {
+    fn a_stage_resolves_the_mlx_variant_only_when_it_names_mlx() {
         use httpmock::prelude::*;
 
         let server = MockServer::start();
@@ -3190,7 +3177,9 @@ stages:
                 r#"{"id":"test-llm","family":"test","task":"text-generation","parameters":1,"description":"d","default_variant":null,"variants":{"llamacpp-q4":{"platform":"macos-arm64","format":"gguf","quantization":"q4","size_bytes":456,"hf_repo":"xybrid-ai/test-llm","file":"model.gguf"},"mlx-fp16":{"platform":"macos-arm64","format":"safetensors","quantization":"fp16","size_bytes":123,"hf_repo":"xybrid-ai/test-llm","file":"model.safetensors"}}}"#,
             );
         });
-        let resolve_mock = server.mock(|when, then| {
+        // Declared first so a request that carries `format=safetensors` lands
+        // here; everything else falls through to the default-variant mock.
+        let mlx_resolve_mock = server.mock(|when, then| {
             when.method(GET)
                 .path("/v1/models/test-llm/resolve")
                 .query_param_exists("platform")
@@ -3201,31 +3190,45 @@ stages:
                     r#"{"mask":"test-llm","platform":"macos-arm64","resolved":{"hf_repo":"xybrid-ai/test-llm","file":"model.safetensors","download_url":"https://example.com/model.safetensors","format":"safetensors","quantization":"fp16","size_bytes":123,"sha256":""}}"#,
                 );
         });
-
-        let yaml = format!(
-            r#"
-name: Backend Auto Format
+        let default_resolve_mock = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/models/test-llm/resolve")
+                .query_param_exists("platform");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(
+                    r#"{"mask":"test-llm","platform":"macos-arm64","resolved":{"hf_repo":"xybrid-ai/test-llm","file":"model.gguf","download_url":"https://example.com/model.gguf","format":"gguf","quantization":"q4","size_bytes":456,"sha256":""}}"#,
+                );
+        });
+        let stage_yaml = |backend: &str| {
+            format!(
+                r#"
+name: Backend Format
 registry: "{}"
 stages:
   - id: llm
     model: test-llm
-    target: device
+    target: device{backend}
 "#,
-            server.base_url()
-        );
-        let ref_ = PipelineRef::from_yaml(&yaml).unwrap();
+                server.base_url()
+            )
+        };
 
+        // No backend named: the default variant, on a build that can run MLX
+        // too, and no look at what else the registry lists.
+        let ref_ = PipelineRef::from_yaml(&stage_yaml("")).unwrap();
         let pipeline =
             Pipeline::from_ref_with_selector_cfg(&ref_, &apple_mlx_selector_cfg()).unwrap();
+        assert_eq!(detail_mock.hits(), 0);
+        assert_eq!(mlx_resolve_mock.hits(), 0);
+        assert!(default_resolve_mock.hits() > 0);
+        assert_eq!(pipeline.download_size(), 456);
 
-        assert!(
-            detail_mock.hits() > 0,
-            "auto stage resolution must inspect model variants before resolving"
-        );
-        assert!(
-            resolve_mock.hits() > 0,
-            "auto stage resolution must send the selector-chosen registry format"
-        );
+        // `backend: mlx` is what asks for the SafeTensors variant.
+        let ref_ = PipelineRef::from_yaml(&stage_yaml("\n    backend: mlx")).unwrap();
+        let pipeline =
+            Pipeline::from_ref_with_selector_cfg(&ref_, &apple_mlx_selector_cfg()).unwrap();
+        assert!(mlx_resolve_mock.hits() > 0);
         assert_eq!(pipeline.download_size(), 123);
         assert_eq!(pipeline.stages()[0].status, StageStatus::NeedsDownload);
         assert_eq!(pipeline.stages()[0].download_bytes, Some(123));

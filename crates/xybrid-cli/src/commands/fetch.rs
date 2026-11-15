@@ -4,12 +4,9 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 use xybrid_core::runtime_adapter::SelectorCfg;
-use xybrid_sdk::registry_client::{
-    registry_format_preference_for_backend_override_with_registry_context, RegistryClient,
-    RegistryFormatPreference,
-};
+use xybrid_sdk::registry_client::RegistryClient;
 
-use super::registry_format::registry_format_for_auto_local_backend;
+use super::registry_format::registry_format_for_stage_backend;
 use super::utils::format_size;
 use crate::ui;
 
@@ -34,7 +31,7 @@ pub(crate) fn handle_fetch_command(
 
     let selector_cfg = SelectorCfg::current();
     let format =
-        registry_format_for_fetch_backend(&client, model_id, backend_override, &selector_cfg)?;
+        registry_format_for_stage_backend(&client, model_id, backend_override, &selector_cfg)?;
     let resolved = if let Some(format) = format {
         client
             .resolve_with_format(model_id, platform, format)
@@ -282,7 +279,7 @@ fn fetch_models_with_selector_cfg(
 
     for request in models {
         let model_id = &request.model_id;
-        let format = match registry_format_for_fetch_backend(
+        let format = match registry_format_for_stage_backend(
             client,
             model_id,
             request.backend.as_deref(),
@@ -352,25 +349,6 @@ fn fetch_models_with_selector_cfg(
     Ok((success_count, skip_count, error_count))
 }
 
-fn registry_format_for_fetch_backend(
-    client: &RegistryClient,
-    model_id: &str,
-    backend_override: Option<&str>,
-    cfg: &SelectorCfg,
-) -> Result<Option<&'static str>> {
-    match registry_format_preference_for_backend_override_with_registry_context(
-        client,
-        model_id,
-        backend_override,
-        cfg,
-    )? {
-        RegistryFormatPreference::Auto => Ok(registry_format_for_auto_local_backend(
-            client, model_id, cfg,
-        )?),
-        RegistryFormatPreference::ExplicitBackend { format } => Ok(format),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -419,7 +397,7 @@ mod tests {
     fn fetch_backend_format_rejects_unavailable_explicit_mlx() {
         let client = RegistryClient::with_url("http://127.0.0.1:9").unwrap();
 
-        let err = registry_format_for_fetch_backend(
+        let err = registry_format_for_stage_backend(
             &client,
             "qwen3-4b",
             Some("mlx"),
@@ -466,7 +444,7 @@ mod tests {
         });
         let client = RegistryClient::with_url(server.base_url()).unwrap();
 
-        let err = registry_format_for_fetch_backend(
+        let err = registry_format_for_stage_backend(
             &client,
             &model_id,
             Some("llamacpp"),
@@ -486,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn fetch_models_auto_fetches_embedding_selector_format_variant() {
+    fn fetch_with_backend_mlx_fetches_the_safetensors_variant() {
         let server = MockServer::start();
         let model_id = format!("test-embed-{}", uuid::Uuid::new_v4());
         let download_url = format!("{}/model.safetensors", server.base_url());
@@ -572,7 +550,7 @@ mod tests {
         let client = RegistryClient::with_url(server.base_url()).unwrap();
         let requests = vec![ModelFetchRequest {
             model_id,
-            backend: None,
+            backend: Some("mlx".to_string()),
         }];
 
         let counts =
@@ -581,18 +559,18 @@ mod tests {
 
         assert!(
             detail_mock.hits() > 0,
-            "fetch auto resolution must inspect model variants"
+            "an explicit backend is checked against the model's task"
         );
         assert!(
             resolve_mock.hits() > 0,
-            "fetch auto resolution must send the selector-chosen format query"
+            "`--backend mlx` must ask for the SafeTensors variant"
         );
         download_mock.assert();
         assert_eq!(counts, (1, 0, 0));
     }
 
     #[test]
-    fn fetch_models_auto_keeps_embedding_registry_default_without_safetensors() {
+    fn fetch_with_no_backend_fetches_the_registry_default() {
         let server = MockServer::start();
         let model_id = format!("test-embed-{}", uuid::Uuid::new_v4());
         let download_url = format!("{}/model.onnx", server.base_url());
@@ -612,6 +590,14 @@ mod tests {
                         "size_bytes":34,
                         "hf_repo":"xybrid-ai/{model_id}",
                         "file":"model.gguf"
+                    }},
+                    "mlx-fp16":{{
+                        "platform":"macos-arm64",
+                        "format":"safetensors",
+                        "quantization":"fp16",
+                        "size_bytes":12,
+                        "hf_repo":"xybrid-ai/{model_id}",
+                        "file":"model.safetensors"
                     }}
                 }}
             }}"#
@@ -652,11 +638,13 @@ mod tests {
                 .header("content-type", "application/json")
                 .body(detail_body);
         });
-        let wrong_gguf_mock = server.mock(|when, then| {
+        // Declared before the default mock, so any request that names a
+        // format lands on one of these instead.
+        let wrong_format_mock = server.mock(|when, then| {
             when.method(GET)
                 .path(format!("/v1/models/{model_id}/resolve"))
-                .query_param("format", "gguf");
-            then.status(500).body("unexpected gguf format request");
+                .query_param_exists("format");
+            then.status(500).body("unexpected format request");
         });
         let resolve_mock = server.mock(|when, then| {
             when.method(GET)
@@ -681,19 +669,19 @@ mod tests {
             fetch_models_with_selector_cfg(&client, &requests, None, &apple_mlx_selector_cfg())
                 .unwrap();
 
-        assert!(
-            detail_mock.hits() > 0,
-            "fetch auto resolution must inspect model variants"
+        // A build that can run MLX, and a registry that lists a SafeTensors
+        // variant: with no `--backend` the fetch is still the default one.
+        assert_eq!(
+            detail_mock.hits(),
+            0,
+            "a fetch that names no backend does not look at the model's variants"
         );
         assert_eq!(
-            wrong_gguf_mock.hits(),
+            wrong_format_mock.hits(),
             0,
-            "embedding fallback must not request a GGUF variant"
+            "a fetch that names no backend must not ask for a format"
         );
-        assert!(
-            resolve_mock.hits() > 0,
-            "embedding fallback should use the registry default resolution"
-        );
+        assert!(resolve_mock.hits() > 0);
         download_mock.assert();
         assert_eq!(counts, (1, 0, 0));
     }
