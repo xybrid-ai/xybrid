@@ -45,7 +45,7 @@ END = "<!-- END GENERATED: workflow inventory -->"
 
 # Display order of the inventory; the keys are the allowed `Group` prefixes.
 GROUPS = {
-    "CI": "Workspace validation, pull-request gates and backend test suites.",
+    "CI": "The pull-request pipeline (ci.yml, bazel.yml) and suites that run only on master.",
     "SDK": "Per-platform SDK builds, wrapper tests and example apps.",
     "Artifacts": "Publish reusable native artifacts and their download manifests.",
     "Release": "Cut, validate, publish and announce a release.",
@@ -69,24 +69,19 @@ WORKFLOW_FILES = frozenset(
         "build-react-native.yml",
         "build-unity.yml",
         "ci.yml",
-        "clean-scripts.yml",
         "codeql.yml",
         "discord-notify.yml",
         "gradle-wrapper-validation.yml",
         "llamacpp-update.yml",
-        "llamacpp-validate.yml",
         "release-dryrun.yml",
         "release-notify.yml",
         "release-prep.yml",
         "release-publish.yml",
         "scorecard.yml",
         "star-history.yml",
-        "test-candle.yml",
         "test-choice-conformance.yml",
         "test-ci.yml",
         "test-decision-conformance.yml",
-        "test-policy-routing.yml",
-        "test-whispercpp.yml",
         "test-zzz-android.yml",
         "test-zzz-engine.yml",
         "trusted-zzz-sdk.yml",
@@ -111,18 +106,13 @@ PULL_REQUEST_FILES = frozenset(
         "build-flutter.yml",
         "build-react-native.yml",
         "ci.yml",
-        "clean-scripts.yml",
         "codeql.yml",
         "discord-notify.yml",
         "gradle-wrapper-validation.yml",
-        "llamacpp-validate.yml",
         "release-dryrun.yml",
         "release-publish.yml",
-        "test-candle.yml",
         "test-choice-conformance.yml",
         "test-decision-conformance.yml",
-        "test-policy-routing.yml",
-        "test-whispercpp.yml",
         "unity-editor.yml",
         "welcome.yml",
     }
@@ -410,6 +400,95 @@ def parse_workflow(path: Path) -> Workflow:
         )
     except Unsupported as exc:
         raise Unsupported(f"{path.name}: {exc}") from None
+
+
+@dataclass(frozen=True)
+class Job:
+    """The keys of one job that decide when and where it runs."""
+
+    id: str
+    name: Optional[str]
+    condition: Optional[str]
+    needs: Tuple[str, ...]
+    uses: Optional[str]
+    runs_on: Optional[str]
+    # `strategy.matrix.include` entries, each as its scalar keys.
+    include: Tuple[Dict[str, str], ...] = ()
+
+    @property
+    def check_name(self) -> str:
+        """The check run GitHub reports for a job that calls no workflow."""
+        return self.name or self.id
+
+
+def _folded(rest: str, block: Sequence[str]) -> str:
+    """A scalar written inline or as a `>-` / `|` block, joined into one line."""
+    rest = _COMMENT.sub("", rest).strip()
+    if rest[:1] in (">", "|"):
+        return " ".join(line.strip() for line in block if not _skip(line))
+    return _scalar(rest)
+
+
+def _matrix_include(job_lines: Sequence[str]) -> Tuple[Dict[str, str], ...]:
+    strategy = next((i for i, line in enumerate(job_lines) if re.match(r"^    strategy:\s*$", line)), None)
+    if strategy is None:
+        return ()
+    block = _block(job_lines, strategy)
+    start = next((i for i, line in enumerate(block) if re.match(r"^\s+include:\s*$", line)), None)
+    if start is None:
+        return ()
+    entries: List[Dict[str, str]] = []
+    for line in _block(block, start):
+        if _skip(line):
+            continue
+        match = re.match(r"^\s*(-\s+)?([A-Za-z_][\w-]*):\s*(.*)$", line)
+        if not match:
+            continue
+        if match.group(1) or not entries:
+            entries.append({})
+        value = _COMMENT.sub("", match.group(3)).strip()
+        if value and value[:1] not in (">", "|"):
+            entries[-1][match.group(2)] = _scalar(value)
+    return tuple(entries)
+
+
+def read_jobs(path: Path) -> Dict[str, Job]:
+    """Every job in a workflow file, by id, in file order."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    start = next((i for i, line in enumerate(lines) if re.match(r"^jobs:\s*$", line)), None)
+    if start is None:
+        raise Unsupported(f"{path.name}: no top-level jobs:")
+    jobs: Dict[str, Job] = {}
+    body = _block(lines, start)
+    for offset, line in enumerate(body):
+        if _skip(line) or _indent(line) != 2:
+            continue
+        match = re.match(r"^  ([A-Za-z_][\w-]*):\s*$", line)
+        if not match:
+            raise Unsupported(f"{path.name}: unsupported job line {line.strip()!r}")
+        job_lines = _block(body, offset)
+        keys: Dict[str, str] = {}
+        needs: List[str] = []
+        for index, job_line in enumerate(job_lines):
+            key = re.match(r"^    ([A-Za-z_][\w-]*):\s*(.*)$", job_line)
+            if not key:
+                continue
+            name, rest = key.groups()
+            sub = _block(job_lines, index)
+            if name == "needs":
+                needs = _items(rest, sub)
+            elif name in ("name", "if", "uses", "runs-on"):
+                keys[name] = _folded(rest, sub)
+        jobs[match.group(1)] = Job(
+            id=match.group(1),
+            name=keys.get("name"),
+            condition=keys.get("if"),
+            needs=tuple(needs),
+            uses=keys.get("uses"),
+            runs_on=keys.get("runs-on"),
+            include=_matrix_include(job_lines),
+        )
+    return jobs
 
 
 def load(directory: Path) -> List[Workflow]:

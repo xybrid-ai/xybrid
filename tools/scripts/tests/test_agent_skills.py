@@ -15,7 +15,7 @@ implementation, the SHA-256 it prints must be its reference script's, and the
 script must run the connect contract end to end against a loopback platform:
 one workspace, a gitignored file, private recovery state, no key on stdout.
 
-CI's Agent skills job runs this file on every pull request, docs-only ones
+CI's Repo checks job runs this file on every pull request, docs-only ones
 included, because skills are Markdown and edited in docs-only PRs.
 """
 

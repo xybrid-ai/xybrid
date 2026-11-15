@@ -1,13 +1,15 @@
 # GitHub Actions workflows
 
-One file per pipeline; GitHub reads only top-level files in this directory. This
-page is the map: what each workflow is for, when it runs, what it can write, and
-which ones depend on each other.
+GitHub reads only top-level files in this directory. `ci.yml` and `bazel.yml`
+validate pull requests, with the lane workflows not yet called from `ci.yml`;
+everything else is release, artifact, security, community or manual automation.
+This page is the map: what each workflow is for, when it runs, what it can
+write, and which ones depend on each other.
 
 ## Conventions
 
 [`tools/scripts/gen_workflow_index.py`](../../tools/scripts/gen_workflow_index.py)
-`--check` (CI job `Workflow index`) enforces the first three, and the first two
+`--check` (in CI job `Repo checks`) enforces the first three, and the first two
 rules under [Adding CI](#adding-ci). The last two are decisions to keep.
 
 - **Display name** is `"Group: Subject"`, quoted, with a group from the
@@ -38,7 +40,7 @@ rules under [Adding CI](#adding-ci). The last two are decisions to keep.
 
 CI used to grow one workflow per feature, each with its own triggers, path
 list, setup block and runner. `ci.yml` is now the pull-request pipeline, and
-new coverage extends it. The first two rules fail `Workflow index`; the rest
+new coverage extends it. The first two rules fail `Repo checks`; the rest
 are how to follow them.
 
 1. **No new workflow file.** `WORKFLOW_FILES` in `gen_workflow_index.py` lists
@@ -57,8 +59,11 @@ are how to follow them.
 4. **A new cargo invocation is a step** in the `ci.yml` job with the same
    runner and feature family.
 5. **A new backend or real-model suite is one `ci.yml` job** built from the
-   shared actions, one path rule in `tools/scripts/ci_gate.py` and one entry
-   in `CI Success`'s `needs`.
+   shared actions and gated on its flag, one row in `LANE_PATHS` with its
+   `OPTIONAL_JOBS` entry (`tools/scripts/ci_gate.py`), its line in
+   `tooling-changes`' outputs, and one entry in `CI Success`'s `needs` once it
+   is reliable (until then it is in `ADVISORY_JOBS`). `test_ci_gate.py` fails
+   until they agree.
 6. **A new binding or platform is a lane file called from `ci.yml`.**
 7. **macOS runs 5 jobs at once for the whole organization.** Add steps to an
    existing macOS job; a new one waits behind every other pull request's.
@@ -67,17 +72,19 @@ are how to follow them.
 
 Jobs are built from the composite actions in [`../actions/`](../actions), not
 from copied setup blocks: `setup-rust` (toolchain and cargo cache),
-`install-boltffi` (the pinned boltffi CLI, cached), `free-disk-space`,
-`setup-vulkan-sdk` and `bazel-repo-cache`. A change under `.github/actions/`
+`install-boltffi` (the pinned boltffi CLI, cached), `fetch-model` (a pinned
+test model, cached and checksummed), `free-disk-space`, `setup-vulkan-sdk` and
+`bazel-repo-cache`. A change under `.github/actions/`
 selects every gated job, in `ci.yml` and in `bazel.yml`.
 
 **Caches.** A cache saved by a pull request is visible to that pull request
 alone but counts against the repository's 10 GB, and every pull request used to
-save its own Rust caches, evicting master's. `setup-rust` and `install-boltffi`
-restore on pull requests and save only on `master` pushes. Other caches still
-save from pull requests: the release and zzz workflows' own setup blocks (their
-tests pin them), `build-flutter.yml`, `build-android.yml`'s NDK, the conformance
-workflows, the `web` job, `bazel-repo-cache` and `setup-vulkan-sdk`.
+save its own Rust caches, evicting master's. `setup-rust`, `install-boltffi` and
+`fetch-model` restore on pull requests and save only on `master` pushes. Other
+caches still save from pull requests: the release and zzz workflows' own setup
+blocks (their tests pin them), `build-flutter.yml`, `build-android.yml`'s NDK,
+the conformance workflows, the `web` job, `bazel-repo-cache` and
+`setup-vulkan-sdk`.
 
 Dependabot's `github-actions` entry lists each action directory, because `/`
 covers only `.github/workflows/`; `tools/scripts/tests/test_ci_actions.py`
@@ -90,9 +97,9 @@ path filters, job IDs and check names, matrices, steps and test commands,
 dependencies, permissions, secret references and cancellation settings. The
 literal concurrency keys stay stable when a display name changes.
 
-The `Workflow index` job supplements the existing checks. Every original test
-command continues to run in its existing job; the index job checks this page and
-the naming conventions.
+The index check covers this page and the naming conventions. Moving a test
+command between jobs or files is a change of its own, made on purpose: the
+command keeps its arguments, and the registry keeps the paths that ran it.
 
 ## Inventory
 
@@ -100,19 +107,14 @@ the naming conventions.
 
 ### CI
 
-Workspace validation, pull-request gates and backend test suites.
+The pull-request pipeline (ci.yml, bazel.yml) and suites that run only on master.
 
 | File | Name | Triggers | Writes | Purpose |
 | --- | --- | --- | --- | --- |
 | [`bazel.yml`](bazel.yml) | CI: Bazel | push to `master`, pull_request to `master`, workflow_dispatch | none | Bazel graph analysis and remote-execution targets; a required check that skips when no Bazel input changed. |
-| [`test-candle.yml`](test-candle.yml) | CI: Candle backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Test the Candle backend (Metal runs only on macOS), scoped to the paths that can affect it. |
 | [`test-choice-conformance.yml`](test-choice-conformance.yml) | CI: Choice conformance | push to `master`, pull_request to `master`, schedule (`23 5 * * *`), workflow_dispatch | none | Regenerate and verify choice-scoring conformance artifacts against pinned sha256s, then score FORMS through core, the Rust SDK and the CLI; daily cold rebuild. |
-| [`clean-scripts.yml`](clean-scripts.yml) | CI: Clean scripts | push to `master`, pull_request to `master` | none | Test the root and per-folder clean.sh scripts and clean-lib.sh; every path they list must be one git ignores. |
 | [`test-decision-conformance.yml`](test-decision-conformance.yml) | CI: Decision conformance | push to `master`, pull_request to `master`, schedule (`41 5 * * *`), workflow_dispatch | none | Verify the decision corpus and run isolated preparation, finalization, matched CPU inference and SDK lifecycle checks against pinned d1 weights. |
-| [`llamacpp-validate.yml`](llamacpp-validate.yml) | CI: llama.cpp backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Check the llama.cpp pins and generated bindings, then run real text and vision models on a source build. |
-| [`test-policy-routing.yml`](test-policy-routing.yml) | CI: Policy routing | push to `master`, pull_request to `master`, workflow_dispatch | none | Drive the xybrid binary through a policy-routed hybrid stage: local GGUF leg, fake DeepSeek cloud leg. |
-| [`test-whispercpp.yml`](test-whispercpp.yml) | CI: whisper.cpp backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Exercise whisper.cpp with real multilingual weights: translation, per-request language, long windows, non-speech suppression. |
-| [`ci.yml`](ci.yml) | CI: Workspace | push to `master`, pull_request to `master` | none | Rust format, lint, tests and feature matrix, plus binding drift, API contract, observability, Python SDK, Web SDK and agent skills checks. Gates merges. |
+| [`ci.yml`](ci.yml) | CI: Workspace | push to `master`, pull_request to `master`, workflow_dispatch | none | The pull-request pipeline: repository checks, Rust format, lint, tests and feature matrix, binding drift, API contract, observability, Python and Web SDKs, and the backend lanes. Gates merges. |
 | [`test-zzz-android.yml`](test-zzz-android.yml) | CI: zzz Android AAR | push to `master`, workflow_dispatch | none | Build the arm64-v8a speech AAR on master with the pinned engine, gate it and its Gradle repackaging, then dlopen its x86_64 slice on an emulator. |
 | [`test-zzz-engine.yml`](test-zzz-engine.yml) | CI: zzz engine | push to `master`, workflow_dispatch | none | Fetch and verify the pinned Phonon/Kitten-only engine slices and link them into Rust tests on each pinned target. |
 
@@ -194,9 +196,22 @@ not a repository write, and `star-history.yml` writes to the unprotected
 **Docs-only changes.** `ci.yml` runs on every change. Its first job classifies
 the changed paths with `tools/scripts/ci_gate.py`. When every path is
 documentation, the build matrix is skipped. `CI Success` still reports, and it
-checks that each skipped job had a recorded reason. `Workflow index` and
-`Version sync` have no path gate and run on every change: the docs carry the
-install snippets `version-sync.sh` keeps on the current release.
+checks that each skipped job had a recorded reason. `Repo checks` has no path
+gate and runs on every change: the workflow index, `version-sync.sh` (the docs
+carry the install snippets it keeps on the current release) and every test
+under `tools/scripts/tests/`, which take about two minutes and no toolchain.
+
+**Lanes.** A lane validates one area (a backend, a binding) and runs only when
+that area's paths change. The backend lanes are `ci.yml` jobs: `test-candle`,
+`test-whispercpp-integration`, `test-policy-routing` and `llamacpp-validate`.
+`tools/scripts/ci_gate.py` holds each lane's paths (`LANE_PATHS`, in GitHub's
+`paths:` syntax), and an edit to `ci.yml`, `.github/actions/` or `ci_gate.py`
+runs them all. Lanes in `ADVISORY_JOBS` report on the pull request without
+gating `CI Success`. To run lanes by hand, dispatch `ci.yml` with `lanes`
+(comma-separated; empty runs every lane). On `master` `ci_gate.py` ignores
+`lanes` and runs every lane: a skipped lane would put a newer, skipped check on
+HEAD under a name the llama.cpp release requires to succeed. To retry one lane
+there, re-run the push run's failed jobs.
 
 **Natives.** `build-natives.yml` compiles the llama.cpp static slices once per
 target and feature set and pushes them to `ghcr.io/xybrid-ai/llama-natives`. It
@@ -209,7 +224,8 @@ updates `crates/llama-cpp-sys/natives-manifest.txt`, which lets a plain
 
 **llama.cpp updates.** `llamacpp-update.yml` looks for a new llama.cpp stable
 release daily and opens one update PR with `RELEASE_PAT`, so the PR triggers
-`llamacpp-validate.yml` and the other required checks. Once that PR merges and
+`ci.yml` (its `llama.cpp stable validation` lane included) and the other
+required checks. Once that PR merges and
 `build-natives.yml` has published a matching natives manifest, it pushes
 `release/v<version>`, which starts the release flow below. Setup and dry runs
 are in [docs/development/llamacpp-updates.md](../../docs/development/llamacpp-updates.md).
