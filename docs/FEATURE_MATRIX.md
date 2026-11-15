@@ -72,28 +72,24 @@ This document provides a comprehensive reference for all feature flags, platform
   since the CLI builds from Bazel; the published binaries are still CPU-only.
 
 - `llm-mlx` gates the `runtime_adapter/mlx` module (config parsing, tokenizer,
-  chat template, sampler, weight-key validation, selector/error surfaces, and
-  TemplateExecutor strategy routing) and pulls in `safetensors`, `memmap2`,
-  `minijinja`, and `rand` as optional deps. It is **mutually compatible** with
-  `llm-llamacpp` — both can be enabled in the same build. Local SafeTensors
-  metadata routes to the MLX adapter when `backend: mlx` is set or when
-  `backend: auto` / absent metadata names a supported MLX LLM architecture
-  (`qwen3`, `gemma4`, `lfm2`, `lfm`, `lfm3`) or a supported embedding
-  architecture (`bert`, `nomic_bert`). The forward pass is gated separately:
-  with `llm-mlx-runtime` on Apple Silicon macOS it executes real MLX LLM and
-  embedding inference; without that runtime gate the same routes return a
-  pointed `NotImplemented` error instead of linking MLX. Explicit SDK/CLI
-  registry backend overrides request the matching artifact format before
-  loading for LLM tasks (`mlx` -> `safetensors`, `llamacpp` -> `gguf`); known
-  registry embedding tasks reject explicit non-MLX local backends until a
-  non-MLX embedding runtime exists. Automatic registry loading (the Rust SDK
-  model loader, SDK pipelines, `xybrid run`, `xybrid repl`, `xybrid fetch`)
-  prefers a SafeTensors variant only on a build that can run MLX (Apple
-  Silicon, `llm-mlx-runtime`, Metal available) and only when the registry
-  lists one. Every other build, and every other model, loads the registry's
-  default variant with no extra registry request. This feature intentionally
-  compiles on non-Apple targets because it does not enable
-  `xybrid-mlx/bindings` or link MLX.
+  chat template, sampler, weight-key validation and TemplateExecutor strategy
+  routing) and pulls in `safetensors`, `memmap2`, `minijinja`, and `rand` as
+  optional deps. It links nothing, compiles on every target, and exists so the
+  adapter can be built and tested without Apple Silicon; no preset enables it.
+  It is **mutually compatible** with `llm-llamacpp`. Local SafeTensors
+  metadata routes to the MLX adapter when `backend: mlx` is set, or when no
+  backend is set and the metadata names a supported MLX LLM architecture
+  (`qwen3`, `gemma4`, `lfm2`, `lfm`) or embedding architecture (`bert`,
+  `nomic_bert`). The forward pass is gated separately: with `llm-mlx-runtime`
+  on Apple Silicon macOS it executes real MLX LLM and embedding inference;
+  without that runtime gate the same routes return a pointed `NotImplemented`
+  error instead of linking MLX. For a registry model MLX is opt-in: a load
+  that names no backend resolves the registry's default variant on every
+  build, with no extra registry request, and an explicit backend (the Rust SDK
+  model loader, a pipeline stage, `xybrid run`, `xybrid repl`, `xybrid fetch`)
+  requests the matching artifact format (`mlx` -> `safetensors`, `llamacpp`
+  -> `gguf`). Known registry embedding tasks reject explicit non-MLX local
+  backends until a non-MLX embedding runtime exists.
 
 - `llm-mlx-runtime` is the *real* MLX forward-pass gate — it forwards
   `xybrid-mlx/bindings` which statically links the `mlx.xcframework` plus Metal,
@@ -121,8 +117,8 @@ This document provides a comprehensive reference for all feature flags, platform
 |---------|-------------|-------------------------|
 | **default** | No default features | *(none)* |
 | **platform-android** | Android preset | `ort-dynamic`, `llm-llamacpp-vision`, `asr-whispercpp` |
-| **platform-ios** | iOS preset | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-mlx` |
-| **platform-macos** | macOS preset | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-mlx` |
+| **platform-ios** | iOS preset | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp` |
+| **platform-macos** | macOS preset | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp` |
 | **platform-desktop** | Desktop (Linux/Windows) preset | `ort-download`, `llm-llamacpp-vision`, `asr-whispercpp` |
 | **ort-download** | Forward to core | `xybrid-core/ort-download` |
 | **ort-dynamic** | Forward to core | `xybrid-core/ort-dynamic` |
@@ -152,8 +148,8 @@ This document provides a comprehensive reference for all feature flags, platform
 | **llm-llamacpp-vision** | Native llama.cpp VLM runtime for image turns | `llm-llamacpp`, `xybrid-sdk/llm-llamacpp-vision` |
 | **asr-whispercpp** | whisper.cpp speech recognition for `xybrid run --input-audio` | `xybrid-sdk/asr-whispercpp` |
 | **platform-android** | Android release preset — forwards to `xybrid-sdk/platform-android` | `ort-dynamic`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-llamacpp`, `huggingface` |
-| **platform-ios** | iOS release preset — forwards to `xybrid-sdk/platform-ios` | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-llamacpp`, `llm-mlx`, `huggingface` |
-| **platform-macos** | macOS release preset — forwards to `xybrid-sdk/platform-macos` | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-llamacpp`, `llm-mlx`, `huggingface` |
+| **platform-ios** | iOS release preset — forwards to `xybrid-sdk/platform-ios` | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-llamacpp`, `huggingface` |
+| **platform-macos** | macOS release preset — forwards to `xybrid-sdk/platform-macos` | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-llamacpp`, `huggingface` |
 | **platform-desktop** | Linux/Windows release preset — forwards to `xybrid-sdk/platform-desktop` | `ort-download`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-llamacpp`, `huggingface` |
 
 ---
@@ -169,11 +165,11 @@ Candle is **not** in any preset. It cost ~1.3 MiB stripped on the same Android p
 | Preset | Target Platform | Core Features Enabled | VLM Default | ASR Default | Rationale |
 |--------|-----------------|----------------------|-------------|-------------|-----------|
 | **platform-android** | Android (all ABIs) | `ort-dynamic`, `llm-llamacpp-vision`, `asr-whispercpp` | On | whisper.cpp | Dynamic ORT loading for AAR distribution; whisper.cpp for Whisper ASR on the ggml llama.cpp already links (+0.2 MiB stripped); llama.cpp has runtime SIMD detection; mistral.rs causes SIGILL on devices without ARMv8.2-A FP16 |
-| **platform-ios** | iOS (arm64, simulator) | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-mlx` | On | whisper.cpp | Static ORT linking; CoreML for ANE acceleration; llama.cpp uses Metal on devices and CPU on the simulator |
-| **platform-macos** | macOS (arm64, x86_64) | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-mlx` | On | whisper.cpp | Same as iOS - unified Apple platform features |
+| **platform-ios** | iOS (arm64, simulator) | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp` | On | whisper.cpp | Static ORT linking; CoreML for ANE acceleration; llama.cpp uses Metal on devices and CPU on the simulator |
+| **platform-macos** | macOS (arm64, x86_64) | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp` | On | whisper.cpp | Same as iOS - unified Apple platform features |
 | **platform-desktop** | Linux, Windows | `ort-download`, `llm-llamacpp-vision`, `asr-whispercpp` | On | whisper.cpp | Static ORT linking; llama.cpp for LLM inference and whisper.cpp for ASR (unified across all platforms); on Linux set `XYBRID_LLAMA_CPP_VULKAN=1` for Vulkan-enabled custom builds |
 
-> **Note on MLX**: `llm-mlx` is included in the Apple-platform presets (`platform-ios`, `platform-macos`) for metadata, registry, tokenizer, selector, and local SafeTensors routing parity. It is **mutually compatible** with `llm-llamacpp` — both can be enabled in the same build. Automatic registry loading through the Rust SDK model loader, SDK pipelines, `xybrid run`, `xybrid repl`, and `xybrid fetch` prefers a registry SafeTensors variant only when `llm-mlx-runtime` is enabled and the Metal runtime probe succeeds; every other build loads the registry default exactly as before. Explicit SDK/CLI registry backend overrides request format-specific variants before loading for LLM tasks, fail when the requested backend is unavailable, and reject known embedding tasks for non-MLX local backends. `llm-mlx` itself is cross-platform and non-linking; `llm-mlx-runtime` is the Apple feature that links Metal/Accelerate through `xybrid-mlx/bindings`, with runtime readiness currently validated on Apple Silicon macOS only. CI can validate that runtime from pinned source SHAs when no published xcframework release exists.
+> **Note on MLX**: no preset enables MLX. `llm-mlx-runtime` is an opt-in for Apple Silicon macOS source builds (`--features platform-macos,llm-mlx-runtime`); it brings `llm-mlx` with it and is compatible with `llm-llamacpp` in the same build. MLX then runs local SafeTensors bundles, and registry models only when a stage, the loader or the command line names `mlx`. See [`backends/mlx.md`](backends/mlx.md).
 
 > **Note**: The CLI (`xybrid-cli`) adds `huggingface` to all its platform presets so `xybrid run --huggingface` works in release builds. SDK/FFI presets do not include `huggingface` by default — add it individually if needed.
 
@@ -226,9 +222,10 @@ The following types and modules are conditionally compiled based on feature flag
 | `LlmRuntimeAdapter` import | `feature = "llm-mistral" OR feature = "llm-llamacpp" OR feature = "llm-mlx"` | LLM adapter import |
 | `llm_adapter_cache` field | `feature = "llm-mistral" OR feature = "llm-llamacpp" OR feature = "llm-mlx"` | Cached LLM adapter in TemplateExecutor |
 | `mlx_embedding_strategy` field | `feature = "llm-mlx"` | Cached MLX embedding strategy in TemplateExecutor |
-| `ExecutionTemplate::GgmlWhisper` handling | `feature = "asr-whispercpp"` | GGML Whisper (whisper.cpp) execution path |
+| `ExecutionTemplate::GgmlWhisper` handling | `feature = "asr-whispercpp"` | GGML Whisper (whisper.cpp) execution path. Fields: `model_file`, `language` (`null` = auto-detect), `audio_ctx` (`0` = no truncation), `translate`. Without the feature the arm errors `GGML Whisper execution requires the 'asr-whispercpp' feature` |
 | `ExecutionTemplate::Gguf` handling | `feature = "llm-mistral" OR feature = "llm-llamacpp"` | GGUF model execution path; `llm-mlx` alone does not execute GGUF |
-| `ExecutionTemplate::SafeTensors` with `backend: mlx`, or `backend: auto` plus supported MLX LLM / embedding architecture | `feature = "llm-mlx"` | MLX bundle-root execution path |
+| `ExecutionTemplate::SafeTensors` handling | `feature = "candle"` | Candle SafeTensors path. Without the feature the arm errors `SafeTensors execution requires the 'candle' feature…` and points at a GGML bundle instead |
+| `ExecutionTemplate::SafeTensors` with `backend: mlx`, or no backend and a supported MLX LLM / embedding architecture | `feature = "llm-mlx"` | MLX bundle-root execution path, taken before the Candle one |
 | `execute_streaming()` callback-capable impl | `feature = "llm-mistral" OR feature = "llm-llamacpp" OR feature = "llm-mlx"` | Streams for compiled GGUF backends and runtime-ready MLX SafeTensors; non-linking MLX builds surface the MLX runtime gate |
 | `execute_streaming()` stub | `NOT (llm-mistral OR llm-llamacpp OR llm-mlx)` | Falls back to regular execution |
 | `execute_streaming_with_context()` | Same as above | Streaming with conversation context |

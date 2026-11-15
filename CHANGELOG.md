@@ -14,17 +14,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (full precision or MLX 4-bit), and BERT and nomic-embed-text embeddings. It
   is an opt-in source build (`llm-mlx-runtime`, after
   `tools/scripts/build-local-mlx-xcframework.sh`); no released SDK, CLI or
-  binding contains it, and the registry lists no SafeTensors variants yet. A
-  local SafeTensors bundle with one of those architectures runs on MLX. MLX
-  refuses a request that carries tools or a grammar instead of answering
-  without them, takes text only, and runs one operation at a time across the
-  process. See `docs/backends/mlx.md`.
+  binding contains it, no platform preset enables it, and the registry lists
+  no SafeTensors variants yet. MLX runs only when it is named: a load that
+  names no backend picks the same backend and the same registry artifact as a
+  build without MLX. A local SafeTensors bundle with one of those
+  architectures runs on MLX. Tool calling works as on llama.cpp, through the
+  same template rendering and call parsing (run on LFM2.5 and Gemma 4). MLX
+  refuses a request that carries a grammar instead of answering without it,
+  takes text only, refuses LFM3 bundles, and runs one operation at a time
+  across the process. See `docs/backends/mlx.md`.
 - **Backend override:** `backend:` on a pipeline stage, `--backend` on
-  `xybrid run`, `repl` and `fetch`, `ModelLoader::with_backend` in Rust and
-  `load(backend:)` in Flutter pin the local LLM or embedding backend to `mlx`,
-  `llamacpp` or `mistral`. It is a hard requirement: the load fails if this
-  build cannot provide the backend or the backend cannot run the model's
-  format. Swift, Kotlin, Python, Unity and React Native do not have it yet.
+  `xybrid run`, `repl` and `fetch`, and `ModelLoader::with_backend` in Rust
+  pin the local LLM or embedding backend to `mlx`, `llamacpp` or `mistral`. It
+  is a hard requirement: the load fails if this build cannot provide the
+  backend or the backend cannot run the model's format. The bindings do not
+  have it: none of their published native libraries contains MLX.
 - **Rust SDK:** `GenerationConfig::seed` (`with_seed`) makes sampled output
   reproducible on the MLX backend; the llama.cpp and mistralrs backends ignore
   it. `Xybrid::model(id)` is shorthand for `ModelLoader::from_registry(id)`.

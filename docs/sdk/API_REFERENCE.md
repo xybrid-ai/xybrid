@@ -427,7 +427,7 @@ using var model = loader.Load();
 var result = model.Run(Envelope.Text("Hello!"));
 ```
 
-### `withBackend()` / `with_backend()`
+### `with_backend()` (Rust)
 
 Pins local generation or embedding execution to a specific backend by setting
 `ModelMetadata.backend` when the loader materializes a model. Omit this call for
@@ -447,7 +447,9 @@ let model = ModelLoader::from_directory("./qwen3-mlx")?
 
 MLX is a preview for Apple Silicon Macs and needs a build with the
 `llm-mlx-runtime` feature; see [`docs/backends/mlx.md`](../backends/mlx.md)
-for what it runs and what it refuses (tools, grammars, images).
+for what it runs and what it refuses (grammars, images). Only the Rust SDK
+has this override: no binding's published native library contains the MLX
+runtime, so the bindings get it together with the runtime.
 
 ### Implementation Status
 
@@ -463,7 +465,6 @@ for what it runs and what it refuses (tools, grammars, images).
 | `download()` / `StartDownload()` | — | ✅ | ✅ | ✅ |
 | `fromRegistrySpeculative()` | ✅ | ✅ | ✅ | ✅ |
 | `willSpeculate` | ✅ | ✅ | ✅ | ✅ |
-| `withBackend()` (Dart: `backend:` on `load()`) | ✅ | — | — | — |
 
 `fromRegistrySpeculative()` answers from the cloud gateway while the registry
 weights download in the background, then switches to on-device by itself. It
@@ -713,11 +714,6 @@ class XybridModel {
     required ConversationContext context,
     GenerationConfig? config,
   });
-  /// True for token-streaming LLMs: GGUF when a GGUF backend is compiled,
-  /// and MLX SafeTensors only when the Apple Silicon macOS MLX runtime is
-  /// available. Non-linking MLX builds return false.
-  bool supportsTokenStreaming();
-
   // Streaming TTS (audio chunk-by-chunk)
   // Emits each sentence-chunk's raw PCM (+ sample rate) as it is synthesized,
   // instead of one batched WAV, so playback can start after the first sentence.
@@ -820,7 +816,7 @@ impl XybridModel {
         on_token: F,
     ) -> SdkResult<InferenceResult>;
 
-    // Same capability gate as Dart: GGUF requires a compiled GGUF backend;
+    // GGUF requires a compiled GGUF backend;
     // MLX SafeTensors requires the Apple Silicon macOS MLX runtime.
     pub fn supports_token_streaming(&self) -> bool;
 }
@@ -1752,7 +1748,7 @@ data class YuvColorInfo(
 
 ### BackendChoice
 
-Explicit local generation or embedding backend override. Omit the override for automatic selection.
+Explicit local generation or embedding backend override (Rust SDK only). Omit the override and the model loads as it would on a build without MLX.
 
 ```rust
 pub enum BackendChoice {
@@ -2065,7 +2061,6 @@ stream stays low-cardinality.
 |------|------|--------|-------|----|
 | `ConversationContext` | ✅ | ✅ | ✅ | ✅ |
 | `MessageRole` | ✅ | — | — | ✅ |
-| `BackendChoice` (Dart: `XybridBackend`) | ✅ | — | — | — |
 | `GenerationConfig` | ✅ | ✅ | ✅ | ✅ |
 | `PixelFormat` | ✅ | 📋 | 📋 | 📋 |
 | `ImagePlane` | ✅ | 📋 | 📋 | 📋 |

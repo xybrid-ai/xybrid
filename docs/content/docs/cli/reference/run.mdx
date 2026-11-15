@@ -43,7 +43,7 @@ In dry-run mode the CLI decides the first stage (policy and route) exactly as a 
 An explicit backend is a hard requirement: the run fails if this build cannot
 provide it or it cannot run the model's format. `mlx` is a preview for Apple
 Silicon Macs that needs a build with the `llm-mlx-runtime` feature; it runs
-SafeTensors models, and refuses requests that need tools, grammars or images.
+SafeTensors models, and refuses requests that need grammars or images.
 For a registry model, `mlx` asks for the SafeTensors variant and `llamacpp`
 for the GGUF one. The registry lists no SafeTensors variants yet, so `mlx`
 applies to local model directories today.

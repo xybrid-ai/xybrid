@@ -24,9 +24,10 @@
 #
 # `features` is the cargo feature list (default `llm-mlx-runtime`). Each
 # filter is a libtest name filter over crates/xybrid-core/tests/mlx_llm_chat.rs;
-# the default set selects the tests that need a Qwen bundle. Set
-# XYBRID_MLX_REQUIRE, as test-mlx.yml does, to make an unstaged bundle a
-# failure instead of a skip.
+# the default set selects the tests that need a Qwen bundle and the ones that
+# need an LFM2.5 bundle (XYBRID_MLX_LFM25_4BIT_DIR: generation and the
+# tool-calling cycle). A test whose bundle is not staged skips; set
+# XYBRID_MLX_REQUIRE, as test-mlx.yml does, to make that a failure.
 #
 # XYBRID_MLX_TEST_BIN runs an already-built test binary instead of building.
 # XYBRID_MLX_TOGETHER_RUNS repeats the one-process pass (default 1).
@@ -41,7 +42,10 @@ fi
 if [ "$#" -gt 0 ]; then
     FILTERS=("$@")
 else
-    FILTERS=(real_qwen four_turn_chat streaming_matches_non_streaming qwen35_quantized)
+    FILTERS=(
+        real_qwen four_turn_chat streaming_matches_non_streaming qwen35_quantized
+        real_lfm25 lfm25_quantized
+    )
 fi
 
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)

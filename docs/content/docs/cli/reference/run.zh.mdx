@@ -39,7 +39,7 @@ xybrid run --pipeline <name> --dry-run
 
 显式指定的后端是硬性要求：如果当前构建无法提供该后端，或该后端无法运行模型的
 格式，运行会失败。`mlx` 是面向 Apple Silicon Mac 的预览功能，需要启用了
-`llm-mlx-runtime` 功能的构建；它运行 SafeTensors 模型，并会拒绝需要工具、
+`llm-mlx-runtime` 功能的构建；它运行 SafeTensors 模型，并会拒绝需要
 语法约束或图像的请求。对于 Registry 模型，`mlx` 会请求 SafeTensors 变体，
 `llamacpp` 会请求 GGUF 变体。Registry 目前还没有任何 SafeTensors 变体，因此
 `mlx` 目前只适用于本地模型目录。

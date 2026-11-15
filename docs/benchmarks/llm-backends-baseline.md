@@ -115,6 +115,47 @@ tuple so you can diff two baselines cleanly. Rows marked
 > (0.26x). This is useful performance evidence, but it is not a parity
 > gate and should not be used for an MLX speed claim.
 
+### Apple M4 Max, 4-bit pairs (128 GB unified memory, macOS 27.2.1)
+
+The rows above compare the engines on identical BF16 weights. These compare
+what each backend's users download: MLX 4-bit SafeTensors against a Q4_K_M
+GGUF of the same model. They are two quantization schemes (Q4_K_M keeps more
+bits per weight and is the larger file), so read the rows as "what picking a
+backend gets you", not as kernel parity. None is gated.
+
+Measured 2026-11-15 at `001378d3`, MLX v0.32.4, mlx-c v0.8.0, llama.cpp
+`8642541`. Decode tokens/s is the median of rounds 2 to 5; each column is one
+pass of `tools/scripts/bench-llm-backends.sh`. The Gemma pair was added after
+the first pass.
+
+| model | backend | fixture | decode-tokens/s, pass 1 / 2 / 3 / 4 | ttft-ms | peak-mem-mb |
+|-------|---------|---------|-------------------------------------|---------|-------------|
+| qwen3-0.6b-4bit | mlx | qwen3-0.6b-4bit-mlx | 627.2 / 654.7 / 651.4 / 622.8 | 31 | 781 |
+| qwen3-0.6b-4bit | llama.cpp | qwen3-0.6b-q4km-gguf | 428.5 / 245.4 / 159.8 / 233.6 | 3 to 5.5 | 1095 |
+| gemma-4-e2b-4bit | mlx | gemma-4-e2b-it-4bit-mlx | n/a / 104.8 / 103.8 / 109.4 | 135 | 7005 |
+| gemma-4-e2b-4bit | llama.cpp | gemma-4-e2b-it-q4km-gguf | n/a / 56.7 / 73.3 / 53.6 | 13 to 25 | 3596 |
+| lfm2.5-1.2b-instruct-4bit | mlx | lfm2.5-1.2b-instruct-4bit-mlx | 508.0 / 502.0 / 506.0 / 503.0 | 51 | 1485 |
+| lfm2.5-1.2b-instruct-4bit | llama.cpp | lfm2.5-1.2b-instruct-q4km-gguf | 447.7 / 491.3 / 257.0 / 490.3 | 47 to 53 | 1349 |
+
+> **The machine was not idle, and it shows on one side only.** MLX decoded at
+> the same rate in every pass, within 5%. llama.cpp's median moved by up to
+> 2.7x between passes: macOS was running photo analysis (`mediaanalysisd`, about
+> 85% of a core plus GPU work) beside two browsers during passes 2 to 4.
+> Within those passes llama.cpp's first round, which the harness discards as
+> warm-up, was its fastest (Qwen 282 tokens/s wall, then 177 to 241; Gemma
+> 121, then 48 to 67). Repeat this on an idle machine before quoting a ratio.
+
+> **What the passes support.** Against llama.cpp's best pass, MLX decodes
+> Qwen 3 0.6B about 1.5x faster and LFM2.5 1.2B at parity (1.02x). For
+> Gemma 4 E2B MLX's median is above every llama.cpp median, but llama.cpp's
+> discarded first rounds reached MLX's rate, so no ratio is claimed.
+
+> **Where llama.cpp is ahead whatever the load.** Time to first token on a
+> repeated prompt: llama.cpp reuses the prompt it evaluated last time, MLX
+> evaluates it again (5.5 ms against 31 ms for Qwen, 13 to 25 ms against
+> 135 ms for Gemma). And memory for Gemma 4 E2B: 7.0 GB peak on MLX against
+> 3.6 GB on llama.cpp.
+
 ## How to update
 
 1. Materialize the MLX staged fixture and download the GGUF reference
@@ -150,8 +191,19 @@ tuple so you can diff two baselines cleanly. Rows marked
    ./integration-tests/download.sh lfm2.5-1.2b-instruct-bf16-gguf
    ```
 
-   Quantized MLX-LM bundles are rejected until quantized matmul support
-   lands, so benchmark MLX fixtures must be dequantized SafeTensors. GGUF
+   The 4-bit pairs are all downloadable, pinned by revision and checksum:
+
+   ```bash
+   for fixture in \
+       qwen3-0.6b-4bit-mlx qwen3-0.6b-q4km-gguf \
+       lfm2.5-1.2b-instruct-4bit-mlx lfm2.5-1.2b-instruct-q4km-gguf \
+       gemma-4-e2b-it-4bit-mlx gemma-4-e2b-it-q4km-gguf; do
+     ./integration-tests/download.sh "$fixture"
+   done
+   ```
+
+   The exact same-precision pairs need full-precision (BF16) SafeTensors on
+   the MLX side; an MLX 4-bit bundle has no same-precision GGUF. GGUF
    fixtures provide the llama.cpp comparison input.
 
 2. Run the harness:
@@ -193,9 +245,11 @@ tuple so you can diff two baselines cleanly. Rows marked
 - Gemma 4 comparison rows stay informational until measured MLX decode
   throughput improves enough to justify parity gating against the pinned
   exact BF16 GGUF counterpart.
-- No public LFM3.5 text-generation SafeTensors fixture was found during
-  the current staging pass, so the benchmark gate uses the current public
-  LFM2.5 exact BF16 pair instead of the stale LFM3.5 placeholder.
+- The BF16 rows for Gemma 4 and LFM2.5 above are from May 2026, on MLX
+  v0.31.1 and an earlier adapter, and have not been re-measured. The 4-bit
+  rows are the current evidence for those two families.
+- LFM3 is not an MLX row: it is a different architecture from LFM2 and the
+  adapter refuses it. llama.cpp runs it from GGUF.
 - The M2 Pro baseline row is unfilled until a runtime-enabled measurement
   machine with the MLX xcframework installed is available (tracked in
   US-001 / US-002 notes).

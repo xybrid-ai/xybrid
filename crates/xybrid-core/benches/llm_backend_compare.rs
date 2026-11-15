@@ -142,9 +142,11 @@ mod active {
     /// Median MLX decode_tps must be at least this multiple of the matching
     /// llama.cpp median.
     ///
-    /// The current fair BF16 Qwen 3 4B baseline measures near parity
-    /// (roughly 1.03x llama.cpp), not a shipping speedup. Keep this gate as a
-    /// regression floor unless measured rows justify tightening it.
+    /// This is a regression floor for the one exact same-precision pair, not
+    /// a speedup claim: Qwen 3 4B at BF16 measured about 1.03x llama.cpp.
+    /// What a user actually picks, each backend's usual 4-bit artifact, is
+    /// the three `-4bit` pairs below; `docs/benchmarks/llm-backends-baseline.md`
+    /// records what they measure.
     const LLAMA_CPP_DECODE_PARITY_FLOOR: f32 = 0.95;
 
     /// Output budget per measurement (PRD: 128 tokens).
@@ -207,12 +209,18 @@ mod active {
         Chat,
     }
 
-    /// PRD-priority models (Qwen 3, gemma4-2b, and the public LFM2.5
-    /// exact BF16 pair that replaced the stale LFM3.5 fixture target).
+    /// Two kinds of pair.
     ///
-    /// Gemma 4 and the LFM family have synthetic-covered MLX runtime paths.
-    /// Their rows remain informational until measured exact-pair results prove
-    /// they are stable enough for parity gating.
+    /// The BF16 pairs hold the same weights at the same precision on both
+    /// backends, so they compare the engines. Only Qwen 3 4B is gated; the
+    /// Gemma 4 and LFM2.5 rows are measured, not gated.
+    ///
+    /// The `-4bit` pairs hold what each backend's users download: MLX 4-bit
+    /// SafeTensors against a Q4_K_M GGUF of the same model. Those are two
+    /// quantization schemes (Q4_K_M keeps more bits per weight and is the
+    /// larger file), so the rows say what picking a backend costs or buys in
+    /// practice, and are never gated. Each bundle is pinned by revision and
+    /// checksum in `integration-tests/fixtures/models/models.json`.
     const MODELS: &[ModelUnderTest] = &[
         ModelUnderTest {
             display_name: "qwen3-4b",
@@ -235,11 +243,35 @@ mod active {
             mlx_fixture_id: "lfm2.5-1.2b-instruct-mlx",
             gguf_fixture_id: "lfm2.5-1.2b-instruct-bf16-gguf",
             threshold_policy: ThresholdPolicy::Informational(
-                "LFM2.5 has an exact BF16 MLX/GGUF pair, but the current MLX short-conv runtime is below the parity floor; keep this measured, not gated.",
+                "LFM2.5 has an exact BF16 MLX/GGUF pair. It measured far below llama.cpp in May 2026 and has not been re-measured since; keep this measured, not gated.",
             ),
             prompt_mode: PromptMode::Chat,
         },
+        ModelUnderTest {
+            display_name: "qwen3-0.6b-4bit",
+            mlx_fixture_id: "qwen3-0.6b-4bit-mlx",
+            gguf_fixture_id: "qwen3-0.6b-q4km-gguf",
+            threshold_policy: ThresholdPolicy::Informational(QUANTIZED_PAIR),
+            prompt_mode: PromptMode::Raw,
+        },
+        ModelUnderTest {
+            display_name: "gemma-4-e2b-4bit",
+            mlx_fixture_id: "gemma-4-e2b-it-4bit-mlx",
+            gguf_fixture_id: "gemma-4-e2b-it-q4km-gguf",
+            threshold_policy: ThresholdPolicy::Informational(QUANTIZED_PAIR),
+            prompt_mode: PromptMode::Chat,
+        },
+        ModelUnderTest {
+            display_name: "lfm2.5-1.2b-instruct-4bit",
+            mlx_fixture_id: "lfm2.5-1.2b-instruct-4bit-mlx",
+            gguf_fixture_id: "lfm2.5-1.2b-instruct-q4km-gguf",
+            threshold_policy: ThresholdPolicy::Informational(QUANTIZED_PAIR),
+            prompt_mode: PromptMode::Chat,
+        },
     ];
+
+    /// Why a `-4bit` pair is never gated.
+    const QUANTIZED_PAIR: &str = "MLX 4-bit against GGUF Q4_K_M: the same model in each backend's usual quantization, which are different schemes. It shows what a user gets, not kernel parity.";
 
     // ========================================================================
     // Result collection

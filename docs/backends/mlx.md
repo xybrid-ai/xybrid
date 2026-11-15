@@ -4,8 +4,9 @@
 
 The MLX backend is a **preview**:
 
-- It runs on **Apple Silicon macOS** only. iOS builds compile the non-linking tier and cannot run MLX (see [iOS](#ios)).
-- It is an **opt-in source build** (`llm-mlx-runtime`). No released SDK, CLI or binding artifact contains it yet.
+- It runs on **Apple Silicon macOS** only. iOS cannot run MLX (see [iOS](#ios)).
+- It is an **opt-in source build** (`llm-mlx-runtime`). No released SDK, CLI or binding artifact contains it yet, and no platform preset enables it.
+- It runs **only when you name it**. A registry model loads on MLX when the stage, the loader or the command line says `mlx`; nothing selects it for you. See [How a model reaches MLX](#how-a-model-reaches-mlx).
 - It does less than llama.cpp. Read [What MLX does not do](#what-mlx-does-not-do) before choosing it for a model.
 
 ## What it runs
@@ -13,13 +14,15 @@ The MLX backend is a **preview**:
 | Architecture (`execution_template.architecture`) | Models | Evidence |
 |---|---|---|
 | `qwen3` | Qwen 3 | CI runs it on synthetic weights and on real ones (Qwen3 0.6B, MLX 4-bit). Full-precision Qwen3 0.6B passes the same tests locally. |
-| `gemma4` | Gemma 4 E2B | CI runs it on synthetic weights. Gemma 4 E2B (MLX 4-bit) passes the real-weight tests locally. E4B has the same architecture and has not been run. |
-| `lfm2`, `lfm`, `lfm3` | LFM2, LFM2.5 | CI runs it on synthetic weights. LFM2 350M (BF16) and LFM2.5 1.2B (MLX 4-bit) pass the real-weight tests locally. No LFM3 SafeTensors bundle has been run. |
+| `gemma4` | Gemma 4 E2B | CI runs it on synthetic weights. Gemma 4 E2B (MLX 4-bit) passes the real-weight tests locally, tool calling included. E4B has the same architecture and has not been run. |
+| `lfm2`, `lfm` | LFM2, LFM2.5 | CI runs it on synthetic weights. LFM2 350M (BF16) and LFM2.5 1.2B (MLX 4-bit) pass the real-weight tests locally, tool calling included for LFM2.5. |
 | `bert`, `nomic_bert` | BERT, nomic-embed-text v1.5 (embeddings) | CI runs it on synthetic weights. nomic-embed-text v1.5 passes the real-weight tests locally. |
 
 Weights are SafeTensors: one `model.safetensors`, or a Hugging Face `model.safetensors.index.json` with its `model-*.safetensors` shards. LLM bundles can be full precision (F32, F16, BF16) or MLX affine-quantized (the `mlx-community/*-4bit` layout). Embedding bundles must be full precision.
 
 A bundle whose architecture or quantization MLX cannot load fails at load with an error that says so; nothing falls back to another backend.
+
+**LFM3 is not supported.** It is a different network from LFM2 (sliding-window attention layers, sandwich norms), and an `lfm3` bundle is refused with an error that points at llama.cpp, which runs LFM3 from GGUF.
 
 ## Getting an MLX build
 
@@ -27,8 +30,8 @@ MLX is behind two Cargo features:
 
 | Feature | What it compiles | Where |
 |---|---|---|
-| `llm-mlx` | Everything except the calls into MLX: backend selection, registry formats, config and weight validation, chat templates, sampling. Running a model returns an error that names `llm-mlx-runtime`. | Every target. Included in `platform-macos` and `platform-ios`. |
-| `llm-mlx-runtime` | The MLX runtime itself. Links `mlx.xcframework`. | `aarch64-apple-darwin` only; a compile error anywhere else. Never part of a preset. |
+| `llm-mlx` | Everything except the calls into MLX: config and weight validation, chat templates, sampling. Running a model returns an error that names `llm-mlx-runtime`. It exists so the adapter can be compiled and tested without Apple Silicon; a build has no other use for it. | Every target. Not part of any preset. |
+| `llm-mlx-runtime` | The MLX runtime itself. Links `mlx.xcframework`. Brings `llm-mlx` with it. | `aarch64-apple-darwin` only; a compile error anywhere else. Not part of any preset. |
 
 ```sh
 # 1. Materialize the MLX xcframework (gitignored) under vendor/mlx-apple/.
@@ -57,11 +60,9 @@ A directory or bundle whose `model_metadata.json` has a `SafeTensors` execution 
 
 ### A registry model
 
-By default a registry model loads the registry's default variant, which is GGUF for LLMs. That is true on every build that cannot run MLX, and such a build makes no extra registry request.
+A registry model loads the registry's default variant, which is GGUF for LLMs, unless you name a backend. That holds on every build, one that can run MLX included: such a build resolves the same artifact as one that cannot, and makes no extra registry request. MLX refuses grammars and images, and a request that works on llama.cpp must not start failing because the build gained a runtime.
 
-On a build that can run MLX (Apple Silicon, `llm-mlx-runtime`, Metal available), an LLM or embedding model for which the registry lists a `safetensors` variant loads that variant on MLX instead. The registry lists no SafeTensors variants today, so this changes nothing yet. When it does, a SafeTensors variant is a promise that MLX can load it: there is no fallback to GGUF if it cannot.
-
-A SafeTensors variant is cached separately from the default variant, so the two never shadow each other.
+Naming `mlx` (below) asks the registry for the model's `safetensors` variant. The registry lists no SafeTensors variants today, so for now MLX runs local bundles only. A SafeTensors variant is cached separately from the default variant, and a copy left by a `backend: mlx` load is not picked up by a later load that names no backend.
 
 ### Choosing the backend yourself
 
@@ -93,23 +94,32 @@ let model = ModelLoader::from_directory("./qwen3-mlx")?
     .load()?;
 ```
 
-Flutter:
-
-```dart
-final loader = XybridModelLoader.fromDirectory('/path/to/qwen3-mlx');
-final model = await loader.load(backend: XybridBackend.mlx);
-```
-
-The Swift, Kotlin, Python, Unity and React Native SDKs have no backend override yet.
+The Flutter, Swift, Kotlin, Python, Unity and React Native SDKs have no backend override: none of their published native libraries contains the MLX runtime, so the option could only fail there. They get it together with the runtime.
 
 Some pairs can never work and are rejected up front: `llamacpp` or `mistral` with a SafeTensors bundle or a registry embedding model, `mlx` with a GGUF model, and anything but `llamacpp` with a decision model.
+
+## Tool calling
+
+Tool calling works as it does on llama.cpp, through the same code: the request's `tools` are rendered into the prompt by the bundle's own chat template, calls are parsed from the model's output, a streamed turn holds the call back and delivers it parsed on the terminal token, and a tool result goes back with `Envelope::tool_results`. See the [tool calling guide](../content/docs/guides/tool-calling.mdx).
+
+| Family | Call notation | Evidence |
+|---|---|---|
+| LFM2.5 | `<|tool_call_start|>[get_weather(city="Paris")]<|tool_call_end|>` | LFM2.5 1.2B Instruct (MLX 4-bit): calls the tool and answers from its result, locally. The same call llama.cpp gets from the Q4_K_M GGUF. |
+| Gemma 4 | `<|tool_call>call:get_weather{city:<|"|>Paris<|"|>}<tool_call|>` | Gemma 4 E2B (MLX 4-bit): calls the tool and answers from its result, locally. |
+| Qwen 3 | | Not run with tools. |
+
+CI covers the plumbing on synthetic weights; the two real-weight cycles above run only with the bundles staged (see [Testing](#testing)).
+
+Two things to know:
+
+- **The bundle's template has to list tools.** A bundle whose chat template never mentions `tools` (`mlx-community/LFM2-350M-4bit` is one) is refused for a tool-bearing request, with an error that says so, instead of answering as if no tools had been offered.
+- **Small 4-bit models decide differently.** Asked "What is the weather in Paris right now?", LFM2.5 1.2B answered in prose from the MLX 4-bit weights and called the tool from the Q4_K_M GGUF; asked "What's the weather in Paris?", both called it. The two files are different quantizations of the model. If a model is on the edge of calling a tool, say in the system prompt when it should.
 
 ## What MLX does not do
 
 A request for something on this list fails with an error; it is never answered without the feature.
 
-- **Tool calling.** A request with `tools` is refused. Run it on llama.cpp (`backend: llamacpp`).
-- **Grammars and JSON-schema output.** A request with `grammar` is refused, for the same reason.
+- **Grammars and JSON-schema output.** A request with `grammar` is refused. Run it on llama.cpp (`backend: llamacpp`).
 - **Images.** MLX runs text models only.
 - **Decision models.** They run on the llama.cpp decision runtime.
 
@@ -123,12 +133,33 @@ Other differences from llama.cpp:
 
 `seed` in the generation config is honored by MLX and makes sampled output reproducible. Without a seed, sampled output differs on every call, as on llama.cpp. Greedy decoding (temperature 0, the default) is deterministic either way.
 
+## Performance
+
+The reason to choose MLX is decode speed on small models; the reasons not to are time to first token and, for Gemma 4, memory. Measured on an Apple M4 Max with each backend's usual 4-bit artifact of the same model (MLX 4-bit against a Q4_K_M GGUF, which are different quantizations), 128 tokens, greedy:
+
+| Model | MLX decode | llama.cpp decode | Time to first token, MLX / llama.cpp | Peak memory, MLX / llama.cpp |
+|---|---|---|---|---|
+| Qwen 3 0.6B | 620 to 655 tok/s | 160 to 430 tok/s | 31 ms / 3 to 5.5 ms | 0.8 GB / 1.1 GB |
+| LFM2.5 1.2B | 500 to 510 tok/s | 255 to 490 tok/s | 51 ms / 47 to 53 ms | 1.5 GB / 1.3 GB |
+| Gemma 4 E2B | 104 to 109 tok/s | 54 to 73 tok/s | 135 ms / 13 to 25 ms | 7.0 GB / 3.6 GB |
+
+Read it with these in mind:
+
+- **The ranges are over repeated passes (four, three for Gemma), and the machine was not idle.** MLX's rate did not move between passes; llama.cpp's did, by up to 2.7x, with other GPU work running. Against llama.cpp's best pass MLX is about 1.5x faster on Qwen 3 0.6B and level on LFM2.5 1.2B. For Gemma 4 no ratio is claimed: llama.cpp's warm-up rounds, which the benchmark discards, reached MLX's rate.
+- **llama.cpp answers a repeated prompt sooner.** It keeps the prompt it evaluated last time; MLX evaluates the whole prompt again on every call. In a long conversation that gap grows with the history.
+- **At full precision the engines are level, or MLX is behind.** On identical BF16 weights Qwen 3 4B measured 1.03x llama.cpp. Gemma 4 and LFM2.5 at BF16 measured far below llama.cpp in May 2026 and have not been re-measured.
+
+Every pass, the method and how to reproduce it are in [`docs/benchmarks/llm-backends-baseline.md`](../benchmarks/llm-backends-baseline.md).
+
 ## Testing
 
-CI runs the MLX runtime on Apple Silicon in two lanes, both only when something that reaches the runtime changed. The non-linking tier is checked on Linux for every code change.
+The adapter is tested on three levels.
 
-- `check (llm-mlx-runtime, macos)` in `ci.yml` uses synthetic, randomly initialized bundles written by the tests themselves, through the adapters, the executor, the SDK and the CLI.
-- `Test MLX (integration, real model)` in `test-mlx.yml` downloads one small real bundle, the `qwen3-0.6b-4bit-mlx` fixture (335 MB, pinned by revision and checksum), and runs the chat, streaming, cancellation, two-models-at-once and memory-release tests on it, then the bundle through the CLI. `tools/scripts/run-mlx-real-tests.sh` runs each test in its own process and then all of them in one, and prints the crash report's backtrace if a process dies. A hosted runner's GPU is virtual and rejects a command buffer now and then; the script retries that one failure, by MLX's message, and prints Metal's reason each time.
+- **Every code change, on Linux:** `check (llm-mlx non-linking, ubuntu-latest)` in `ci.yml` compiles and lints the `llm-mlx` tier and runs its whole core, SDK and CLI test suites: everything but the calls into MLX. A change to shared code that breaks the adapter fails here.
+- **A change to the MLX backend, on Apple Silicon:** `check (llm-mlx-runtime, macos)` in `ci.yml` links MLX and runs the adapters, the executor, the SDK and the CLI on synthetic, randomly initialized bundles the tests write themselves. `Test MLX (integration, real model)` in `test-mlx.yml` downloads one small real bundle, the `qwen3-0.6b-4bit-mlx` fixture (335 MB, pinned by revision and checksum), and runs the chat, streaming, cancellation, two-models-at-once and memory-release tests on it, then the bundle through the CLI. Neither runs for a pull request that does not touch the backend.
+- **Every night, on master:** `test-mlx.yml` runs both of those again, for the change to shared code that compiles on every tier and breaks MLX at run time.
+
+The MLX-linked steps are one script, `tools/scripts/check-mlx-runtime.sh`, so the pull-request job and the nightly one cannot drift; run it locally to reproduce either. `tools/scripts/run-mlx-real-tests.sh` runs each real-weight test in its own process and then all of them in one, and prints the crash report's backtrace if a process dies. A hosted runner's GPU is virtual and rejects a command buffer now and then; both scripts retry that one failure, by MLX's message, and print Metal's reason each time.
 
 The other real-weight tests are for bundles too large to download in CI. They run only when an environment variable points at a bundle staged on disk, and skip otherwise:
 
@@ -137,8 +168,10 @@ The other real-weight tests are for bundles too large to download in CI. They ru
 | `qwen3-4b-mlx` (or any Qwen 3 bundle) | `XYBRID_MLX_QWEN_4B_DIR` / `XYBRID_MLX_QWEN_DIR` | `config.json`, `tokenizer.json`, `tokenizer_config.json`, weights |
 | an MLX 4-bit Qwen 3 bundle | `XYBRID_MLX_QWEN_4BIT_DIR` | same |
 | `gemma4-2b` | `XYBRID_MLX_GEMMA_DIR` | `config.json`, `tokenizer.json`, `tokenizer_config.json`, `chat_template.jinja`, weights |
+| `gemma-4-e2b-it-4bit-mlx` (3.55 GB, downloadable) | `XYBRID_MLX_GEMMA_4BIT_DIR` | same; the tool-calling tests use it |
 | `lfm2-350m-bf16` | `XYBRID_MLX_LFM_DIR` | `config.json`, `tokenizer.json`, weights |
 | `lfm2.5-1.2b-instruct-mlx` | `XYBRID_MLX_LFM25_DIR` | `config.json`, `tokenizer.json`, `tokenizer_config.json`, `chat_template.jinja`, weights |
+| `lfm2.5-1.2b-instruct-4bit-mlx` (659 MB, downloadable) | `XYBRID_MLX_LFM25_4BIT_DIR` | same; the tool-calling tests use it |
 | `nomic-embed-text-v1.5` | `XYBRID_MLX_NOMIC_DIR` | `config.json`, `tokenizer.json`, weights |
 
 ```sh
@@ -159,7 +192,7 @@ XYBRID_MLX_QWEN_DIR=/path/to/Qwen3-0.6B \
 
 `backend: mlx` is a hard requirement and this build or host cannot meet it. The error lists the backends that are available. The usual causes:
 
-- the build has `llm-mlx` but not `llm-mlx-runtime` (every `platform-macos` build without the extra feature);
+- the build has no `llm-mlx-runtime` (every released artifact, and every `platform-macos` build without the extra feature);
 - the host is not Apple Silicon macOS;
 - Metal is unreachable, which happens in some virtual machines.
 
@@ -173,9 +206,17 @@ MLX could not find `mlx.metallib`. See [Shipping a binary that links MLX](#shipp
 
 `llm-mlx-runtime` needs the xcframework under `vendor/mlx-apple/`, or `MLX_XCFRAMEWORK_PATH`. Run `./tools/scripts/build-local-mlx-xcframework.sh`.
 
-### `the MLX backend does not support tool calling` / `grammar-constrained generation`
+### `the MLX backend does not support grammar-constrained generation`
 
 See [What MLX does not do](#what-mlx-does-not-do). Load the model with `backend: llamacpp`.
+
+### `this bundle's chat template does not render tool definitions`
+
+The request offers tools and the bundle's chat template has no place for them, so the model could not know they exist. Use a bundle whose template lists tools (the model's own `chat_template.jinja` usually does; some community conversions replace it with a bare one), or drop `tools` from the request.
+
+### `unsupported MLX model architecture`
+
+MLX runs Qwen 3, Gemma 4 and LFM2 / LFM2.5. Anything else, LFM3 included, runs from GGUF on llama.cpp.
 
 ### `MLX sharded SafeTensors bundles require model.safetensors.index.json`
 
@@ -194,7 +235,7 @@ An embedding bundle is quantized, or an LLM bundle uses a quantization layout ot
 
 ## iOS
 
-Upstream MLX builds without its Metal backend for iOS, so there is nothing to run a model with. `platform-ios` carries `llm-mlx` so that metadata, selection and registry code compile the same on both Apple platforms; `llm-mlx-runtime` is a compile error for iOS. Use GGUF models on llama.cpp there.
+Upstream MLX builds without its Metal backend for iOS, so there is nothing to run a model with. `llm-mlx-runtime` is a compile error for iOS, as for every target but Apple Silicon macOS (`tools/scripts/test-mlx-runtime-gate.sh` keeps it one), and `platform-ios` carries nothing of MLX. Use GGUF models on llama.cpp there.
 
 ## Further reading
 
