@@ -9,6 +9,12 @@ describes, because a table can only be built from files that follow them:
   * The line directly above `name:` is `# Purpose: <one sentence>`.
   * A concurrency group never uses `github.workflow`, so renaming a workflow
     cannot silently change its concurrency group.
+  * Every file is listed in WORKFLOW_FILES: CI grows by extending ci.yml (a
+    job, or a lane file it calls), not by adding a workflow.
+  * Only the files in PULL_REQUEST_FILES declare pull_request or
+    pull_request_target. A lane file declares workflow_call (plus
+    workflow_dispatch, plus schedule for a nightly), is called by a workflow,
+    and never declares push or a pull-request event.
 
 Standard library only: this runs on a bare CI runner and on a laptop without a
 YAML package. It reads the small, regular subset of YAML these files use and
@@ -28,7 +34,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import AbstractSet, Dict, List, Optional, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
@@ -48,6 +54,85 @@ GROUPS = {
     "Community": "Contributor-facing automation.",
 }
 
+# Every file allowed in .github/workflows/. CI coverage is added by extending
+# ci.yml: a job built from the shared actions in .github/actions/, or a lane
+# file it calls. A file missing here fails the check, and so does an entry
+# whose file is gone, so the set only shrinks unless a PR adds a file on
+# purpose and says why (README, "Adding CI").
+WORKFLOW_FILES = frozenset(
+    {
+        "bazel.yml",
+        "build-android.yml",
+        "build-apple.yml",
+        "build-flutter.yml",
+        "build-natives.yml",
+        "build-react-native.yml",
+        "build-unity.yml",
+        "ci.yml",
+        "clean-scripts.yml",
+        "codeql.yml",
+        "discord-notify.yml",
+        "gradle-wrapper-validation.yml",
+        "llamacpp-update.yml",
+        "llamacpp-validate.yml",
+        "release-dryrun.yml",
+        "release-notify.yml",
+        "release-prep.yml",
+        "release-publish.yml",
+        "scorecard.yml",
+        "star-history.yml",
+        "test-candle.yml",
+        "test-choice-conformance.yml",
+        "test-ci.yml",
+        "test-decision-conformance.yml",
+        "test-policy-routing.yml",
+        "test-whispercpp.yml",
+        "test-zzz-android.yml",
+        "test-zzz-engine.yml",
+        "trusted-zzz-sdk.yml",
+        "unity-activation.yml",
+        "unity-editor.yml",
+        "web-webgpu.yml",
+        "welcome.yml",
+    }
+)
+
+# The files that may declare pull_request or pull_request_target. ci.yml and
+# bazel.yml validate pull requests; the others scan them (codeql.yml,
+# gradle-wrapper-validation.yml), dry-run a release (release-dryrun.yml),
+# publish a merged release PR (release-publish.yml) or greet contributors
+# (discord-notify.yml, welcome.yml). The remaining entries are lanes that have
+# not yet moved behind ci.yml; each leaves this set when it does.
+PULL_REQUEST_FILES = frozenset(
+    {
+        "bazel.yml",
+        "build-android.yml",
+        "build-apple.yml",
+        "build-flutter.yml",
+        "build-react-native.yml",
+        "ci.yml",
+        "clean-scripts.yml",
+        "codeql.yml",
+        "discord-notify.yml",
+        "gradle-wrapper-validation.yml",
+        "llamacpp-validate.yml",
+        "release-dryrun.yml",
+        "release-publish.yml",
+        "test-candle.yml",
+        "test-choice-conformance.yml",
+        "test-decision-conformance.yml",
+        "test-policy-routing.yml",
+        "test-whispercpp.yml",
+        "unity-editor.yml",
+        "welcome.yml",
+    }
+)
+
+_PULL_REQUEST_EVENTS = ("pull_request", "pull_request_target")
+
+# Events a lane file (one that declares workflow_call) may also declare.
+_LANE_EVENTS = {"workflow_call", "workflow_dispatch", "schedule"}
+
 _NAME = re.compile(r"^([A-Za-z]+): (\S.*)$")
 _COMMENT = re.compile(r"\s+#.*$")
 _KEY = re.compile(r"^\s*([A-Za-z_][\w-]*):\s*(.*)$")
@@ -57,8 +142,24 @@ _KEY = re.compile(r"^\s*([A-Za-z_][\w-]*):\s*(.*)$")
 # example `branches-ignore`) would change what a row means, so it is refused.
 _EVENT_KEYS = {"branches", "tags", "types", "paths", "paths-ignore", "inputs"}
 
+# workflow_call declares its interface instead of filters; none of it is rendered.
+_CALL_KEYS = {"inputs", "outputs", "secrets"}
+
+# A job that runs a lane file: `uses: ./.github/workflows/<file>` as a job key
+# (four spaces in), not a step's `uses:` or a line inside a `run:` script.
+_CALL = re.compile(r"""^    uses:\s*(["']?)\./\.github/workflows/([^"'\s#]+)\1\s*(?:#.*)?$""")
+
 # Events are listed in this order so rows scan the same way; others follow alphabetically.
-_EVENT_ORDER = ("push", "pull_request", "pull_request_target", "issues", "release", "schedule", "workflow_dispatch")
+_EVENT_ORDER = (
+    "push",
+    "pull_request",
+    "pull_request_target",
+    "workflow_call",
+    "issues",
+    "release",
+    "schedule",
+    "workflow_dispatch",
+)
 
 
 class Unsupported(Exception):
@@ -73,6 +174,10 @@ class Workflow:
     triggers: Tuple[str, ...]
     writes: Tuple[str, ...]
     concurrency: Tuple[str, ...]
+    # Event names, in the order of `triggers`.
+    events: Tuple[str, ...] = ()
+    # Lane files this workflow runs (`uses: ./.github/workflows/<file>`).
+    calls: Tuple[str, ...] = ()
 
     @property
     def group(self) -> Optional[str]:
@@ -170,6 +275,7 @@ def _event_filters(event: str, rest: str, sub: Sequence[str]) -> Dict[str, List[
         return {"cron": crons}
     filter_indent = min(_indent(line) for line in content)
     filters: Dict[str, List[str]] = {}
+    allowed = _CALL_KEYS if event == "workflow_call" else _EVENT_KEYS
     for offset, line in enumerate(sub):
         if _skip(line) or _indent(line) != filter_indent:
             continue
@@ -177,7 +283,7 @@ def _event_filters(event: str, rest: str, sub: Sequence[str]) -> Dict[str, List[
         if not match:
             raise Unsupported(f"on.{event}: unsupported line {line.strip()!r}")
         key, value = match.groups()
-        if key not in _EVENT_KEYS:
+        if key not in allowed:
             raise Unsupported(f"on.{event}.{key}: the generator does not read this key")
         if key in ("branches", "tags", "types"):
             filters[key] = _items(value, _block(sub, offset))
@@ -201,12 +307,16 @@ def _event_rank(event: str) -> Tuple[int, str]:
     return (_EVENT_ORDER.index(event) if event in _EVENT_ORDER else len(_EVENT_ORDER), event)
 
 
-def _triggers(lines: Sequence[str]) -> List[str]:
+def _triggers(lines: Sequence[str]) -> List[Tuple[str, str]]:
+    """(event, rendered trigger) pairs in display order."""
     start = next((i for i, line in enumerate(lines) if re.match(r"""^("on"|'on'|on):""", line)), None)
     if start is None:
         raise Unsupported("no top-level on:")
     head = re.match(r"""^(?:"on"|'on'|on):\s*(.*)$""", lines[start]).group(1)  # type: ignore[union-attr]
     head = _COMMENT.sub("", head).strip()
+    if head.startswith("{"):
+        # A flow mapping would read as one event and hide pull_request from the rules.
+        raise Unsupported(f"on: unsupported flow mapping {head!r}")
     triggers: Dict[str, str] = {}
     if head:
         for event in _items(head, []):
@@ -225,7 +335,17 @@ def _triggers(lines: Sequence[str]) -> List[str]:
                 raise Unsupported(f"on: unsupported line {line.strip()!r}")
             event, rest = match.groups()
             triggers[event] = _render_trigger(event, _event_filters(event, rest, _block(block, offset)))
-    return [triggers[event] for event in sorted(triggers, key=_event_rank)]
+    return [(event, triggers[event]) for event in sorted(triggers, key=_event_rank)]
+
+
+def _calls(lines: Sequence[str]) -> List[str]:
+    """Lane files run by this workflow's jobs, in file order, each once."""
+    calls: List[str] = []
+    for line in lines:
+        match = _CALL.match(line)
+        if match and match.group(2) not in calls:
+            calls.append(match.group(2))
+    return calls
 
 
 def _writes(lines: Sequence[str]) -> List[str]:
@@ -278,13 +398,16 @@ def parse_workflow(path: Path) -> Workflow:
     lines = path.read_text(encoding="utf-8").splitlines()
     try:
         name_index, name = _name(lines)
+        triggers = _triggers(lines)
         return Workflow(
             file=path.name,
             name=name,
             purpose=_purpose(lines, name_index),
-            triggers=tuple(_triggers(lines)),
+            triggers=tuple(text for _, text in triggers),
             writes=tuple(_writes(lines)),
             concurrency=tuple(_concurrency(lines)),
+            events=tuple(event for event, _ in triggers),
+            calls=tuple(_calls(lines)),
         )
     except Unsupported as exc:
         raise Unsupported(f"{path.name}: {exc}") from None
@@ -298,10 +421,45 @@ def load(directory: Path) -> List[Workflow]:
 # --- rules -------------------------------------------------------------------
 
 
-def problems(workflows: Sequence[Workflow]) -> List[str]:
+def problems(
+    workflows: Sequence[Workflow],
+    files: Optional[AbstractSet[str]] = None,
+    pull_request_files: Optional[AbstractSet[str]] = None,
+) -> List[str]:
+    """Rule violations; `files` and `pull_request_files` default to the allowlists above."""
+    files = WORKFLOW_FILES if files is None else files
+    pull_request_files = PULL_REQUEST_FILES if pull_request_files is None else pull_request_files
     found: List[str] = []
     seen: Dict[str, str] = {}
+    present = {workflow.file: workflow for workflow in workflows}
+    names = set(present)
     for workflow in workflows:
+        if workflow.file not in files:
+            found.append(
+                f"{workflow.file}: not an allowed workflow file. Add CI as a job in ci.yml or a lane "
+                "file it calls (.github/workflows/README.md, Adding CI); a file the repository really "
+                "needs is added to WORKFLOW_FILES in tools/scripts/gen_workflow_index.py by a PR that says why"
+            )
+        for event in _PULL_REQUEST_EVENTS:
+            if event in workflow.events and workflow.file not in pull_request_files:
+                found.append(
+                    f"{workflow.file}: declares {event}, but only ci.yml and bazel.yml validate pull "
+                    "requests. Run it from ci.yml: a job, or a lane file that declares workflow_call"
+                )
+        if "workflow_call" in workflow.events:
+            extra = [event for event in workflow.events if event not in _LANE_EVENTS]
+            if extra:
+                found.append(
+                    f"{workflow.file}: a lane file (workflow_call) runs when ci.yml calls it, so it "
+                    f"declares only workflow_call, workflow_dispatch and schedule, not {', '.join(extra)}"
+                )
+            if not any(workflow.file in other.calls for other in workflows):
+                found.append(f"{workflow.file}: declares workflow_call, but no workflow calls it")
+        for callee in workflow.calls:
+            if callee not in present:
+                found.append(f"{workflow.file}: calls {callee}, which does not exist")
+            elif "workflow_call" not in present[callee].events:
+                found.append(f"{workflow.file}: calls {callee}, which does not declare workflow_call")
         match = _NAME.match(workflow.name)
         if not match or match.group(1) not in GROUPS:
             found.append(
@@ -319,6 +477,13 @@ def problems(workflows: Sequence[Workflow]) -> List[str]:
         if workflow.name in seen:
             found.append(f"{workflow.file}: name {workflow.name!r} is already used by {seen[workflow.name]}")
         seen.setdefault(workflow.name, workflow.file)
+    for file in sorted(set(files) - names):
+        found.append(f"WORKFLOW_FILES lists {file}, which does not exist; remove it")
+    for file in sorted(set(pull_request_files) & names):
+        if not any(event in present[file].events for event in _PULL_REQUEST_EVENTS):
+            found.append(f"PULL_REQUEST_FILES lists {file}, which declares no pull-request event; remove it")
+    for file in sorted(set(pull_request_files) - set(files)):
+        found.append(f"PULL_REQUEST_FILES lists {file}, which WORKFLOW_FILES does not allow; remove it")
     return found
 
 
@@ -327,6 +492,13 @@ def problems(workflows: Sequence[Workflow]) -> List[str]:
 
 def _cell(text: str) -> str:
     return text.replace("|", "\\|")
+
+
+def _called_by(workflow: Workflow, workflows: Sequence[Workflow]) -> str:
+    callers = sorted(other.file for other in workflows if workflow.file in other.calls)
+    if not callers:
+        return "workflow_call"
+    return "called by " + ", ".join(f"`{caller}`" for caller in callers)
 
 
 def render(workflows: Sequence[Workflow]) -> str:
@@ -345,7 +517,9 @@ def render(workflows: Sequence[Workflow]) -> str:
         ]
         for w in rows:
             writes = ", ".join(w.writes) if w.writes else "none"
-            triggers = _cell(", ".join(w.triggers))
+            # A lane file's row names its caller instead of the bare event.
+            shown = [_called_by(w, workflows) if text == "workflow_call" else text for text in w.triggers]
+            triggers = _cell(", ".join(shown))
             lines.append(
                 f"| [`{w.file}`]({w.file}) | {_cell(w.name)} | {triggers} | {writes} | {_cell(w.purpose or '')} |"
             )

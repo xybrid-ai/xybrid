@@ -7,8 +7,8 @@ which ones depend on each other.
 ## Conventions
 
 [`tools/scripts/gen_workflow_index.py`](../../tools/scripts/gen_workflow_index.py)
-`--check` (CI job `Workflow index`) enforces the first three. The last two are
-decisions to keep.
+`--check` (CI job `Workflow index`) enforces the first three, and the first two
+rules under [Adding CI](#adding-ci). The last two are decisions to keep.
 
 - **Display name** is `"Group: Subject"`, quoted, with a group from the
   inventory below. Groups sort together in the Actions sidebar. A dispatch-only
@@ -33,6 +33,37 @@ decisions to keep.
   `tools/scripts/llamacpp_update.py` waits on more job names before it cuts a
   llama.cpp release (its `REQUIRED_CHECKS`). A workflow's `name:` can change
   freely; those job names cannot.
+
+## Adding CI
+
+CI used to grow one workflow per feature, each with its own triggers, path
+list, setup block and runner. `ci.yml` is now the pull-request pipeline, and
+new coverage extends it. The first two rules fail `Workflow index`; the rest
+are how to follow them.
+
+1. **No new workflow file** other than a lane file (rule 6). `WORKFLOW_FILES`
+   in `gen_workflow_index.py` lists every file in this directory, and an
+   unlisted file fails the check. A new lane file, or a file the repository
+   really needs (a release, artifact, security or community workflow), is
+   added there by the PR that says why.
+2. **Only `ci.yml` and `bazel.yml` validate pull requests.**
+   `PULL_REQUEST_FILES` names the files that may declare `pull_request` or
+   `pull_request_target`: those two, the security scans, the release dry-run
+   and publish, the community bots, and the lanes not yet moved behind
+   `ci.yml`. A lane file declares `workflow_call` (plus `workflow_dispatch`,
+   plus `schedule` for a nightly), never `push` or a pull-request event, and a
+   workflow must call it.
+3. **A check that takes seconds and needs no toolchain is a test** under
+   `tools/scripts/tests/`, not a job.
+4. **A new cargo invocation is a step** in the `ci.yml` job with the same
+   runner and feature family.
+5. **A new backend or real-model suite is one `ci.yml` job** gated on its
+   flag, the flag's path rule and `OPTIONAL_JOBS` entry in
+   `tools/scripts/ci_gate.py`, its line in `tooling-changes`' outputs, and one
+   entry in `CI Success`'s `needs`.
+6. **A new binding or platform is a lane file called from `ci.yml`.**
+7. **macOS runs 5 jobs at once for the whole organization.** Add steps to an
+   existing macOS job; a new one waits behind every other pull request's.
 
 ## Preserving execution
 
@@ -118,7 +149,7 @@ Manual utilities, run on demand.
 
 | File | Name | Triggers | Writes | Purpose |
 | --- | --- | --- | --- | --- |
-| [`test-ci.yml`](test-ci.yml) | Maintenance: Packaging tools (manual) | workflow_dispatch | contents | Manual: precompile and upload Flutter binaries per platform, and dry-run the speech-free Kotlin packaging. |
+| [`test-ci.yml`](test-ci.yml) | Maintenance: Packaging tools (manual) | workflow_dispatch | none | Manual: dry-run the speech-free Kotlin packaging. |
 | [`unity-activation.yml`](unity-activation.yml) | Maintenance: Unity activation (manual) | workflow_dispatch | none | Manual: emit the Unity license activation request (.alf); re-run when Editor activation starts failing. |
 
 ### Community
@@ -194,10 +225,9 @@ build, gates and Gradle packaging on `master` with the master-only
 `zzz-engine` environment, which `test-zzz-engine.yml` and `trusted-zzz-sdk.yml`
 also use.
 
-**Manual only.** `test-ci.yml` precompiles the Flutter binaries per platform and
-uploads them to GitHub Releases (`contents: write`), and dry-runs the
-speech-free Kotlin packaging; the speech publish path is rehearsed by
-dispatching `test-zzz-android.yml` on `master`. `unity-activation.yml` emits the Unity license activation request; it is
+**Manual only.** `test-ci.yml` dry-runs the speech-free Kotlin packaging; the
+speech publish path is rehearsed by dispatching `test-zzz-android.yml` on
+`master`, and `release-prep.yml` precompiles the Flutter binaries. `unity-activation.yml` emits the Unity license activation request; it is
 kept for when the license expires or the GameCI image changes.
 `web-webgpu.yml` runs WebGPU generation on a self-hosted runner labelled
 `webgpu`, because hosted runners have no GPU adapter with `shader-f16`.
