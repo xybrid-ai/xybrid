@@ -142,9 +142,9 @@ _EVENT_KEYS = {"branches", "tags", "types", "paths", "paths-ignore", "inputs"}
 # workflow_call declares its interface instead of filters; none of it is rendered.
 _CALL_KEYS = {"inputs", "outputs", "secrets"}
 
-# A job that runs a lane file: `uses: ./.github/workflows/<file>` as a job key
-# (four spaces in), not a step's `uses:` or a line inside a `run:` script.
-_CALL = re.compile(r"""^    uses:\s*(["']?)\./\.github/workflows/([^"'\s#]+)\1\s*(?:#.*)?$""")
+# A job that runs a lane file: `uses: ./.github/workflows/<file>` as one of
+# the job's own keys, not a step's `uses:` or a line inside a `run:` script.
+_CALL = re.compile(r"""^uses:\s*(["']?)\./\.github/workflows/([^"'\s#]+)\1\s*(?:#.*)?$""")
 
 # Events are listed in this order so rows scan the same way; others follow alphabetically.
 _EVENT_ORDER = (
@@ -336,12 +336,30 @@ def _triggers(lines: Sequence[str]) -> List[Tuple[str, str]]:
 
 
 def _calls(lines: Sequence[str]) -> List[str]:
-    """Lane files run by this workflow's jobs, in file order, each once."""
+    """Lane files run by this workflow's jobs, in file order, each once.
+
+    A call is a `uses:` key at a job's own key indent, found by the nesting of
+    `jobs:`, so any indentation width reads the same."""
+    start = next((i for i, line in enumerate(lines) if _header(line, "jobs", "") == ""), None)
+    if start is None:
+        return []
+    body = _block(lines, start)
+    content = [line for line in body if not _skip(line)]
+    if not content:
+        return []
+    job_indent = min(_indent(line) for line in content)
     calls: List[str] = []
-    for line in lines:
-        match = _CALL.match(line)
-        if match and match.group(2) not in calls:
-            calls.append(match.group(2))
+    for offset, line in enumerate(body):
+        if _skip(line) or _indent(line) != job_indent:
+            continue
+        keys = [key for key in _block(body, offset) if not _skip(key)]
+        if not keys:
+            continue
+        key_indent = min(_indent(key) for key in keys)
+        for key in keys:
+            match = _CALL.match(key.strip()) if _indent(key) == key_indent else None
+            if match and match.group(2) not in calls:
+                calls.append(match.group(2))
     return calls
 
 
@@ -488,7 +506,7 @@ def _matrix_include(job_lines: Sequence[str]) -> Tuple[Dict[str, str], ...]:
 def read_jobs(path: Path) -> Dict[str, Job]:
     """Every job in a workflow file, by id, in file order."""
     lines = path.read_text(encoding="utf-8").splitlines()
-    start = next((i for i, line in enumerate(lines) if re.match(r"^jobs:\s*$", line)), None)
+    start = next((i for i, line in enumerate(lines) if _header(line, "jobs", "") == ""), None)
     if start is None:
         raise Unsupported(f"{path.name}: no top-level jobs:")
     jobs: Dict[str, Job] = {}

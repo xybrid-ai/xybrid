@@ -202,6 +202,27 @@ class ParseTests(unittest.TestCase):
         )
         self.assertEqual(caller.calls, ("lane.yml", "other.yml"))
 
+    def test_reads_calls_at_any_indentation_width(self):
+        caller = self.parse(
+            """\
+            # Purpose: x
+            name: "CI: Caller"
+            on: pull_request
+            jobs: # every lane
+                lane:
+                    name: Lane
+                    uses: ./.github/workflows/lane.yml
+                build:
+                    runs-on: ubuntu-latest
+                    steps:
+                        -   run: |
+                                echo "uses: ./.github/workflows/not-a-job.yml"
+            """
+        )
+        self.assertEqual(caller.calls, ("lane.yml",))
+        lane = gen.Workflow("lane.yml", "SDK: Lane", "x", ("workflow_call",), (), (), events=("workflow_call",))
+        self.assertEqual(gen.problems([caller, lane], {"w.yml", "lane.yml"}, {"w.yml"}), [])
+
     def test_refuses_keys_an_event_does_not_take(self):
         cases = {
             "secrets outside workflow_call": 'name: "CI: X"\non:\n  push:\n    secrets: {}\n',
