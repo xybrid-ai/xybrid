@@ -47,7 +47,7 @@ use std::time::{Duration, Instant};
 /// | Key | Type | Description |
 /// |-----|------|-------------|
 /// | `provider` | String | Provider name: "openai", "anthropic", "google" |
-/// | `model` | String | Model identifier, e.g., "gpt-4o-mini" |
+/// | `model` | String | Model identifier: a canonical id such as "openai/gpt-4o-mini" through the gateway, the provider's own id (e.g., "gpt-4o-mini") with `backend: direct` |
 /// | `system_prompt` | String | System message for the conversation |
 /// | `temperature` | f32 | Sampling temperature (0.0-2.0) |
 /// | `max_tokens` | u32 | Maximum tokens in response |

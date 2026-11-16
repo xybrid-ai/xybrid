@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+* Fixed: `runStreamingWithFallback` asks the Xybrid gateway for
+  `openai/gpt-4o-mini` when `RunOptions.cloudModel` is unset. It sent
+  `gpt-4o-mini`, which the managed gateway answers with 404
+  `model_not_found`: it takes frontier models by their canonical OpenRouter id
+  only. A `cloudModel` you set is sent unchanged, so use a canonical id there
+  too (for example `anthropic/claude-haiku-4.5`).
+
 ## 0.19.0
 
 * Fixed: pipeline stages with no explicit target or cloud provider now download

@@ -9,6 +9,10 @@ pub struct GatewayConfig {
     pub base_url: String,
 
     /// Default model to use if not specified in request.
+    ///
+    /// The Xybrid gateway names frontier models by their canonical OpenRouter
+    /// id (`openai/gpt-4o-mini`, `anthropic/claude-haiku-4.5`) and answers
+    /// `404 model_not_found` for a short id such as `gpt-4o-mini`.
     pub default_model: Option<String>,
 
     /// Request timeout in milliseconds.
@@ -28,7 +32,7 @@ impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
             base_url: "https://api.xybrid.dev/v1".to_string(),
-            default_model: Some("gpt-4o-mini".to_string()),
+            default_model: Some("openai/gpt-4o-mini".to_string()),
             timeout_ms: 60000,
             debug: false,
             max_retries: 3,
@@ -167,7 +171,7 @@ mod tests {
     fn test_default_config() {
         let config = GatewayConfig::default();
         assert_eq!(config.base_url, "https://api.xybrid.dev/v1");
-        assert_eq!(config.default_model, Some("gpt-4o-mini".to_string()));
+        assert_eq!(config.default_model, Some("openai/gpt-4o-mini".to_string()));
         assert_eq!(config.timeout_ms, 60000);
     }
 
