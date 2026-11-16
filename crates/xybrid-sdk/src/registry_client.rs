@@ -3694,6 +3694,16 @@ mod tests {
     }
 
     #[test]
+    fn public_build_client_header_follows_the_process_ci_decision() {
+        // The public builder wires in the cached decisions; a regression
+        // that dropped `is_ci()` there would pass every pure-helper test.
+        assert_eq!(
+            build_client_header("rust"),
+            build_client_header_with("rust", is_telemetry_opted_out(), is_ci())
+        );
+    }
+
+    #[test]
     fn build_client_header_never_sends_ci_zero() {
         let header = build_client_header_with("rust", false, false).unwrap();
         assert!(!header.contains("ci="), "no ci key outside CI: {header}");

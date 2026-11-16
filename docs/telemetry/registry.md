@@ -49,7 +49,7 @@ GitHub Actions, GitLab CI, CircleCI, Buildkite, Travis CI and most other CI serv
 export XYBRID_CI=1
 ```
 
-The same works for a build service that doesn't set `CI` (Jenkins, for example), and `XYBRID_CI=0` keeps a CI job that serves real users from being labelled.
+The same works for a build service that doesn't set `CI` (Jenkins, for example). `XYBRID_CI=0` keeps a process that serves real users from being labelled: a CI job that does, or a container image that bakes in `ENV CI=true`, as many Node images do.
 
 `ci=0` is never sent: a run outside CI sends the header without a `ci` key. The opt-out wins over the label: with `XYBRID_TELEMETRY_OPTOUT` set, no header is sent at all. Like the opt-out, both variables are read once per process, on the first registry call, and cached.
 
