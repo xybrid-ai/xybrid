@@ -1011,7 +1011,13 @@ impl RegistryClient {
         }
     }
 
-    /// Check if a model is cached locally.
+    /// Check whether the bundle the registry resolves for `mask` is downloaded.
+    ///
+    /// This is not an offline check: it calls [`Self::resolve`] first, so it
+    /// costs a registry round trip and fails when the registry does not list
+    /// `mask`. It looks only at the downloaded bundle (checking its SHA-256
+    /// when the registry gives one), not at an extracted directory;
+    /// [`Self::resolve_offline`] answers that without the network.
     pub fn is_cached(&self, mask: &str, platform: Option<&str>) -> Result<bool, SdkError> {
         let resolved = self.resolve(mask, platform)?;
         let cache_path = self.get_cache_path(&resolved);

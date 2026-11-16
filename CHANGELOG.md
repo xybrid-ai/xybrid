@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **SDK:** loading a pipeline no longer asks the model registry about its
+  cloud and provider stages. `PipelineRef::load`, which every binding's
+  pipeline constructor goes through, checked whether each stage's model was
+  cached by resolving it in the registry, including stages that name a
+  provider or `target: cloud`, `server` or `integration`. Their models
+  (`gpt-4o-mini`) are not registry ids, so each load spent a registry round
+  trip per such stage and got a 404 back. Only device and auto stages are
+  checked now; what a stage reports (`Pipeline::stages`) is unchanged.
+
 ## [0.19.0] - 2026-11-14
 
 ### Added
