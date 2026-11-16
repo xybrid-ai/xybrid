@@ -1,14 +1,29 @@
-# Purpose: Rust format, lint, tests and feature matrix, plus binding drift, API contract, observability, Python SDK, Web SDK and agent skills checks. Gates merges.
+# Purpose: The pull-request pipeline: repository checks, Rust format, lint, tests and feature matrix, binding drift, API contract, observability, Python and Web SDKs, and the backend lanes. Gates merges.
 name: "CI: Workspace"
 
+# The one workflow that validates pull requests (with bazel.yml). New coverage
+# extends it: .github/workflows/README.md, "Adding CI".
 on:
   push:
     branches: [master]
   pull_request:
     branches: [master]
+  # A manual run executes every job; `lanes` narrows the lanes, except on
+  # master, where ci_gate.py ignores it and runs every lane.
+  workflow_dispatch:
+    inputs:
+      lanes:
+        description: Lanes to run, comma-separated (candle, llamacpp, policy_routing, whispercpp). Empty runs every lane.
+        type: string
+        required: false
+        default: ''
 
+# A pull request or manual run cancels its superseded run. A master push never
+# does (its group is its commit): each push selects lanes from its own diff, so
+# a later push would not run the earlier one's lanes again, and only master
+# runs save the shared caches.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'push' && github.sha || github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.ref) || github.ref }}
   cancel-in-progress: true
 
 permissions: read-all
@@ -21,17 +36,24 @@ jobs:
   tooling-changes:
     name: Detect CI-relevant changes
     runs-on: ubuntu-latest
+    # One output per tools/scripts/ci_gate.py flag (PATH_FILTERS, LANE_PATHS).
     outputs:
       full_ci: ${{ steps.filter.outputs.full_ci }}
-      relevant: ${{ steps.filter.outputs.relevant }}
+      ort_staging: ${{ steps.filter.outputs.ort_staging }}
       unity_bolt: ${{ steps.filter.outputs.unity_bolt }}
       python_sdk: ${{ steps.filter.outputs.python_sdk }}
       kotlin_jni: ${{ steps.filter.outputs.kotlin_jni }}
       apple_bolt: ${{ steps.filter.outputs.apple_bolt }}
+      candle: ${{ steps.filter.outputs.candle }}
+      whispercpp: ${{ steps.filter.outputs.whispercpp }}
+      policy_routing: ${{ steps.filter.outputs.policy_routing }}
+      llamacpp: ${{ steps.filter.outputs.llamacpp }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Check changed paths
         id: filter
+        # pipefail: a ci_gate.py error must fail the step, not vanish into tee.
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
@@ -39,7 +61,20 @@ jobs:
           BEFORE_SHA: ${{ github.event.before }}
           CURRENT_SHA: ${{ github.sha }}
           REPOSITORY: ${{ github.repository }}
+          LANES: ${{ inputs.lanes }}
+          REF: ${{ github.ref }}
         run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # Check runs attach to the commit, not the branch: a run on any
+            # branch whose tip is master's HEAD counts as a run on master, and
+            # so does a run whose master lookup fails (every lane runs).
+            if ! MASTER_SHA="$(gh api "repos/$REPOSITORY/commits/master" --jq .sha)" \
+              || [ "$CURRENT_SHA" = "$MASTER_SHA" ]; then
+              REF=refs/heads/master
+            fi
+            python3 tools/scripts/ci_gate.py dispatch "$LANES" --ref "$REF" | tee -a "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$EVENT_NAME" = "pull_request" ]; then
             gh api --paginate --slurp \
               "repos/$REPOSITORY/pulls/$PR_NUMBER/files" > "$RUNNER_TEMP/ci-files.json"
@@ -95,10 +130,12 @@ jobs:
       - name: Compare committed Unity C# with fresh generation
         run: python3 tools/scripts/gen_unity_bolt_csharp.py --check
 
+  # Stage the pinned ONNX Runtime the Unity desktop plugin ships and load it,
+  # on the two hosts it ships for. The tooling unit tests run in repo-checks.
   tooling-tests:
     name: Tooling tests (${{ matrix.platform }})
     needs: tooling-changes
-    if: needs.tooling-changes.outputs.relevant == 'true'
+    if: needs.tooling-changes.outputs.ort_staging == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -114,9 +151,6 @@ jobs:
             runtime: onnxruntime.dll
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Test native staging tools
-        if: matrix.platform == 'linux'
-        run: python3 -m unittest discover -s tools/scripts/tests -p 'test_*.py'
       - name: Stage and load the real ONNX Runtime
         run: |
           ${{ matrix.python }} tools/scripts/stage_unity_desktop_ort.py ${{ matrix.platform }} "${{ runner.temp }}/unity-ort"
@@ -193,39 +227,27 @@ jobs:
           cache: 'false'
       - run: cargo fmt --all --check
 
-  # .github/workflows/README.md's inventory is generated from the workflow files;
-  # this also enforces the "Group: Subject" names and literal concurrency keys it
-  # describes. It takes about a second, so it runs on every PR rather than behind
-  # a path gate that a new workflow could slip past.
-  workflow-index:
-    name: Workflow index
+  # Checks that take seconds and need no toolchain, on every change, docs-only
+  # included: docs carry the install pins version-sync.sh keeps current, the
+  # agent skills are Markdown, and a new workflow must not slip past the index
+  # rules behind a path gate. A new check of this kind is a test under
+  # tools/scripts/tests/, which this job discovers.
+  repo-checks:
+    name: Repo checks
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - run: python3 tools/scripts/gen_workflow_index.py --check
-
-  # The READMEs' and docs pages' install snippets are version pins
-  # (tools/scripts/install_pins.py), and they are edited in docs-only PRs, which
-  # skip the tooling tests. A second or so, so it runs on every PR like the
-  # workflow index: a stale, reshaped or unregistered snippet fails here, not
-  # at the next release cut.
-  version-sync:
-    name: Version sync
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - run: bash tools/scripts/version-sync.sh --check
-      - run: python3 -m unittest discover -s tools/scripts/tests -p test_install_pins.py
-
-  # Agent skills are Markdown, so their edits land in docs-only PRs that skip
-  # the tooling tests, and the .agents/skills mirror drifted unnoticed before.
-  # A couple of seconds, so it runs on every PR like the workflow index.
-  agent-skills:
-    name: Agent skills
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - run: python3 -m unittest discover -s tools/scripts/tests -p test_agent_skills.py -v
+      - name: Workflow index and rules
+        run: python3 tools/scripts/gen_workflow_index.py --check
+      # Each check reports even when an earlier one failed.
+      - name: Version sync
+        if: ${{ !cancelled() }}
+        run: bash tools/scripts/version-sync.sh --check
+      # Includes test_install_pins.py, test_agent_skills.py and test_clean.py.
+      - name: Tooling tests
+        if: ${{ !cancelled() }}
+        run: python3 -m unittest discover -s tools/scripts/tests -p 'test_*.py'
 
   clippy:
     name: Clippy
@@ -440,6 +462,210 @@ jobs:
       - name: Run tests (huggingface cache integration)
         run: cargo test -p xybrid-sdk --features huggingface --lib
 
+  # ---------------------------------------------------------------------------
+  # Backend lanes. Each runs when one of its paths in ci_gate.py's LANE_PATHS
+  # changes (any edit to this file, .github/actions/ or ci_gate.py runs them
+  # all), with real weights fetched by .github/actions/fetch-model. They are in
+  # ci_gate.ADVISORY_JOBS, so CI Success does not wait for them yet.
+  # tools/scripts/llamacpp_update.py waits on three of these job names before
+  # it cuts a llama.cpp release: never rename them.
+  # ---------------------------------------------------------------------------
+
+  # Candle is the pure-Rust ML framework behind xybrid-core's `candle` feature,
+  # and macOS is the only place its Metal backend can run. The second half runs
+  # real Whisper weights on real audio: the mel-windowing and per-request
+  # language/task defects it guards against are invisible without them.
+  test-candle:
+    name: Test Candle
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.candle == 'true'
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - id: rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key: candle
+          per-image: 'true'
+      - name: Test Candle (xybrid-core only)
+        run: cargo test -p xybrid-core --features "ort-download,candle" --lib --tests
+      # The real-model half was a job of its own: it still runs when the unit
+      # tests fail.
+      - id: model
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/fetch-model
+        with:
+          model: whisper-tiny
+      # Scoped to this one test binary on purpose: the crate's other E2E files
+      # gate on models this job does not download (wav2vec2, kokoro, the GGUF
+      # LLMs), and XYBRID_REQUIRE_MODELS would turn each of their skips into a
+      # failure. With it set, `fixtures::model_for_test` panics instead of
+      # skipping, so a silently failed download cannot leave the suite green.
+      - name: Test Whisper end to end
+        if: ${{ !cancelled() && steps.rust.outcome == 'success' && steps.model.outcome == 'success' }}
+        env:
+          XYBRID_REQUIRE_MODELS: 1
+        run: |
+          cargo test -p integration-tests --features candle \
+            --test whisper_candle_integration -- --nocapture
+
+  # Real multilingual weights exercise behavior that compile-only lanes cannot:
+  # translation, per-request language selection, long-window handling, and the
+  # suppression of bracketed non-speech tokens in user-facing transcripts.
+  test-whispercpp-integration:
+    name: Test whisper.cpp (integration, real model)
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.whispercpp == 'true'
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: whispercpp-integration
+          per-image: 'true'
+      # The checksum pins the exact multilingual Q5_1 weights whose quality
+      # thresholds this suite calibrates.
+      - uses: ./.github/actions/fetch-model
+        with:
+          model: whisper-tiny-ggml
+          sha256: 818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7
+          file: ggml-tiny-q5_1.bin
+      - name: Test Whisper end to end
+        env:
+          XYBRID_REQUIRE_MODELS: 1
+        run: |
+          cargo test -p integration-tests --features asr-whispercpp \
+            --test whispercpp_integration -- --nocapture
+
+  # Drives the real `xybrid` binary through a policy-routed hybrid stage: the
+  # local leg is a real GGUF model (FunctionGemma 270M), the cloud leg is a
+  # local fake DeepSeek endpoint. Compile-only lanes cannot prove that a policy
+  # actually keeps a prompt on the device or actually sends it to the provider
+  # with the right model, credential and options; this one does.
+  test-policy-routing:
+    name: Test policy routing (real local model, fake DeepSeek)
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.policy_routing == 'true'
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: policy-routing-integration
+          per-image: 'true'
+      # The checksum pins the exact Q8_0 weights the test is calibrated
+      # against (integration-tests/fixtures/models/models.json).
+      - uses: ./.github/actions/fetch-model
+        with:
+          model: functiongemma-270m-it
+          sha256: 83940d4dd9676710856f43523bed096164a595a96f6b34771610a03937de5270
+          file: functiongemma-270m-it-q8_0.gguf
+
+      - name: CLI routing helpers (unit)
+        run: cargo test -p xybrid-cli --bin xybrid commands::run
+
+      - name: Policy routing end to end
+        env:
+          XYBRID_REQUIRE_MODELS: 1
+        run: |
+          # Enumerate and assert the required tests: printing `--list` alone
+          # would still pass if every test were compiled out (cargo test exits
+          # 0 on an empty set).
+          LIST="$(cargo test -p xybrid-cli --features llm-llamacpp --test policy_routing_cli_test -- --list)"
+          printf '%s\n' "$LIST"
+          for test in \
+            local_only_policy_runs_the_gguf_model \
+            prefer_cloud_policy_calls_the_fake_deepseek_endpoint \
+            dry_run_loads_policy_without_inference \
+            cold_cache_hybrid_downloads_extracts_and_then_runs_offline; do
+            printf '%s\n' "$LIST" | grep -qE "^${test}: test$" \
+              || { echo "missing required test: ${test}" >&2; exit 1; }
+          done
+          cargo test -p xybrid-cli --features llm-llamacpp --test policy_routing_cli_test -- --nocapture
+
+      - name: SDK streaming fast path (real GGUF fixture)
+        env:
+          XYBRID_REQUIRE_MODELS: 1
+        run: |
+          LIST="$(cargo test -p xybrid-sdk --features llm-llamacpp --test streaming_fast_path -- --list)"
+          printf '%s\n' "$LIST"
+          for test in \
+            yaml_max_tokens_caps_streaming_generation \
+            envelope_metadata_overrides_yaml_in_streaming \
+            invalid_yaml_option_fails_before_any_token; do
+            printf '%s\n' "$LIST" | grep -qE "^${test}: test$" \
+              || { echo "missing required test: ${test}" >&2; exit 1; }
+          done
+          cargo test -p xybrid-sdk --features llm-llamacpp --test streaming_fast_path -- --nocapture
+
+  # Checks the llama.cpp pins and generated bindings, then runs real text and
+  # vision models on a source build (no prebuilt natives).
+  llamacpp-validate:
+    name: llama.cpp stable validation
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.llamacpp == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      XYBRID_NATIVES_FORCE_SOURCE: 1
+      XYBRID_REQUIRE_MODELS: 1
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: llamacpp-stable-validation
+
+      - name: Validate pin consistency and generated bindings
+        run: |
+          python3 tools/scripts/llamacpp_update.py check-pin
+          python3 tools/scripts/llamacpp_update.py bindings --check
+
+      # Downloaded on every run, as before: caching both models would take
+      # several hundred MB of the repository's 10 GB.
+      - uses: ./.github/actions/fetch-model
+        with:
+          model: functiongemma-270m-it
+          sha256: 83940d4dd9676710856f43523bed096164a595a96f6b34771610a03937de5270
+          file: functiongemma-270m-it-q8_0.gguf
+          cache: 'false'
+      - uses: ./.github/actions/fetch-model
+        with:
+          model: lfm2-vl-450m
+          cache: 'false'
+
+      - name: Require the vision model files before running tests
+        run: |
+          test -s integration-tests/fixtures/models/lfm2-vl-450m/LFM2-VL-450M-Q4_0.gguf
+          test -s integration-tests/fixtures/models/lfm2-vl-450m/mmproj-LFM2-VL-450M-Q8_0.gguf
+
+      - name: Test constrained text generation
+        run: |
+          LIST="$(cargo test -p integration-tests --features llm-llamacpp --test llamacpp_release -- --list)"
+          printf '%s\n' "$LIST" | grep -qx 'text_generation_obeys_grammar: test'
+          cargo test -p integration-tests --features llm-llamacpp --test llamacpp_release -- --nocapture
+
+      - name: Test streamed text across token boundaries
+        run: |
+          LIST="$(cargo test -p xybrid-core --features llm-llamacpp,ort-download --test llamacpp_stream_text -- --list)"
+          printf '%s\n' "$LIST" | grep -qx 'characters_split_into_byte_tokens_survive_on_functiongemma: test'
+          printf '%s\n' "$LIST" | grep -qx 'text_ahead_of_a_stop_inside_a_token_is_streamed: test'
+          # The FunctionGemma tests only: this job does not download
+          # qwen3-0.6b, and XYBRID_REQUIRE_MODELS fails a missing model.
+          cargo test -p xybrid-core --features llm-llamacpp,ort-download --test llamacpp_stream_text -- --nocapture functiongemma text_ahead_of_a_stop
+
+      - name: Test real vision inference
+        run: |
+          LIST="$(cargo test -p xybrid-core --features llm-llamacpp-vision,ort-download --test vlm_lfm2_smoke -- --list)"
+          printf '%s\n' "$LIST" | grep -qx 'lfm2_vl_runtime_caption_smoke_when_fixture_is_downloaded: test'
+          cargo test -p xybrid-core --features llm-llamacpp-vision,ort-download --test vlm_lfm2_smoke -- --nocapture
+
   # (Retired) The cargo linux-CLI build lived here. The required Bazel check
   # ("Bazel graph + RBE targets", bazel.yml) now builds + smokes the linux CLI
   # on every Bazel-relevant PR, so this cargo build was redundant.
@@ -628,7 +854,30 @@ jobs:
     runs-on: ubuntu-latest
     # Inspect dependency results even when the tooling path gate skips its matrix.
     if: ${{ !cancelled() }}
-    needs: [tooling-changes, tooling-tests, unity-bolt-compile, unity-bolt-drift, python-sdk, kotlin-jni-drift, apple-bolt-drift, fmt, workflow-index, version-sync, agent-skills, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, observability, web]
+    # Every ci.yml job except ci_gate.ADVISORY_JOBS, one per line so
+    # concurrent edits merge; test_ci_gate.py keeps the two in step.
+    needs:
+      - tooling-changes
+      - repo-checks
+      - tooling-tests
+      - unity-bolt-compile
+      - unity-bolt-drift
+      - python-sdk
+      - kotlin-jni-drift
+      - apple-bolt-drift
+      - fmt
+      - clippy
+      - check-no-default-features
+      - check-platform-macos
+      - check-platform-desktop
+      - check-vision-platforms
+      - check-llamacpp-vulkan
+      - clippy-llm
+      - test-llm
+      - test
+      - api-contract
+      - observability
+      - web
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Verify required job results

@@ -44,7 +44,7 @@ GATES = {
         BOLT_INPUTS,
     ),
     "tools/scripts/gen_workflow_index.py": (
-        "ci.yml", "workflow-index", None, (".github/workflows/README.md",), (),
+        "ci.yml", "repo-checks", None, (".github/workflows/README.md",), (),
     ),
 }
 # Generators that produce fixtures from downloaded models, not code from the

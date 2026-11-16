@@ -27,11 +27,11 @@ updates. If you close an update PR to reject it, leave its branch in place to
 suppress retries for that version; delete it when you want another attempt.
 Re-running discovery without a new upstream commit is a no-op.
 
-The update PR runs the existing Cargo, Bazel, SDK streaming, policy-routing,
-and Whisper workflows. `llamacpp-validate.yml` additionally verifies the pins
-and binding snapshot, runs real grammar-constrained text generation, and runs
-the existing LFM2-VL caption test with both model files present. Missing model
-files fail validation. Whisper consumes llama.cpp's ggml, so its real-model
+The update PR runs `ci.yml` and `bazel.yml`: the Cargo, Bazel, SDK streaming,
+policy-routing and Whisper checks. `ci.yml`'s `llama.cpp stable validation`
+lane additionally verifies the pins and binding snapshot, runs real
+grammar-constrained text generation, and runs the existing LFM2-VL caption test
+with both model files present. Missing model files fail validation. Whisper consumes llama.cpp's ggml, so its real-model
 suite is a release prerequisite too.
 
 One update triggers several workflows for platform builds and integration

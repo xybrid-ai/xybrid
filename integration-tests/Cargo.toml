@@ -9,11 +9,11 @@ default = []
 
 # Candle (pure-Rust ML) backend — gates tests/whisper_candle_integration.rs.
 # Off by default because it pulls candle-core/nn/transformers into the build;
-# CI turns it on in test-candle.yml.
+# CI turns it on in ci.yml's test-candle job.
 candle = ["xybrid-core/candle"]
 
 # whisper.cpp ASR backend — gates tests/whispercpp_integration.rs. The real
-# multilingual model is downloaded only by the dedicated model-test workflow.
+# multilingual model is downloaded only by ci.yml's whisper.cpp lane.
 asr-whispercpp = ["xybrid-core/asr-whispercpp"]
 
 # Native Apple Core ML adapter and its real-model integration test.
