@@ -23,10 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accepts: it names frontier models by their canonical OpenRouter id
   (`vendor/model`), so every such fallback failed with `404 model_not_found`.
   A `cloudModel` the app sets is sent unchanged, so it needs a canonical id
-  too (`anthropic/claude-haiku-4.5`, not `claude-3-haiku`).
+  too (`anthropic/claude-haiku-4.5`, not `claude-haiku-4.5`).
 - **Rust:** `LlmClientConfig::default()` and
   `xybrid_core::gateway::GatewayConfig::default()`, which target the Xybrid
-  gateway, default to `openai/gpt-4o-mini` instead of `gpt-4o-mini`.
+  gateway, default to `openai/gpt-4o-mini` instead of `gpt-4o-mini`. An
+  `LlmClientConfig` with `backend: Direct` that relied on the default must now
+  set `default_model` to the provider's own id.
 - **Docs and examples:** the pipeline, hybrid execution and `xybrid run`
   pages (English and Chinese), the CLI's `hybrid-platform.yaml` and
   `hiiipe.yaml`, the `cloud_fallback_demo` and `voice_assistant_gateway_demo`

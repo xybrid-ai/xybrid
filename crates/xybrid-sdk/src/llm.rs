@@ -24,11 +24,13 @@
 //!     ..Default::default()
 //! };
 //!
-//! // Direct backend (development only)
+//! // Direct backend (development only). The provider names its own models:
+//! // the default `openai/gpt-4o-mini` is the gateway's canonical id.
 //! let direct_config = LlmClientConfig {
 //!     backend: LlmBackend::Direct,
 //!     direct_provider: Some("openai".to_string()),
 //!     api_key: Some("sk-...".to_string()),
+//!     default_model: Some("gpt-4o-mini".to_string()),
 //!     ..Default::default()
 //! };
 //! ```

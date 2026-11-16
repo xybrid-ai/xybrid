@@ -28,7 +28,7 @@ stages:
 ### Hybrid stages
 
 A stage with `target: auto` **and** a `provider` has two legs: the local model
-named by `model`, and the provider's model named by `cloud_model` (defaults to
+named by `model`, and the cloud model named by `cloud_model` (defaults to
 `model`). The policy and the device state pick one leg per request. Shared
 options (`system_prompt`, `temperature`, `max_tokens`, `top_p`) apply to
 whichever leg runs.
