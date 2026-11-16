@@ -925,6 +925,14 @@ jobs:
           cp -r staging/Sources .
           rm -rf staging
 
-          git add Package.swift Sources/
+          # Vercel builds the docs site from docs/ on every branch of this repo.
+          # This branch has no docs/, so each release left a failed ("Root
+          # Directory does not exist") deployment and an email. This file
+          # turns the branch's deployments off, and skips the build if one
+          # still starts.
+          mkdir -p docs
+          echo '{"git":{"deploymentEnabled":false},"ignoreCommand":"exit 0"}' > docs/vercel.json
+
+          git add Package.swift Sources/ docs/vercel.json
           git commit -m "swift: update to ${TAG}"
           git push origin swift --force
