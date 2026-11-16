@@ -60,6 +60,23 @@ if result.success {
 }
 ```
 
+### Streaming tokens
+
+For a chat UI, stream an LLM's answer as it is generated instead of waiting for
+`runAsync`:
+
+```swift
+let model = try await Xybrid.model("qwen3-0.6b").load()
+
+for try await token in model.streamTokens(envelope: XybridEnvelope.text("Tell me a joke")) {
+    print(token.token, terminator: "")
+}
+```
+
+`streamTokens` returns an `AsyncSequence` of `XybridStreamToken`. Cancelling the
+task that consumes it, or breaking out of the loop, stops generation at the
+next token.
+
 ### Reasoning (thinking models)
 
 Reasoning models (metadata `reasoning: true`, e.g. `lfm2.5-1.2b-thinking`)

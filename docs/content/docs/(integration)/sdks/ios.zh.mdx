@@ -170,6 +170,22 @@ if let vector = result.embedding {
 
 ---
 
+## 流式输出 Token
+
+`runAsync` 在完整回答生成后才返回。聊天界面可以在生成过程中逐个接收 Token：
+
+```swift
+let model = try await Xybrid.model("qwen3-0.6b").load()
+
+for try await token in model.streamTokens(envelope: .text("Tell me a joke")) {
+    label.text = token.cumulativeText
+}
+```
+
+`streamTokens` 返回 `XybridStreamToken` 的 `AsyncSequence`。取消消费它的任务或跳出循环，生成会在下一个 Token 处停止。生成参数通过 `options: .make(generationConfig: config)` 传入。其他 SDK 见[流式推理](/zh/docs/concepts/streaming)。
+
+---
+
 ## 实时转写
 
 `run()` 转写的是已经录完的音频缓冲区；而会话（session）在语音到达的同时进行转写，

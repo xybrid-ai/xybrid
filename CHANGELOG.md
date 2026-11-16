@@ -67,6 +67,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CPU. The Simulator known issue
   ([#179](https://github.com/xybrid-ai/xybrid/issues/179), fixed in 0.4.0-alpha)
   is gone, and building needs Xcode 15.3 (Swift 5.10).
+- **The iOS example README is current.** It targets iOS 16.0, loads models
+  with `Xybrid.model(...).load()` instead of the blocking `Model(fromRegistry:)`,
+  and no longer says Swift lacks token streaming: `streamTokens` has shipped,
+  and the iOS page, the Swift README, the streaming docs and the API reference
+  now document it (Kotlin's `streamTokens` too), and the streaming page no
+  longer calls live transcription planned. What Swift still lacks for live
+  vision is named instead: Flutter's `preempt` flag and raw-frame `imageRaw`
+  envelopes.
 
 ## [0.19.0] - 2026-11-14
 

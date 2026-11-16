@@ -182,6 +182,26 @@ if let vector = result.embedding {
 
 ---
 
+## Streaming Tokens
+
+`runAsync` returns once the whole answer is ready. For a chat UI, stream the
+tokens as they are generated:
+
+```swift
+let model = try await Xybrid.model("qwen3-0.6b").load()
+
+for try await token in model.streamTokens(envelope: .text("Tell me a joke")) {
+    label.text = token.cumulativeText
+}
+```
+
+`streamTokens` returns an `AsyncSequence` of `XybridStreamToken`. Cancelling the
+task that consumes it, or breaking out of the loop, stops generation at the
+next token. Pass `options: .make(generationConfig: config)` for generation
+settings. See [Streaming](/docs/concepts/streaming) for the other SDKs.
+
+---
+
 ## Live Transcription
 
 `run()` transcribes a finished audio buffer. A session transcribes speech *as

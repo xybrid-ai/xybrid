@@ -4,7 +4,7 @@ description: LLM 与音频转录的实时 Token 流式输出
 ---
 
 
-Xybrid 支持两种流式推理：**LLM Token 流式输出**（现已可用）和**实时音频流式输出**（规划中）。
+Xybrid 支持两种流式推理：**LLM Token 流式输出**和**实时音频流式输出**（实时转写）。
 
 ## LLM Token 流式输出
 
@@ -49,6 +49,18 @@ await for (final token in stream) {
 }
 ```
 
+### Swift
+
+```swift
+let model = try await Xybrid.model("gemma-3-1b").load()
+
+for try await token in model.streamTokens(envelope: .text("Tell me a joke")) {
+    print(token.token, terminator: "") // 每个 Token 生成时立即输出
+}
+```
+
+`streamTokens` 返回一个 `AsyncSequence`。取消消费它的任务或跳出循环，生成会在下一个 Token 处停止。生成参数通过 `options: .make(generationConfig: config)` 传入。需要对话上下文时使用拉取式 API：`runStreamWithContext(envelope:context:options:)` 返回一个流 ID，用 `streamNext(streamId:)` 依次读取直至结束，再用 `streamClose(streamId:)` 关闭。
+
 ### Unity（C#）
 
 ```csharp
@@ -76,16 +88,16 @@ string response = model.RunStreamingText("Tell me a story.", token =>
 | `token` | `String` | 生成的 Token 文本 |
 | `index` | `int` | Token 在序列中的位置 |
 | `cumulativeText` | `String` | 目前已生成的全部文本 |
-| `isFinal` | `bool` | 是否为最后一个 Token |
+| `isFinal` | `bool` | 是否为最后一个 Token。Dart 的流总以该 Token 结束。Unity 的 `IsFinal`，以及 Swift/Kotlin 中非空的 `finishReason`，标记终止 Token，但未生成文本的运行结束时不会发送终止 Token：请以循环结束作为流结束的信号 |
 | `finishReason` | `String?` | `"stop"`、`"length"` 或 `"error"` |
 
 ## SDK 支持情况
 
 | 功能 | Flutter | Unity | Kotlin | Swift |
 |---------|---------|-------|--------|-------|
-| `runStreaming()` | 支持 | 支持 | 规划中 | 规划中 |
-| `runStreamingWithContext()` | 支持 | 支持 | 规划中 | 规划中 |
-| 生成配置 | 支持 | 支持 | 规划中 | 规划中 |
+| `runStreaming()` | 支持 | 支持 | 支持（`streamTokens`；无 `preempt`） | 支持（`streamTokens`；无 `preempt`） |
+| `runStreamingWithContext()` | 支持 | 支持 | 仅拉取式 API（`runStreamWithContext`） | 仅拉取式 API（`runStreamWithContext`） |
+| 生成配置 | 支持 | 支持 | 支持 | 支持 |
 
 ---
 
@@ -115,13 +127,6 @@ XYBRID_LLAMACPP_VERBOSITY=4 ./my-xybrid-app
 
 ---
 
-## 实时音频流式输出（规划中）
+## 实时音频流式输出
 
-基于分块 Whisper 推理的实时音频转录（含部分结果输出）已列入未来版本计划，将支持：
-
-- 麦克风持续输入与分块处理
-- 音频接收过程中的部分转录结果
-- 用于自动分段的语音活动检测（VAD）
-- 可配置的块大小与重叠
-
-该功能实现后将在所有 SDK 中提供。
+实时转写会话持续接收应用送入的麦克风音频，并在语音到达时返回部分转写结果，可选用语音活动检测按语音边界切分。详见 [iOS](/zh/docs/sdks/ios#实时转写)、[Android](/zh/docs/sdks/android#实时转写) 和 [Unity](/zh/docs/sdks/unity#实时转写) 的“实时转写”章节，以及 [Flutter](/zh/docs/sdks/flutter#语音转文字) 的“语音转文字”章节；React Native 通过 `model.stream()` 打开会话（[指南](/en/docs/sdks/react-native#more-capabilities)，英文）。

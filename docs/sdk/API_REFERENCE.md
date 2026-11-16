@@ -840,15 +840,15 @@ println!("{} {:.3}", best.id, best.score);
 | `defaultGenerationConfig()` | — | ✅ | ✅ | ✅ |
 | `voice()` | — | ✅ | ✅ | ✅ |
 | `run()` | ✅ | ✅ | ✅ | ✅ |
-| `runWithOptions()` / `run_with_options()` | Rust ✅ | planned | planned | planned |
-| `runWithContext()` | ✅ | — | — | ✅ |
-| `runWithContextOptions()` / `run_with_context_options()` | Rust ✅ | planned | planned | planned |
-| `runStreaming()` | ✅ | — | — | ✅ |
-| `runStreamingWithOptions()` / `run_streaming_with_options()` | Rust ✅ | planned | planned | planned |
+| `runWithOptions()` / `run_with_options()` | Rust ✅ | 🚧 `run(envelope, options)` | 🚧 `run(envelope:options:)` | planned |
+| `runWithContext()` | ✅ | ✅ | ✅ | ✅ |
+| `runWithContextOptions()` / `run_with_context_options()` | Rust ✅ | 🚧 `runWithContext(envelope, context, options)` | 🚧 `runWithContext(envelope:context:options:)` | planned |
+| `runStreaming()` | ✅ | 🚧 `streamTokens` | 🚧 `streamTokens` | ✅ |
+| `runStreamingWithOptions()` / `run_streaming_with_options()` | Rust ✅ | 🚧 `streamTokens` | 🚧 `streamTokens` | planned |
 | `runTtsStreaming()` / `run_tts_streaming()` | ✅ | — | — | — |
 | `runStreamingWithFallback()` | ✅ | planned | planned | planned |
-| `runStreamingWithContext()` | ✅ | — | — | ✅ |
-| `runStreamingWithContextOptions()` / `run_streaming_with_context_options()` | Rust ✅ | planned | planned | planned |
+| `runStreamingWithContext()` | ✅ | 🚧 pull API `runStreamWithContext` | 🚧 pull API `runStreamWithContext` | ✅ |
+| `runStreamingWithContextOptions()` / `run_streaming_with_context_options()` | Rust ✅ | 🚧 pull API `runStreamWithContext` | 🚧 pull API `runStreamWithContext` | planned |
 | `benchmark()` | — | — | — | — |
 | `warmup()` | ✅ | ✅ | ✅ | — |
 | `unload()` | ✅ | ✅ | ✅ | — |
@@ -1859,7 +1859,7 @@ cancellation primitive to it.
 | Binding | Cancel a run by |
 |---------|-----------------|
 | Dart | passing a `CancellationToken`, or unsubscribing the stream |
-| Swift | cancelling the `Task` around `runAsync`, or passing a token to `run(envelope:options:cancel:)` |
+| Swift | cancelling the `Task` around `runAsync` / `streamTokens` (or breaking out of the `for try await` loop), or passing a token to `run(envelope:options:cancel:)` |
 | Kotlin | cancelling the coroutine around `runAsync` / `streamTokens`, or passing a token to the generated `run` |
 | C# (Unity) | passing a `System.Threading.CancellationToken` to `Run` / `RunStreaming` |
 
@@ -1873,8 +1873,12 @@ cancellation primitive to it.
 > `Cancelled` (see [decisions](decisions.md)).
 
 ```swift
-// Swift — structured concurrency drives the native stop button
-let task = Task { try await model.runAsync(envelope: .text("Tell me a long story")) }
+// Swift — cancelling the consuming task stops native generation
+let task = Task {
+    for try await token in model.streamTokens(envelope: .text("Tell me a long story")) {
+        render(token)
+    }
+}
 task.cancel()   // generation stops at the next token
 ```
 
