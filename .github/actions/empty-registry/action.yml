@@ -1,0 +1,45 @@
+name: Serve an empty model registry
+description: >
+  Start a loopback server that answers 404 to every request and point
+  XYBRID_REGISTRY_URL at it for the rest of the job, so no test asks the
+  production model registry (registry.xybrid.dev) anything.
+
+# Tests load made-up model ids (`loopback-model`, a provider's `gpt-4o-mini`).
+# Each one the SDK resolved reached the production registry and counted there
+# as a failed resolution. RegistryClient::from_env() reads XYBRID_REGISTRY_URL,
+# and the SDK treats a 404 as "model not found" without retrying, so a fake id
+# costs a test one loopback round trip. A server rather than a closed port: an
+# unreachable registry is an `Offline` error to the SDK, a different path from
+# the 404 production answers for an id it does not list, so tests see the
+# answer they always saw. A test that needs a registry starts its own and sets
+# the variable itself. Model downloads are unaffected:
+# integration-tests/download.sh (fetch-model) keeps its own REGISTRY_API.
+inputs:
+  port:
+    description: Loopback port to serve on.
+    default: '18080'
+
+runs:
+  using: composite
+  steps:
+    - name: Serve an empty model registry
+      shell: bash
+      env:
+        PORT: ${{ inputs.port }}
+      run: |
+        root="$RUNNER_TEMP/empty-registry"
+        mkdir -p "$root"
+        # Every path under an empty directory is a 404. The server outlives
+        # this step and stops with the job.
+        nohup python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$root" \
+          > "$RUNNER_TEMP/empty-registry.log" 2>&1 &
+        for _ in $(seq 50); do
+          if curl -sf -o /dev/null "http://127.0.0.1:$PORT/"; then
+            echo "XYBRID_REGISTRY_URL=http://127.0.0.1:$PORT" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          sleep 0.2
+        done
+        echo "::error::The empty registry did not start on 127.0.0.1:$PORT"
+        cat "$RUNNER_TEMP/empty-registry.log"
+        exit 1

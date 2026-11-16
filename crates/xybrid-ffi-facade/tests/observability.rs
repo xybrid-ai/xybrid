@@ -589,16 +589,24 @@ fn serve_platform(
 }
 
 /// Points the process's registry, gateway and platform key at a
-/// [`PacedPlatform`], and clears them again on drop (a failing test included),
-/// so the other tests here keep their own configuration.
-struct PlatformConfig;
+/// [`PacedPlatform`] until dropped (a failing test included), so the other
+/// tests here keep their own configuration.
+///
+/// On drop the gateway and key are cleared, and the registry URL goes back to
+/// the one the process had: CI points every test at a local registry through
+/// it, and removing it would send the tests that run after this one to the
+/// production registry.
+struct PlatformConfig {
+    previous_registry: Option<std::ffi::OsString>,
+}
 
 impl PlatformConfig {
     fn point_at(platform: &PacedPlatform) -> Self {
+        let previous_registry = std::env::var_os("XYBRID_REGISTRY_URL");
         std::env::set_var("XYBRID_REGISTRY_URL", platform.url());
         set_api_key("paced-platform-key".into());
         xybrid_core::cloud::set_xybrid_gateway_url(Some(format!("{}/v1", platform.url())));
-        Self
+        Self { previous_registry }
     }
 }
 
@@ -606,7 +614,10 @@ impl Drop for PlatformConfig {
     fn drop(&mut self) {
         xybrid_core::cloud::set_xybrid_gateway_url(None);
         xybrid_core::cloud::set_xybrid_api_key(None);
-        std::env::remove_var("XYBRID_REGISTRY_URL");
+        match self.previous_registry.take() {
+            Some(url) => std::env::set_var("XYBRID_REGISTRY_URL", url),
+            None => std::env::remove_var("XYBRID_REGISTRY_URL"),
+        }
     }
 }
 

@@ -185,6 +185,9 @@ jobs:
           # Floor of the SDK: boltffi's generated package needs >= 3.10.
           python-version: '3.12'
       - uses: ./.github/actions/install-boltffi
+      # The suite runs the SDK in-process: keep it off the production model
+      # registry.
+      - uses: ./.github/actions/empty-registry
       - name: Check the committed bindings match the crate
         run: python3 tools/scripts/gen_python_bolt.py --check
       - name: Build and stage the native artifacts
@@ -399,6 +402,10 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           cache-key: ubuntu-latest-ort-download
+
+      # No test may reach the production model registry: point the SDK at a
+      # local one that lists no model.
+      - uses: ./.github/actions/empty-registry
 
       # Skip examples — they statically link llama.cpp + ort and exhaust
       # runner disk during link. `clippy --all-targets` already verifies

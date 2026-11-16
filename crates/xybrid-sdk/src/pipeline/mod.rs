@@ -232,6 +232,40 @@ impl std::fmt::Display for StageTarget {
     }
 }
 
+impl StageTarget {
+    /// Classify a stage from its YAML.
+    ///
+    /// A stage that names a provider, or `target: integration`, is an
+    /// integration stage; `target: cloud`, `server` or `api` runs on a server;
+    /// `target: device`, `local` or `edge` runs here; anything else (`auto`,
+    /// no target) leaves the choice to the routing authority. Targets are
+    /// matched case-insensitively, as `parse_target` reads them for
+    /// execution. Loading a [`Pipeline`] asks this both before probing the
+    /// registry and when reporting each stage, so the two cannot disagree.
+    fn for_stage(stage: &StageConfig) -> Self {
+        let target = stage.target().map(str::to_ascii_lowercase);
+        let target = target.as_deref();
+        let provider = stage.provider();
+        if provider.is_some() || target == Some("integration") {
+            Self::Integration {
+                provider: provider.unwrap_or("unknown").to_string(),
+            }
+        } else if matches!(target, Some("cloud" | "server" | "api")) {
+            Self::Cloud
+        } else if matches!(target, Some("device" | "local" | "edge")) {
+            Self::Device // Explicit local execution
+        } else {
+            Self::Auto // Default: let authority decide (includes "auto" and None)
+        }
+    }
+
+    /// Whether a stage with this target may run its model on this device, so
+    /// that model is one to look for in the cache and the registry.
+    fn may_run_locally(&self) -> bool {
+        matches!(self, Self::Device | Self::Auto)
+    }
+}
+
 /// Status of a stage's model.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StageStatus {
@@ -757,7 +791,14 @@ impl Pipeline {
         };
 
         if let Some(ref client) = client {
-            for stage_config in &stage_configs {
+            // Only a stage that may run here has a model to look for. A cloud
+            // or provider stage's model is not the registry's to resolve, and
+            // asking would cost a round trip on every load (a 404 for the
+            // provider model names the registry does not list).
+            for stage_config in stage_configs
+                .iter()
+                .filter(|stage| StageTarget::for_stage(stage).may_run_locally())
+            {
                 let model_id = stage_config.model_id();
                 let is_cached = client.resolve_offline(&model_id).is_some()
                     || client.is_cached(&model_id, None).unwrap_or(false);
@@ -844,59 +885,42 @@ impl Pipeline {
 
         for stage_config in &config.stages {
             let stage_id = stage_config.stage_id();
-            let target_str = stage_config.target();
-            let provider = stage_config.provider();
             let model_name = Some(stage_config.model_id());
+            let stage_target = StageTarget::for_stage(stage_config);
 
-            let stage_target = if provider.is_some() || target_str == Some("integration") {
-                StageTarget::Integration {
-                    provider: provider.unwrap_or("unknown").to_string(),
-                }
-            } else if target_str == Some("cloud") || target_str == Some("server") {
-                StageTarget::Cloud
-            } else if target_str == Some("device")
-                || target_str == Some("local")
-                || target_str == Some("edge")
-            {
-                StageTarget::Device // Explicit local execution
-            } else {
-                StageTarget::Auto // Default: let authority decide (includes "auto" and None)
-            };
-
-            let (status, download_bytes) =
-                if matches!(stage_target, StageTarget::Device | StageTarget::Auto) {
-                    // For device/auto stages, check if model is cached (might run locally).
-                    // Passthrough models (GGUF) have no bundle, only an extracted
-                    // directory, which `is_cached` does not look at.
-                    let model_id = stage_config.model_id();
-                    match client.resolve(&model_id, None) {
-                        Ok(resolved) => {
-                            let is_cached = client.resolve_offline(&model_id).is_some()
-                                || client.is_cached(&model_id, None).unwrap_or(false);
-                            if is_cached {
-                                (StageStatus::Cached, None)
-                            } else {
-                                total_download_bytes += resolved.size_bytes;
-                                (StageStatus::NeedsDownload, Some(resolved.size_bytes))
-                            }
-                        }
-                        Err(e) => {
-                            // Check availability map as fallback
-                            if handle_read
-                                .availability_map
-                                .get(&model_id)
-                                .copied()
-                                .unwrap_or(false)
-                            {
-                                (StageStatus::Cached, None)
-                            } else {
-                                (StageStatus::Error(e.to_string()), None)
-                            }
+            let (status, download_bytes) = if stage_target.may_run_locally() {
+                // For device/auto stages, check if model is cached (might run locally).
+                // Passthrough models (GGUF) have no bundle, only an extracted
+                // directory, which `is_cached` does not look at.
+                let model_id = stage_config.model_id();
+                match client.resolve(&model_id, None) {
+                    Ok(resolved) => {
+                        let is_cached = client.resolve_offline(&model_id).is_some()
+                            || client.is_cached(&model_id, None).unwrap_or(false);
+                        if is_cached {
+                            (StageStatus::Cached, None)
+                        } else {
+                            total_download_bytes += resolved.size_bytes;
+                            (StageStatus::NeedsDownload, Some(resolved.size_bytes))
                         }
                     }
-                } else {
-                    (StageStatus::Integration, None)
-                };
+                    Err(e) => {
+                        // Check availability map as fallback
+                        if handle_read
+                            .availability_map
+                            .get(&model_id)
+                            .copied()
+                            .unwrap_or(false)
+                        {
+                            (StageStatus::Cached, None)
+                        } else {
+                            (StageStatus::Error(e.to_string()), None)
+                        }
+                    }
+                }
+            } else {
+                (StageStatus::Integration, None)
+            };
 
             stages.push(StageInfo {
                 id: stage_id,
@@ -2537,6 +2561,166 @@ mod tests {
                 .load_models()
                 .expect_err("model C cannot be downloaded");
             assert!(!pipeline.is_ready(), "{:?}", pipeline.stages());
+        }
+    }
+
+    /// Which stages loading a pipeline asks the registry about. Only a stage
+    /// that may run on this device has a model to resolve: a cloud or
+    /// provider stage names a provider's model (`gpt-4o-mini`), which the
+    /// registry does not list, so asking cost every load a round trip and a
+    /// 404.
+    mod registry_probes {
+        use super::super::*;
+        use httpmock::prelude::*;
+
+        /// The registry's answer for a model it does not list.
+        fn unlisted<'a>(server: &'a MockServer, model_id: &str) -> httpmock::Mock<'a> {
+            server.mock(|when, then| {
+                when.method(GET)
+                    .path(format!("/v1/models/{model_id}/resolve"));
+                then.status(404)
+                    .header("content-type", "application/json")
+                    .json_body(serde_json::json!({
+                        "error": { "code": "NOT_FOUND", "message": "not listed" }
+                    }));
+            })
+        }
+
+        fn load(server: &MockServer, stages: &str) -> Pipeline {
+            PipelineRef::from_yaml(&format!(
+                "name: probes\nregistry: {}\nstages:{stages}",
+                server.base_url()
+            ))
+            .unwrap()
+            .load()
+            .unwrap()
+        }
+
+        /// The models whose availability loading probed, sorted.
+        fn probed(pipeline: &Pipeline) -> Vec<String> {
+            let handle = pipeline.handle.read().unwrap();
+            let mut models: Vec<String> = handle.availability_map.keys().cloned().collect();
+            models.sort();
+            models
+        }
+
+        #[test]
+        fn loading_cloud_and_provider_stages_sends_the_registry_no_request() {
+            let server = MockServer::start();
+            // No conditions: counts every request the registry receives.
+            let any_request = server.mock(|_, then| {
+                then.status(404);
+            });
+
+            let pipeline = load(
+                &server,
+                r#"
+  - id: provider
+    model: gpt-4o-mini
+    provider: openai
+  - id: cloud
+    model: cloud-model
+    target: cloud
+  - id: server
+    model: server-model
+    target: server
+  - id: integration
+    model: integration-model
+    target: integration
+  - id: api
+    model: api-model
+    target: api
+  - id: upper-cloud
+    model: upper-cloud-model
+    target: CLOUD
+  - id: mixed-server
+    model: mixed-server-model
+    target: Server
+"#,
+            );
+
+            assert_eq!(any_request.hits(), 0);
+            assert!(probed(&pipeline).is_empty(), "{:?}", probed(&pipeline));
+            let targets: Vec<_> = pipeline.stages().iter().map(|s| s.target.clone()).collect();
+            assert_eq!(
+                targets,
+                [
+                    StageTarget::Integration {
+                        provider: "openai".into()
+                    },
+                    StageTarget::Cloud,
+                    StageTarget::Cloud,
+                    StageTarget::Integration {
+                        provider: "unknown".into()
+                    },
+                    // Read like `parse_target` reads them for execution.
+                    StageTarget::Cloud,
+                    StageTarget::Cloud,
+                    StageTarget::Cloud,
+                ]
+            );
+            for stage in pipeline.stages() {
+                assert_eq!(stage.status, StageStatus::Integration, "{stage:?}");
+            }
+        }
+
+        #[test]
+        fn loading_device_and_auto_stages_still_probes_the_registry_for_their_models() {
+            let server = MockServer::start();
+            let auto = unlisted(&server, "probe-auto-model");
+            let device = unlisted(&server, "probe-device-model");
+
+            let pipeline = load(
+                &server,
+                r#"
+  - id: auto
+    model: probe-auto-model
+  - id: device
+    model: probe-device-model
+    target: device
+"#,
+            );
+
+            assert!(auto.hits() > 0);
+            assert!(device.hits() > 0);
+            assert_eq!(
+                probed(&pipeline),
+                ["probe-auto-model", "probe-device-model"]
+            );
+            for stage in pipeline.stages() {
+                assert!(
+                    matches!(stage.status, StageStatus::Error(_)),
+                    "the registry does not list it: {stage:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_mixed_pipeline_probes_the_registry_only_for_its_local_stages() {
+            let server = MockServer::start();
+            let asr = unlisted(&server, "probe-mixed-asr");
+            let llm = unlisted(&server, "probe-mixed-llm");
+            let tts = unlisted(&server, "probe-mixed-tts");
+
+            let pipeline = load(
+                &server,
+                r#"
+  - id: asr
+    model: probe-mixed-asr
+  - id: llm
+    model: probe-mixed-llm
+    provider: openai
+  - id: tts
+    model: probe-mixed-tts
+    target: device
+"#,
+            );
+
+            assert_eq!(llm.hits(), 0);
+            assert!(asr.hits() > 0);
+            assert!(tts.hits() > 0);
+            assert_eq!(probed(&pipeline), ["probe-mixed-asr", "probe-mixed-tts"]);
+            assert_eq!(pipeline.stages()[1].status, StageStatus::Integration);
         }
     }
 
