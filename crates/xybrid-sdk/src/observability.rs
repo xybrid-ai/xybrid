@@ -505,6 +505,7 @@ pub(crate) fn runtime_name(label: &str) -> &'static str {
         "llamacpp" | "llama.cpp" => "llama.cpp",
         "mistralrs" | "mistral" => "mistral.rs",
         "whispercpp" => "whisper.cpp",
+        "litertlm" => "litert-lm",
         "candle" => "candle",
         "zzz" => "zzz",
         "coreml" => "coreml",
@@ -545,6 +546,26 @@ impl RunSubject {
                     vec![Modality::Text],
                     None,
                     Some("gguf"),
+                    true,
+                ),
+                ExecutionTemplate::LiteRtLm { .. } => (
+                    "chat",
+                    Some(
+                        if task_l == "vlm" || task_l.contains("vision") {
+                            "vision_language"
+                        } else {
+                            "text_generation"
+                        }
+                        .into(),
+                    ),
+                    if task_l == "vlm" || task_l.contains("vision") {
+                        vec![Modality::Text, Modality::Image]
+                    } else {
+                        vec![Modality::Text]
+                    },
+                    vec![Modality::Text],
+                    None,
+                    Some("litertlm"),
                     true,
                 ),
                 ExecutionTemplate::GgmlWhisper { .. } => (
@@ -589,7 +610,6 @@ impl RunSubject {
                         ExecutionTemplate::SafeTensors { .. } => Some("safetensors"),
                         ExecutionTemplate::CoreMl { .. } => Some("coreml"),
                         ExecutionTemplate::TfLite { .. } => Some("tflite"),
-                        ExecutionTemplate::LiteRtLm { .. } => Some("litertlm"),
                         _ => None,
                     };
                     if (task_l.contains("speech") && task_l.starts_with("text"))
@@ -1953,6 +1973,7 @@ pub fn stage_metadata_value(key: &str, value: &str) -> Option<String> {
                 | "mistralrs"
                 | "mistral"
                 | "whispercpp"
+                | "litertlm"
                 | "candle"
                 | "zzz"
                 | "coreml"
@@ -1965,6 +1986,7 @@ pub fn stage_metadata_value(key: &str, value: &str) -> Option<String> {
                 | "metal"
                 | "cuda"
                 | "vulkan"
+                | "opencl"
                 | "coreml"
                 | "directml"
                 | "nnapi"

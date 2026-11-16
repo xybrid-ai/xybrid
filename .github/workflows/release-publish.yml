@@ -320,6 +320,9 @@ jobs:
           publish_crate xybrid-whisper
           publish_crate xybrid-zzz-sys
           publish_crate xybrid-observability
+          # core's optional `llm-litert` dependency. Pure Rust bindings: the
+          # LiteRT-LM runtime library itself is not part of the crate.
+          publish_crate xybrid-litert-lm
           publish_crate xybrid-core
           publish_crate xybrid-sdk
           publish_crate xybrid

@@ -36,6 +36,10 @@ llm-mistral-metal = ["xybrid-sdk/llm-mistral-metal"]
 llm-mistral-cuda = ["xybrid-sdk/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]
 llm-llamacpp-vision = ["llm-llamacpp", "xybrid-sdk/llm-llamacpp-vision"]
+# LiteRT-LM backend for `.litertlm` model directories (`xybrid run -d <dir>`).
+# In no platform preset: Google's runtime library is not bundled, so it has to
+# be findable at run time (see XYBRID_LITERT_LM_LIBRARY).
+llm-litert = ["xybrid-sdk/llm-litert"]
 
 # Speech recognition
 asr-whispercpp = ["xybrid-sdk/asr-whispercpp"]
@@ -54,8 +58,8 @@ asr-whispercpp = ["xybrid-sdk/asr-whispercpp"]
 # Keep it explicit rather than pushing it into the sdk presets, which would
 # grow every embedder's dependency tree for a CLI convenience.
 #
-# `llm-llamacpp` / `llm-mistral` are the only features this crate `#[cfg]`s on
-# itself; the rest exist to be forwarded. (The previous comment here claimed the
+# `llm-llamacpp` / `llm-mistral` / `llm-litert` are the only features this
+# crate `#[cfg]`s on itself; the rest exist to be forwarded. (The previous comment here claimed the
 # duplication was needed for local `#[cfg(feature = ...)]` checks — that was
 # stale: no `candle*` cfg has ever appeared in this crate's src/.)
 platform-android = ["xybrid-sdk/platform-android", "llm-llamacpp", "huggingface"]

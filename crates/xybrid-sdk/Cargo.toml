@@ -128,6 +128,9 @@ llm-mistral = ["xybrid-core/llm-mistral"]
 llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]
 llm-mistral-cuda = ["xybrid-core/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-core/llm-llamacpp"]
+# LiteRT-LM backend for `.litertlm` models. In no platform preset yet: the
+# runtime library ships separately and is opened at run time.
+llm-litert = ["xybrid-core/llm-litert"]
 
 # whisper.cpp speech recognition. Pulls `llm-llamacpp` transitively, because
 # whisper.cpp links the ggml that llama.cpp builds rather than a second copy.
@@ -146,6 +149,8 @@ dev-tools = ["xybrid-core/dev-tools"]
 # Vision envelope primitives.
 
 [dev-dependencies]
+# Test images for the LiteRT-LM end-to-end test (already in the lock through xybrid-core).
+image = "0.25"
 httpmock = "0.7"
 # In-memory span, metric and log capture through application-owned providers
 # in tests (`testing` provides the in-memory metric and log exporters).

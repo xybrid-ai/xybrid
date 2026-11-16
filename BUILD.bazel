@@ -24,6 +24,21 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
+# The LiteRT-LM backend for `.litertlm` models (xybrid-core's `llm-litert`
+# feature) is opt-in: no shipped artifact enables it yet. It adds Rust code
+# only. Google's runtime library is opened at run time and is not built,
+# linked or packaged by this workspace, so a flag-on artifact still loads
+# where that library is absent and refuses `.litertlm` models with a typed
+# error.
+#
+# scope = "target" for the same reason as tts_zzz above: build tools in the
+# exec configuration never run a model.
+bool_flag(name = "llm_litert", build_setting_default = False, scope = "target", visibility = ["//visibility:public"])
+config_setting(
+    name = "llm_litert_enabled", flag_values = {":llm_litert": "true"},
+    visibility = ["//visibility:public"],
+)
+
 # The macOS GPU lane toggle (Flip 2). Both darwin lanes share the SAME Rust
 # feature set (candle-metal/CoreML/vision are bindings — pure Rust, cross-
 # compilable, so keeping features identical maximizes rlib cache overlap

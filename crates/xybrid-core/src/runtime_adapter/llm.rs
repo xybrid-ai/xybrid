@@ -51,6 +51,20 @@ pub(crate) fn local_execution_provider(backend_name: &str) -> &'static str {
     match backend_name {
         "llama-cpp" => llamacpp_execution_provider(),
         "mistral" => mistral_execution_provider(),
+        #[cfg(feature = "llm-litert")]
+        crate::runtime_adapter::litert_lm::BACKEND_NAME => {
+            match crate::runtime_adapter::litert_lm::requested_accelerator() {
+                // The runtime's GPU backend is Metal on Apple platforms and
+                // OpenCL elsewhere.
+                xybrid_litert_lm::Backend::Gpu
+                    if cfg!(any(target_os = "macos", target_os = "ios")) =>
+                {
+                    "metal"
+                }
+                xybrid_litert_lm::Backend::Gpu => "opencl",
+                xybrid_litert_lm::Backend::Cpu => "cpu",
+            }
+        }
         _ => "cpu",
     }
 }
@@ -170,6 +184,27 @@ pub struct GenerationOutput {
 }
 
 // =============================================================================
+// Tool-result continuation
+// =============================================================================
+
+/// One tool-result continuation turn, as data.
+///
+/// What [`Envelope::tool_results`](crate::ir::Envelope::tool_results) carries,
+/// resolved by the executor: the conversation up to and including the user
+/// message that led to the calls, the assistant text that made them, and the
+/// results.
+#[derive(Debug, Clone, Copy)]
+pub struct ToolContinuationTurn<'a> {
+    /// The conversation so far, ending with the user message being answered.
+    pub messages: &'a [ChatMessage],
+    /// The assistant turn that requested the tools, as the earlier run
+    /// returned it (tool-call blocks included).
+    pub prior_assistant_text: &'a str,
+    /// The tool results: a JSON array of `{call_id?, name?, content}`.
+    pub tool_responses_json: &'a str,
+}
+
+// =============================================================================
 // LLM Backend Trait
 // =============================================================================
 
@@ -219,6 +254,40 @@ pub trait LlmBackend: Send + Sync {
     ) -> LlmResult<String> {
         Err(AdapterError::InvalidInput(format!(
             "backend '{}' does not support chat-prompt rendering",
+            self.name()
+        )))
+    }
+
+    /// Whether this backend replays tool results as messages through its own
+    /// chat interface ([`Self::generate_tool_continuation`]).
+    ///
+    /// `false` (the default) means the executor composes the continuation as
+    /// text, in the model's protocol, on top of [`Self::render_chat_prompt`],
+    /// and runs it through [`Self::generate_raw`] or
+    /// [`Self::generate_raw_streaming`].
+    fn has_tool_continuation(&self) -> bool {
+        false
+    }
+
+    /// Run a tool-result continuation turn from structured data.
+    ///
+    /// Called only when [`Self::has_tool_continuation`] is `true`. The
+    /// backend owns the whole turn: `on_token`, when given, receives the same
+    /// filtered stream and terminal token as [`Self::generate_streaming`],
+    /// and the returned text is already clean.
+    ///
+    /// # Errors
+    ///
+    /// The default returns [`AdapterError::InvalidInput`]: a backend without
+    /// this path must not be asked.
+    fn generate_tool_continuation(
+        &self,
+        _turn: &ToolContinuationTurn<'_>,
+        _config: &GenerationConfig,
+        _on_token: Option<StreamingCallback<'_>>,
+    ) -> LlmResult<GenerationOutput> {
+        Err(AdapterError::InvalidInput(format!(
+            "backend '{}' does not replay tool results as messages",
             self.name()
         )))
     }
@@ -447,6 +516,38 @@ impl LlmRuntimeAdapter {
         Ok(Self::with_backend(Box::new(backend)))
     }
 
+    /// The default-backend constructor of a build whose only LLM backend is
+    /// LiteRT-LM. That backend runs `.litertlm` models and is selected by
+    /// their format (see [`Self::with_litert_lm`]), never by default, so a
+    /// model that reaches this constructor has no backend in the build.
+    ///
+    /// # Errors
+    ///
+    /// Always: [`AdapterError::RuntimeError`] naming the missing feature.
+    #[cfg(all(
+        feature = "llm-litert",
+        not(any(feature = "llm-mistral", feature = "llm-llamacpp"))
+    ))]
+    pub fn new() -> AdapterResult<Self> {
+        Err(AdapterError::RuntimeError(
+            "this build has no backend for GGUF models: enable the 'llm-llamacpp' feature \
+             (the LiteRT-LM backend runs .litertlm models only)"
+                .to_string(),
+        ))
+    }
+
+    /// Create a new LLM Runtime Adapter with the LiteRT-LM backend, for
+    /// `.litertlm` models.
+    ///
+    /// The runtime library is not opened here; that happens when a model is
+    /// loaded.
+    #[cfg(feature = "llm-litert")]
+    pub fn with_litert_lm() -> AdapterResult<Self> {
+        use crate::runtime_adapter::litert_lm::LiteRtLmBackend;
+        let backend = LiteRtLmBackend::new()?;
+        Ok(Self::with_backend(Box::new(backend)))
+    }
+
     /// Create a new LLM Runtime Adapter with MistralBackend explicitly.
     ///
     /// Use this when you need to force MistralBackend regardless of metadata hints.
@@ -472,9 +573,15 @@ impl LlmRuntimeAdapter {
     ///
     /// If the hint is "llamacpp" and the feature is available, uses LlamaCppBackend.
     /// Otherwise falls back to the default backend for the platform.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     pub fn with_backend_hint(hint: Option<&str>) -> AdapterResult<Self> {
         match hint {
+            #[cfg(feature = "llm-litert")]
+            Some(crate::runtime_adapter::litert_lm::BACKEND_HINT) => Self::with_litert_lm(),
             #[cfg(feature = "llm-llamacpp")]
             Some("llamacpp") => Self::with_llamacpp(),
             #[cfg(feature = "llm-mistral")]

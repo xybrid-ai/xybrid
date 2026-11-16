@@ -66,5 +66,10 @@ llm-llamacpp-vision = ["xybrid-sdk/llm-llamacpp-vision"]
 # shipped artifact already contains.
 asr-whispercpp = ["xybrid-sdk/asr-whispercpp"]
 
+# LiteRT-LM backend for `.litertlm` models. In no platform preset: it adds Rust
+# code only, and Google's runtime library, opened at run time, ships
+# separately. Bazel builds use `--//:llm_litert=true` instead.
+llm-litert = ["xybrid-sdk/llm-litert"]
+
 # Opt-in privately staged Kitten engine.
 tts-zzz = ["xybrid-sdk/tts-zzz"]

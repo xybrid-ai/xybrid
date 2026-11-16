@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Core, SDK, CLI:** an opt-in LiteRT-LM backend (`llm-litert` feature) runs
+  chat models in Google's `.litertlm` format, such as Gemma 4, through the
+  calls that already run GGUF models: text, image input and tool calling,
+  streamed or not. A bundle declares it with the `LiteRtLm` execution
+  template; the model's format picks the runtime. Google's runtime library is
+  opened at run time (`XYBRID_LITERT_LM_LIBRARY`, or the platform's default
+  name) and is not bundled, so a build with the feature still starts where it
+  is absent and refuses such a model with a typed error. No platform preset
+  and no released SDK enables the feature yet; Bazel builds take it with
+  `--//:llm_litert=true`. It runs on CPU. Grammar-constrained output and raw
+  prompts are refused, and `min_p` is not applied. A cancel is seen when the
+  next visible token arrives, as with GGUF models, so it waits while the model
+  reads a long prompt, thinks or writes a tool call.
+- **New crate `xybrid-litert-lm`:** safe Rust bindings to the LiteRT-LM C API
+  (1.0.0, LiteRT-LM v0.19.1), with no xybrid dependencies. Its `test-util`
+  feature provides a scripted runtime for tests that need no model.
+
+### Changed
+
+- **SDK:** loading a TFLite or LiteRT-LM model no longer says these formats
+  "run in the browser SDK", which stopped being true in 0.11.0. A TFLite model
+  is refused as a format no runtime executes; a LiteRT-LM model is refused
+  with `UnsupportedBackendCapability` in builds without `llm-litert`.
+
+### Fixed
+
+- **Core:** a request with an image keeps its `system_prompt`. On
+  vision-language models the message list was built from the envelope's parts
+  alone, so attaching an image dropped the system prompt that the same
+  request kept without one. Batch and streaming.
+- **Core:** tool results sent with a conversation context that contains an
+  image are refused with `InvalidInput`, as they already were without a
+  context. They used to be dropped: the turn ran as the original question
+  again and the model never saw the results.
+- **SDK:** a streamed run that is refused because the model or the build
+  lacks a capability returns `UnsupportedModelCapability` or
+  `UnsupportedBackendCapability`, as a batch run does. It used to return
+  `InferenceError` with the refusal in its text.
+
 ## [0.19.0] - 2026-11-14
 
 ### Added

@@ -139,3 +139,65 @@ fn lfm2_vl_runtime_caption_smoke_when_fixture_is_downloaded() {
         "real VLM inference should carry positive image_preprocess_ms metadata: {spans}"
     );
 }
+
+/// A system prompt rides on the request envelope. Attaching an image must not
+/// drop it: the prompt the model reads is longer with one than without.
+#[test]
+fn lfm2_vl_image_request_keeps_its_system_prompt_when_fixture_is_downloaded() {
+    let Some(model_dir) = model_fixtures::model_or_skip(MODEL_ID) else {
+        return;
+    };
+    if !model_dir.join(MODEL_FILE).exists() || !model_dir.join(MMPROJ_FILE).exists() {
+        eprintln!(
+            "Skipping: {} requires both {} and {}",
+            MODEL_ID, MODEL_FILE, MMPROJ_FILE
+        );
+        return;
+    }
+
+    let metadata = load_metadata(&model_dir);
+    let mut executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap());
+    let config = GenerationConfig::greedy().with_max_tokens(4);
+    let request = |system_prompt: Option<&str>| {
+        let image = Envelope::image(encoded_test_image(32, 32), "png").expect("valid image");
+        let mut input =
+            Envelope::user_message("Describe the image in one short sentence.", vec![image])
+                .expect("multipart VLM input");
+        if let Some(system_prompt) = system_prompt {
+            input
+                .metadata
+                .insert("system_prompt".to_string(), system_prompt.to_string());
+        }
+        input
+    };
+    let mut prompt_tokens = |input: &Envelope| -> u64 {
+        let stage_trace = xybrid_core::tracing::capture();
+        executor
+            .execute(&metadata, input, Some(&config))
+            .expect("LFM2-VL image request succeeds");
+        let spans = stage_trace.stages_json();
+        spans["spans"]
+            .as_array()
+            .expect("the run captures tracing spans")
+            .iter()
+            .filter_map(|span| span["metadata"].get("tokens_in"))
+            .filter_map(|value| value.as_str())
+            .filter_map(|value| value.parse::<u64>().ok())
+            .max()
+            .unwrap_or_else(|| panic!("the run records its prompt tokens: {spans}"))
+    };
+
+    let without = prompt_tokens(&request(None));
+    // Long enough to outweigh any default system text a template adds.
+    let with = prompt_tokens(&request(Some(
+        "You are a guide in a museum of modern art. You speak to visitors of every age, \
+         you never use technical vocabulary, and you always answer in French, in complete \
+         sentences, naming the colours and the shapes you can see before anything else.",
+    )));
+
+    assert!(
+        with > without + 20,
+        "the system prompt reaches the model with an image attached: \
+         {with} prompt tokens with it, {without} without"
+    );
+}

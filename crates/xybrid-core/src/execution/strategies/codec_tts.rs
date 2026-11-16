@@ -47,16 +47,32 @@ fn dump(filename: &str, content: &[u8]) {
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 use crate::execution::strategies::llm::DefaultLlmInference;
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 type DefaultInference = DefaultLlmInference;
 
-#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+#[cfg(not(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+)))]
 use crate::execution::strategies::llm::NoOpLlmInference;
 
-#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+#[cfg(not(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+)))]
 type DefaultInference = NoOpLlmInference;
 
 /// Codec TTS strategy for NeuTTS-style models.
@@ -67,7 +83,11 @@ pub struct CodecTtsStrategy<I: LlmInference = DefaultInference> {
     inference: std::sync::Mutex<I>,
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 impl CodecTtsStrategy<DefaultLlmInference> {
     pub fn new() -> Self {
         Self {
@@ -76,7 +96,11 @@ impl CodecTtsStrategy<DefaultLlmInference> {
     }
 }
 
-#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+#[cfg(not(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+)))]
 impl CodecTtsStrategy<NoOpLlmInference> {
     pub fn new() -> Self {
         Self {

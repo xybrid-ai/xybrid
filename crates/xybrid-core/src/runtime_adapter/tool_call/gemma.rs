@@ -79,6 +79,29 @@ impl GemmaDialect {
     }
 }
 
+/// Write one call in gemma-4's `call:name{args}` notation, the inverse of
+/// [`parse_gemma_block`]. `arguments` that are not an object format as an
+/// empty argument list.
+pub(super) fn format_gemma_call(name: &str, arguments: &Value) -> String {
+    format_structured_gemma_call(name, arguments, GEMMA_4)
+}
+
+/// [`format_gemma_call`] for FunctionGemma's string delimiter.
+pub(super) fn format_function_gemma_call(name: &str, arguments: &Value) -> String {
+    format_structured_gemma_call(name, arguments, FUNCTION_GEMMA)
+}
+
+fn format_structured_gemma_call(name: &str, arguments: &Value, dialect: GemmaDialect) -> String {
+    let mut out = String::from("call:");
+    out.push_str(name);
+    out.push('{');
+    if let Value::Object(map) = arguments {
+        format_gemma_object_entries(map, &mut out, dialect.string_delimiter);
+    }
+    out.push('}');
+    out
+}
+
 pub(super) fn compose_gemma_continuation(
     base_prompt: &str,
     prior_assistant_text: &str,

@@ -359,6 +359,30 @@ jobs:
       # none of the disk pressure that made the test job skip examples.
       - name: Clippy with llm-llamacpp
         run: cargo clippy -p xybrid-core --features "ort-download,llm-llamacpp" --all-targets -- -D warnings
+      # The LiteRT-LM backend is in no platform preset, so no other job
+      # compiles it. It is linted beside llama.cpp, the combination a shipped
+      # build would carry (with image input too, which shares the dispatch),
+      # and alone, where the shared LLM code has to compile without
+      # llama.cpp. Neither needs anything native: LiteRT-LM is opened at run
+      # time. `test-util` adds the scripted runtime and the tests that use it.
+      - name: Clippy with llm-llamacpp and llm-litert
+        run: |
+          cargo clippy -p xybrid-core --features "ort-download,llm-llamacpp,llm-litert" --all-targets -- -D warnings
+          cargo clippy -p xybrid-core --features "ort-download,llm-llamacpp-vision,llm-litert,test-util" --all-targets -- -D warnings
+      - name: Clippy with llm-litert alone
+        run: cargo clippy -p xybrid-core --no-default-features --features "llm-litert,test-util" --all-targets -- -D warnings
+      - name: Clippy the LiteRT-LM bindings
+        run: |
+          cargo clippy -p xybrid-litert-lm --all-targets -- -D warnings
+          cargo clippy -p xybrid-litert-lm --all-targets --features test-util -- -D warnings
+      # The feature is forwarded by every crate above core. A gate one of them
+      # forgot shows up here, with the feature alone and beside llama.cpp.
+      - name: Clippy the crates that forward llm-litert
+        run: |
+          cargo clippy -p xybrid-sdk --features "llm-litert,test-util" --all-targets -- -D warnings
+          cargo clippy -p xybrid-sdk --features "llm-llamacpp,llm-litert,test-util" --all-targets -- -D warnings
+          cargo clippy -p xybrid-cli --features llm-litert --all-targets -- -D warnings
+          cargo clippy -p xybrid_bolt --features llm-litert --all-targets -- -D warnings
 
   test-llm:
     needs: tooling-changes
@@ -374,6 +398,31 @@ jobs:
           cache-key: ubuntu-test-llm
       - name: Test with llm-llamacpp
         run: cargo test -p xybrid-core --features "ort-download,llm-llamacpp" --lib
+      # The LiteRT-LM backend, on a scripted runtime that lives in the test
+      # process (`xybrid_litert_lm::testing`, feature `test-util`): no model
+      # and no runtime library. The bindings' stream bridge, the backend, the
+      # executor paths a `.litertlm` model takes, and the SDK surface above
+      # them all run here. The tests that need the real model
+      # (tests/litert_lm_gemma4.rs) skip on CI.
+      #
+      # Every test file is gated on its features and compiles to an empty
+      # binary without them, which still passes. So each run is checked for
+      # having found tests.
+      - name: Test the LiteRT-LM bindings
+        run: |
+          cargo test -p xybrid-litert-lm --features test-util
+          found=$(cargo test -p xybrid-litert-lm --features test-util --test fake_runtime -- --list --format terse | grep -c ': test$')
+          test "$found" -gt 0
+      - name: Test xybrid-core with the LiteRT-LM backend
+        run: |
+          cargo test -p xybrid-core --no-default-features --features "llm-litert,test-util" --lib --test litert_lm_fake --test litert_lm_gemma4
+          found=$(cargo test -p xybrid-core --no-default-features --features "llm-litert,test-util" --test litert_lm_fake -- --list --format terse | grep -c ': test$')
+          test "$found" -gt 0
+      - name: Test xybrid-sdk with the LiteRT-LM backend
+        run: |
+          cargo test -p xybrid-sdk --features "llm-litert,test-util" --lib --test litert_lm_fake --test litert_lm_missing_runtime --test litert_lm_gemma4
+          found=$(cargo test -p xybrid-sdk --features "llm-litert,test-util" --test litert_lm_fake --test litert_lm_missing_runtime -- --list --format terse | grep -c ': test$')
+          test "$found" -gt 1
 
   # Linux-only on push/PR. macOS + Windows validation runs in release-prep.yml
   # at release time, and check-platform-macos / build-apple.yml cover

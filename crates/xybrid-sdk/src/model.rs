@@ -468,10 +468,34 @@ fn add_decision_telemetry(
 }
 
 fn streaming_execution_error(error: xybrid_core::runtime_adapter::AdapterError) -> SdkError {
+    use xybrid_core::runtime_adapter::AdapterError;
     match error {
-        xybrid_core::runtime_adapter::AdapterError::AbortedForCloudFallback { reason } => {
+        AdapterError::AbortedForCloudFallback { reason } => {
             SdkError::AbortedForCloudFallback { reason }
         }
+        // What a model or a build cannot do is the same refusal streamed or
+        // not (see `sdk_execution_error`): a caller tells a missing
+        // capability from a failed inference by the variant.
+        AdapterError::UnsupportedModelCapability {
+            model_id,
+            capability,
+            hint,
+        } => SdkError::UnsupportedModelCapability {
+            model_id,
+            capability,
+            hint,
+        },
+        AdapterError::UnsupportedBackendCapability {
+            model_id,
+            backend,
+            capability,
+            hint,
+        } => SdkError::UnsupportedBackendCapability {
+            model_id,
+            backend,
+            capability,
+            hint,
+        },
         other => SdkError::inference_src("Streaming execution failed", other),
     }
 }
@@ -1438,15 +1462,16 @@ pub(crate) fn select_huggingface_files_to_download<'a>(
             || filename.ends_with(".onnx")
             || filename.ends_with(".safetensors")
     });
-    let has_browser_only_model = all_filenames
+    let has_undownloadable_model = all_filenames
         .iter()
         .any(|filename| filename.ends_with(".tflite") || filename.ends_with(".litertlm"));
 
-    if has_browser_only_model && !has_native_model {
+    if has_undownloadable_model && !has_native_model {
         return Err(SdkError::load(format!(
             "HuggingFace repo '{}' contains only .tflite and/or .litertlm model files. \
-             TFLite and LiteRT-LM models run in the browser SDK (@xybrid/web); no native \
-             TFLite/LiteRT-LM runtime is registered",
+             No runtime in this SDK executes TFLite models, and LiteRT-LM models are loaded \
+             from a local directory (builds with the 'llm-litert' feature), not from \
+             HuggingFace",
             repo
         )));
     }
@@ -2165,9 +2190,9 @@ impl ModelLoader {
     /// Downloads model files from the HuggingFace Hub and caches them locally.
     /// Subsequent calls use the cached files. When the repository does not ship
     /// a `model_metadata.json`, one is auto-generated from the model card and
-    /// native model files (.onnx, .gguf, .safetensors). Browser-only formats
-    /// (.tflite, .litertlm) are rejected before download — they run via the
-    /// `@xybrid/web` SDK.
+    /// native model files (.onnx, .gguf, .safetensors). `.tflite` and
+    /// `.litertlm` files are never downloaded: no runtime here executes
+    /// TFLite, and LiteRT-LM models are loaded from a local directory.
     ///
     /// Requires the `huggingface` feature flag at load time.
     /// The constructor itself is always available, but `load()` will return
@@ -3559,9 +3584,25 @@ impl ModelLoader {
     }
 
     fn validate_native_execution_template(metadata: &ModelMetadata) -> SdkResult<()> {
-        let browser_format = match &metadata.execution_template {
-            ExecutionTemplate::TfLite { .. } => "TFLite",
-            ExecutionTemplate::LiteRtLm { .. } => "LiteRT-LM",
+        match &metadata.execution_template {
+            ExecutionTemplate::TfLite { .. } => Err(SdkError::load(format!(
+                "Model '{}' uses the TFLite format, which no runtime in this SDK executes",
+                metadata.model_id
+            ))),
+            // Whether the runtime library itself is present is only known
+            // when the model loads; the backend reports that with its own
+            // typed error.
+            ExecutionTemplate::LiteRtLm { .. } => {
+                if xybrid_core::features::enabled().contains(&"llm-litert") {
+                    return Ok(());
+                }
+                Err(SdkError::UnsupportedBackendCapability {
+                    model_id: metadata.model_id.clone(),
+                    backend: "litert-lm".into(),
+                    capability: "LiteRT-LM (.litertlm) models".into(),
+                    hint: "Use a build with the 'llm-litert' feature".into(),
+                })
+            }
             ExecutionTemplate::ZzzEmbed { .. } | ExecutionTemplate::ZzzPhonon { .. } => {
                 // Cached bundles bypass registry backend selection. Check the
                 // runtime's availability too, before publishing a loaded handle.
@@ -3573,29 +3614,19 @@ impl ModelLoader {
                         hint: "Use a build with the 'tts-zzz' feature and its pinned engine slice available on this host".into(),
                     });
                 }
-                return Ok(());
+                Ok(())
             }
             // Checked once at load, so a bad spec fails here rather than on
             // the first run.
             ExecutionTemplate::ChoiceScorer { scorer } => {
-                return validate_scorer_spec(scorer)
-                    .map_err(|e| SdkError::MetadataInvalid(e.to_string()));
+                validate_scorer_spec(scorer).map_err(|e| SdkError::MetadataInvalid(e.to_string()))
             }
-            _ => return Ok(()),
-        };
-
-        Err(SdkError::load(format!(
-            "Model '{}' uses the browser-only {} format. TFLite and LiteRT-LM models run in the \
-             browser SDK (@xybrid/web); no native TFLite/LiteRT-LM runtime is registered",
-            metadata.model_id, browser_format
-        )))
+            _ => Ok(()),
+        }
     }
 
     fn is_llm_template(metadata: &ModelMetadata) -> bool {
-        matches!(
-            metadata.execution_template,
-            ExecutionTemplate::Gguf { .. } | ExecutionTemplate::VisionLanguage { .. }
-        )
+        metadata.execution_template.is_chat_llm()
     }
 
     fn check_streaming_support(metadata: &ModelMetadata) -> bool {
@@ -6235,7 +6266,11 @@ impl XybridModel {
     /// Note: `run_streaming()` works for all models, but only LLM models
     /// get true token-by-token streaming; others emit a single result.
     pub fn supports_token_streaming(&self) -> bool {
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        #[cfg(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        ))]
         {
             self.handle
                 .read()
@@ -6243,7 +6278,11 @@ impl XybridModel {
                 .map(|h| ModelLoader::is_llm_template(&h.metadata))
                 .unwrap_or(false)
         }
-        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        #[cfg(not(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        )))]
         {
             false
         }
@@ -6979,8 +7018,8 @@ mod tests {
 
         assert!(message.contains("litert-community/gemma"));
         assert!(message.contains("only .tflite and/or .litertlm model files"));
-        assert!(message.contains("browser SDK (@xybrid/web)"));
-        assert!(message.contains("no native TFLite/LiteRT-LM runtime is registered"));
+        assert!(message.contains("not from HuggingFace"));
+        assert!(!message.contains("browser SDK"));
     }
 
     #[test]
@@ -6988,7 +7027,7 @@ mod tests {
         let filenames = ["model.gguf", "model.litertlm", "README.md", "LICENSE"];
 
         let files = select_huggingface_files_to_download("org/model", &filenames, None, None)
-            .expect("mixed native and browser-only repository should succeed");
+            .expect("a repository with a native model beside these files should succeed");
 
         assert_eq!(files, vec!["model.gguf", "README.md"]);
     }
@@ -7003,8 +7042,8 @@ mod tests {
 
         assert!(message.contains("org/model"));
         assert!(message.contains("only .tflite and/or .litertlm model files"));
-        assert!(message.contains("browser SDK (@xybrid/web)"));
-        assert!(message.contains("no native TFLite/LiteRT-LM runtime is registered"));
+        assert!(message.contains("not from HuggingFace"));
+        assert!(!message.contains("browser SDK"));
     }
 
     #[test]
@@ -7018,8 +7057,8 @@ mod tests {
 
         assert!(message.contains("org/browser-model"));
         assert!(message.contains("only .tflite and/or .litertlm model files"));
-        assert!(message.contains("browser SDK (@xybrid/web)"));
-        assert!(message.contains("no native TFLite/LiteRT-LM runtime is registered"));
+        assert!(message.contains("not from HuggingFace"));
+        assert!(!message.contains("browser SDK"));
     }
 
     #[test]
@@ -7027,7 +7066,7 @@ mod tests {
         let filenames = ["model.gguf", "model.tflite", "README.md", "LICENSE"];
 
         let files = select_huggingface_files_to_download("org/model", &filenames, None, None)
-            .expect("mixed native and browser-only repository should succeed");
+            .expect("a repository with a native model beside these files should succeed");
 
         assert_eq!(files, vec!["model.gguf", "README.md"]);
     }
@@ -7075,43 +7114,65 @@ mod tests {
         assert_eq!(files, filenames);
     }
 
+    fn write_metadata_with_template(template: ExecutionTemplate) -> tempfile::TempDir {
+        let temp_dir = tempfile::tempdir().expect("temporary model directory should exist");
+        let mut metadata = ModelMetadata::onnx("format-gate-model", "1.0", "model.bin");
+        metadata.execution_template = template;
+        let metadata_json =
+            serde_json::to_string(&metadata).expect("model metadata should serialize");
+        std::fs::write(temp_dir.path().join("model_metadata.json"), metadata_json)
+            .expect("model metadata should be written");
+        temp_dir
+    }
+
     #[test]
-    fn create_model_handle_rejects_browser_only_templates_at_load_time() {
-        let templates = [
-            (
-                "TFLite",
-                ExecutionTemplate::TfLite {
-                    model_file: "model.tflite".to_string(),
-                },
-            ),
-            (
-                "LiteRT-LM",
-                ExecutionTemplate::LiteRtLm {
-                    model_file: "model.litertlm".to_string(),
-                    context_length: None,
-                },
-            ),
-        ];
+    fn create_model_handle_rejects_tflite_at_load_time() {
+        let temp_dir = write_metadata_with_template(ExecutionTemplate::TfLite {
+            model_file: "model.tflite".to_string(),
+        });
 
-        for (format, template) in templates {
-            let temp_dir = tempfile::tempdir().expect("temporary model directory should exist");
-            let mut metadata = ModelMetadata::onnx("browser-only-model", "1.0", "model.bin");
-            metadata.execution_template = template;
-            let metadata_json =
-                serde_json::to_string(&metadata).expect("model metadata should serialize");
-            std::fs::write(temp_dir.path().join("model_metadata.json"), metadata_json)
-                .expect("model metadata should be written");
+        let error = match ModelLoader::create_model_handle(&temp_dir.path().to_path_buf(), false) {
+            Ok(_) => panic!("TFLite metadata must be rejected during load"),
+            Err(error) => error,
+        };
+        let message = error.to_string();
 
-            let error =
-                match ModelLoader::create_model_handle(&temp_dir.path().to_path_buf(), false) {
-                    Ok(_) => panic!("{format} metadata must be rejected during load"),
-                    Err(error) => error,
-                };
-            let message = error.to_string();
+        assert!(message.contains("format-gate-model"));
+        assert!(message.contains("TFLite format"));
+        assert!(message.contains("no runtime in this SDK executes"));
+        assert!(!message.contains("browser SDK"));
+    }
 
-            assert!(message.contains(&format!("browser-only {format} format")));
-            assert!(message.contains("browser SDK (@xybrid/web)"));
-            assert!(message.contains("no native TFLite/LiteRT-LM runtime is registered"));
+    /// A `.litertlm` model is a native chat model in builds with the
+    /// `llm-litert` feature, and a typed missing capability in builds without.
+    #[test]
+    fn create_model_handle_gates_litert_lm_on_its_feature() {
+        let temp_dir = write_metadata_with_template(ExecutionTemplate::LiteRtLm {
+            model_file: "model.litertlm".to_string(),
+            context_length: None,
+        });
+
+        let result = ModelLoader::create_model_handle(&temp_dir.path().to_path_buf(), false);
+
+        // Asked of core, as the loader asks it: a Bazel build sets the
+        // feature on core alone, so this crate's own `cfg` would disagree.
+        if xybrid_core::features::enabled().contains(&"llm-litert") {
+            assert!(
+                result.is_ok(),
+                "a LiteRT-LM model is accepted when its backend is compiled in"
+            );
+        } else {
+            match result {
+                Err(SdkError::UnsupportedBackendCapability { backend, hint, .. }) => {
+                    assert_eq!(backend, "litert-lm");
+                    assert!(
+                        hint.contains("llm-litert"),
+                        "the hint names the feature: {hint}"
+                    );
+                }
+                Err(other) => panic!("expected a missing backend capability, got {other}"),
+                Ok(_) => panic!("LiteRT-LM metadata must be rejected without its feature"),
+            }
         }
     }
 
@@ -7728,6 +7789,56 @@ mod tests {
             }
             other => panic!("expected AbortedForCloudFallback, got {other:?}"),
         }
+    }
+
+    /// A refusal for something the model or the build cannot do keeps its
+    /// variant when the run was streamed, as it does for a batch run.
+    #[test]
+    fn streaming_execution_error_preserves_capability_refusals() {
+        use xybrid_core::runtime_adapter::AdapterError;
+
+        let backend = || AdapterError::UnsupportedBackendCapability {
+            model_id: "m".into(),
+            backend: "litert-lm".into(),
+            capability: "grammar-constrained output".into(),
+            hint: "use a GGUF build".into(),
+        };
+        let model = || AdapterError::UnsupportedModelCapability {
+            model_id: "m".into(),
+            capability: "image input".into(),
+            hint: "no vision encoder".into(),
+        };
+
+        for (streamed, batch) in [
+            (
+                streaming_execution_error(backend()),
+                sdk_execution_error("Execution failed", backend()),
+            ),
+            (
+                streaming_execution_error(model()),
+                sdk_execution_error("Execution failed", model()),
+            ),
+        ] {
+            assert_eq!(
+                std::mem::discriminant(&streamed),
+                std::mem::discriminant(&batch),
+                "streamed: {streamed:?}, batch: {batch:?}"
+            );
+            assert_eq!(streamed.to_string(), batch.to_string());
+            assert!(
+                matches!(
+                    streamed,
+                    SdkError::UnsupportedBackendCapability { .. }
+                        | SdkError::UnsupportedModelCapability { .. }
+                ),
+                "{streamed:?}"
+            );
+        }
+        // Anything else is still a failed streamed inference.
+        assert!(matches!(
+            streaming_execution_error(AdapterError::InferenceFailed("boom".into())),
+            SdkError::InferenceError { .. }
+        ));
     }
 
     #[test]

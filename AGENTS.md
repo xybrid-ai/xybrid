@@ -283,6 +283,66 @@ contract is `docs/development/liquid-decision-protocol.md`, and
   differ). Keep llama.cpp's `src/` off the wrapper's include path: a second
   `ggml.h` breaks the iOS build.
 
+### LiteRT-LM backend (`llm-litert`)
+
+`.litertlm` chat models (the `LiteRtLm` execution template; qualified with
+Gemma 4 E2B) run through Google's LiteRT-LM runtime:
+`crates/xybrid-core/src/runtime_adapter/litert_lm` implements `LlmBackend`
+over `crates/xybrid-litert-lm`, which binds the runtime's C API. Text, image
+input and tool calling work through the ordinary `run*` surface; a model's
+format picks the runtime.
+
+- **Opt-in, and nothing native is built.** Cargo feature `llm-litert` (core,
+  sdk, cli, bolt) or Bazel `--//:llm_litert=true`. It is in no platform preset
+  and no shipped artifact. Google's library is opened at run time
+  (`XYBRID_LITERT_LM_LIBRARY`, or the platform's default name) and is not
+  bundled. It is opened on a model's first run, not when its directory is
+  loaded: where it is absent, `ModelLoader::load()` succeeds and the first run
+  is refused with `UnsupportedBackendCapability`, streamed or not. Load
+  success is not readiness; `litert_lm::runtime_available()` asks.
+- **Bazel sets the feature on core only.** Code and tests in other crates ask
+  `xybrid_core::features::enabled()`, never their own
+  `cfg!(feature = "llm-litert")`: under `--//:llm_litert=true` the two
+  disagree. bazel.yml's flag-on step is what catches it.
+- **CPU only is qualified.** `XYBRID_LITERT_LM_ACCELERATOR=gpu` selects the
+  GPU path, which is untested here and has open upstream defects
+  (`docs/design/litert-runtime.md`, section 4.4).
+- **`sys.rs` is hand-written against C API 1.0.0** (LiteRT-LM v0.19.1). A new
+  call is a new line in its table; another major version is refused at load.
+- **"Any LLM backend" gates name three features:**
+  `any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-litert")`.
+  Add all three to a new gate. ci.yml's `clippy-llm` and `test-llm` jobs build
+  the feature in core, sdk, cli and bolt, alone and beside llama.cpp; nothing
+  else compiles it.
+- **Not offered by the registry.** No `ARTIFACT_BACKENDS` entry: these models
+  load from a local directory.
+- **The runtime's parse is the tool call.** A call enters the reply's text
+  only when the runtime reports it parsed, written from that parsed form and
+  read back with xybrid's parser (`litert_lm/chunks.rs`). The raw call text
+  the runtime streams is not used: it is not a call until it is closed, and
+  the two parsers disagree on some inputs.
+- **Teardown rules live in `crates/xybrid-litert-lm/src/stream.rs`.** The
+  conversation owns its running stream; a stream that ended with an error is
+  cancelled before the delete; when the runtime cannot be shown to be at rest
+  the conversation and engine are leaked and refuse work. Change them only
+  with a test on the scripted runtime.
+- **A cancel is seen only when a visible token arrives** (the SDK checks in
+  the token callback, as for llama.cpp). Prompt reading, thinking and
+  tool-call text deliver none. Open; see `docs/design/litert-runtime.md`.
+- **Tests without a model use a scripted runtime.** `xybrid_litert_lm::testing`
+  (feature `test-util`, re-exported by core as
+  `runtime_adapter::litert_lm::testing`) plays scripts inside the test
+  process, and `FakeRuntime::at(path)` puts one behind a model file. Every
+  such test file is gated on `test-util` and compiles to nothing without it,
+  so pass the feature: `cargo test -p xybrid-litert-lm --features test-util`,
+  and `--features llm-litert,test-util` for `litert_lm_fake` in core and sdk.
+- **Tests with the model.** `tests/litert_lm_gemma4.rs` in core and sdk skip
+  unless the model (`./integration-tests/download.sh gemma-4-e2b-litert`,
+  2.6 GB) and the library are present; `XYBRID_REQUIRE_MODELS` turns the skip
+  into a failure. On an Apple-silicon Android emulator, start it with
+  `-qemu -append arm64.nosme` or upstream's library dies with `SIGILL`
+  (`crates/xybrid-litert-lm/README.md`).
+
 ### Releases
 
 **Releases are cut by branch name, not by hand.** Push a `release/v<version>`
@@ -416,6 +476,7 @@ flutter rust──► xybrid-ffi-facade ─► xybrid-sdk ─► xybrid-core
 xtask ────────────────────────────► xybrid-core
 integration-tests ────────────────► xybrid-core
 xybrid-sdk, xybrid-cli ───────────► xybrid-observability (depends on no xybrid crate)
+xybrid-core (llm-litert) ─────────► xybrid-litert-lm (depends on no xybrid crate)
 ```
 
 Workspace **package metadata** is inherited via `[workspace.package]` —

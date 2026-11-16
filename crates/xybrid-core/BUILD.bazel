@@ -96,6 +96,17 @@ rust_library(
         "//bazel/zzz:android_without_slice": [],
         "//:tts_zzz_enabled": ["tts-zzz"],
         "//conditions:default": [],
+    }) + select({
+        # LiteRT-LM backend (--//:llm_litert=true). `xybrid-litert-lm` is the
+        # implicit optional-dependency feature, listed for the same reason
+        # `xybrid-llama` is. Only this crate needs the feature: the other
+        # first-party crates gate nothing on it that `llm-llamacpp`, which
+        # every Bazel build enables, does not already switch on.
+        "//:llm_litert_enabled": [
+            "llm-litert",
+            "xybrid-litert-lm",
+        ],
+        "//conditions:default": [],
     }),
     # Vulkan lane (--//:vulkan=true): `local_execution_provider` decides between
     # "vulkan" and "cpu" with `option_env!("XYBRID_LLAMA_CPP_VULKAN")`
@@ -117,6 +128,10 @@ rust_library(
         # Speech: identical at every tts-zzz forwarder (bazel/zzz/BUILD.bazel).
         "//bazel/zzz:android_without_slice": [],
         "//:tts_zzz_enabled": ["//crates/zzz-sys:xybrid_zzz_sys"],
+        "//conditions:default": [],
+    }) + select({
+        # Off by default, so absent from `all_crate_deps` like xybrid-whisper.
+        "//:llm_litert_enabled": ["//crates/xybrid-litert-lm"],
         "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],

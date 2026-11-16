@@ -37,6 +37,10 @@ const ALL_FEATURES: &[(&str, bool)] = &[
     // here and to the SDK's `ARTIFACT_BACKENDS` when that closes. A local
     // load needs no capability.
     ("llamacpp-lfm3vl", cfg!(feature = "llm-llamacpp-vision")),
+    // Compiled in. Whether the LiteRT-LM runtime library is present is only
+    // known when a model loads: finding out earlier would mean opening the
+    // library on the first capability query of every process.
+    ("llm-litert", cfg!(feature = "llm-litert")),
     ("llm-llamacpp", cfg!(feature = "llm-llamacpp")),
     ("llm-llamacpp-vision", cfg!(feature = "llm-llamacpp-vision")),
     ("llm-mistral", cfg!(feature = "llm-mistral")),
