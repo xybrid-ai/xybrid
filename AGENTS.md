@@ -30,10 +30,13 @@ cargo test  --workspace --features ort-download         # CI: test (matrix)
 (no `-check`) writes fixes — run before committing. Match CI's
 `--features ort-download` locally so feature-gated paths don't surprise you.
 
-CI gates (`.github/workflows/ci.yml`): `fmt`, `clippy`, `test` (macOS/Linux/Windows),
-plus feature-matrix jobs: `check-no-default-features`, `check-platform-macos`,
-`check-platform-desktop`, `clippy-llm`, `test-llm`, `test-candle`, `build-cli`,
-`api-contract`.
+CI gates: two required checks protect `master`, `CI Success` (`ci.yml`) and
+`Bazel graph + RBE targets` (`bazel.yml`). `ci.yml` runs the three commands
+above (`test` on Linux only), the feature checks (`check-*`, `clippy-llm`,
+`test-llm`), `api-contract`, observability, the Web and Python SDKs and the
+binding drift jobs. `tools/scripts/ci_gate.py` decides which jobs a change
+needs, and `CI Success` fails unless each one passed or was skipped for that
+reason. `.github/workflows/README.md` maps every workflow.
 
 Crate-wide lint opt-outs go in `lib.rs` at the crate root (see e.g.
 `crates/xybrid-core/src/lib.rs`). Don't sprinkle `#[allow(...)]` at call sites —
@@ -663,6 +666,22 @@ is generated from the workflow files, and these rules keep it true:
   configurations (CodeQL `codeql.yml:analyze`, Scorecard `scorecard.yml:analysis`)
   to the path, and `release-publish.yml` and the docs call
   `gh workflow run <file>`. Change `name:` instead.
+- **Add CI by extending `ci.yml`, never with a new workflow file.**
+  `gen_workflow_index.py --check` fails on a file missing from its
+  `WORKFLOW_FILES`, and on a `pull_request` / `pull_request_target` trigger
+  outside `PULL_REQUEST_FILES`: only `ci.yml` and `bazel.yml` validate pull
+  requests (the others listed scan, dry-run, publish or greet, plus the lane
+  workflows not yet called from `ci.yml`). A lane file declares `workflow_call`
+  (plus `workflow_dispatch`, plus `schedule` for a nightly) and is called from
+  `ci.yml`. A seconds-long check that needs no toolchain is a test under
+  `tools/scripts/tests/`; a new cargo invocation is a step in the `ci.yml` job
+  with the same runner and feature family; a new backend or real-model suite is
+  one `ci.yml` job gated on its flag, the flag's path rule and `OPTIONAL_JOBS`
+  entry in `tools/scripts/ci_gate.py` with its `tooling-changes` output line,
+  and one `CI Success` `needs` entry; a new binding or platform is a lane file,
+  the one new file this allows: its PR lists it in `WORKFLOW_FILES`. macOS runs
+  5 jobs at once for the whole organization, so add steps to an existing macOS
+  job. The full rules are in the workflow README, "Adding CI".
 - **Job names are matched as checks; never rename them.** `CI Success`
   (`ci.yml`) and `Bazel graph + RBE targets` (`bazel.yml`)
   gate `master` through branch protection. `tools/scripts/llamacpp_update.py`
