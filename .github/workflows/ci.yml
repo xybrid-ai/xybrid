@@ -429,8 +429,8 @@ jobs:
   # ---------------------------------------------------------------------------
   # Backend lanes. Each runs when one of its paths in ci_gate.py's LANE_PATHS
   # changes (any edit to this file, .github/actions/ or ci_gate.py runs them
-  # all), with real weights fetched by .github/actions/fetch-model. They are in
-  # ci_gate.ADVISORY_JOBS, so CI Success does not wait for them yet.
+  # all), with real weights fetched by .github/actions/fetch-model. CI Success
+  # requires each one the change selected.
   # tools/scripts/llamacpp_update.py waits on three of these job names before
   # it cuts a llama.cpp release: never rename them.
   # ---------------------------------------------------------------------------
@@ -634,9 +634,9 @@ jobs:
   # SDK lanes: one lane file per binding or platform, called when one of its
   # paths in LANE_PATHS changes. GitHub names a called job's check
   # `<caller name> / <job name>`, so these caller names are part of every
-  # check name below them. Advisory (ci_gate.ADVISORY_JOBS) like the backend
-  # lanes. A caller job takes no runs-on, env or timeout: those stay in the
-  # lane file, and it inherits this workflow's read-all permissions.
+  # check name below them. CI Success requires each one the change selected.
+  # A caller job takes no runs-on, env or timeout: those stay in the lane
+  # file, and it inherits this workflow's read-all permissions.
   # ---------------------------------------------------------------------------
 
   android:
@@ -914,6 +914,17 @@ jobs:
       - api-contract
       - observability
       - web
+      - test-candle
+      - test-whispercpp-integration
+      - test-policy-routing
+      - llamacpp-validate
+      - android
+      - apple
+      - flutter
+      - react-native
+      - unity-editor
+      - choice-conformance
+      - decision-conformance
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Verify required job results

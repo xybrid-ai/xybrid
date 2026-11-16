@@ -17,9 +17,9 @@ Two kinds of flag:
 
 A new backend or real-model suite is one ci.yml job gated on its flag
 (`if: needs.tooling-changes.outputs.<flag> == 'true'`), one LANE_PATHS row,
-its OPTIONAL_JOBS entry, its line in tooling-changes' outputs, and (once it is
-reliable) an entry in CI Success's needs. test_ci_gate.py fails until they
-agree. BAZEL_PATHS is bazel.yml's gate, read with `ci_gate.py bazel`.
+its OPTIONAL_JOBS entry, its line in tooling-changes' outputs, and an entry in
+CI Success's needs. test_ci_gate.py fails until they agree. BAZEL_PATHS is
+bazel.yml's gate, read with `ci_gate.py bazel`.
 """
 
 import argparse
@@ -334,22 +334,11 @@ OPTIONAL_JOBS = {
 ALWAYS_JOBS = {"tooling-changes", "repo-checks"}
 
 # Jobs ci.yml runs that CI Success does not require: a failure shows on the
-# pull request without blocking the merge. Every lane starts here, so moving it
-# into ci.yml does not change merge policy; it joins CI Success's needs by
-# leaving this set.
-ADVISORY_JOBS = {
-    "test-candle",
-    "test-whispercpp-integration",
-    "test-policy-routing",
-    "llamacpp-validate",
-    "android",
-    "apple",
-    "flutter",
-    "react-native",
-    "unity-editor",
-    "choice-conformance",
-    "decision-conformance",
-}
+# pull request without blocking the merge. Empty: every lane gates CI Success,
+# so one green check means every lane the change selected passed. A lane that
+# turns flaky comes back here, and out of CI Success's needs, while it is
+# fixed: two lines, which test_ci_gate.py checks agree.
+ADVISORY_JOBS: set = set()
 
 _GLOB_SPECIAL = set("?+[]")
 

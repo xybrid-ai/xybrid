@@ -71,9 +71,15 @@ jobs:
       # THEIR repo, where no secret exists — and a push is not a pull_request, so
       # the event test alone let the assertion fire and failed every fork's
       # Actions tab. Secrets are only ever expected in the canonical repo.
+      #
+      # Dependabot's pull requests come from this repository but receive no
+      # Actions secrets, so they skip like a fork's; the master push after the
+      # merge runs the Editor. CI Success requires this lane, so asserting here
+      # would block every Dependabot PR that selects it.
       - name: Require credentials (non-fork runs)
         if: >-
           github.repository == 'xybrid-ai/xybrid' &&
+          github.actor != 'dependabot[bot]' &&
           (github.event_name != 'pull_request' ||
            github.event.pull_request.head.repo.full_name == github.repository)
         env:

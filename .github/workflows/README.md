@@ -63,9 +63,8 @@ how to follow them.
 5. **A new backend or real-model suite is one `ci.yml` job** built from the
    shared actions and gated on its flag, one row in `LANE_PATHS` with its
    `OPTIONAL_JOBS` entry (`tools/scripts/ci_gate.py`), its line in
-   `tooling-changes`' outputs, and one entry in `CI Success`'s `needs` once it
-   is reliable (until then it is in `ADVISORY_JOBS`). `test_ci_gate.py` fails
-   until they agree.
+   `tooling-changes`' outputs, and one entry in `CI Success`'s `needs`.
+   `test_ci_gate.py` fails until they agree.
 6. **A new binding or platform is a lane file called from `ci.yml`.**
 7. **macOS runs 5 jobs at once for the whole organization.** Add steps to an
    existing macOS job; a new one waits behind every other pull request's.
@@ -220,13 +219,16 @@ keeps its nightly cold rebuild as its own `schedule`: on `ci.yml` it would put
 skipped checks on master's HEAD over the ones the llama.cpp release reads.
 `tools/scripts/ci_gate.py` holds each lane's paths (`LANE_PATHS`, in GitHub's
 `paths:` syntax), and an edit to `ci.yml`, `.github/actions/` or `ci_gate.py`
-runs them all. Lanes in `ADVISORY_JOBS` report on the pull request without
-gating `CI Success`. To run lanes by hand, dispatch a lane file, or dispatch
-`ci.yml` with `lanes` (comma-separated; empty runs every lane). On `master`, or
-a branch whose tip is master's HEAD, `ci_gate.py` ignores `lanes` and runs every
-lane: a skipped lane would put a newer, skipped check on HEAD under a name the
-llama.cpp release requires to succeed. To retry one lane there, re-run the push
-run's failed jobs.
+runs them all. `CI Success` requires every lane a change selects, so one green
+check means each of them passed. The exception is a pull request without secrets
+(a fork's, or Dependabot's): the Unity Editor lane passes there without running
+the Editor, which the master push after the merge does. A lane that turns flaky
+goes back to `ADVISORY_JOBS` (out of `CI Success`'s `needs`) while it is fixed.
+To run lanes by hand, dispatch a lane file, or dispatch `ci.yml` with `lanes`
+(comma-separated; empty runs every lane). On `master`, or a branch whose tip is
+master's HEAD, `ci_gate.py` ignores `lanes` and runs every lane: a skipped lane
+would put a newer, skipped check on HEAD under a name the llama.cpp release
+requires to succeed. To retry one lane there, re-run the push run's failed jobs.
 
 **Bazel.** `bazel.yml` runs on every pull request so its required job can
 report; its `changes` job skips the build unless a path in `BAZEL_PATHS`
