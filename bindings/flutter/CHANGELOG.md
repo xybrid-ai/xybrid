@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* Added: registry calls made under CI (`CI` set to anything but empty, `0` or
+  `false`, or `XYBRID_CI=1`) end the `X-Xybrid-Client` header with `ci=1`, so
+  registry analytics can leave test traffic out of real usage. `XYBRID_CI=0`
+  keeps a CI run unlabelled, and `XYBRID_TELEMETRY_OPTOUT` still drops the
+  header.
 * Fixed: `runStreamingWithFallback` asks the Xybrid gateway for
   `openai/gpt-4o-mini` when `RunOptions.cloudModel` is unset. It sent
   `gpt-4o-mini`, which the managed gateway answers with 404

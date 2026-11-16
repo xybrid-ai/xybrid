@@ -399,6 +399,12 @@ so a new binding there reports theirs only until it registers. Add a new name
 to the facade's `resolve_binding`; a test fails until you do. The table is in
 `docs/telemetry/registry.md`.
 
+Under CI the same header ends with `ci=1` (`crates/xybrid-sdk/src/ci.rs`:
+`XYBRID_CI` decides when it is `1`/`true` or `0`/`false`, else `CI`), and
+registry analytics can leave those requests out. Coding-agent sandboxes don't set
+`CI`: export `XYBRID_CI=1` before running tests or examples that can reach the
+registry, or point `XYBRID_REGISTRY_URL` at a local stub.
+
 The browser package (`bindings/web`, npm `@xybrid/web`) is a GGUF text-generation
 preview over the existing Rust/llama.cpp path. `pnpm build` invokes Bazel for CPU
 and experimental WebGPU WASM, then bundles the client and worker. `pnpm
