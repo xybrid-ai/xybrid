@@ -24,7 +24,7 @@
 | **default** | 默认特性 | `ort-download`（通过 `llm-llamacpp` 或平台预设启用 llama.cpp） |
 | **ort-download** | 下载预编译的 ONNX Runtime 二进制文件 | `ort/download-binaries`、`ort/tls-native` |
 | **ort-dynamic** | 在运行时加载 ONNX Runtime 的 .so | `ort/load-dynamic` |
-| **ort-coreml** | Apple Neural Engine 加速 | `ort/coreml` |
+| **ort-coreml** | 链接 ONNX Runtime 的 Core ML 执行提供程序（SDK 目前尚未选用） | `ort/coreml` |
 | **candle** | 纯 Rust ML 框架 — SafeTensors Whisper 路径。**仅可显式启用**，自 whisper.cpp 取代其 ASR 角色后已从所有平台预设中移除 | `candle-core`、`candle-nn`、`candle-transformers`、`safetensors`、`byteorder`、`num-traits` |
 | **asr-whispercpp** | whisper.cpp 语音识别，运行在 llama.cpp 已链接的 ggml 上。需要 `llm-llamacpp` —— ggml 正是由它提供 | `xybrid-whisper`、`xybrid-whisper-sys` |
 | **candle-hub** | Candle + HuggingFace Hub 下载支持 | `candle`、`hf-hub`（需要 OpenSSL — **不适用于 Android**） |
@@ -105,7 +105,7 @@ Candle **不在**任何预设中。在同一 Android 代理上它约占 1.3 MiB�
 | 预设 | 目标平台 | 启用的 Core 特性 | VLM 默认 | ASR 默认 | 理由 |
 |--------|-----------------|----------------------|-------------|-------------|-----------|
 | **platform-android** | Android（所有 ABI） | `ort-dynamic`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 用于 AAR 分发的动态 ORT 加载；Whisper ASR 由 whisper.cpp 承担，复用 llama.cpp 已链接的 ggml（strip 后约 0.2 MiB）；llama.cpp 具备运行时 SIMD 检测；mistral.rs 在不具备 ARMv8.2-A FP16 的设备上会导致 SIGILL |
-| **platform-ios** | iOS（arm64、模拟器） | `ort-download`、`ort-coreml`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 静态 ORT 链接；用于 ANE 加速的 CoreML；llama.cpp 在实体设备上使用 Metal，在模拟器上使用 CPU |
+| **platform-ios** | iOS（arm64、模拟器） | `ort-download`、`ort-coreml`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 静态 ORT 链接；已链接 ORT 的 Core ML 执行提供程序，但 SDK 不会选用；llama.cpp 在实体设备上使用 Metal，在模拟器上使用 CPU |
 | **platform-macos** | macOS（arm64、x86_64） | `ort-download`、`ort-coreml`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 与 iOS 相同 — 统一的 Apple 平台特性 |
 | **platform-desktop** | Linux、Windows | `ort-download`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 静态 ORT 链接；LLM 推理用 llama.cpp，ASR 用 whisper.cpp（所有平台统一） |
 

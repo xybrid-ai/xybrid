@@ -238,7 +238,7 @@ val model = loader.load()
 val result = model.run(XybridEnvelope.text("Hello, world!"))
 ```
 
-### Swift (iOS / macOS)
+### Swift (iOS)
 
 ```swift
 import Xybrid
@@ -323,7 +323,7 @@ if (!modelDir.exists()) {
 val loader = ModelLoader.fromDirectory(modelDir.absolutePath)
 ```
 
-### iOS / macOS — App Bundle
+### iOS — App Bundle
 
 Add model files to your Xcode project as a folder reference:
 

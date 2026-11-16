@@ -231,7 +231,7 @@ val model = loader.load()
 val result = model.run(XybridEnvelope.text("Hello, world!"))
 ```
 
-### Swift (iOS / macOS)
+### Swift (iOS)
 
 ```swift
 import Xybrid
@@ -316,7 +316,7 @@ if (!modelDir.exists()) {
 val loader = ModelLoader.fromDirectory(modelDir.absolutePath)
 ```
 
-### iOS / macOS — 应用包
+### iOS — 应用包
 
 将模型文件作为文件夹引用添加到 Xcode 项目：
 

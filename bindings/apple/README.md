@@ -1,6 +1,6 @@
-# Xybrid Swift SDK (iOS/macOS)
+# Xybrid Swift SDK (iOS)
 
-Native iOS and macOS SDK for [Xybrid](https://github.com/xybrid-ai/xybrid), providing on-device ML inference via BoltFFI-generated Swift bindings.
+Native iOS SDK for [Xybrid](https://github.com/xybrid-ai/xybrid), providing on-device ML inference via BoltFFI-generated Swift bindings.
 
 ## Installation
 
@@ -228,8 +228,12 @@ apple/
 
 | Platform | Minimum Version |
 |----------|-----------------|
-| iOS | 13.0 |
-| macOS | 10.15 (Catalina) |
+| iOS (device and Simulator, arm64) | 16.0 |
+
+Building an app against the package needs Xcode 15.3 or later (Swift 5.10).
+The package declares iOS only. The xcframework ships no macOS slice; for a
+macOS app, use the [Flutter SDK](../flutter/) (macOS 14+ on Apple Silicon) or
+the [Rust crate](../../crates/xybrid/).
 
 ## Building the XCFramework
 
@@ -239,7 +243,7 @@ The XCFramework containing the compiled Rust library must be built before using 
 
 | Tool | Required Version | Installation |
 |------|------------------|--------------|
-| Xcode | 14.0+ | Mac App Store |
+| Xcode | 15.3+ | Mac App Store |
 | Bazel (via bazelisk) | per `.bazelversion` | `brew install bazelisk` |
 | Xcode Command Line Tools | Latest | `xcode-select --install` |
 

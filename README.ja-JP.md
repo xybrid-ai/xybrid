@@ -400,7 +400,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 | 埋め込み | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | マルチモデルパイプライン（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | モデルのダウンロードとキャッシュ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| ハードウェアアクセラレーション | Metal, ANE | CPU | Metal, ANE | CPU、オプトインのVulkan | CPU |
+| ハードウェアアクセラレーション | 実機は Metal（llama.cpp）、シミュレータは CPU | CPU | Metal | CPU、オプトインのVulkan | CPU |
 
 **SDK MMP サポート:** Flutter ✅ · Rust ✅ · Kotlin ✅ · Swift ✅ · React Native ✅ · Unity ✅
 
@@ -425,7 +425,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 - **アプリを再リリースせずにモデルを差し替え** — モデルは実行時にレジストリから解決され、デバイス上にキャッシュされます。
 - **クラウドフォールバック** — 実行ごとにオプトイン（[ドキュメント](https://docs.xybrid.dev/en/docs/concepts/hybrid-execution)）。
 - **制御できるテレメトリ** — APIキーによるオプトイン（[ドキュメント](docs/telemetry/registry.md)）。
-- **ハードウェアアクセラレーション** — Apple では Metal と Apple Neural Engine、Linux ではオプトインの Vulkan。Android と Windows は現時点では CPU（[ドキュメント](docs/INSTALLATION.md#platform-features)）。
+- **ハードウェアアクセラレーション** — Apple では Metal、Linux ではオプトインの Vulkan。Android と Windows は現時点では CPU（[ドキュメント](docs/INSTALLATION.md#platform-features)）。
 
 ### 比較
 

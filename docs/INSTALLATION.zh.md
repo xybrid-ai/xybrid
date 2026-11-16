@@ -47,7 +47,7 @@ cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli
 默认情况下，`cargo install` 构建时不包含硬件加速。为获得最佳性能，请添加平台特性：
 
 ```bash
-# macOS — Metal GPU + Apple Neural Engine + llama.cpp
+# macOS — Metal GPU + llama.cpp + whisper.cpp
 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-macos
 
 # Linux / Windows — ONNX + llama.cpp
@@ -69,7 +69,7 @@ cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features pl
 | **独立标志** | |
 | `ort-download` | 下载预编译的 ONNX Runtime 二进制文件 |
 | `ort-dynamic` | 在运行时加载 ONNX Runtime 的 .so |
-| `ort-coreml` | Apple Neural Engine 加速 |
+| `ort-coreml` | 链接 ONNX Runtime 的 Core ML 执行提供程序（SDK 目前尚未选用） |
 | `candle` | Candle ML 后端（Whisper 模型） |
 | `candle-metal` | Candle 的 Metal 显卡加速 |
 | `candle-cuda` | Candle 的 CUDA 显卡加速 |
