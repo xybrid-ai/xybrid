@@ -236,19 +236,21 @@ impl StageTarget {
     /// Classify a stage from its YAML.
     ///
     /// A stage that names a provider, or `target: integration`, is an
-    /// integration stage; `target: cloud` or `server` runs on a server;
+    /// integration stage; `target: cloud`, `server` or `api` runs on a server;
     /// `target: device`, `local` or `edge` runs here; anything else (`auto`,
-    /// no target) leaves the choice to the routing authority. Loading a
-    /// [`Pipeline`] asks this both before probing the registry and when
-    /// reporting each stage, so the two cannot disagree.
+    /// no target) leaves the choice to the routing authority. Targets are
+    /// matched case-insensitively, as `parse_target` reads them for
+    /// execution. Loading a [`Pipeline`] asks this both before probing the
+    /// registry and when reporting each stage, so the two cannot disagree.
     fn for_stage(stage: &StageConfig) -> Self {
-        let target = stage.target();
+        let target = stage.target().map(str::to_ascii_lowercase);
+        let target = target.as_deref();
         let provider = stage.provider();
         if provider.is_some() || target == Some("integration") {
             Self::Integration {
                 provider: provider.unwrap_or("unknown").to_string(),
             }
-        } else if matches!(target, Some("cloud" | "server")) {
+        } else if matches!(target, Some("cloud" | "server" | "api")) {
             Self::Cloud
         } else if matches!(target, Some("device" | "local" | "edge")) {
             Self::Device // Explicit local execution
@@ -2625,6 +2627,15 @@ mod tests {
   - id: integration
     model: integration-model
     target: integration
+  - id: api
+    model: api-model
+    target: api
+  - id: upper-cloud
+    model: upper-cloud-model
+    target: CLOUD
+  - id: mixed-server
+    model: mixed-server-model
+    target: Server
 "#,
             );
 
@@ -2642,6 +2653,10 @@ mod tests {
                     StageTarget::Integration {
                         provider: "unknown".into()
                     },
+                    // Read like `parse_target` reads them for execution.
+                    StageTarget::Cloud,
+                    StageTarget::Cloud,
+                    StageTarget::Cloud,
                 ]
             );
             for stage in pipeline.stages() {
