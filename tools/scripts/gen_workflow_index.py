@@ -101,10 +101,6 @@ WORKFLOW_FILES = frozenset(
 PULL_REQUEST_FILES = frozenset(
     {
         "bazel.yml",
-        "build-android.yml",
-        "build-apple.yml",
-        "build-flutter.yml",
-        "build-react-native.yml",
         "ci.yml",
         "codeql.yml",
         "discord-notify.yml",
@@ -113,7 +109,6 @@ PULL_REQUEST_FILES = frozenset(
         "release-publish.yml",
         "test-choice-conformance.yml",
         "test-decision-conformance.yml",
-        "unity-editor.yml",
         "welcome.yml",
     }
 )

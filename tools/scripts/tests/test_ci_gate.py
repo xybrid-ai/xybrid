@@ -14,10 +14,12 @@ import llamacpp_update
 from ci_gate import (
     ADVISORY_JOBS,
     ALWAYS_JOBS,
+    BAZEL_PATHS,
     LANE_PATHS,
     OPTIONAL_JOBS,
     PATH_FILTERS,
     PIPELINE_PATHS,
+    bazel,
     check_jobs,
     classify,
     dispatch,
@@ -31,6 +33,35 @@ WORKFLOWS = REPO / ".github" / "workflows"
 
 def pr_files(*paths: str) -> list:
     return [[{"filename": path} for path in paths]]
+
+
+def push_paths(workflow: str) -> list:
+    """The `paths:` list under a workflow's `on.push`, in order."""
+    text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
+    block = re.search(r"^  push:\n((?:    .*\n|\s*#.*\n)*)", text, re.M)
+    if block is None:
+        raise AssertionError(f"{workflow} has no push trigger")
+    listed = re.search(r"^    paths:\n((?:      .*\n)*)", block[1], re.M)
+    if listed is None:
+        raise AssertionError(f"{workflow}'s push trigger has no paths")
+    return re.findall(r"""^      - ["']([^"']+)["']$""", listed[1], re.M)
+
+
+def workflow_call_secrets(workflow: str) -> set:
+    text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
+    block = re.search(r"^  workflow_call:\n((?:    .*\n|\s*#.*\n)*)", text, re.M)
+    if block is None:
+        return set()
+    secrets = re.search(r"^    secrets:\n((?:      .*\n|\s*#.*\n)*)", block[1], re.M)
+    return set(re.findall(r"^      ([A-Z][A-Z0-9_]*):", secrets[1], re.M)) if secrets else set()
+
+
+def job_text(workflow: str, job: str) -> str:
+    text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
+    match = re.search(rf"^  {re.escape(job)}:\n((?:    .*\n|\s*#.*\n|\n)*)", text, re.M)
+    if match is None:
+        raise AssertionError(f"{workflow} has no job {job}")
+    return match[1]
 
 
 def ci_jobs() -> dict:
@@ -210,9 +241,15 @@ class ChangeSelectionTests(unittest.TestCase):
 class LaneTests(unittest.TestCase):
     """Each row reproduces the `paths:` filter of the workflow it replaced."""
 
-    def lanes(self, *paths: str) -> set:
+    BACKEND = {"candle", "whispercpp", "policy_routing", "llamacpp"}
+    SDK = {"android", "apple", "flutter", "react_native", "unity_editor"}
+
+    def lanes(self, *paths: str, among: set = BACKEND) -> set:
         outputs = classify("pull_request", pr_files(*paths))
-        return {lane for lane in LANE_PATHS if outputs[lane] == "true"}
+        return {lane for lane in among if outputs[lane] == "true"}
+
+    def test_every_lane_is_a_backend_or_sdk_lane(self):
+        self.assertEqual(set(LANE_PATHS), self.BACKEND | self.SDK)
 
     def test_each_lane_runs_on_its_own_inputs(self):
         cases = {
@@ -260,6 +297,25 @@ class LaneTests(unittest.TestCase):
                 flag = OPTIONAL_JOBS.get(job.id, "full_ci")
                 self.assertEqual(outputs[flag], "true")
 
+    def test_sdk_lanes_run_on_their_bindings_and_sources(self):
+        cases = {
+            "bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt": {"android", "react_native"},
+            "bindings/apple/Sources/Xybrid/Xybrid.swift": {"apple", "react_native"},
+            "bindings/flutter/lib/xybrid.dart": {"flutter"},
+            "bindings/react-native/src/index.ts": {"react_native"},
+            "bindings/unity/Runtime/Api/Xybrid.cs": {"unity_editor"},
+            "crates/xybrid-bolt/src/lib.rs": {"android", "apple", "react_native", "unity_editor"},
+            "crates/xybrid-observability/src/lib.rs": {"android", "apple", "flutter", "unity_editor"},
+            "vendor/ort-ios/README.txt": {"apple"},
+            "tools/scripts/stage_unity_native.py": {"unity_editor"},
+            ".github/workflows/build-android.yml": {"android"},
+            ".github/workflows/unity-editor.yml": {"unity_editor"},
+            "bindings/flutter/README.md": set(),
+        }
+        for path, expected in cases.items():
+            with self.subTest(path=path):
+                self.assertEqual(self.lanes(path, among=self.SDK), expected)
+
     def test_dispatch_runs_every_job_and_the_named_lanes(self):
         everything = dispatch("")
         self.assertTrue(all(value == "true" for value in everything.values()))
@@ -277,6 +333,61 @@ class LaneTests(unittest.TestCase):
             with self.subTest(lanes=lanes), contextlib.redirect_stderr(io.StringIO()):
                 self.assertTrue(all(value == "true" for value in dispatch(lanes, "refs/heads/master").values()))
         self.assertEqual(dispatch("llamacpp", "refs/heads/topic")["whispercpp"], "false")
+
+
+class BazelGateTests(unittest.TestCase):
+    """bazel.yml's required job: the same registry, its own row."""
+
+    def relevant(self, *paths: str) -> bool:
+        return bazel("pull_request", pr_files(*paths))["relevant"] == "true"
+
+    def test_bazel_inputs_run_the_required_job(self):
+        for path in (
+            "MODULE.bazel", "crates/xybrid-core/src/lib.rs", "bazel/ggml/android.bzl",
+            "crates/xybrid-core/BUILD.bazel", "spike/BUILD.bazel", "tools/scripts/ci_gate.py",
+            "vendor/llama-cpp", "vendor/whisper-cpp", "integration-tests/fixtures/models/models.json",
+            "xtask/src/main.rs", "bindings/flutter/rust/src/lib.rs", "tools/windows-smoke/Program.cs",
+            "bindings/unity/Runtime/Bolt/XybridBolt.cs", "bindings/web/test/fixtures/rust-metadata-gguf.json",
+            ".github/actions/free-disk-space/action.yml", ".github/workflows/bazel.yml",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(self.relevant(path))
+
+    def test_other_changes_skip_it(self):
+        for path in (
+            "README.md", "crates/xybrid-core/README.md", "docs/content/docs/index.mdx",
+            "crates/xybrid-core/docs/guide.mdx", ".github/workflows/ci.yml",
+            "bindings/flutter/lib/xybrid.dart", "bindings/apple/Sources/Xybrid/Xybrid.swift",
+            "bindings/web/test/fixtures/hf-tree-smollm2-gguf.json",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(self.relevant(path))
+
+    def test_an_uncertain_file_list_runs_it(self):
+        self.assertTrue(self.relevant())
+        self.assertEqual(bazel("push", {"files": []})["relevant"], "true")
+
+    def test_the_push_trigger_lists_the_same_paths(self):
+        # Pushes to master filter at the trigger; pull requests filter in the
+        # `changes` job through this registry. Both must select the same runs.
+        self.assertEqual(push_paths("bazel.yml"), BAZEL_PATHS)
+
+    def test_a_failed_gate_runs_bazel_rather_than_passing_it(self):
+        # A skipped required check counts as passing, so an erroring gate must
+        # not skip the required job.
+        jobs = gen_workflow_index.read_jobs(WORKFLOWS / "bazel.yml")
+        for job in ("bazel", "bazel-linux-vulkan"):
+            with self.subTest(job=job):
+                self.assertEqual(
+                    jobs[job].condition,
+                    "${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.relevant == 'true') }}",
+                )
+
+    def test_the_changes_job_reads_the_registry(self):
+        changes = job_text("bazel.yml", "changes")
+        self.assertIn("python3 tools/scripts/ci_gate.py bazel pull_request", changes)
+        self.assertIn("sparse-checkout: tools/scripts/ci_gate.py", changes)
+        self.assertIn("shell: bash", changes)
 
 
 class PipelineShapeTests(unittest.TestCase):
@@ -331,6 +442,21 @@ class PipelineShapeTests(unittest.TestCase):
         self.assertIn("python3 tools/scripts/gen_workflow_index.py --check", block)
         self.assertIn("bash tools/scripts/version-sync.sh --check", block)
         self.assertIn("python3 -m unittest discover -s tools/scripts/tests -p 'test_*.py'", block)
+
+    def test_each_lane_file_is_called_with_every_secret_it_declares(self):
+        for job in ci_jobs().values():
+            if not job.uses:
+                continue
+            callee = job.uses.rsplit("/", 1)[1]
+            caller = job_text("ci.yml", job.id)
+            for secret in sorted(workflow_call_secrets(callee)):
+                with self.subTest(job=job.id, secret=secret):
+                    self.assertIn(f"{secret}: ${{{{ secrets.{secret} }}}}", caller)
+            self.assertNotIn("secrets: inherit", caller, "pass each secret a lane declares, nothing more")
+
+    def test_the_unity_lane_may_publish_its_check(self):
+        caller = job_text("ci.yml", "unity-editor")
+        self.assertRegex(caller, r"(?m)^    permissions:\n      contents: read\n      checks: write$")
 
     def test_every_check_the_llama_cpp_release_waits_on_exists(self):
         # A misspelt or renamed job leaves the automation waiting forever.

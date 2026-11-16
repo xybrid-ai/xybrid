@@ -20,47 +20,22 @@
 # Purpose: Run a real Unity Editor: EditMode tests against a Bazel-built native, an IL2CPP player smoke, then the observability runtime scenario.
 name: "SDK: Unity Editor"
 
+# A lane: ci.yml's `Unity Editor` job calls this file when one of the paths in
+# LANE_PATHS["unity_editor"] (tools/scripts/ci_gate.py) changes, on pull requests and
+# on master pushes, which keep master's caches warm for new branches. Its
+# checks are named `Unity Editor / <job>`. Dispatch it here to run it alone.
 on:
-  pull_request:
-    branches: [master]
-    paths:
-      - "bindings/unity/**"
-      - "crates/xybrid-bolt/**"
-      - "crates/xybrid-ffi-facade/**"
-      # The SDK and the observability crate it links: the observability
-      # runtime scenario below exercises their export, content rules and
-      # lifecycle through the C# API. xybrid-core is left to the Apple,
-      # Android and Flutter lanes, which run the same scenario on its changes.
-      - "crates/xybrid-sdk/**"
-      - "crates/xybrid-observability/**"
-      - "tools/unity-runtime-smoke/**"
-      - "tools/scripts/stage_unity_native.py"
-      - "tools/scripts/stage_unity_desktop_ort.py"
-      - "tools/scripts/bazel-output.sh"
-      - "tools/scripts/write-buildbuddy-rc.sh"
-      - "tools/scripts/observability_capture/**"
-      - ".github/actions/**"
-      - ".github/workflows/unity-editor.yml"
-      # Markdown inside any path above cannot affect this build.
-      - "!**.md"
-  push:
-    branches: [master]
-    paths:
-      - "bindings/unity/**"
-      - "crates/xybrid-bolt/**"
-      - "crates/xybrid-ffi-facade/**"
-      - "crates/xybrid-sdk/**"
-      - "crates/xybrid-observability/**"
-      - "tools/unity-runtime-smoke/**"
-      - "tools/scripts/stage_unity_native.py"
-      - "tools/scripts/stage_unity_desktop_ort.py"
-      - "tools/scripts/bazel-output.sh"
-      - "tools/scripts/write-buildbuddy-rc.sh"
-      - "tools/scripts/observability_capture/**"
-      - ".github/actions/**"
-      - ".github/workflows/unity-editor.yml"
-      # Markdown inside any path above cannot affect this build.
-      - "!**.md"
+  workflow_call:
+    # Optional: forks and Dependabot pull requests receive none.
+    secrets:
+      BUILDBUDDY_API_KEY:
+        required: false
+      UNITY_LICENSE:
+        required: false
+      UNITY_EMAIL:
+        required: false
+      UNITY_PASSWORD:
+        required: false
   workflow_dispatch:
 
 permissions:
@@ -68,10 +43,6 @@ permissions:
   # game-ci/unity-test-runner publishes the result as a GitHub Check. Without
   # this the Checks API call fails with "Resource not accessible by integration".
   checks: write
-
-concurrency:
-  group: unity-editor-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   editmode:
