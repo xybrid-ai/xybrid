@@ -77,9 +77,10 @@ how to follow them.
 Jobs are built from the composite actions in [`../actions/`](../actions), not
 from copied setup blocks: `setup-rust` (toolchain and cargo cache),
 `install-boltffi` (the pinned boltffi CLI, cached), `fetch-model` (a pinned
-test model, cached and checksummed), `free-disk-space`, `setup-vulkan-sdk` and
-`bazel-repo-cache`. A change under `.github/actions/`
-selects every gated job, in `ci.yml` and in `bazel.yml`.
+test model, cached and checksummed), `free-disk-space`, `setup-vulkan-sdk`,
+`bazel-repo-cache` and `empty-registry` (a loopback model registry that lists
+nothing, so tests never ask the production one). A change under
+`.github/actions/` selects every gated job, in `ci.yml` and in `bazel.yml`.
 
 **Caches.** A cache saved by a pull request is visible to that pull request
 alone but counts against the repository's 10 GB, and every pull request used to

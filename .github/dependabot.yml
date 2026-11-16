@@ -22,6 +22,7 @@ updates:
     directories:
       - "/"
       - "/.github/actions/bazel-repo-cache"
+      - "/.github/actions/empty-registry"
       - "/.github/actions/fetch-model"
       - "/.github/actions/free-disk-space"
       - "/.github/actions/install-boltffi"
