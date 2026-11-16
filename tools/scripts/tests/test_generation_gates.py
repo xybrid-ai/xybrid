@@ -30,17 +30,17 @@ GATES = {
         BOLT_INPUTS,
     ),
     "tools/scripts/gen_kotlin_bolt.py": (
-        "ci.yml", "kotlin-jni-drift", "kotlin_jni",
+        "ci.yml", "bindings-drift", "bindings_drift",
         ("bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt", "bindings/kotlin/bazel/jni/jni_glue.c"),
         BOLT_INPUTS,
     ),
     "tools/scripts/gen_unity_bolt_csharp.py": (
-        "ci.yml", "unity-bolt-drift", "unity_bolt",
+        "ci.yml", "bindings-drift", "bindings_drift",
         ("bindings/unity/Runtime/Bolt/XybridBolt.cs", "bindings/unity/Runtime/Bolt/XybridBolt.cs.meta"),
         BOLT_INPUTS + ("crates/xybrid-ffi-facade/src/lib.rs",),
     ),
     "bindings/apple/scripts/gen-bolt-bindings.sh": (
-        "ci.yml", "apple-bolt-drift", "apple_bolt",
+        "ci.yml", "bindings-drift", "bindings_drift",
         ("bindings/apple/Sources/Xybrid/xybrid_bolt.swift", "bindings/apple/include/xybrid-bolt.h"),
         BOLT_INPUTS,
     ),

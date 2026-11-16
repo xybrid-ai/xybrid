@@ -113,9 +113,13 @@ jobs:
           # CI-runtime flip to the locally-built xcframework. Do NOT commit this.
           ./bindings/apple/scripts/set-natives-mode.sh --set-local
           xcodebuild -resolvePackageDependencies
+          # One DerivedData for this job: the unit tests reuse this build and
+          # the scenario below reuses the tests' build. (-resolvePackageDependencies
+          # refuses -derivedDataPath without a scheme; the build resolves there.)
           xcodebuild build \
             -scheme Xybrid \
             -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO
 
@@ -128,9 +132,12 @@ jobs:
         run: |
           set -euo pipefail
           SIM_ID="$(./bindings/apple/scripts/boot-ci-simulator.sh)"
+          # The observability scenario below runs on the same simulator.
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
           xcodebuild test \
             -scheme Xybrid \
             -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO
 
@@ -141,50 +148,25 @@ jobs:
           path: bindings/apple/XCFrameworks/XybridFFI.xcframework
           if-no-files-found: error
 
-  observability-runtime:
-    name: Observability runtime scenario (iOS Simulator)
-    # Runs the shared observability scenario
-    # (tools/scripts/observability_capture/scenario.md) through the public Swift
-    # API on an iOS Simulator, linked against the xcframework the job above
-    # built: parent-in, reference-out, manual operations, content redaction and
-    # omission, release and the flush/shutdown lifecycle. run_scenario.py starts
-    # capture_server.py, runs the test, stops the receiver and runs
-    # check_capture.py on what reached it. This is the Swift row of
-    # docs/sdk/observability-coverage.md.
-    #
-    # xcodebuild rather than `swift test --filter`: the xcframework ships only
-    # ios-arm64 + ios-arm64-simulator and Package.swift declares iOS only, so a
-    # macOS-host `swift test` has no slice to link. `-only-testing:` is the
-    # filter. xcodebuild hands the test runner only TEST_RUNNER_-prefixed
-    # variables (prefix stripped), hence the `env` below. The simulator reaches
-    # the receiver on the host as 127.0.0.1 and reads and writes host paths.
-    needs: build-xcframework
-    runs-on: macos-26
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Download XCFramework
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: XybridFFI-xcframework
-          path: bindings/apple/XCFrameworks/XybridFFI.xcframework
-
-      - name: Build Swift tests (iOS Simulator)
-        run: |
-          set -euo pipefail
-          # CI-runtime flip to the downloaded xcframework. Do NOT commit this.
-          ./bindings/apple/scripts/set-natives-mode.sh --set-local
-          SIM_ID="$(./bindings/apple/scripts/boot-ci-simulator.sh "Xybrid observability iPhone")"
-          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
-          xcodebuild build-for-testing \
-            -scheme Xybrid \
-            -destination "platform=iOS Simulator,id=$SIM_ID" \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            -skipPackagePluginValidation \
-            CODE_SIGNING_ALLOWED=NO
-
+      # Runs the shared observability scenario
+      # (tools/scripts/observability_capture/scenario.md) through the public
+      # Swift API on the simulator the unit tests used, linked against the
+      # xcframework built above: parent-in, reference-out, manual operations,
+      # content redaction and omission, release and the flush/shutdown
+      # lifecycle. run_scenario.py starts capture_server.py, runs the test,
+      # stops the receiver and runs check_capture.py on what reached it. This
+      # is the Swift row of docs/sdk/observability-coverage.md.
+      #
+      # xcodebuild rather than `swift test --filter`: the xcframework ships
+      # only ios-arm64 + ios-arm64-simulator and Package.swift declares iOS
+      # only, so a macOS-host `swift test` has no slice to link.
+      # `-only-testing:` is the filter, and `test-without-building` reuses the
+      # unit tests' build. xcodebuild hands the test runner only
+      # TEST_RUNNER_-prefixed variables (prefix stripped), hence the `env`
+      # below. The simulator reaches the receiver on the host as 127.0.0.1 and
+      # reads and writes host paths.
       - name: Run observability scenario (iOS Simulator)
+        id: scenario
         timeout-minutes: 10
         run: |
           set -euo pipefail
@@ -206,7 +188,7 @@ jobs:
               CODE_SIGNING_ALLOWED=NO
 
       - name: Upload scenario report
-        if: always()
+        if: ${{ !cancelled() && steps.scenario.outcome != 'skipped' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: observability-runtime-swift

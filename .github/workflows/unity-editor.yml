@@ -1,7 +1,7 @@
 # Unity Editor CI — the first job in this repo that runs a real Unity Editor.
 #
 # Everything else that touches the Unity SDK only compiles C#: ci.yml's
-# `unity-bolt-compile` is a `dotnet build` against netstandard2.1. That is not
+# `bindings-drift` runs a `dotnet build` against netstandard2.1. That is not
 # enough — the `Unsafe.SizeOf<T>()` regression passed that gate and only failed
 # inside an actual Editor, because Unity's compiler and `dotnet build` disagree
 # about what is available.

@@ -35,7 +35,7 @@ CI gates: two required checks protect `master`, `CI Success` (`ci.yml`) and
 workflow index, version sync and every `tools/scripts/tests` test, on every
 change), the three commands above (`test` on Linux only), the feature checks
 (`check-*`, `clippy-llm`, `test-llm`), `api-contract`, observability, the Web
-and Python SDKs, the binding drift jobs, the backend lanes (Candle,
+and Python SDKs, the binding drift job, the backend lanes (Candle,
 whisper.cpp, policy routing, llama.cpp) and the SDK lanes it calls
 (`build-android.yml`, `build-apple.yml`, `build-flutter.yml`,
 `build-react-native.yml`, `unity-editor.yml`). `tools/scripts/ci_gate.py` decides
@@ -689,8 +689,9 @@ is generated from the workflow files, and these rules keep it true:
   the one new file this allows: its PR lists it in `WORKFLOW_FILES`.
   `setup-rust`, `install-boltffi` and `fetch-model` save their caches from
   `master` only. macOS runs 5 jobs at once for the whole organization, so add
-  steps to an existing macOS job. The full rules are in the workflow README,
-  "Adding CI".
+  steps to an existing macOS job: the check also holds `ci.yml` and its lane
+  files to `MACOS_JOB_BUDGET` macOS jobs, which a new one raises in the same PR
+  with a reason. The full rules are in the workflow README, "Adding CI".
 - **Job names are matched as checks; never rename them.** `CI Success`
   (`ci.yml`) and `Bazel graph + RBE targets` (`bazel.yml`)
   gate `master` through branch protection. `tools/scripts/llamacpp_update.py`
