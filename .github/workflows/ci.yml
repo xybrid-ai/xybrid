@@ -57,7 +57,7 @@ jobs:
       choice: ${{ steps.filter.outputs.choice }}
       choice_gguf: ${{ steps.filter.outputs.choice_gguf }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - name: Check changed paths
         id: filter
         # pipefail: a ci_gate.py error must fail the step, not vanish into tee.
@@ -106,7 +106,7 @@ jobs:
     if: needs.tooling-changes.outputs.bindings_drift == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - uses: ./.github/actions/setup-rust
       - id: boltffi
         uses: ./.github/actions/install-boltffi
@@ -160,7 +160,7 @@ jobs:
             python: python
             runtime: onnxruntime.dll
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - name: Stage and load the real ONNX Runtime
         run: |
           ${{ matrix.python }} tools/scripts/stage_unity_desktop_ort.py ${{ matrix.platform }} "${{ runner.temp }}/unity-ort"
@@ -178,9 +178,9 @@ jobs:
     if: needs.tooling-changes.outputs.python_sdk == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - uses: ./.github/actions/setup-rust
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           # Floor of the SDK: boltffi's generated package needs >= 3.10.
           python-version: '3.12'
@@ -204,7 +204,7 @@ jobs:
     if: needs.tooling-changes.outputs.full_ci == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - uses: ./.github/actions/setup-rust
         with:
           components: rustfmt
@@ -221,7 +221,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - name: Workflow index and rules
         run: python3 tools/scripts/gen_workflow_index.py --check
       # Each check reports even when an earlier one failed.
@@ -239,7 +239,7 @@ jobs:
     if: needs.tooling-changes.outputs.full_ci == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - uses: ./.github/actions/setup-rust
         with:
           components: clippy
@@ -251,7 +251,7 @@ jobs:
     name: check (platform-macos, macos-latest)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           submodules: true
       - uses: ./.github/actions/setup-rust
@@ -274,7 +274,7 @@ jobs:
     name: check (platform-desktop, ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           submodules: true
       - id: rust
@@ -296,7 +296,7 @@ jobs:
     name: check vision (windows)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           submodules: true
       - uses: ./.github/actions/setup-rust
@@ -324,7 +324,7 @@ jobs:
             os: ubuntu-latest
             cache-key: linux-llamacpp-vulkan
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           submodules: true
       - uses: ./.github/actions/setup-vulkan-sdk
@@ -343,7 +343,7 @@ jobs:
     name: clippy (llm-llamacpp, ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           submodules: true
       - uses: ./.github/actions/setup-rust
@@ -366,7 +366,7 @@ jobs:
     name: test (llm-llamacpp, ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           submodules: true
       - uses: ./.github/actions/setup-rust
@@ -384,7 +384,7 @@ jobs:
     name: Test (ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
       # The full --workspace debug build compiles llama.cpp from source (hundreds
       # of model .cpp objects) on top of ort-download's ONNX Runtime and every
@@ -446,7 +446,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - id: rust
         uses: ./.github/actions/setup-rust
         with:
@@ -484,7 +484,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - uses: ./.github/actions/setup-rust
         with:
           cache-key: whispercpp-integration
@@ -515,7 +515,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           submodules: true
       - uses: ./.github/actions/setup-rust
@@ -579,7 +579,7 @@ jobs:
       XYBRID_NATIVES_FORCE_SOURCE: 1
       XYBRID_REQUIRE_MODELS: 1
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           submodules: true
       - uses: ./.github/actions/setup-rust
@@ -717,7 +717,7 @@ jobs:
     name: API Contract Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - name: Install yq
         run: |
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
@@ -731,7 +731,7 @@ jobs:
     name: Observability contract (Rust)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - uses: ./.github/actions/setup-rust
         with:
           cache-key: observability-contract
@@ -748,7 +748,7 @@ jobs:
       # xybrid-observability without `test-util`.
       - name: Test SDK chunk timing across a wall-clock step
         run: cargo test --locked -p xybrid-sdk --features test-util --lib observability::tests::a_delivered_chunk_is_timed_on_the_operation_clock_across_a_wall_clock_step
-      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -779,12 +779,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           submodules: true
 
       - name: Use Bazelisk
-        uses: bazel-contrib/setup-bazel@4fd964a13a440a8aeb0be47350db2fc640f19ca8 # 0.15.0
+        uses: bazel-contrib/setup-bazel@f34d6a05eae3c24acab7fa54587492daeaeffdab # 0.19.2
         with:
           bazelisk-cache: true
 
@@ -794,7 +794,7 @@ jobs:
           macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       - name: Cache browser runtime build outputs
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .context/bazel-disk-cache
           key: web-wasm-${{ runner.os }}-${{ hashFiles('.bazelversion', 'MODULE.bazel', 'emsdk.patch', 'rules_rust.patch', 'BUILD.bazel', 'bindings/web/runtime/**', 'crates/xybrid-llama/**', 'crates/llama-cpp-sys/**') }}
@@ -804,7 +804,7 @@ jobs:
         run: echo 'build --experimental_disk_cache_gc_max_size=536870912' >> .context/local.bazelrc
 
       - name: Use Node.js
-        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
 
@@ -851,7 +851,7 @@ jobs:
       # The demo and browser suite use the same 92 MB GGUF. Preparation and
       # the SDK verify size/SHA-256; runtime assets are rebuilt from source.
       - name: Cache Web example model assets
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: bindings/web/example/public/model.gguf
           key: web-gguf-${{ hashFiles('bindings/web/example/model.ts') }}
@@ -879,7 +879,7 @@ jobs:
 
       - name: Upload Web SDK and browser measurements
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: xybrid-web-wasm
           path: |
@@ -926,7 +926,7 @@ jobs:
       - choice-conformance
       - decision-conformance
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - name: Verify required job results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}

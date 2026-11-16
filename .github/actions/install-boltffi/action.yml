@@ -18,7 +18,7 @@ runs:
     # A cold `cargo install` takes 2-3 minutes. The cached binary is a few MB.
     - name: Restore the boltffi CLI
       id: restore
-      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cargo/bin/boltffi
         key: boltffi-cli-${{ runner.os }}-${{ runner.arch }}-${{ inputs.version }}
@@ -36,7 +36,7 @@ runs:
     # would be visible to that pull request alone.
     - name: Save the boltffi CLI
       if: steps.restore.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
-      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cargo/bin/boltffi
         key: boltffi-cli-${{ runner.os }}-${{ runner.arch }}-${{ inputs.version }}
