@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still drops the whole header. Every SDK built on the Rust core sends it; the
   browser SDK (`@xybrid/web`) can't read environment variables and doesn't.
   See [Registry call telemetry](docs/telemetry/registry.md#labelling-ci-runs).
+- **Swift: load a local GGUF file.** `ModelLoader.fromModelFile(_:)` and
+  `Xybrid.model(.modelFile(url))` load a raw GGUF with no `model_metadata.json`,
+  as React Native's `fromModelFile` and Unity's `FromModelFile` already do:
+  `load()` generates the metadata from the GGUF header and writes it next to the
+  file unless one is there. `ModelSource` gains a `.modelFile(URL)` case, so a
+  `switch` over it without a `default` needs one more arm.
 
 ### Fixed
 

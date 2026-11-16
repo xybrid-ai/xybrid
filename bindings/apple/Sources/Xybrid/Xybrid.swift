@@ -343,6 +343,9 @@ public enum ModelSource: Sendable, Equatable {
     /// download in the background. See
     /// ``ModelLoader/fromRegistrySpeculative(_:)``.
     case registrySpeculative(String)
+
+    /// A raw GGUF file on disk. See ``ModelLoader/fromModelFile(_:)``.
+    case modelFile(URL)
 }
 
 /// A cheap model reference that defers all expensive work until ``load()``.
@@ -405,6 +408,20 @@ public struct ModelLoader: Sendable {
         Self(source: .huggingFace(repo))
     }
 
+    /// Create a loader for a raw llama.cpp GGUF file, such as one the app
+    /// downloaded.
+    ///
+    /// No `model_metadata.json` is needed. ``load()`` generates it from the
+    /// GGUF header and writes it next to the file, unless one is already
+    /// there, then loads the file's directory. Put each GGUF in its own
+    /// directory inside the app container (Application Support, for example):
+    /// the app bundle is read-only, and an existing `model_metadata.json` is
+    /// used as is, so a second GGUF in the same directory would load the first
+    /// one's model. Copy a file the user picks into the container first.
+    public static func fromModelFile(_ url: URL) -> Self {
+        Self(source: .modelFile(url))
+    }
+
     /// Load the model without blocking the calling task's executor.
     public func load() async throws -> XybridModel {
         try await Task.detached { try loadSync() }.value
@@ -426,6 +443,8 @@ public struct ModelLoader: Sendable {
             return try XybridModel(fromHuggingface: repo)
         case .registrySpeculative(let id):
             return try XybridModel(fromRegistrySpeculative: id)
+        case .modelFile(let url):
+            return try XybridModel(fromModelFile: url.path)
         }
     }
 
@@ -447,14 +466,15 @@ public struct ModelLoader: Sendable {
     /// ```
     ///
     /// Returns `nil` for a source with nothing to fetch — a local bundle,
-    /// directory, or Hugging Face repo — where ``load()`` is the whole story.
+    /// directory, model file, or Hugging Face repo — where ``load()`` is the
+    /// whole story.
     /// Cancelling the task consuming `progress()` unsubscribes from updates;
     /// call ``XybridDownload/cancel()`` to stop the transfer itself.
     public func download() -> XybridDownload? {
         switch source {
         case .registry(let id), .registrySpeculative(let id):
             return XybridDownload(fromRegistry: id)
-        case .bundle, .directory, .huggingFace:
+        case .bundle, .directory, .huggingFace, .modelFile:
             return nil
         }
     }

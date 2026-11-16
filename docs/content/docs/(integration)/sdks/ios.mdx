@@ -109,11 +109,27 @@ let model = try await Xybrid.model("whisper-tiny-ggml").load()
 let model = try await Xybrid.model(.bundle(bundleURL)).load()
 ```
 
-`Xybrid.model(...)` creates a cheap, unloaded reference. Local bundle and
-directory sources use `URL` through `.bundle(url)` and `.directory(url)`;
-Hugging Face uses `.huggingFace("org/repo")`. Async `load()` is the explicit
+`Xybrid.model(...)` creates a cheap, unloaded reference. Local bundle,
+directory, and GGUF file sources use `URL` through `.bundle(url)`,
+`.directory(url)`, and `.modelFile(url)`; Hugging Face uses
+`.huggingFace("org/repo")`. Async `load()` is the explicit
 boundary for resolving, downloading, disk access, and runtime initialization.
 Use `loadSync()` only from an existing worker thread.
+
+### From a Local GGUF File
+
+```swift
+let model = try await Xybrid.model(.modelFile(ggufURL)).load()
+```
+
+A raw llama.cpp GGUF needs no `model_metadata.json`. `load()` generates one from
+the GGUF header and writes it next to the file, with the context capped at
+4,096 tokens (raise its `context_length` for longer chats). Put each GGUF in its
+own directory inside the app container, such as Application Support. The app
+bundle is read-only, so `model_metadata.json` cannot be written there, and a
+`model_metadata.json` already in the directory is used as is: a second GGUF in
+the same directory would load the first one's model. Copy a file the user picks
+into the app container before loading it.
 
 ---
 
