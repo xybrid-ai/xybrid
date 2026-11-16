@@ -278,7 +278,8 @@ Chain models together into a single multi-model inference pipeline (MMP) — bui
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny-ggml  # Speech → text
+  - id: asr
+    model: whisper-tiny-ggml  # Speech → text
   - model: qwen2.5-0.5b       # Process with LLM
   - model: kokoro-82m         # Text → speech
 ```

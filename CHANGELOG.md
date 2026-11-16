@@ -52,6 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `backend: gateway` sent `gpt-4o-mini` (or `deepseek-flash`) and got
   `404 model_not_found`. With `backend: direct`, a stage still uses the
   provider's own model id.
+- **The Swift README no longer calls the SDK "Coming Soon".** Its opening banner
+  told production users to pick Flutter or Kotlin, while the same README
+  documents the SwiftPM install of the shipped package. The Chinese and
+  Japanese READMEs and the pipelines page also stop listing Swift, Kotlin and
+  Unity pipelines as coming soon or planned, matching the English README.
 
 ## [0.19.0] - 2026-11-14
 

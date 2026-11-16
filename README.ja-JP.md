@@ -249,7 +249,8 @@ let result = model.run(&Envelope::text("Hello world"))?;
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny-ggml  # 音声 → テキスト
+  - id: asr
+    model: whisper-tiny-ggml  # 音声 → テキスト
   - model: qwen2.5-0.5b       # LLMで処理
   - model: kokoro-82m         # テキスト → 音声
 ```
@@ -267,17 +268,23 @@ final result = await pipeline.run(XybridEnvelope.audio(bytes: audioBytes, sample
 
 **Kotlin:**
 ```kotlin
-// マルチモデルパイプライン（MMP）サポートは近日対応予定 — 現在は単一モデルの読み込みを使用してください
+val pipeline = XybridPipeline.fromYamlAsync(yamlString)
+val result = pipeline.runAsync(inputEnvelope)
+val transcript = result.stage("asr")?.text  // 最後のステージだけでなく、すべてのステージの出力
 ```
 
 **Swift:**
 ```swift
-// マルチモデルパイプライン（MMP）サポートは近日対応予定 — 現在は単一モデルの読み込みを使用してください
+let pipeline = try await XybridPipeline.fromYamlAsync(yamlString)
+let result = try await pipeline.runAsync(envelope: inputEnvelope)
+let transcript = result.stage("asr")?.text  // 最後のステージだけでなく、すべてのステージの出力
 ```
 
 **Unity (C#):**
 ```csharp
-// マルチモデルパイプライン（MMP）サポートは近日対応予定 — 現在は単一モデルの読み込みを使用してください
+using var pipeline = Pipeline.FromYaml(yamlString);
+PipelineResult result = pipeline.Run(inputEnvelope);
+string transcript = result.Stage("asr")?.Text;  // 最後のステージだけでなく、すべてのステージの出力
 ```
 
 **Rust:**
@@ -395,7 +402,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 | モデルのダウンロードとキャッシュ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | ハードウェアアクセラレーション | Metal, ANE | CPU | Metal, ANE | CPU、オプトインのVulkan | CPU |
 
-**SDK MMP サポート:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
+**SDK MMP サポート:** Flutter ✅ · Rust ✅ · Kotlin ✅ · Swift ✅ · React Native ✅ · Unity ✅
 
 **ツール呼び出し:** ローカルモデルが自分で定義した関数を呼び出せます。ツールは単なる
 データで、ループを回すのは自分のコードです。詳しくは

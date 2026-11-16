@@ -1,7 +1,5 @@
 # Xybrid Swift SDK (iOS/macOS)
 
-> **Status**: Coming Soon — Swift bindings are in development. Use [Flutter](../flutter/) or [Kotlin](../kotlin/) for production use today.
-
 Native iOS and macOS SDK for [Xybrid](https://github.com/xybrid-ai/xybrid), providing on-device ML inference via BoltFFI-generated Swift bindings.
 
 ## Installation
