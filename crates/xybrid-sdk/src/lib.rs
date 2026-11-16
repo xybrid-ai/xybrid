@@ -158,6 +158,7 @@ use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
 
 pub mod benchmark;
 pub mod cache;
+mod ci;
 pub mod device;
 pub mod download;
 pub mod llm;

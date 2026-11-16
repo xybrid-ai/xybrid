@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Registry telemetry:** CI runs now label their registry calls. When the
+  `CI` environment variable is set (GitHub Actions, GitLab CI, CircleCI,
+  Buildkite and most other CI services set it) to anything but empty, `0` or
+  `false`, the `X-Xybrid-Client` header ends with `; ci=1`, so registry
+  analytics can leave test traffic, such as suites resolving fake model ids,
+  out of real usage. `XYBRID_CI=1` (or `true`) labels a run where `CI` is
+  unset, such as a coding-agent sandbox or a development machine, and
+  `XYBRID_CI=0` (or `false`) keeps a CI run unlabelled. `ci=0` is never sent,
+  registries that predate the key ignore it, and `XYBRID_TELEMETRY_OPTOUT`
+  still drops the whole header. Every SDK built on the Rust core sends it; the
+  browser SDK (`@xybrid/web`) can't read environment variables and doesn't.
+  See [Registry call telemetry](docs/telemetry/registry.md#labelling-ci-runs).
+
 ### Fixed
 
 - **SDK:** loading a pipeline no longer asks the model registry about its
