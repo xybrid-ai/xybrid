@@ -10,7 +10,7 @@ import PackageDescription
 //
 // FOR EXTERNAL USERS (consuming via GitHub):
 //
-//   .package(url: "https://github.com/xybrid-ai/xybrid", exact: "0.1.0-beta13")
+//   .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.19.0")
 //
 // FOR LOCAL DEVELOPMENT:
 //

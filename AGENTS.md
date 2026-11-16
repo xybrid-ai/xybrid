@@ -610,7 +610,8 @@ Pushing `release/v*` triggers `release-prep.yml`, which:
   not committed). Run `bindings/apple/scripts/set-natives-mode.sh --set-remote`
   before committing — remote (`false`) is the canonical committed state.
 
-Install snippets in the READMEs and docs pages that name a release are pins in
+Install snippets in the READMEs and docs pages that name a release, and the
+root `Package.swift`'s comment for external users, are pins in
 `PINS` (`tools/scripts/install_pins.py`). A new snippet shape, or a new page
 carrying one, gets an entry there or no bump rewrites it. CI's `Repo checks`
 job runs `version-sync.sh --check` and `test_install_pins.py` on every PR,
