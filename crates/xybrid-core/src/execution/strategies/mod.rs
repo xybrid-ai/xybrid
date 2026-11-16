@@ -9,13 +9,21 @@
 //! `CodecTtsStrategy` implements [`ExecutionStrategy`]; the executor dispatches
 //! to it from `TemplateExecutor::execute_impl` (see `executor.rs`).
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 mod llm;
 
 // Codec TTS depends on LLM infrastructure (same feature gate)
 mod codec_tts;
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 #[allow(unused_imports)]
 pub use llm::{LlmGenerationParams, LlmInference, LlmModelConfig};
 
@@ -23,9 +31,17 @@ pub use llm::{LlmGenerationParams, LlmInference, LlmModelConfig};
 pub use codec_tts::CodecTtsStrategy;
 
 // Always compile the llm module (stubs when features disabled)
-#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+#[cfg(not(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+)))]
 mod llm;
-#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+#[cfg(not(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+)))]
 #[allow(unused_imports)]
 pub use llm::{LlmGenerationParams, LlmInference, LlmModelConfig};
 

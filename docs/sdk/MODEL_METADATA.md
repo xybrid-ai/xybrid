@@ -144,22 +144,33 @@ TensorFlow Lite model execution (mobile).
 
 ### `LiteRtLm`
 
-Legacy LiteRT-LM metadata, retained for serialization compatibility. The current
-browser SDK (`@xybrid/web`) uses `Gguf` and rejects this template;
-native runtimes reject this template with an explicit error.
+A chat model in LiteRT-LM format (`.litertlm`), such as Google's Gemma 4
+builds. It runs through Google's LiteRT-LM runtime in builds with the
+`llm-litert` feature, which no released SDK enables yet; other native builds
+and the browser SDK (`@xybrid/web`) reject the template with an explicit error.
+The runtime library is not bundled and is opened on the model's first run:
+where it is absent the model still loads, and that run is refused with
+`UnsupportedBackendCapability`.
+
+The file carries its own prompt template and, when the model has them, its
+vision and audio encoders, so the bundle needs no chat template file and no
+`vision_encoder` block. Text chat, image input (when the file has a vision
+encoder) and tool calling are supported. Grammar-constrained output and raw
+prompts are not, `min_p` is not applied, and sampling defaults cannot be set
+in the metadata (`generation_params` is a `Gguf` and `VisionLanguage` field).
 
 ```json
 {
   "type": "LiteRtLm",
-  "model_file": "model.litertlm",
-  "context_length": 2048
+  "model_file": "gemma-4-E2B-it.litertlm",
+  "context_length": 4096
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `model_file` | string | yes | Path to `.litertlm` file (relative to model directory) |
-| `context_length` | integer | no | Legacy context length in tokens; omit when unset. Must be at least 1 when present |
+| `context_length` | integer | no | Context length in tokens; 4096 when omitted, and capped to the maximum the file was exported with. Must be at least 1 when present |
 
 ### `ModelGraph`
 

@@ -6,7 +6,7 @@ Platform-specific reference implementations demonstrating how to integrate the X
 
 | Platform | Directory | Command | Sample |
 |----------|-----------|---------|--------|
-| [Browser/Web preview](#browserweb-preview) | `../bindings/web/` | `cd ../bindings/web && pnpm install && pnpm dev:example` | In-browser LiteRT a+b tensor demo |
+| [Browser/Web preview](#browserweb-preview) | `../bindings/web/` | `cd ../bindings/web && pnpm install && pnpm dev:example` | In-browser GGUF text generation |
 | [Flutter](#flutter) | `flutter/` | `cd flutter && flutter run` | [README](flutter/README.md) |
 | [iOS (Swift)](#ios-swift) | `ios/` | `open ios/XybridExample.xcodeproj` | [README](ios/README.md) |
 | [Android (Kotlin)](#android-kotlin) | `android/` | `cd android && ./gradlew assembleDebug` | [README](android/README.md) |
@@ -16,9 +16,9 @@ Platform-specific reference implementations demonstrating how to integrate the X
 
 ## Browser/Web Preview
 
-Browser-native LiteRT.js adapter example: loads a pinned TFLite addition model,
-runs it entirely in the browser on wasm or WebGPU, and verifies every output
-equals elementwise a+b.
+Local text generation in the browser: loads a 92 MB GGUF (SmolLM2-135M-Instruct)
+and streams tokens from llama.cpp compiled to WebAssembly, on CPU or
+experimental WebGPU. See [`bindings/web/README.md`](../bindings/web/README.md).
 
 ### Getting Started
 

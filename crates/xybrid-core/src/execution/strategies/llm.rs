@@ -8,7 +8,11 @@
 //! The real backend is feature-gated and requires either `llm-mistral` or
 //! `llm-llamacpp`; without them a no-op stub keeps the module compiling.
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 use log::debug;
 
 use crate::execution::types::ExecutorResult;
@@ -292,13 +296,21 @@ pub trait LlmInference: Send + Sync {
 // ============================================================================
 
 /// Default LLM inference implementation using LlmRuntimeAdapter.
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 pub struct DefaultLlmInference {
     adapter: Option<crate::runtime_adapter::llm::LlmRuntimeAdapter>,
     backend_hint: Option<String>,
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 impl DefaultLlmInference {
     /// Create a new default inference backend.
     pub fn new() -> Self {
@@ -317,14 +329,22 @@ impl DefaultLlmInference {
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 impl Default for DefaultLlmInference {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 impl LlmInference for DefaultLlmInference {
     fn load_model(&mut self, config: &LlmModelConfig) -> ExecutorResult<()> {
         use crate::runtime_adapter::llm::{LlmConfig, LlmRuntimeAdapter};
@@ -469,10 +489,18 @@ impl LlmInference for DefaultLlmInference {
 // ============================================================================
 
 /// No-op inference for when LLM features are disabled.
-#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+#[cfg(not(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+)))]
 pub struct NoOpLlmInference;
 
-#[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+#[cfg(not(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+)))]
 impl LlmInference for NoOpLlmInference {
     fn load_model(&mut self, _config: &LlmModelConfig) -> ExecutorResult<()> {
         Err(AdapterError::RuntimeError(

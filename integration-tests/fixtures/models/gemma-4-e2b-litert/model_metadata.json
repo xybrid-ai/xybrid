@@ -1,0 +1,28 @@
+{
+  "model_id": "gemma-4-e2b-litert",
+  "version": "1.0",
+  "description": "Gemma 4 E2B in LiteRT-LM format - text, image input and tool calling through the LiteRT-LM runtime",
+  "execution_template": {
+    "type": "LiteRtLm",
+    "model_file": "gemma-4-E2B-it.litertlm",
+    "context_length": 4096
+  },
+  "preprocessing": [],
+  "postprocessing": [],
+  "files": [
+    "gemma-4-E2B-it.litertlm"
+  ],
+  "metadata": {
+    "task": "vlm",
+    "architecture": "gemma4",
+    "backend": "litert-lm",
+    "languages": [
+      "multilingual",
+      "140+"
+    ],
+    "instruction_tuned": true,
+    "context_length": 4096,
+    "quantization": "mixed-2-4-8bit",
+    "source": "litert-community/gemma-4-E2B-it-litert-lm@2d74ac41a33d7da82f39f7d5720a04c68514a103"
+  }
+}

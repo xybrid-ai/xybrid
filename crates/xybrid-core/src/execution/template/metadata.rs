@@ -61,11 +61,19 @@ pub enum ExecutionTemplate {
         model_file: String,
     },
 
-    /// Legacy LiteRT-LM metadata; retained for serialization compatibility.
+    /// LiteRT-LM chat model (`.litertlm`), executed by the LiteRT-LM runtime
+    /// in builds with the `llm-litert` feature.
+    ///
+    /// The file carries its own prompt template and, when the model has
+    /// them, its vision and audio encoders, so the bundle needs no template
+    /// file and no `vision_encoder` entry. Text chat, image input (when the
+    /// file has a vision encoder) and tool calling are supported; see
+    /// `runtime_adapter::litert_lm` for what differs from GGUF models.
     LiteRtLm {
         /// Path to the .litertlm model file (relative to bundle root)
         model_file: String,
-        /// Maximum context length (tokens); engine default when absent
+        /// Maximum context length (tokens); 4096 when absent. Capped to the
+        /// file's own maximum, which is fixed when the file is exported.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         context_length: Option<NonZeroUsize>,
     },
@@ -813,10 +821,26 @@ pub fn backend_label_from_template(
         ExecutionTemplate::ChoiceScorer { scorer } => match scorer {
             ChoiceScorerSpec::OnnxByteOptionScorer(_) => Some("ort"),
         },
+        // The format fixes the runtime; no hint participates.
+        ExecutionTemplate::LiteRtLm { .. } => Some("litertlm"),
         ExecutionTemplate::CoreMl { .. }
         | ExecutionTemplate::TfLite { .. }
-        | ExecutionTemplate::LiteRtLm { .. }
         | ExecutionTemplate::ModelGraph { .. } => None,
+    }
+}
+
+impl ExecutionTemplate {
+    /// Whether this template is a chat language model: one that takes
+    /// messages and generates text, streamed or not.
+    ///
+    /// The single answer for "is this an LLM" above the executor: the SDK's
+    /// output typing and streaming dispatch and the observability
+    /// classifiers ask it instead of matching formats themselves.
+    pub fn is_chat_llm(&self) -> bool {
+        matches!(
+            self,
+            Self::Gguf { .. } | Self::VisionLanguage { .. } | Self::LiteRtLm { .. }
+        )
     }
 }
 

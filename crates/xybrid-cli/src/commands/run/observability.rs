@@ -150,12 +150,16 @@ pub(super) fn workflow<T, E>(name: &str, execute: impl FnOnce() -> Result<T, E>)
     result
 }
 
+/// The contract's runtime name for a backend's wire label. The SDK maps the
+/// same labels the same way (`xybrid_sdk::observability::runtime_name`), so
+/// a model run through the CLI and through an SDK lands under one runtime.
 fn runtime(label: &str) -> &str {
     match label {
         "ort" | "onnx" => "onnxruntime",
         "llamacpp" | "llama.cpp" => "llama.cpp",
         "mistralrs" | "mistral" => "mistral.rs",
         "whispercpp" => "whisper.cpp",
+        "litertlm" => "litert-lm",
         "cloud" | "gateway" => "http",
         other => other,
     }
@@ -168,7 +172,7 @@ fn request(metadata: &ModelMetadata, input: &Envelope) -> InferenceRequest {
         .and_then(|value| value.as_str());
     let task_lower = task.unwrap_or_default().to_ascii_lowercase();
     let operation = match &metadata.execution_template {
-        ExecutionTemplate::Gguf { .. } | ExecutionTemplate::VisionLanguage { .. } => "chat",
+        template if template.is_chat_llm() => "chat",
         ExecutionTemplate::GgmlWhisper { .. }
         | ExecutionTemplate::ZzzEmbed { .. }
         | ExecutionTemplate::ZzzPhonon { .. } => "generate_content",
@@ -276,6 +280,46 @@ fn parts(envelope: &Envelope) -> Vec<Part> {
         EnvelopeKind::Embedding(_) => Vec::new(),
         // Decision state, questions and answers are never captured content.
         EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod runtime_names {
+    use super::*;
+
+    /// `.litertlm` models report the wire label `litertlm`; the runtime they
+    /// are grouped under is `litert-lm`, as the SDK names it.
+    #[test]
+    fn a_litert_lm_model_is_recorded_under_the_sdks_runtime_name() {
+        assert_eq!(runtime("litertlm"), "litert-lm");
+
+        let metadata: ModelMetadata = serde_json::from_value(serde_json::json!({
+            "model_id": "m",
+            "version": "1.0",
+            "execution_template": { "type": "LiteRtLm", "model_file": "m.litertlm" },
+            "preprocessing": [],
+            "postprocessing": [],
+            "files": ["m.litertlm"],
+            "metadata": { "task": "text-generation", "backend": "litert-lm" },
+        }))
+        .expect("valid metadata");
+        let request = request(&metadata, &Envelope::new(EnvelopeKind::Text("hi".into())));
+        assert_eq!(request.runtime.as_deref(), Some("litert-lm"));
+        assert_eq!(request.provider, "litert-lm");
+    }
+
+    #[test]
+    fn the_other_runtimes_keep_their_names() {
+        for (label, name) in [
+            ("ort", "onnxruntime"),
+            ("llamacpp", "llama.cpp"),
+            ("mistralrs", "mistral.rs"),
+            ("whispercpp", "whisper.cpp"),
+            ("cloud", "http"),
+            ("candle", "candle"),
+        ] {
+            assert_eq!(runtime(label), name);
+        }
     }
 }
 

@@ -6488,6 +6488,7 @@ dependencies = [
  "walkdir",
  "windows 0.61.3",
  "windows-sys 0.59.0",
+ "xybrid-litert-lm",
  "xybrid-llama",
  "xybrid-llama-sys",
  "xybrid-whisper",
@@ -6506,6 +6507,14 @@ dependencies = [
  "tokio",
  "xybrid-core",
  "xybrid-sdk",
+]
+
+[[package]]
+name = "xybrid-litert-lm"
+version = "0.19.0"
+dependencies = [
+ "libloading 0.8.9",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -6569,6 +6578,7 @@ dependencies = [
  "dirs",
  "hf-hub",
  "httpmock",
+ "image 0.25.10",
  "log",
  "opentelemetry",
  "opentelemetry_sdk",

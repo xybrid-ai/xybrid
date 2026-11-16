@@ -75,27 +75,55 @@ use crate::result::{output_type_for_envelope, OutputType};
 use crate::run_options::RunOptions;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 use xybrid_core::cache_provider::CacheProvider;
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 use xybrid_core::context::DEVICE_CLASS_SCHEMA_VERSION;
 use xybrid_core::context::{DeviceMetrics, StageDescriptor};
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 use xybrid_core::device::ResourceMonitor;
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 use xybrid_core::event_bus::{EventContext, OrchestratorEvent};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::orchestrator::routing_engine::LocalAvailability;
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 use xybrid_core::orchestrator::{
     LocalAuthority, OrchestrationAuthority, ResolvedTarget, StageContext,
 };
 use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 use xybrid_core::orchestrator::{PolicyOutcome, PolicyRequest};
 use xybrid_core::pipeline::{ExecutionTarget, IntegrationProvider, StageOptions};
 use xybrid_core::pipeline_config::PipelineConfig;
@@ -364,13 +392,21 @@ fn pipeline_metrics(options: &RunOptions) -> DeviceMetrics {
     options.device_metrics.as_ref().cloned().unwrap_or_default()
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 struct StreamingFastPathCacheProvider {
     model_id: String,
     model_path: PathBuf,
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 impl StreamingFastPathCacheProvider {
     fn new(model_id: impl Into<String>, model_path: PathBuf) -> Self {
         Self {
@@ -380,7 +416,11 @@ impl StreamingFastPathCacheProvider {
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 impl CacheProvider for StreamingFastPathCacheProvider {
     fn is_model_cached(&self, model_id: &str) -> bool {
         model_id == self.model_id && self.model_path.exists()
@@ -403,7 +443,11 @@ impl CacheProvider for StreamingFastPathCacheProvider {
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 fn stage_descriptor_with_bundle_path(
     stage_descriptor: &StageDescriptor,
     bundle_path: &Path,
@@ -421,7 +465,11 @@ fn stage_descriptor_with_bundle_path(
 /// `top_p` would be ignored by streaming and invalid values would skip
 /// validation entirely. Input metadata still wins over the YAML options, and
 /// errors surface before any generation or token callback begins.
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 fn prepare_streaming_fast_path_input(
     stage: &StageDescriptor,
     envelope: &Envelope,
@@ -430,7 +478,11 @@ fn prepare_streaming_fast_path_input(
         .map_err(|e| SdkError::pipeline(format!("stage '{}': {}", stage.name, e)))
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 #[derive(Debug, Clone)]
 struct StreamingFastPathRoute {
     policy_allowed: bool,
@@ -442,7 +494,11 @@ struct StreamingFastPathRoute {
     can_stream_locally: bool,
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 fn resolve_streaming_fast_path_route(
     authority: &dyn OrchestrationAuthority,
     stage: &StageDescriptor,
@@ -500,7 +556,11 @@ fn resolve_streaming_fast_path_route(
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 fn streaming_fast_path_events(
     stage_name: &str,
     model_id: &str,
@@ -525,7 +585,11 @@ fn streaming_fast_path_events(
     ]
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 fn publish_streaming_fast_path_events(
     stage_name: &str,
     model_id: &str,
@@ -538,7 +602,12 @@ fn publish_streaming_fast_path_events(
 }
 
 /// The single local stage the streaming fast path runs.
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", test))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert",
+    test
+))]
 struct StreamingStage<'a> {
     name: &'a str,
     model_id: &'a str,
@@ -556,7 +625,12 @@ struct StreamingStage<'a> {
 /// token, and the stage, its attempt and `workflow` end `cancelled`, with no
 /// exception, while the caller still receives the stage's error.
 /// `chunk_count` counts the tokens `on_token` accepted.
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", test))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert",
+    test
+))]
 fn observe_streaming_stage(
     workflow: &crate::observability::WorkflowScope,
     options: &RunOptions,
@@ -1627,7 +1701,7 @@ impl Xybrid {
     /// # Example
     ///
     /// ```no_run
-    /// # #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    /// # #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-litert"))]
     /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
     /// use xybrid_sdk::{Xybrid, PartialToken};
     /// use xybrid_sdk::ir::{Envelope, EnvelopeKind};
@@ -1653,7 +1727,11 @@ impl Xybrid {
     ///
     /// Streaming is only supported for LLM stages (GGUF models). For other
     /// model types, this behaves identically to `run_pipeline`.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     pub fn run_pipeline_streaming<'a>(
         yaml: &str,
         envelope: &Envelope,
@@ -1667,7 +1745,11 @@ impl Xybrid {
     /// Uses `RunOptions::device_metrics` for the single-stage streaming LLM
     /// routing fast path, so the streaming path observes the same caller-supplied
     /// routing context as non-streaming `run_pipeline_with_options`.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     pub fn run_pipeline_streaming_with_options<'a>(
         yaml: &str,
         envelope: &Envelope,
@@ -1707,10 +1789,13 @@ impl Xybrid {
                         let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
                             .map_err(|e| SdkError::pipeline_src("Failed to parse metadata", e))?;
 
-                        // Check if this is an LLM model
+                        // Check if this is an LLM model. A `VisionLanguage`
+                        // bundle is one too and has never taken this path;
+                        // it keeps the batch fallback below.
                         if matches!(
                             metadata.execution_template,
                             xybrid_core::execution::ExecutionTemplate::Gguf { .. }
+                                | xybrid_core::execution::ExecutionTemplate::LiteRtLm { .. }
                         ) {
                             let model_id = metadata.model_id.clone();
                             // The fast path bypasses the orchestrator, so it must
@@ -1830,7 +1915,11 @@ impl Xybrid {
     ///
     /// Without LLM features, streaming is not available and this falls back
     /// to regular pipeline execution.
-    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    #[cfg(not(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    )))]
     #[allow(unused_variables)]
     pub fn run_pipeline_streaming<'a>(
         yaml: &str,
@@ -1842,7 +1931,11 @@ impl Xybrid {
     }
 
     /// Stub for when LLM features are disabled.
-    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    #[cfg(not(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    )))]
     #[allow(unused_variables)]
     pub fn run_pipeline_streaming_with_options<'a>(
         yaml: &str,
@@ -2664,7 +2757,11 @@ stages:
         ) -> PipelineResult<PipelineExecutionResult> = Xybrid::run_pipeline_streaming_with_options;
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn streaming_fast_path_route_uses_policy_and_local_routing() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -2689,7 +2786,11 @@ stages:
         assert!(route.reason.contains("Explicit target"));
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn streaming_fast_path_descriptor_uses_loaded_bundle_path() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -2704,7 +2805,11 @@ stages:
         assert!(stage.is_locally_runnable());
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn streaming_fast_path_network_target_disables_local_streaming() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -2726,7 +2831,11 @@ stages:
         assert_eq!(route.target, "cloud");
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn streaming_fast_path_policy_deny_disables_local_streaming() {
         use xybrid_core::orchestrator::policy_engine::{DefaultPolicyEngine, PolicyEngine};
@@ -2768,7 +2877,11 @@ signature: "test-deny-text"
         );
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn streaming_fast_path_events_emit_policy_before_routing_with_hint() {
         let route = StreamingFastPathRoute {
@@ -3090,7 +3203,11 @@ stages:
     }
 
     /// Build the same stage shape the streaming fast path uses from YAML.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     fn streaming_stage(yaml: &str) -> StageDescriptor {
         let ref_ = PipelineRef::from_yaml(yaml).unwrap();
         let stage_config = &ref_.config.stages[0];
@@ -3098,7 +3215,11 @@ stages:
             .with_options(Pipeline::convert_options(&stage_config.options()))
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn streaming_fast_path_input_gets_the_same_options_as_batch() {
         let stage = streaming_stage(
@@ -3137,7 +3258,11 @@ stages:
         );
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn streaming_fast_path_input_keeps_overrides_and_rejects_invalid_options() {
         let stage = streaming_stage(

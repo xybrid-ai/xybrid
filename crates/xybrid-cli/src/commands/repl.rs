@@ -89,7 +89,11 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
     // Speculative cloud only applies to a bare registry --model (not config /
     // HuggingFace / GGUF file). When it engages, the model serves from cloud
     // immediately and the weights download in the background.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     let want_speculative = speculative_cloud
         && model.is_some()
         && config.is_none()
@@ -97,7 +101,11 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
         && model_file.is_none();
     // Without LLM features the loop has no model-driven path that could consume
     // the cloud-backed handle — fall through to the normal blocking download.
-    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    #[cfg(not(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    )))]
     let want_speculative = {
         if speculative_cloud {
             ui::warning(
@@ -109,7 +117,11 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
 
     // Holds the cloud-backed model when the speculative load speculated,
     // installed into `loaded_model` below.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     let mut speculative_model: Option<xybrid_sdk::model::XybridModel> = None;
 
     // --huggingface: load from HuggingFace repo
@@ -125,7 +137,11 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
             // local-load block skip this stage — the speculative model drives
             // the loop and transparently switches to local once the download
             // lands.
-            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+            #[cfg(any(
+                feature = "llm-mistral",
+                feature = "llm-llamacpp",
+                feature = "llm-litert"
+            ))]
             {
                 speculative_model = Some(model_obj);
             }
@@ -271,7 +287,11 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
     // available, so the block above skipped it. Speculation targets LLM/chat,
     // so enable conversation context up front (the placeholder can't report
     // `is_llm()` until the local weights land).
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     if loaded_model.is_none() {
         if let Some(model) = speculative_model.take() {
             let mut ctx = ConversationContext::new();
@@ -488,7 +508,11 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
         let start = std::time::Instant::now();
 
         // Try streaming execution
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        #[cfg(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        ))]
         let use_streaming = {
             let can_stream = stages.len() == 1 && {
                 let locally_available = stage_is_locally_available(&stages[0]);
@@ -516,7 +540,11 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
             can_stream
         };
 
-        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        #[cfg(not(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        )))]
         let use_streaming = {
             if stream {
                 ui::warning("Streaming requested but LLM features not enabled");
@@ -526,7 +554,11 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
         };
 
         if use_streaming {
-            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+            #[cfg(any(
+                feature = "llm-mistral",
+                feature = "llm-llamacpp",
+                feature = "llm-litert"
+            ))]
             {
                 let did_stream = try_streaming_execution(
                     &stages,
@@ -566,11 +598,19 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
 }
 
 fn print_streaming_status(stream: bool) {
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     if stream {
         ui::ok("Token streaming: enabled");
     }
-    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    #[cfg(not(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    )))]
     if stream {
         ui::warning("Token streaming: not available (LLM features not compiled)");
     }
@@ -1047,7 +1087,11 @@ fn image_format_hint(path: &Path) -> Result<&str> {
         .ok_or_else(|| anyhow::anyhow!("Image file has no extension: {}", path.display()))
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 fn try_streaming_execution(
     stages: &[StageDescriptor],
     input: &Envelope,
@@ -1117,7 +1161,11 @@ fn try_streaming_execution(
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 fn execute_streaming(
     model: &xybrid_sdk::model::XybridModel,
     input: &Envelope,

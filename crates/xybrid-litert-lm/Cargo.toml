@@ -1,0 +1,27 @@
+[package]
+name = "xybrid-litert-lm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Safe Rust bindings to Google's LiteRT-LM runtime through its C API. The runtime library is opened at run time; nothing is linked at build time."
+
+[lib]
+name = "xybrid_litert_lm"
+path = "src/lib.rs"
+
+[features]
+default = []
+# `xybrid_litert_lm::testing`: a scripted runtime that lives in the calling
+# process, so code built on this crate can be tested without a model or the
+# native library. Never enabled in a shipped build.
+test-util = []
+
+[dependencies]
+# Already in the workspace lockfile through `ort`; nothing new enters it.
+libloading = "0.8"
+thiserror = { workspace = true }
+
+[[test]]
+name = "fake_runtime"
+required-features = ["test-util"]

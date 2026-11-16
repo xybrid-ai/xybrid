@@ -210,7 +210,18 @@ impl ToolCallProtocol {
         }
     }
 
-    fn call_start(self) -> &'static str {
+    /// The text of one call, as this protocol writes it between its call
+    /// markers. `None` for protocols without a formatter here (LFM2, LFM3).
+    pub(crate) fn format_call(self, name: &str, arguments: &Value) -> Option<String> {
+        match self {
+            Self::Gemma => Some(gemma::format_gemma_call(name, arguments)),
+            Self::FunctionGemma => Some(gemma::format_function_gemma_call(name, arguments)),
+            Self::Lfm2 | Self::Lfm3 => None,
+        }
+    }
+
+    /// The marker that opens one of this protocol's tool-call blocks.
+    pub(crate) fn call_start(self) -> &'static str {
         match self {
             Self::Lfm2 => TOOL_CALL_START,
             Self::Lfm3 => LFM3_TOOL_CALL_START,
@@ -219,7 +230,8 @@ impl ToolCallProtocol {
         }
     }
 
-    fn call_end(self) -> &'static str {
+    /// The marker that closes one of this protocol's tool-call blocks.
+    pub(crate) fn call_end(self) -> &'static str {
         match self {
             Self::Lfm2 => TOOL_CALL_END,
             Self::Lfm3 => LFM3_TOOL_CALL_END,
@@ -515,7 +527,14 @@ pub(crate) fn compose_tool_continuation(
     }
 }
 
-fn validate_tool_responses(value: &Value, calls: &[ToolCall]) -> Result<Vec<Value>, AdapterError> {
+/// Match tool responses to the calls they answer, in call order.
+///
+/// Each returned object is the caller's response with `call_id` and `name`
+/// filled in from the call it answers.
+pub(crate) fn validate_tool_responses(
+    value: &Value,
+    calls: &[ToolCall],
+) -> Result<Vec<Value>, AdapterError> {
     let responses = value.as_array().ok_or_else(|| {
         AdapterError::InvalidInput("tool_responses_json must be a json array".to_string())
     })?;
@@ -622,7 +641,7 @@ fn tool_response_content(response: &Value, index: usize) -> Result<&Value, Adapt
     })
 }
 
-pub(super) fn sanitize_tool_result_content(value: &Value) -> Value {
+pub(crate) fn sanitize_tool_result_content(value: &Value) -> Value {
     match value {
         Value::String(value) => Value::String(neutralize_reserved_markers(value)),
         Value::Array(values) => Value::Array(

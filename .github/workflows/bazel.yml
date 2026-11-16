@@ -317,13 +317,21 @@ jobs:
       # The inline `#[cfg(test)] mod tests` of each crate, plus the `tests/`
       # integration binaries (one target per file, since each is its own binary).
       #
-      # Every tests/ binary in the workspace is now covered. The two exceptions
-      # are both cargo-gated the same way in cargo itself:
+      # Every tests/ binary in the workspace is now covered. The exceptions
+      # are all cargo-gated the same way in cargo itself:
       #  - xybrid-sdk's cloud_fallback_e2e (required-features = ["dev-tools"])
       #    needs `test-util` propagated sdk -> core, and Bazel has no cross-crate
       #    feature propagation.
       #  - integration-tests' local_llm is gated on llm-mistral, a backend
       #    xybrid-core's Bazel target does not build at all.
+      #  - litert_lm_gemma4 in xybrid-core and xybrid-sdk is gated on llm-litert
+      #    (off unless --//:llm_litert=true) and needs a 2.6 GB model and the
+      #    LiteRT-LM runtime library, neither of which exists on CI.
+      #  - litert_lm_fake (core and sdk) and the sdk's litert_lm_missing_runtime
+      #    need llm-litert and, for the scripted runtime, `test-util`
+      #    propagated sdk -> core -> xybrid-litert-lm. ci.yml's test-llm job
+      #    runs them with cargo. The stream bridge under them is covered here
+      #    by //crates/xybrid-litert-lm:fake_runtime below.
       #
       # Adding a target is not enough on its own: a file wrapped in
       # `#![cfg(feature = ...)]` compiles to an EMPTY binary that still reports
@@ -335,11 +343,25 @@ jobs:
             //crates/xybrid-cli:all \
             //crates/xybrid-core:all \
             //crates/xybrid-ffi-facade:xybrid-ffi-facade_test \
+            //crates/xybrid-litert-lm:all \
             //crates/xybrid-llama:all \
             //crates/xybrid-sdk:all \
             //crates/xybrid-whisper:all \
             //integration-tests:all \
             //xtask:xtask_test
+
+      # The same inline tests with the LiteRT-LM backend compiled in. The flag
+      # sets the feature on xybrid-core alone, so this is where a test (or a
+      # gate) that reads another crate's `cfg` for it stops agreeing with the
+      # code. Nothing else in the workflow turns the flag on.
+      - name: Run Rust tests on RBE with --//:llm_litert=true
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk test --config=remote -c opt --test_output=errors \
+            --//:llm_litert=true \
+            //crates/xybrid-core:xybrid-core_test \
+            //crates/xybrid-litert-lm:all \
+            //crates/xybrid-sdk:xybrid-sdk_test
 
       # Desktop lanes on RBE: linux CLI (native) + the macOS-CPU cross
       # (hermetic clang + @macos_sdk + vendored ort; Metal/Swift stay Mac-bound

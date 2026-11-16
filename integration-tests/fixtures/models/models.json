@@ -357,6 +357,43 @@
         }
       }
     },
+    "gemma-4-e2b-litert": {
+      "description": "Gemma 4 E2B - LiteRT-LM format (text, vision, tools); needs the LiteRT-LM runtime library at run time",
+      "source": "url",
+      "size_mb": 2588,
+      "task": "vision-language",
+      "feature_gate": "llm-litert",
+      "files": [
+        {
+          "url": "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/2d74ac41a33d7da82f39f7d5720a04c68514a103/gemma-4-E2B-it.litertlm",
+          "output": "gemma-4-E2B-it.litertlm",
+          "sha256": "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "gemma-4-e2b-litert",
+        "version": "1.0",
+        "description": "Gemma 4 E2B in LiteRT-LM format - text, image input and tool calling through the LiteRT-LM runtime",
+        "execution_template": {
+          "type": "LiteRtLm",
+          "model_file": "gemma-4-E2B-it.litertlm",
+          "context_length": 4096
+        },
+        "preprocessing": [],
+        "postprocessing": [],
+        "files": ["gemma-4-E2B-it.litertlm"],
+        "metadata": {
+          "task": "vlm",
+          "architecture": "gemma4",
+          "backend": "litert-lm",
+          "languages": ["multilingual", "140+"],
+          "instruction_tuned": true,
+          "context_length": 4096,
+          "quantization": "mixed-2-4-8bit",
+          "source": "litert-community/gemma-4-E2B-it-litert-lm@2d74ac41a33d7da82f39f7d5720a04c68514a103"
+        }
+      }
+    },
     "neutts-nano-q4": {
       "description": "NeuTTS Nano Q4 - Codec-based TTS (120M GGUF + NeuCodec ONNX + OpenPhonemizer). Voice cloning, no system deps.",
       "source": "registry",

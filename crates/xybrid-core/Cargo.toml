@@ -31,6 +31,9 @@ xybrid-llama = { path = "../xybrid-llama", version = "0.19.0", optional = true }
 # `llm-llamacpp` — that is where the shared ggml comes from.
 xybrid-whisper = { path = "../xybrid-whisper", version = "0.19.0", optional = true }
 xybrid-zzz-sys = { path = "../zzz-sys", version = "0.19.0", optional = true }
+# LiteRT-LM runtime bindings. Nothing is linked: the runtime library is
+# opened at run time, so enabling `llm-litert` adds no native build step.
+xybrid-litert-lm = { path = "../xybrid-litert-lm", version = "0.19.0", optional = true }
 # Real Jinja engine for the llama.cpp chat-template fallback: when llama.cpp's
 # hardcoded non-Jinja matcher rejects a GGUF's embedded template (returns -1),
 # we render that template here instead. Gated with the deps below into
@@ -128,10 +131,14 @@ default = ["ort-download"]
 schema = ["dep:schemars"]
 
 # Expose the `testing` module (mocks + model fixtures) to downstream crates.
-# No-op marker today (the module is currently always `pub`); it exists so
-# consumers can depend on `xybrid-core/test-util` now and stay correct once
+# No-op marker today for that module (it is currently always `pub`); it exists
+# so consumers can depend on `xybrid-core/test-util` now and stay correct once
 # the `testing` module is gated behind this feature (audit 4a).
-test-util = []
+#
+# With `llm-litert` it also lets a test put a scripted LiteRT-LM runtime
+# behind a model path (`runtime_adapter::litert_lm::testing`), so the
+# backend runs without a model or the native library.
+test-util = ["xybrid-litert-lm?/test-util"]
 
 # ONNX Runtime — the static-vs-dynamic mode is decided per-target by the
 # [target.'cfg(...)'] ort dependency sections, NOT by these features. The two
@@ -214,6 +221,15 @@ tts-zzz = [
     "dep:xybrid-zzz-sys",
     "xybrid-zzz-sys/bindings",
 ]
+
+# LiteRT-LM backend for `.litertlm` models (ExecutionTemplate::LiteRtLm):
+# text, image input and tool calling through the runtime's Conversation API.
+# Independent of `llm-llamacpp`; the two can be enabled together, and the
+# model's format picks the runtime. The LiteRT-LM shared library is opened
+# at run time (see `crates/xybrid-litert-lm`): a build with this feature
+# still starts where the library is absent, and loading a `.litertlm`
+# model there fails with a typed error.
+llm-litert = ["dep:xybrid-litert-lm"]
 
 # The Rust vision pipeline (envelopes, preprocessing, strategy dispatch) is
 # always compiled in. This feature gates only the *native* llama multimodal

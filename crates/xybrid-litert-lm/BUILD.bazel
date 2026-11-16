@@ -1,0 +1,65 @@
+# LiteRT-LM runtime bindings. Pure Rust: Google's runtime library is opened at
+# run time (libloading), so this package builds and links nothing native and
+# is the same on every platform. Its two dependencies come from the hub.
+#
+# Nothing depends on it by default. xybrid-core takes it under
+# `--//:llm_litert=true` (see the flag in the root BUILD.bazel).
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
+
+# Target name == package dir basename, so `//crates/xybrid-litert-lm` resolves
+# and the derived crate name is `xybrid_litert_lm`.
+rust_library(
+    name = "xybrid-litert-lm",
+    version = XYBRID_VERSION,
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    deps = all_crate_deps(normal = True),
+    visibility = ["//visibility:public"],
+)
+
+# The same crate with the `test-util` feature, which adds
+# `xybrid_litert_lm::testing`: a scripted runtime that lives in the calling
+# process. `testonly`, so no shipped target can depend on it.
+rust_library(
+    name = "xybrid-litert-lm_test_util",
+    testonly = True,
+    version = XYBRID_VERSION,
+    srcs = glob(["src/**/*.rs"]),
+    crate_features = ["test-util"],
+    crate_name = "xybrid_litert_lm",
+    edition = "2021",
+    deps = all_crate_deps(normal = True),
+)
+
+# Inline `#[cfg(test)] mod tests`, the ones that drive the scripted runtime
+# included. `crate = ` inherits srcs, edition, features and deps.
+rust_test(
+    name = "xybrid-litert-lm_test",
+    version = XYBRID_VERSION,
+    crate = ":xybrid-litert-lm_test_util",
+)
+
+# Integration tests: each tests/*.rs is its own binary.
+#  - fake_runtime drives the stream bridge against the scripted runtime: no
+#    model, no native library.
+#  - real_runtime needs the LiteRT-LM library and a model, named by environment
+#    variables. Neither exists on CI, where every test in it skips; the target
+#    is here so the file keeps compiling.
+rust_test(
+    name = "fake_runtime",
+    version = XYBRID_VERSION,
+    srcs = ["tests/fake_runtime.rs"],
+    edition = "2021",
+    deps = [":xybrid-litert-lm_test_util"],
+)
+
+rust_test(
+    name = "real_runtime",
+    version = XYBRID_VERSION,
+    srcs = ["tests/real_runtime.rs"],
+    edition = "2021",
+    deps = [":xybrid-litert-lm"],
+)

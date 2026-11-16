@@ -473,11 +473,11 @@
           ]
         },
         {
-          "description": "Legacy LiteRT-LM metadata; retained for serialization compatibility.",
+          "description": "LiteRT-LM chat model (`.litertlm`), executed by the LiteRT-LM runtime\nin builds with the `llm-litert` feature.\n\nThe file carries its own prompt template and, when the model has\nthem, its vision and audio encoders, so the bundle needs no template\nfile and no `vision_encoder` entry. Text chat, image input (when the\nfile has a vision encoder) and tool calling are supported; see\n`runtime_adapter::litert_lm` for what differs from GGUF models.",
           "type": "object",
           "properties": {
             "context_length": {
-              "description": "Maximum context length (tokens); engine default when absent",
+              "description": "Maximum context length (tokens); 4096 when absent. Capped to the\nfile's own maximum, which is fixed when the file is exported.",
               "type": [
                 "integer",
                 "null"

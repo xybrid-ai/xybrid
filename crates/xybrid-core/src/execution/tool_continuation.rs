@@ -17,11 +17,11 @@
 //! [`text_messages_from_multimodal`].
 
 use crate::ir::Envelope;
-use crate::runtime_adapter::llm::GenerationOutput;
-// llamacpp-only on purpose: `streaming_postprocess` is not compiled for
-// mistral-only builds, and the mistral backend rejects tool-bearing
-// requests outright, so a continuation can never execute there.
-#[cfg(feature = "llm-llamacpp")]
+use crate::runtime_adapter::llm::{GenerationOutput, ToolContinuationTurn};
+// Not for mistral-only builds: `streaming_postprocess` is not compiled there,
+// and the mistral backend rejects tool-bearing requests outright, so a
+// continuation can never execute.
+#[cfg(any(feature = "llm-llamacpp", feature = "llm-litert"))]
 use crate::runtime_adapter::streaming_postprocess::{
     is_reasoning_primed, strip_and_capture_thinking_tags_primed,
 };
@@ -62,6 +62,11 @@ pub(crate) fn run_tool_continuation(
     input: &Envelope,
     responses_json: &str,
 ) -> ExecutorResult<GenerationOutput> {
+    // A backend with a chat interface of its own replays the turn from data.
+    if backend.has_tool_continuation() {
+        let turn = continuation_turn(messages, input, responses_json)?;
+        return backend.generate_tool_continuation(&turn, gen_config, None);
+    }
     let (prompt, raw_config) =
         compose_continuation_prompt(backend, messages, gen_config, input, responses_json)?;
     let out = backend.generate_raw(&prompt, &raw_config)?;
@@ -85,11 +90,43 @@ pub(crate) fn run_tool_continuation_streaming(
     responses_json: &str,
     on_token: StreamingCallback<'_>,
 ) -> ExecutorResult<GenerationOutput> {
+    if backend.has_tool_continuation() {
+        let turn = continuation_turn(messages, input, responses_json)?;
+        return backend.generate_tool_continuation(&turn, gen_config, Some(on_token));
+    }
     let (prompt, raw_config) =
         compose_continuation_prompt(backend, messages, gen_config, input, responses_json)?;
     let out = backend.generate_raw_streaming(&prompt, &raw_config, on_token)?;
     // The backend split the reasoning off its text with the same priming.
     Ok(finish_continuation_output(out, None))
+}
+
+/// The continuation as data: the envelope's prior assistant text beside the
+/// messages and results the caller resolved.
+fn continuation_turn<'a>(
+    messages: &'a [ChatMessage],
+    input: &'a Envelope,
+    responses_json: &'a str,
+) -> ExecutorResult<ToolContinuationTurn<'a>> {
+    Ok(ToolContinuationTurn {
+        messages,
+        prior_assistant_text: prior_assistant_text(input)?,
+        tool_responses_json: responses_json,
+    })
+}
+
+fn prior_assistant_text(input: &Envelope) -> ExecutorResult<&str> {
+    input
+        .metadata
+        .get(Envelope::TOOL_PRIOR_TEXT_METADATA_KEY)
+        .map(String::as_str)
+        .ok_or_else(|| {
+            AdapterError::InvalidInput(
+                "tool_responses metadata requires tool_prior_text; build continuation \
+                 envelopes with Envelope::tool_results"
+                    .to_string(),
+            )
+        })
 }
 
 /// Render the chat prefix, append the replayed assistant turn plus the tool
@@ -102,16 +139,7 @@ fn compose_continuation_prompt(
     input: &Envelope,
     responses_json: &str,
 ) -> ExecutorResult<(String, GenerationConfig)> {
-    let prior_text = input
-        .metadata
-        .get(Envelope::TOOL_PRIOR_TEXT_METADATA_KEY)
-        .ok_or_else(|| {
-            AdapterError::InvalidInput(
-                "tool_responses metadata requires tool_prior_text; build continuation \
-                 envelopes with Envelope::tool_results"
-                    .to_string(),
-            )
-        })?;
+    let prior_text = prior_assistant_text(input)?;
     let base = backend.render_chat_prompt(messages, gen_config)?;
     let prompt = compose_tool_continuation(&base, prior_text, responses_json)?;
     // generate_raw applies only caller-supplied stop sequences (no
@@ -147,7 +175,7 @@ fn finish_continuation_output(
     // After a prompt that ends inside `<think>`, a thought the budget cut
     // short has no marker at all. Priming text that is already split would
     // instead turn a truncated answer into reasoning.
-    #[cfg(feature = "llm-llamacpp")]
+    #[cfg(any(feature = "llm-llamacpp", feature = "llm-litert"))]
     {
         let primed = raw_prompt.is_some_and(is_reasoning_primed);
         let truncated_by_budget = out.finish_reason == "length";
@@ -174,17 +202,7 @@ pub(crate) fn text_messages_from_multimodal(
             for part in &message.parts {
                 match part.as_text() {
                     Some(text) => content.push_str(text),
-                    None => {
-                        return Err(AdapterError::InvalidInput(
-                            "tool-result continuation requires a text-only conversation. \
-                             A continuation replays the prior turns as a composed text \
-                             prompt, and image embeddings cannot be re-evaluated from \
-                             text — so an image-bearing conversation cannot continue on \
-                             any path, streaming or not. Run the tool loop on a text-only \
-                             conversation, or describe the image in text first."
-                                .to_string(),
-                        ))
-                    }
+                    None => return Err(image_bearing_continuation_error()),
                 }
             }
             Ok(ChatMessage {
@@ -193,6 +211,37 @@ pub(crate) fn text_messages_from_multimodal(
             })
         })
         .collect()
+}
+
+/// The refusal for a tool-result continuation over a conversation that
+/// contains images. One wording for every path that gives it.
+fn image_bearing_continuation_error() -> AdapterError {
+    AdapterError::InvalidInput(
+        "tool-result continuation requires a text-only conversation. \
+         A continuation replays the prior turns as a composed text \
+         prompt, and image embeddings cannot be re-evaluated from \
+         text — so an image-bearing conversation cannot continue on \
+         any path, streaming or not. Run the tool loop on a text-only \
+         conversation, or describe the image in text first."
+            .to_string(),
+    )
+}
+
+/// Refuse tool results for a conversation whose turns contain images.
+///
+/// The conversation paths run an image-bearing history through the
+/// multimodal generate call, which takes messages and nothing else: the tool
+/// results would not reach the model, and the turn would run as the original
+/// question again. Refusing is what the one-shot path already does, through
+/// [`text_messages_from_multimodal`].
+pub(crate) fn reject_image_bearing_continuation(
+    messages: &[MultimodalChatMessage],
+    continuation: Option<ToolContinuation<'_>>,
+) -> ExecutorResult<()> {
+    if continuation.is_some() && messages.iter().any(|message| message.image_count() > 0) {
+        return Err(image_bearing_continuation_error());
+    }
+    Ok(())
 }
 
 /// The tool-result payload carried by a continuation envelope, resolved once

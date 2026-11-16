@@ -27,7 +27,11 @@
 
 use log::{debug, info, warn};
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 use super::template::PostprocessingStep;
 use super::template::{
     backend_label_from_template, quantization_label_from_metadata, span_kind_from_template,
@@ -47,16 +51,25 @@ use super::choice::onnx::OnnxChoiceScorer;
 use super::choice::{ensure_no_choice_kinds, validate_choice_request, EntryPoint};
 use super::decision::{ensure_no_decision_kinds, validate_decision_request};
 use super::listener::ExecutionGuard;
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 use super::llm_telemetry::{
     insert_llm_streaming_metrics, mirror_llm_metrics_to_span, stamp_llm_runtime_backend,
     stamp_llm_span_cost_attribution,
 };
 use super::template::{ChoiceScorerSpec, OnnxByteOptionScorerSpec};
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 use super::tool_continuation::{
-    reject_nested_tool_continuation_parts, run_tool_continuation, run_tool_continuation_streaming,
-    text_messages_from_multimodal, ToolContinuation,
+    reject_image_bearing_continuation, reject_nested_tool_continuation_parts,
+    run_tool_continuation, run_tool_continuation_streaming, text_messages_from_multimodal,
+    ToolContinuation,
 };
 use crate::ir::ChoiceRequest;
 
@@ -68,7 +81,11 @@ fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct LlmAdapterCacheKey {
     model_path: String,
@@ -78,7 +95,11 @@ struct LlmAdapterCacheKey {
     vision_encoder_path: Option<String>,
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 impl LlmAdapterCacheKey {
     fn new(
         model_path: String,
@@ -97,12 +118,80 @@ impl LlmAdapterCacheKey {
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 fn resolve_optional_model_path(base_path: &str, path: Option<&str>) -> Option<String> {
     path.map(|p| Path::new(base_path).join(p).to_string_lossy().to_string())
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+/// Context used for a `.litertlm` model whose metadata names none. The
+/// backend caps it to the file's own maximum.
+#[cfg(feature = "llm-litert")]
+const LITERT_LM_DEFAULT_CONTEXT_LENGTH: usize = 4096;
+
+/// How a chat model that may take images is loaded.
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
+struct VisionChatModel<'a> {
+    model_file: &'a String,
+    chat_template: Option<String>,
+    context_length: usize,
+    backend_hint: Option<&'a str>,
+}
+
+/// The load parameters of `metadata` when it runs on the vision-language
+/// path: a `VisionLanguage` bundle, or a `.litertlm` model.
+///
+/// A `.litertlm` file carries its own prompt template and, when it has one,
+/// its vision encoder, so it needs neither a template file nor a
+/// `vision_encoder` entry. Its format selects the LiteRT-LM backend whatever
+/// the metadata's `backend` hint says.
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
+fn vision_chat_model(metadata: &ModelMetadata) -> Option<VisionChatModel<'_>> {
+    match &metadata.execution_template {
+        ExecutionTemplate::VisionLanguage {
+            model_file,
+            chat_template,
+            context_length,
+            ..
+        } => Some(VisionChatModel {
+            model_file,
+            chat_template: chat_template.clone(),
+            context_length: *context_length,
+            backend_hint: metadata.metadata.get("backend").and_then(|v| v.as_str()),
+        }),
+        #[cfg(feature = "llm-litert")]
+        ExecutionTemplate::LiteRtLm {
+            model_file,
+            context_length,
+        } => Some(VisionChatModel {
+            model_file,
+            chat_template: None,
+            context_length: context_length.map_or(
+                LITERT_LM_DEFAULT_CONTEXT_LENGTH,
+                std::num::NonZeroUsize::get,
+            ),
+            backend_hint: Some(crate::runtime_adapter::litert_lm::BACKEND_HINT),
+        }),
+        _ => None,
+    }
+}
+
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 fn reject_text_only_model_image_input(
     metadata: &ModelMetadata,
     input: &Envelope,
@@ -122,8 +211,22 @@ fn reject_text_only_model_image_input(
     Ok(())
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 fn unsupported_backend_vision_error(metadata: &ModelMetadata, backend_name: &str) -> AdapterError {
+    // A .litertlm file either carries a vision encoder or it does not; no
+    // build option or backend choice adds one.
+    #[cfg(feature = "llm-litert")]
+    if backend_name == crate::runtime_adapter::litert_lm::BACKEND_NAME {
+        return AdapterError::UnsupportedModelCapability {
+            model_id: metadata.model_id.clone(),
+            capability: "image input".to_string(),
+            hint: "this .litertlm file has no vision encoder".to_string(),
+        };
+    }
     AdapterError::UnsupportedBackendCapability {
         model_id: metadata.model_id.clone(),
         backend: backend_name.to_string(),
@@ -143,7 +246,11 @@ fn metadata_reasoning(metadata: &ModelMetadata) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 fn ensure_backend_supports_vision(
     metadata: &ModelMetadata,
     adapter: &LlmRuntimeAdapter,
@@ -170,13 +277,21 @@ use crate::runtime_adapter::onnx::{
 use crate::runtime_adapter::candle::CandleRuntime;
 
 // Always-available LLM types (defined in runtime_adapter/types.rs)
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 use crate::runtime_adapter::types::{ChatMessage, LlmConfig};
 use crate::runtime_adapter::types::{GenerationConfig, StreamingCallback};
 use crate::runtime_adapter::{MultimodalChatMessage, MultimodalMessagePart, VisionEncoder};
 
 // LLM adapter implementation (only available with LLM features)
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 use crate::runtime_adapter::llm::LlmRuntimeAdapter;
 
 use super::modes::{
@@ -260,11 +375,19 @@ pub struct TemplateExecutor {
     /// config matches. The key includes the model path, context window, chat
     /// template, backend hint, and optional vision encoder/mmproj artifact.
     /// This field always exists but is only populated when LLM features are enabled.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     llm_adapter_cache: Option<(LlmAdapterCacheKey, LlmRuntimeAdapter)>,
     /// Placeholder for llm_adapter_cache when LLM features are disabled.
     /// This ensures the struct has consistent fields regardless of features.
-    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    #[cfg(not(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    )))]
     llm_adapter_cache: Option<()>,
     /// The CPU session the TTS and token-ID paths build themselves (see
     /// [`OnnxSessionCache`]). Lives for the executor's lifetime — i.e. the
@@ -447,6 +570,28 @@ impl TemplateExecutor {
         self.runtimes.keys().map(|s| s.as_str()).collect()
     }
 
+    /// The messages of a one-shot request that carries images: the
+    /// envelope's `system_prompt`, when it has one, then the envelope.
+    ///
+    /// The message conversion reads parts and a role, not metadata, so the
+    /// system prompt has to be lifted off the envelope here, as the text
+    /// paths do, or attaching an image would drop it.
+    fn one_shot_multimodal_messages(
+        input: &Envelope,
+    ) -> ExecutorResult<Vec<MultimodalChatMessage>> {
+        let mut messages = Vec::with_capacity(2);
+        if let Some(system) = input.metadata.get("system_prompt") {
+            messages.push(MultimodalChatMessage {
+                role: MessageRole::System,
+                parts: vec![crate::runtime_adapter::MultimodalMessagePart::Text(
+                    system.clone(),
+                )],
+            });
+        }
+        messages.push(MultimodalChatMessage::from_envelope(input)?);
+        Ok(messages)
+    }
+
     fn multimodal_messages_with_context(
         input: &Envelope,
         context: &ConversationContext,
@@ -549,8 +694,8 @@ impl TemplateExecutor {
     /// Whether the model this metadata describes is already loaded in the
     /// responsible runtime's cache.
     ///
-    /// `false` when the template has no cache-aware runtime (GGUF, graphs,
-    /// browser-only templates) — read it as "an execution would pay a load".
+    /// `false` when the template has no cache-aware runtime (GGUF, LiteRT-LM,
+    /// graphs, TFLite) — read it as "an execution would pay a load".
     pub fn is_model_loaded(&self, metadata: &ModelMetadata) -> bool {
         let (runtime_type, model_file) = match &metadata.execution_template {
             #[cfg(feature = "llm-llamacpp")]
@@ -798,7 +943,11 @@ impl TemplateExecutor {
         // Must come before the plain-GGUF fast-path below — CodecTtsStrategy orchestrates
         // PhonemeRaw preprocessing, voice codes, LLM generation, and ONNX codec decoding
         // in a single call. Plain-GGUF models fall through to execute_llm() as before.
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        #[cfg(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        ))]
         if matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. })
             && metadata
                 .postprocessing
@@ -818,15 +967,18 @@ impl TemplateExecutor {
             return strategy.execute(&mut ctx, metadata, input);
         }
 
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-        if let ExecutionTemplate::VisionLanguage {
-            model_file,
-            chat_template,
-            context_length,
-            ..
-        } = &metadata.execution_template
-        {
-            let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
+        #[cfg(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        ))]
+        if let Some(chat_model) = vision_chat_model(metadata) {
+            let (model_file, chat_template, context_length) = (
+                chat_model.model_file,
+                &chat_model.chat_template,
+                &chat_model.context_length,
+            );
+            let backend_hint = chat_model.backend_hint;
             return if Self::requires_multimodal_generation(input) {
                 self.execute_vision_language(
                     metadata,
@@ -881,7 +1033,11 @@ impl TemplateExecutor {
             };
         }
 
-        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        #[cfg(not(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        )))]
         if matches!(
             metadata.execution_template,
             ExecutionTemplate::VisionLanguage { .. }
@@ -930,12 +1086,23 @@ impl TemplateExecutor {
                     "ModelGraph execution should not reach single model path".to_string(),
                 ));
             }
+            #[cfg(feature = "llm-litert")]
             ExecutionTemplate::LiteRtLm { .. } => {
                 return Err(AdapterError::RuntimeError(
-                    "LiteRtLm models run in the browser SDK (@xybrid/web); no native runtime is available".to_string(),
+                    "LiteRtLm execution should dispatch before the single-model path".to_string(),
                 ));
             }
-            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+            #[cfg(not(feature = "llm-litert"))]
+            ExecutionTemplate::LiteRtLm { .. } => {
+                return Err(AdapterError::RuntimeError(
+                    "LiteRtLm execution requires the 'llm-litert' feature".to_string(),
+                ));
+            }
+            #[cfg(any(
+                feature = "llm-mistral",
+                feature = "llm-llamacpp",
+                feature = "llm-litert"
+            ))]
             ExecutionTemplate::Gguf {
                 model_file,
                 chat_template,
@@ -968,7 +1135,11 @@ impl TemplateExecutor {
                     config,
                 );
             }
-            #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+            #[cfg(not(any(
+                feature = "llm-mistral",
+                feature = "llm-llamacpp",
+                feature = "llm-litert"
+            )))]
             ExecutionTemplate::Gguf { .. } => {
                 return Err(AdapterError::RuntimeError(
                     "GGUF/LLM execution requires the 'llm-mistral' or 'llm-llamacpp' feature"
@@ -1327,26 +1498,40 @@ impl TemplateExecutor {
         // appended after it. Resolve the payload here — the messages-based
         // functions below never see the envelope, so it has to be threaded
         // explicitly or it would be silently dropped.
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        #[cfg(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        ))]
         let continuation = ToolContinuation::from_input(input);
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        #[cfg(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        ))]
         reject_nested_tool_continuation_parts(input, "context")?;
 
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-        if let ExecutionTemplate::VisionLanguage {
-            model_file,
-            chat_template,
-            context_length,
-            ..
-        } = &metadata.execution_template
-        {
+        #[cfg(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        ))]
+        if let Some(chat_model) = vision_chat_model(metadata) {
+            let (model_file, chat_template, context_length) = (
+                chat_model.model_file,
+                &chat_model.chat_template,
+                &chat_model.context_length,
+            );
             debug!(
                 target: "xybrid_core",
                 "VisionLanguage model detected, converting context to multimodal messages"
             );
 
             let messages = Self::multimodal_messages_with_context(input, context)?;
-            let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
+            let backend_hint = chat_model.backend_hint;
+            // The image branch below cannot carry tool results; say so
+            // instead of answering the original question again.
+            reject_image_bearing_continuation(&messages, continuation)?;
 
             let mut result = if messages.iter().any(|message| message.image_count() > 0) {
                 self.execute_llm_multimodal_messages(
@@ -1377,7 +1562,11 @@ impl TemplateExecutor {
         }
 
         // Check if this is a GGUF (LLM) model
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        #[cfg(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        ))]
         if let ExecutionTemplate::Gguf {
             model_file,
             chat_template,
@@ -1522,16 +1711,19 @@ impl TemplateExecutor {
         validate_decision_request(metadata, input, EntryPoint::Streaming)?;
         validate_choice_request(metadata, input, EntryPoint::Streaming)?;
 
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        #[cfg(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        ))]
         {
-            if let super::template::ExecutionTemplate::VisionLanguage {
-                model_file,
-                chat_template,
-                context_length,
-                ..
-            } = &metadata.execution_template
-            {
-                let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
+            if let Some(chat_model) = vision_chat_model(metadata) {
+                let (model_file, chat_template, context_length) = (
+                    chat_model.model_file,
+                    &chat_model.chat_template,
+                    &chat_model.context_length,
+                );
+                let backend_hint = chat_model.backend_hint;
 
                 return if Self::requires_multimodal_generation(input) {
                     self.execute_vision_language_streaming(
@@ -1613,7 +1805,11 @@ impl TemplateExecutor {
             );
         }
 
-        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        #[cfg(not(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        )))]
         {
             debug!(
                 target: "xybrid_core",
@@ -1739,27 +1935,41 @@ impl TemplateExecutor {
         // Continuations stream, and they compose with conversation context —
         // see `execute_with_context_impl` for why the payload is resolved
         // here and threaded down rather than re-read further in.
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        #[cfg(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        ))]
         let continuation = ToolContinuation::from_input(input);
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        #[cfg(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        ))]
         reject_nested_tool_continuation_parts(input, "streaming context")?;
 
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        #[cfg(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        ))]
         {
-            if let ExecutionTemplate::VisionLanguage {
-                model_file,
-                chat_template,
-                context_length,
-                ..
-            } = &metadata.execution_template
-            {
+            if let Some(chat_model) = vision_chat_model(metadata) {
+                let (model_file, chat_template, context_length) = (
+                    chat_model.model_file,
+                    &chat_model.chat_template,
+                    &chat_model.context_length,
+                );
                 debug!(
                     target: "xybrid_core",
                     "VisionLanguage model detected, converting context to multimodal messages for streaming"
                 );
 
                 let messages = Self::multimodal_messages_with_context(input, context)?;
-                let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
+                let backend_hint = chat_model.backend_hint;
+                // As on the batch path: tool results cannot ride the image
+                // branch, so the combination is refused.
+                reject_image_bearing_continuation(&messages, continuation)?;
 
                 let result = if messages.iter().any(|message| message.image_count() > 0) {
                     self.execute_llm_multimodal_streaming_messages(
@@ -1867,7 +2077,11 @@ impl TemplateExecutor {
             Ok(result)
         }
 
-        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        #[cfg(not(any(
+            feature = "llm-mistral",
+            feature = "llm-llamacpp",
+            feature = "llm-litert"
+        )))]
         {
             debug!(
                 target: "xybrid_core",
@@ -1879,7 +2093,11 @@ impl TemplateExecutor {
     }
 
     /// Execute LLM inference with streaming.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     fn execute_llm_streaming(
         &mut self,
         metadata: &ModelMetadata,
@@ -2020,7 +2238,11 @@ impl TemplateExecutor {
     /// `continuation` carries the tool-result payload when this turn is a
     /// continuation (see `tool_continuation::ToolContinuation`); `messages`
     /// is then the chat prefix the continuation prompt is composed on top of.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[allow(clippy::too_many_arguments)]
     fn execute_llm_with_messages(
         &mut self,
@@ -2124,7 +2346,11 @@ impl TemplateExecutor {
         ))
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     fn execute_vision_language(
         &mut self,
         metadata: &ModelMetadata,
@@ -2160,7 +2386,7 @@ impl TemplateExecutor {
         // path symmetric with the streaming variant's recursive guard.
         reject_nested_tool_continuation_parts(input, "vision-language")?;
 
-        let messages = vec![MultimodalChatMessage::from_envelope(input)?];
+        let messages = Self::one_shot_multimodal_messages(input)?;
         self.execute_llm_multimodal_messages(
             metadata,
             model_file,
@@ -2178,7 +2404,11 @@ impl TemplateExecutor {
     /// path. Image-bearing conversations cannot re-evaluate their image
     /// embeddings from text and are rejected by
     /// `text_messages_from_multimodal`.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     fn execute_vlm_tool_continuation(
         &mut self,
         metadata: &ModelMetadata,
@@ -2241,7 +2471,11 @@ impl TemplateExecutor {
     /// conversation is refused by `text_messages_from_multimodal` here just
     /// as it is on the batch path, because image embeddings cannot be
     /// re-evaluated from a composed text prompt.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[allow(clippy::too_many_arguments)]
     fn execute_vlm_tool_continuation_streaming(
         &mut self,
@@ -2304,7 +2538,11 @@ impl TemplateExecutor {
         ))
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     fn vision_language_llm_config(
         &self,
         metadata: &ModelMetadata,
@@ -2335,7 +2573,11 @@ impl TemplateExecutor {
     /// generate path and the text-only tool-continuation path so both load
     /// identically. Vision support is re-checked even on a cache hit,
     /// preserving the original per-call validation.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     fn ensure_vlm_adapter(
         &mut self,
         metadata: &ModelMetadata,
@@ -2392,7 +2634,11 @@ impl TemplateExecutor {
         Ok(())
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     fn execute_llm_multimodal_messages(
         &mut self,
         metadata: &ModelMetadata,
@@ -2459,7 +2705,11 @@ impl TemplateExecutor {
         ))
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     fn execute_vision_language_streaming(
         &mut self,
         metadata: &ModelMetadata,
@@ -2492,7 +2742,7 @@ impl TemplateExecutor {
         }
 
         reject_nested_tool_continuation_parts(input, "vision-language streaming")?;
-        let messages = vec![MultimodalChatMessage::from_envelope(input)?];
+        let messages = Self::one_shot_multimodal_messages(input)?;
         self.execute_llm_multimodal_streaming_messages(
             metadata,
             model_file,
@@ -2505,7 +2755,11 @@ impl TemplateExecutor {
         )
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     fn execute_llm_multimodal_streaming_messages(
         &mut self,
         metadata: &ModelMetadata,
@@ -2621,7 +2875,11 @@ impl TemplateExecutor {
     ///
     /// `continuation` carries the tool-result payload when this turn is a
     /// continuation — see `execute_llm_with_messages`.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[allow(clippy::too_many_arguments)]
     fn execute_llm_streaming_with_messages(
         &mut self,
@@ -2737,7 +2995,11 @@ impl TemplateExecutor {
     /// The adapter is cached to avoid reloading the model on subsequent calls
     /// with the same model path. This provides significant speedup for REPL
     /// and interactive use cases.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     fn execute_llm(
         &mut self,
         metadata: &ModelMetadata,
@@ -3987,7 +4249,11 @@ impl Default for TemplateExecutor {
 // `execution::llm_telemetry`; this one stays at the executor layer because the
 // vision execute paths source the timing from a local measurement rather than
 // from `GenerationOutput`.
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 fn insert_image_preprocess_metric(
     response_metadata: &mut HashMap<String, String>,
     image_preprocess_ms: Option<u32>,
@@ -4011,7 +4277,11 @@ fn insert_image_preprocess_metric(
 /// (same channel as `finish_reason`). The text itself stays intact —
 /// callers strip the blocks for display via `tool_call::strip_tool_calls`.
 /// Malformed blocks are untrusted model output and simply parse to nothing.
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 fn build_llm_response_envelope(
     output: crate::runtime_adapter::llm::GenerationOutput,
     backend_name: &str,
@@ -4138,7 +4408,11 @@ pub fn model_default_gen_config(metadata: &ModelMetadata) -> GenerationConfig {
 
 /// Build the generation config for prompt-based LLM paths using explicit,
 /// envelope, template, reasoning, and global defaults in that precedence order.
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 fn build_gen_config_from_input(
     metadata: &ModelMetadata,
     input: &Envelope,
@@ -4168,7 +4442,11 @@ fn build_gen_config_from_input(
 
 #[cfg(test)]
 mod tests {
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     use super::super::template::GenerationParams;
     use super::super::template::PreprocessingStep;
     use super::*;
@@ -4177,7 +4455,11 @@ mod tests {
     // Characterization tests pinning the response-envelope contract shared by
     // every execute_llm* path after the in-place dedup into
     // `build_llm_response_envelope`.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     fn sample_generation_output(tokens: usize) -> crate::runtime_adapter::llm::GenerationOutput {
         crate::runtime_adapter::llm::GenerationOutput {
             text: "hello".to_string(),
@@ -4198,7 +4480,11 @@ mod tests {
     }
 
     /// The tools a tool-bearing request offers in the envelope tests.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     fn requested_tools() -> Vec<crate::gateway::Tool> {
         vec![crate::gateway::Tool::function(
             "get_temperature",
@@ -4228,7 +4514,11 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn model_default_gen_config_maps_all_template_generation_params() {
         let metadata = test_model_metadata(ExecutionTemplate::Gguf {
@@ -4258,7 +4548,11 @@ mod tests {
         assert!(config.tools.is_empty());
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn model_default_gen_config_reasoning_floor_scales_with_context() {
         for (context_length, expected_max_tokens) in
@@ -4281,7 +4575,11 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn model_default_gen_config_template_max_tokens_beats_reasoning_floor() {
         let mut metadata = test_model_metadata(ExecutionTemplate::Gguf {
@@ -4300,7 +4598,11 @@ mod tests {
         assert_eq!(model_default_gen_config(&metadata).max_tokens, 64);
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn model_default_gen_config_non_reasoning_keeps_default() {
         let metadata = test_model_metadata(ExecutionTemplate::VisionLanguage {
@@ -4313,7 +4615,11 @@ mod tests {
         assert_eq!(model_default_gen_config(&metadata).max_tokens, 2048);
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn build_gen_config_from_input_envelope_beats_template() {
         let metadata = test_model_metadata(ExecutionTemplate::Gguf {
@@ -4339,7 +4645,11 @@ mod tests {
         assert_eq!(config.temperature, 0.2);
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn build_gen_config_from_input_explicit_config_wins_whole_struct() {
         let metadata = test_model_metadata(ExecutionTemplate::Gguf {
@@ -4384,7 +4694,11 @@ mod tests {
         assert!(config.tools.is_empty());
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn template_generation_params_reach_backend_config() {
         use std::sync::{Arc, Mutex};
@@ -4465,7 +4779,11 @@ mod tests {
         assert_eq!(*observed_max_tokens.lock().unwrap(), Some(7));
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn build_llm_response_envelope_text_path_omits_image_metric() {
         let env =
@@ -4488,7 +4806,11 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn build_llm_response_envelope_multimodal_path_stamps_image_metric() {
         let env = build_llm_response_envelope(
@@ -4505,7 +4827,11 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn build_llm_response_envelope_parses_tool_calls_when_tools_requested() {
         let mut output = sample_generation_output(7);
@@ -4537,7 +4863,11 @@ mod tests {
 
     /// LFM3 writes argument values as raw text; the envelope types them with
     /// the request's schemas, so a string parameter keeps digits as text.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn build_llm_response_envelope_types_lfm3_arguments_with_the_request_tools() {
         let mut output = sample_generation_output(7);
@@ -4556,7 +4886,11 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn build_llm_response_envelope_omits_tool_calls_when_none_emitted() {
         let mut output = sample_generation_output(7);
@@ -4573,7 +4907,11 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     fn sample_tool_continuation_envelope() -> crate::ir::Envelope {
         crate::ir::Envelope::tool_results(
             "what is the weather?",
@@ -4586,7 +4924,11 @@ mod tests {
         )
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     fn llm_metadata_for_continuation_tests() -> ModelMetadata {
         ModelMetadata {
             model_id: "test-llm".into(),
@@ -4609,7 +4951,11 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn tool_continuation_payload_is_resolved_off_the_envelope() {
         let envelope = sample_tool_continuation_envelope();
@@ -4629,7 +4975,11 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn nested_multipart_tool_continuation_is_rejected() {
         // Continuation metadata inside a MultiPart part would be discarded by
@@ -4651,13 +5001,21 @@ mod tests {
     /// Backend that records the prompts it is handed and refuses the chat
     /// path, so a test can prove a continuation composed a raw prompt rather
     /// than silently replaying the user text as a fresh question.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[derive(Default)]
     struct ContinuationProbeBackend {
         raw_prompts: std::sync::Mutex<Vec<String>>,
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     impl ContinuationProbeBackend {
         const ANSWER: &'static str = "It is 21C in Paris.";
 
@@ -4668,7 +5026,11 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     impl crate::runtime_adapter::LlmBackend for ContinuationProbeBackend {
         fn name(&self) -> &str {
             "continuation-probe"
@@ -4739,7 +5101,11 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     fn cache_continuation_probe_backend(
         executor: &mut TemplateExecutor,
     ) -> std::sync::Arc<ContinuationProbeBackend> {
@@ -4755,10 +5121,18 @@ mod tests {
 
     /// Shared-ownership shim so a test can keep reading the probe's recorded
     /// prompts after the adapter takes the boxed backend.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     struct ProbeHandle(std::sync::Arc<ContinuationProbeBackend>);
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     impl crate::runtime_adapter::LlmBackend for ProbeHandle {
         fn name(&self) -> &str {
             self.0.name()
@@ -4814,7 +5188,11 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn execute_with_context_composes_a_tool_continuation() {
         let metadata = llm_metadata_for_continuation_tests();
@@ -4852,7 +5230,11 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn execute_streaming_with_context_streams_a_tool_continuation() {
         let metadata = llm_metadata_for_continuation_tests();
@@ -4905,7 +5287,11 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn build_llm_response_envelope_skips_tool_parse_when_tools_not_requested() {
         let mut output = sample_generation_output(7);
@@ -4925,10 +5311,18 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     struct TextOnlyVisionBoundaryBackend;
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     impl crate::runtime_adapter::LlmBackend for TextOnlyVisionBoundaryBackend {
         fn name(&self) -> &str {
             "text-only"
@@ -4984,7 +5378,11 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     fn cache_text_only_boundary_backend(
         executor: &mut TemplateExecutor,
         model_path: &str,
@@ -5040,7 +5438,11 @@ mod tests {
         assert!(runtimes.contains_key("onnx"));
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn vision_language_execute_reaches_multimodal_backend_boundary() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -5107,7 +5509,11 @@ mod tests {
     /// `MultiPart` envelope regardless of whether it actually carried an
     /// image, producing a misleading `UnsupportedModelCapability("image
     /// input")` error for pure text.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn vision_language_multipart_text_only_dispatches_to_llm_path() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -5241,7 +5647,11 @@ mod tests {
     /// `MultiPart`) must be rejected, not flattened into plain text — the
     /// ChatMessages paths cannot compose the continuation prompt, and silently
     /// dropping the tool results would produce a plausible but wrong answer.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn vision_language_multipart_nested_tool_continuation_is_rejected() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -5377,7 +5787,11 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn vision_language_text_only_backend_reports_backend_capability_before_generation() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -5461,7 +5875,11 @@ mod tests {
     /// covered here; they are separate call sites that share the
     /// underlying `ensure_backend_supports_vision()` helper and would
     /// benefit from their own dedicated tests as the surface stabilises.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn vision_language_streaming_text_only_backend_reports_backend_capability_before_tokens() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -5612,7 +6030,11 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn gguf_image_input_returns_text_only_model_error_before_load() {
         let metadata = ModelMetadata {
@@ -5669,7 +6091,11 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn vision_language_streaming_uses_multimodal_streaming_span() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -5738,7 +6164,11 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn vision_language_registered_encoder_preprocesses_image_before_llm() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -6042,7 +6472,111 @@ mod tests {
         ));
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    /// A one-shot request's system prompt is envelope metadata, which the
+    /// message conversion does not read. It is lifted into a system message
+    /// here, so attaching an image does not drop it.
+    #[test]
+    fn vision_language_one_shot_planning_keeps_the_system_prompt() {
+        use crate::runtime_adapter::MultimodalMessagePart;
+
+        let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            2,
+            2,
+            image::Rgb([17, 34, 51]),
+        ));
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("test image encodes");
+        let image = Envelope::image(encoded.into_inner(), "png").unwrap();
+        let mut input = Envelope::user_message("What is this?", vec![image]).unwrap();
+
+        let plain = TemplateExecutor::one_shot_multimodal_messages(&input)
+            .expect("multimodal planning succeeds");
+        assert_eq!(plain.len(), 1, "no system prompt, no system message");
+        assert_eq!(plain[0].role, MessageRole::User);
+
+        input
+            .metadata
+            .insert("system_prompt".to_string(), "Answer in French.".to_string());
+        let messages = TemplateExecutor::one_shot_multimodal_messages(&input)
+            .expect("multimodal planning succeeds");
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, MessageRole::System);
+        assert_eq!(
+            messages[0].parts,
+            vec![MultimodalMessagePart::Text("Answer in French.".to_string())]
+        );
+        assert_eq!(messages[1].role, MessageRole::User);
+        assert_eq!(messages[1].image_count(), 1);
+    }
+
+    /// Tool results cannot ride the multimodal generate call, which takes
+    /// messages and nothing else. With an image in the conversation they are
+    /// refused, batch and streaming, before any model is loaded: running the
+    /// turn without them would answer the original question again.
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
+    #[test]
+    fn vision_language_context_refuses_tool_results_after_an_image() {
+        let metadata = test_model_metadata(ExecutionTemplate::VisionLanguage {
+            model_file: "missing-model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: None,
+        });
+        let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            2,
+            2,
+            image::Rgb([17, 34, 51]),
+        ));
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("test image encodes");
+        let image = Envelope::image(encoded.into_inner(), "png").unwrap();
+        let mut context = ConversationContext::new();
+        context.push(Envelope::user_message("Remember this picture.", vec![image]).unwrap());
+        context.push(
+            Envelope::new(EnvelopeKind::Text("I will.".to_string()))
+                .with_role(MessageRole::Assistant),
+        );
+        let continuation = sample_tool_continuation_envelope();
+        let mut executor = TemplateExecutor::with_base_path("/models");
+
+        let batch = executor
+            .execute_with_context(&metadata, &continuation, &context, None)
+            .expect_err("tool results cannot follow an image");
+        let streamed = executor
+            .execute_streaming_with_context(
+                &metadata,
+                &continuation,
+                &context,
+                Box::new(|_token| Err("a refused turn delivers no token".into())),
+                None,
+            )
+            .expect_err("tool results cannot follow an image");
+
+        for err in [batch, streamed] {
+            match err {
+                // Not a missing model file: the refusal comes first.
+                AdapterError::InvalidInput(message) => {
+                    assert!(message.contains("text-only conversation"), "{message}");
+                }
+                other => panic!("expected InvalidInput, got {other:?}"),
+            }
+        }
+    }
+
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn vision_language_llm_config_resolves_sibling_mmproj_path() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
@@ -7148,13 +7682,21 @@ mod tests {
 
     /// LLM backend that counts every call, so a test can prove a refused
     /// request reached none.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[derive(Default)]
     struct CountingBackend {
         calls: std::sync::atomic::AtomicUsize,
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     impl CountingBackend {
         fn record(&self) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
             self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -7166,10 +7708,18 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     struct CountingHandle(std::sync::Arc<CountingBackend>);
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     impl crate::runtime_adapter::LlmBackend for CountingHandle {
         fn name(&self) -> &str {
             "counting"
@@ -7225,7 +7775,11 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(
+        feature = "llm-mistral",
+        feature = "llm-llamacpp",
+        feature = "llm-litert"
+    ))]
     #[test]
     fn choice_kinds_never_reach_an_llm_backend() {
         let metadata = llm_metadata_for_continuation_tests();

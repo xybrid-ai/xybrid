@@ -80,19 +80,27 @@ pub mod coreml;
 pub mod candle;
 
 // LLM shared types and adapter (available when any LLM backend is enabled)
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 pub mod llm;
 
 // Shared telemetry helpers for LLM backends (itl_stats, etc.)
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 pub(crate) mod llm_telemetry;
 
 // Shared streaming post-processing for LLM backends
 // (stop-pattern filtering, <think> tag stripping, safe-prefix buffer).
-// Used by backends whose engines don't strip these internally — currently
-// llama_cpp. Mistral's engine (mistralrs) handles it natively and does
+// Used by backends whose engines don't strip these internally: llama_cpp
+// and litert_lm. Mistral's engine (mistralrs) handles it natively and does
 // not import this module.
-#[cfg(feature = "llm-llamacpp")]
+#[cfg(any(feature = "llm-llamacpp", feature = "llm-litert"))]
 pub(crate) mod streaming_postprocess;
 
 // MistralBackend (feature-gated, uses mistral.rs - desktop only, NOT Android)
@@ -104,6 +112,11 @@ pub mod mistral;
 // Has proper runtime SIMD detection via ggml
 #[cfg(feature = "llm-llamacpp")]
 pub mod llama_cpp;
+
+// LiteRtLmBackend (feature-gated). Runs `.litertlm` models through Google's
+// LiteRT-LM runtime, which is opened at run time and never linked.
+#[cfg(feature = "llm-litert")]
+pub mod litert_lm;
 
 // whisper.cpp ASR (feature-gated). Shares llama.cpp's ggml rather than
 // linking a second one — see the module docs for why that constraint shapes
@@ -132,7 +145,11 @@ pub use candle::{CandleBackend, CandleRuntimeAdapter};
 
 // LLM exports - adapter types only (ChatMessage, GenerationConfig, LlmConfig
 // are re-exported from types.rs unconditionally below)
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-litert"
+))]
 pub use llm::{GenerationOutput, LlmBackend, LlmResult, LlmRuntimeAdapter};
 
 // MistralBackend export (desktop only)
@@ -142,6 +159,10 @@ pub use mistral::MistralBackend;
 // LlamaCppBackend export (Android compatible)
 #[cfg(feature = "llm-llamacpp")]
 pub use llama_cpp::LlamaCppBackend;
+
+// LiteRtLmBackend export.
+#[cfg(feature = "llm-litert")]
+pub use litert_lm::LiteRtLmBackend;
 
 // llama.cpp log control exports.
 #[cfg(feature = "llm-llamacpp")]
