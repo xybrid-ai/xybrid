@@ -21,63 +21,25 @@ name: "CI: Choice conformance"
 # against the SDK, with XYBRID_REQUIRE_MODELS set, so a missing model or ONNX
 # Runtime fails instead of skipping. The label-token (llama.cpp) runtime tests
 # join that job with the label scorer.
+#
+# A lane: ci.yml's `Choice conformance` job calls this file when one of the
+# paths in LANE_PATHS["choice"] (tools/scripts/ci_gate.py) changes, on pull
+# requests and master pushes; its checks are named `Choice conformance / <job>`.
+# The nightly cold rebuild stays a schedule here: on ci.yml it would stamp
+# skipped checks on master's HEAD over the ones the llama.cpp release reads.
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'integration-tests/fixtures/choice/**'
-      - 'integration-tests/fixtures/models/models.json'
-      - 'integration-tests/fixtures/models/cua-s1-forms/**'
-      - 'integration-tests/download.sh'
-      - 'integration-tests/Cargo.toml'
-      - 'integration-tests/src/**'
-      - 'integration-tests/tests/choice_forms_conformance.rs'
-      - 'tools/conformance/**'
-      - 'tools/scripts/check_choice_provenance.py'
-      - 'tools/scripts/tests/test_check_choice_provenance.py'
-      - 'tools/scripts/stage_unity_desktop_ort.py'
-      - 'vendor/llama-cpp'
-      - 'crates/llama-cpp-sys/**'
-      - 'crates/xybrid-core/**'
-      - 'crates/xybrid-sdk/**'
-      - 'crates/xybrid-cli/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.cargo/**'
-      - '.github/workflows/test-choice-conformance.yml'
-      - "!**.md"
-  pull_request:
-    branches: [master]
-    paths:
-      - 'integration-tests/fixtures/choice/**'
-      - 'integration-tests/fixtures/models/models.json'
-      - 'integration-tests/fixtures/models/cua-s1-forms/**'
-      - 'integration-tests/download.sh'
-      - 'integration-tests/Cargo.toml'
-      - 'integration-tests/src/**'
-      - 'integration-tests/tests/choice_forms_conformance.rs'
-      - 'tools/conformance/**'
-      - 'tools/scripts/check_choice_provenance.py'
-      - 'tools/scripts/tests/test_check_choice_provenance.py'
-      - 'tools/scripts/stage_unity_desktop_ort.py'
-      - 'vendor/llama-cpp'
-      - 'crates/llama-cpp-sys/**'
-      - 'crates/xybrid-core/**'
-      - 'crates/xybrid-sdk/**'
-      - 'crates/xybrid-cli/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.cargo/**'
-      - '.github/workflows/test-choice-conformance.yml'
-      - "!**.md"
+  workflow_call:
+    inputs:
+      gguf:
+        description: >-
+          'false' skips the Qwen GGUF job: ci.yml passes LANE_PATHS["choice_gguf"],
+          the paths that job reads. The schedule and a dispatch run it.
+        type: string
+        default: 'true'
   schedule:
     # Daily 05:23 UTC.
     - cron: '23 5 * * *'
   workflow_dispatch:
-
-concurrency:
-  group: test-choice-conformance-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions: read-all
 
@@ -161,12 +123,9 @@ jobs:
           path: target/choice-conformance/reports/cua-s1-forms-export.json
           if-no-files-found: error
 
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+      - uses: ./.github/actions/setup-rust
         with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          key: choice-forms
+          cache-key: choice-forms
 
       # Off Apple platforms ort loads libonnxruntime at run time; without it
       # the ONNX tests would skip. Stage the version ort-sys pins (1.23.2).
@@ -295,6 +254,10 @@ jobs:
 
   label-token:
     name: Qwen3.5-0.8B GGUF (regenerate or verify)
+    # A cache hit only re-verifies the GGUFs, so the macOS runner is spent
+    # only when what it reads changed. `inputs.gguf` is unset on the schedule
+    # and on a dispatch, which run it.
+    if: inputs.gguf != 'false'
     runs-on: macos-15
     timeout-minutes: 60
     steps:

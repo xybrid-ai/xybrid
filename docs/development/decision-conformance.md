@@ -46,8 +46,11 @@ Every required test name is enumerated in `CI: Decision conformance`, and the
 tests assert corpus execution counts. Missing/corrupt models, missing reference
 receipts, missing test names and narrowed corpora fail the required lane. Local
 native checks can skip when assets are absent, with an explicit message.
-`Decision CPU conformance` also gates the llama.cpp update automation. The
-workflow has no path filters, so required checks always reach a terminal state.
+`Decision conformance / Decision CPU conformance` also gates the llama.cpp
+update automation. `ci.yml` calls the workflow on every change that is not
+docs-only. On a docs-only change it reports only its caller, `Decision
+conformance`, as skipped: the prefixed check appears only when the lane runs,
+so it must never become a branch-protection required check.
 
 For a manually collected current-host reference:
 

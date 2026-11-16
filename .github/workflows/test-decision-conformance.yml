@@ -1,24 +1,21 @@
 # Purpose: Verify the decision corpus and run isolated preparation, finalization, matched CPU inference and SDK lifecycle checks against pinned d1 weights.
 name: "CI: Decision conformance"
 
+# A lane: ci.yml's `Decision conformance` job calls this file on every change
+# that is not docs-only (a docs-only change reports only that caller job, as
+# skipped), on pull requests and master pushes. Its check, `Decision conformance / Decision CPU
+# conformance`, gates upstream-engine updates (llamacpp_update.REQUIRED_CHECKS).
+# The nightly rebuild stays a schedule here: on ci.yml it would stamp skipped
+# checks on master's HEAD over the ones the llama.cpp release reads.
 on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: [master]
+  workflow_call:
   schedule:
     - cron: '41 5 * * *'
   workflow_dispatch:
 
-concurrency:
-  group: test-decision-conformance-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
 
-# No workflow path filter: this check participates in upstream-engine update
-# validation and must reach a terminal result on every pull request.
 jobs:
   native:
     name: Decision CPU conformance
@@ -33,12 +30,9 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+      - uses: ./.github/actions/setup-rust
         with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          key: decision-cpu
+          cache-key: decision-cpu
       - name: Install native build and fixture tools
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build jq libclang-dev
       - name: Verify fixture identities and collection tooling
