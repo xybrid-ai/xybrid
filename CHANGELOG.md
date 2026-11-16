@@ -17,6 +17,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`gpt-4o-mini`) are not registry ids, so each load spent a registry round
   trip per such stage and got a 404 back. Only device and auto stages are
   checked now; what a stage reports (`Pipeline::stages`) is unchanged.
+- **Flutter:** the cloud fallback (`runStreamingWithFallback`) asks the Xybrid
+  gateway for `openai/gpt-4o-mini` when the app sets no `cloudModel`. It sent
+  `gpt-4o-mini`, a short id the managed gateway (`api.xybrid.dev`) no longer
+  accepts: it names frontier models by their canonical OpenRouter id
+  (`vendor/model`), so every such fallback failed with `404 model_not_found`.
+  A `cloudModel` the app sets is sent unchanged, so it needs a canonical id
+  too (`anthropic/claude-haiku-4.5`, not `claude-3-haiku`).
+- **Rust:** `LlmClientConfig::default()` and
+  `xybrid_core::gateway::GatewayConfig::default()`, which target the Xybrid
+  gateway, default to `openai/gpt-4o-mini` instead of `gpt-4o-mini`.
+- **Docs and examples:** the pipeline, hybrid execution and `xybrid run`
+  pages (English and Chinese), the CLI's `hybrid-platform.yaml` and
+  `hiiipe.yaml`, the `cloud_fallback_demo` and `voice_assistant_gateway_demo`
+  examples and the staging acceptance tooling name the gateway's cloud model
+  by its canonical id. A cloud stage written from them on the default
+  `backend: gateway` sent `gpt-4o-mini` (or `deepseek-flash`) and got
+  `404 model_not_found`. With `backend: direct`, a stage still uses the
+  provider's own model id.
 
 ## [0.19.0] - 2026-11-14
 

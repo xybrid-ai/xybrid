@@ -19,7 +19,7 @@
 //! stages:
 //!   - whisper-tiny
 //!
-//!   - model: gpt-4o-mini
+//!   - model: openai/gpt-4o-mini
 //!     target: cloud
 //!     provider: openai
 //!     system_prompt: "Be concise."

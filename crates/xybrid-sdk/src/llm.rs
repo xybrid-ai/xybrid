@@ -101,7 +101,11 @@ pub struct LlmClientConfig {
 
     /// Default model to use if not specified in request.
     ///
-    /// Examples: `"gpt-4o-mini"`, `"claude-3-5-sonnet"`, `"llama-3.2-1b"`
+    /// Default: `"openai/gpt-4o-mini"`. The gateway names frontier models by
+    /// their canonical OpenRouter id (`"openai/gpt-4o-mini"`,
+    /// `"anthropic/claude-haiku-4.5"`) and answers `404 model_not_found` for a
+    /// short id such as `"gpt-4o-mini"`. The direct backend takes the
+    /// provider's own id (`"gpt-4o-mini"`, `"claude-3-5-sonnet-20241022"`).
     pub default_model: Option<String>,
 
     /// Request timeout in milliseconds.
@@ -125,7 +129,7 @@ impl Default for LlmClientConfig {
             backend: LlmBackend::Gateway,
             gateway_url: default_gateway_url(),
             api_key: None,
-            default_model: Some("gpt-4o-mini".to_string()),
+            default_model: Some("openai/gpt-4o-mini".to_string()),
             timeout_ms: 60000,
             direct_provider: None,
             debug: false,
@@ -282,7 +286,7 @@ impl ChatMessage {
 ///     ChatMessage::user("What is Rust?".to_string()),
 /// ];
 /// let request = CompletionRequest::chat(messages)
-///     .with_model("gpt-4o-mini".to_string());
+///     .with_model("openai/gpt-4o-mini".to_string());
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompletionRequest {
@@ -333,7 +337,9 @@ impl CompletionRequest {
     ///
     /// # Arguments
     ///
-    /// * `model` - Model identifier (e.g., "gpt-4o-mini", "claude-3-5-sonnet")
+    /// * `model` - Model identifier: a canonical id such as
+    ///   "openai/gpt-4o-mini" through the gateway, the provider's own id
+    ///   (e.g., "gpt-4o-mini") on the direct backend
     pub fn with_model(mut self, model: String) -> Self {
         self.model = Some(model);
         self
@@ -533,7 +539,7 @@ mod tests {
         let config = LlmClientConfig::default();
         assert_eq!(config.backend, LlmBackend::Gateway);
         assert_eq!(config.timeout_ms, 60000);
-        assert_eq!(config.default_model, Some("gpt-4o-mini".to_string()));
+        assert_eq!(config.default_model, Some("openai/gpt-4o-mini".to_string()));
         assert!(config.api_key.is_none());
         assert!(config.direct_provider.is_none());
         assert!(!config.debug);

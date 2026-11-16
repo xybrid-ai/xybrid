@@ -27,7 +27,7 @@
 //!     target: device
 //!
 //!   - id: llm
-//!     model: gpt-4o-mini
+//!     model: openai/gpt-4o-mini
 //!     target: integration
 //!     provider: openai
 //! ```

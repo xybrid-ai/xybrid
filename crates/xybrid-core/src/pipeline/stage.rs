@@ -18,7 +18,7 @@ pub struct StageConfig {
     /// Unique stage identifier within the pipeline.
     pub id: String,
 
-    /// Model identifier (e.g., "wav2vec2-base-960h", "gpt-4o-mini").
+    /// Model identifier (e.g., "wav2vec2-base-960h", "openai/gpt-4o-mini").
     pub model: String,
 
     /// Model version (for device/server targets).

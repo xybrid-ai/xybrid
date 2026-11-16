@@ -467,6 +467,14 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
     })
 }
 
+/// The cloud leg's model when the app sets no `cloudModel`.
+///
+/// The fallback always goes through a Xybrid gateway (`backend: gateway`, and
+/// [`validate_cloud_gateway_url`] admits only Xybrid hosts in release builds),
+/// which names frontier models by their canonical OpenRouter id. It answers
+/// `404 model_not_found` for a short id such as `gpt-4o-mini`.
+const DEFAULT_CLOUD_FALLBACK_MODEL: &str = "openai/gpt-4o-mini";
+
 fn apply_cloud_fallback_metadata(
     envelope: &mut xybrid_sdk::ir::Envelope,
     options: &FfiRunOptions,
@@ -479,7 +487,7 @@ fn apply_cloud_fallback_metadata(
         .to_string());
     }
     let provider = non_empty(options.cloud_provider.as_deref()).unwrap_or("openai");
-    let model = non_empty(options.cloud_model.as_deref()).unwrap_or("gpt-4o-mini");
+    let model = non_empty(options.cloud_model.as_deref()).unwrap_or(DEFAULT_CLOUD_FALLBACK_MODEL);
     envelope
         .metadata
         .insert("provider".to_string(), provider.to_string());
@@ -1716,6 +1724,51 @@ mod tests {
         assert!(error.starts_with("Unsupported model capability:"));
         assert!(error.contains("local-only"));
         assert_eq!(nested.metadata, before);
+    }
+
+    /// The managed gateway takes frontier models by canonical id only: the
+    /// short `gpt-4o-mini` this default used to be answers 404 there.
+    #[test]
+    fn cloud_fallback_defaults_to_a_canonical_gateway_model() {
+        use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+
+        let mut envelope = Envelope::new(EnvelopeKind::Text("hello".into()));
+        let gateway_url =
+            apply_cloud_fallback_metadata(&mut envelope, &sample_options(), None).unwrap();
+
+        assert_eq!(gateway_url, None);
+        assert_eq!(
+            envelope.metadata.get("model").map(String::as_str),
+            Some("openai/gpt-4o-mini")
+        );
+        assert_eq!(
+            envelope.metadata.get("provider").map(String::as_str),
+            Some("openai")
+        );
+        assert_eq!(
+            envelope.metadata.get("backend").map(String::as_str),
+            Some("gateway")
+        );
+    }
+
+    #[test]
+    fn cloud_fallback_sends_the_app_model_unchanged() {
+        use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+
+        let mut options = sample_options();
+        options.cloud_provider = Some("anthropic".to_string());
+        options.cloud_model = Some(" anthropic/claude-haiku-4.5 ".to_string());
+        let mut envelope = Envelope::new(EnvelopeKind::Text("hello".into()));
+        apply_cloud_fallback_metadata(&mut envelope, &options, None).unwrap();
+
+        assert_eq!(
+            envelope.metadata.get("model").map(String::as_str),
+            Some("anthropic/claude-haiku-4.5")
+        );
+        assert_eq!(
+            envelope.metadata.get("provider").map(String::as_str),
+            Some("anthropic")
+        );
     }
 
     #[test]

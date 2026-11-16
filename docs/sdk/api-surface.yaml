@@ -1247,6 +1247,7 @@ classes:
         status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
       cloudModel:
         type: "String?"
+        notes: "Model for the cloud fallback leg, sent to the Xybrid gateway unchanged; unset sends openai/gpt-4o-mini. Frontier models use canonical OpenRouter ids (vendor/model): the gateway answers 404 model_not_found for a short id such as gpt-4o-mini."
         status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
       cloudGatewayUrl:
         type: "String?"

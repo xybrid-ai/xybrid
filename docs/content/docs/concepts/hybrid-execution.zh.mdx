@@ -20,7 +20,7 @@ stages:
   - model: whisper-tiny-ggml
     target: device
 
-  - model: gpt-4o-mini
+  - model: openai/gpt-4o-mini
     target: cloud
     provider: openai
 ```
@@ -42,15 +42,15 @@ stages:
   - id: llm
     model: functiongemma-270m-it      # 本地分支
     target: auto
-    provider: openai                  # Xybrid Platform 后面的上游提供商
-    cloud_model: gpt-4o-mini
+    provider: openai                  # 云端模型的厂商
+    cloud_model: openai/gpt-4o-mini   # 规范模型 ID
     backend: gateway                  # 通过 XYBRID_API_KEY 访问 Xybrid Platform
     system_prompt: "You are a concise assistant."
     max_tokens: 128
 ```
 
-该示例位于 `crates/xybrid-cli/examples/hybrid-platform.yaml`。云端模型必须受平台支持，
-且平台需要配置对应的提供商。策略拒绝云端时，也禁止向 Xybrid Platform 发送推理请求。
+该示例位于 `crates/xybrid-cli/examples/hybrid-platform.yaml`。云端模型必须是平台提供的模型，
+并使用其规范 ID（见[云端执行](#云端执行)）。策略拒绝云端时，也禁止向 Xybrid Platform 发送推理请求。
 如果本地模型不可用，阶段会在本地失败。尚未缓存的本地模型仍可能需要在推理前下载。
 
 ## `auto` 如何决策
@@ -79,6 +79,11 @@ xybrid run --config pipeline.yaml --input-audio q.wav --dry-run
 使用 `backend: gateway`（默认值）时，云端阶段向 Xybrid Platform 的
 `https://api.xybrid.dev/v1` 发送请求。平台验证 Xybrid 密钥，并使用平台配置的提供商凭据
 调用上游。
+
+平台只根据模型 ID 路由；`provider` 不会改变请求的去向。前沿模型请使用其 OpenRouter
+规范 ID，例如 `openai/gpt-4o-mini` 或 `anthropic/claude-haiku-4.5`。平台不接受
+`gpt-4o-mini` 这样的短 ID：会返回 404，`"code": "model_not_found"`。
+`GET /v1/models` 列出所有可调用的模型。使用 `backend: direct` 时，请改用提供商自己的模型 ID。
 
 ```bash
 export XYBRID_API_KEY="<your-xybrid-api-key>"
