@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The streaming docs list the real `finishReason` values** (`stop`,
   `length`, `tool_calls`), say how each SDK reports a failed stream, and
   document `tokenId`, `toolCalls` and `rawText` (#808).
+- **The Unity examples target iOS 16**, the floor the Unity iOS library is
+  built for, and the starter README's iOS, Windows and platform notes are
+  current (#809).
 
 ## [0.20.0] - 2026-11-17
 
