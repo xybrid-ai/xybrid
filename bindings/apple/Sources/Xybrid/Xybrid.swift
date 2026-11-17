@@ -457,10 +457,11 @@ public struct ModelLoader: Sendable {
     ///
     /// ```swift
     /// let loader = Xybrid.model("qwen3-0.6b")
-    /// let download = loader.download()
-    /// for await status in download.progress() {
-    ///     bar.progress = Float(status.progress)
-    ///     label.text = "\(status.downloadedBytes) / \(status.totalBytes ?? 0)"
+    /// if let download = loader.download() {
+    ///     for await status in download.progress() {
+    ///         bar.progress = Float(status.progress)
+    ///         label.text = "\(status.downloadedBytes) / \(status.totalBytes ?? 0)"
+    ///     }
     /// }
     /// let model = try await loader.load()
     /// ```

@@ -178,9 +178,9 @@ print("Transcription: \(result.text ?? "")")
 let envelope = Envelope.text("Hello, how are you?")
 
 // With voice and speed
-let envelope = Envelope.text("Hello", voice: "af_heart", speed: 1.0)
+let voiced = Envelope.text("Hello", voice: "af_heart", speed: 1.0)
 
-let result = try model.run(envelope: envelope)
+let result = try model.run(envelope: voiced)
 if let audioBytes = result.audioBytes {
     // Play or save audio
 }
@@ -271,35 +271,32 @@ SDK, and without one the engine falls back to fixed windows.
 ```swift
 let result = try model.run(envelope: envelope)
 
-if result.success {
-    switch result.outputType {
-    case "text":
-        print("Text: \(result.text!)")
-    case "audio":
-        playAudio(result.audioBytes!)
-    case "embedding":
-        process(result.embedding!)
-    default:
-        break
-    }
-    print("Latency: \(result.latency)s")  // TimeInterval in seconds
-} else {
-    print("Error: \(result.error ?? "Unknown")")
+switch result.outputType {
+case .text:
+    print("Text: \(result.text ?? "")")
+case .audio:
+    if let audio = result.audioBytes { playAudio(audio) }
+case .embedding:
+    if let vector = result.embedding { process(vector) }
+default:
+    break
 }
+print("Latency: \(result.latency)s")  // TimeInterval in seconds
 ```
+
+A failed run throws `XybridError` instead of returning an error on the result; see [Error Handling](#error-handling).
 
 ### XybridResult Properties
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `success` | `Bool` | Whether inference succeeded |
-| `error` | `String?` | Error message if failed |
-| `outputType` | `String` | `"text"`, `"audio"`, or `"embedding"` |
+| `success` | `Bool` | Always `true`; failures throw `XybridError` |
+| `outputType` | `XybridOutputType` | `.text`, `.audio`, `.embedding`, `.decisions`, or `.unknown` |
 | `text` | `String?` | Text output (ASR, LLM) |
 | `audioBytes` | `Data?` | Audio output (TTS) |
 | `embedding` | `[Float]?` | Embedding vector |
 | `latencyMs` | `UInt32` | Inference latency in ms |
-| `isFailure` | `Bool` | Convenience: `!success` |
+| `isFailure` | `Bool` | `true` when `outputType == .unknown` (no output) |
 | `latency` | `TimeInterval` | Latency in seconds |
 
 ---
@@ -312,16 +309,14 @@ The SDK uses a Swift error enum for type-safe error handling:
 do {
     let model = try await Xybrid.model("kokoro-82m").load()
     let result = try await model.runAsync(envelope: envelope)
-} catch XybridError.ModelNotFound(let modelId) {
-    print("Model not found: \(modelId)")
-} catch XybridError.InferenceFailed(let message) {
+} catch XybridError.modelNotFound(let id) {
+    print("Model not found: \(id)")
+} catch XybridError.inferenceError(let message) {
     print("Inference failed: \(message)")
-} catch XybridError.InvalidInput(let message) {
-    print("Invalid input: \(message)")
-} catch XybridError.IoError(let message) {
+} catch XybridError.ioError(let message) {
     print("I/O error: \(message)")
 } catch {
-    print("Unexpected error: \(error.localizedDescription)")
+    print(error.localizedDescription)
 }
 ```
 

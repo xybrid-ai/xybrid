@@ -208,7 +208,7 @@ python3 tools/scripts/observability_capture/run_scenario.py --binding swift --ou
 | `ModelLoader` | Cheap model reference; call `load()` to perform I/O |
 | `XybridModel` | A loaded model ready for inference |
 | `XybridEnvelope` | Input data container (audio, text, embedding, image, or multi-part user message) |
-| `XybridResult` | Inference result with success status and output data |
+| `XybridResult` | Inference result with its output data (failures throw `XybridError`) |
 | `XybridError` | Error enum for error handling |
 
 ### Creating Envelopes
@@ -223,14 +223,14 @@ let ttsEnvelope = XybridEnvelope.text(
 
 // Speech-to-Text input
 let asrEnvelope = XybridEnvelope.audio(
-    bytes: audioData,
+    pcmData: audioData,
     sampleRate: 16000,
     channels: 1
 )
 
 // Embedding input
 let embeddingEnvelope = XybridEnvelope.embedding(
-    data: [0.1, 0.2, 0.3, ...]
+    data: [0.1, 0.2, 0.3]
 )
 
 // Vision-language input

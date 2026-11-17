@@ -157,9 +157,9 @@ print("Transcription: \(result.text ?? "")")
 let envelope = Envelope.text("Hello, how are you?")
 
 // 带声音和语速
-let envelope = Envelope.text("Hello", voice: "af_heart", speed: 1.0)
+let voiced = Envelope.text("Hello", voice: "af_heart", speed: 1.0)
 
-let result = try model.run(envelope: envelope)
+let result = try model.run(envelope: voiced)
 if let audioBytes = result.audioBytes {
     // 播放或保存音频
 }
@@ -240,35 +240,32 @@ let transcript = result.text
 ```swift
 let result = try model.run(envelope: envelope)
 
-if result.success {
-    switch result.outputType {
-    case "text":
-        print("Text: \(result.text!)")
-    case "audio":
-        playAudio(result.audioBytes!)
-    case "embedding":
-        process(result.embedding!)
-    default:
-        break
-    }
-    print("Latency: \(result.latency)s")  // TimeInterval（秒）
-} else {
-    print("Error: \(result.error ?? "Unknown")")
+switch result.outputType {
+case .text:
+    print("Text: \(result.text ?? "")")
+case .audio:
+    if let audio = result.audioBytes { playAudio(audio) }
+case .embedding:
+    if let vector = result.embedding { process(vector) }
+default:
+    break
 }
+print("Latency: \(result.latency)s")  // TimeInterval（秒）
 ```
+
+失败的运行会抛出 `XybridError`，而不是在结果上返回错误；参见[错误处理](#错误处理)。
 
 ### XybridResult 属性
 
 | 属性 | 类型 | 说明 |
 |----------|------|-------------|
-| `success` | `Bool` | 推理是否成功 |
-| `error` | `String?` | 失败时的错误信息 |
-| `outputType` | `String` | `"text"`、`"audio"` 或 `"embedding"` |
+| `success` | `Bool` | 始终为 `true`；失败会抛出 `XybridError` |
+| `outputType` | `XybridOutputType` | `.text`、`.audio`、`.embedding`、`.decisions` 或 `.unknown` |
 | `text` | `String?` | 文本输出（ASR、LLM） |
 | `audioBytes` | `Data?` | 音频输出（TTS） |
 | `embedding` | `[Float]?` | 嵌入向量 |
 | `latencyMs` | `UInt32` | 推理延迟（毫秒） |
-| `isFailure` | `Bool` | 便捷属性：`!success` |
+| `isFailure` | `Bool` | 当 `outputType == .unknown`（无输出）时为 `true` |
 | `latency` | `TimeInterval` | 延迟（秒） |
 
 ---
@@ -281,16 +278,14 @@ SDK 使用 Swift 错误枚举实现类型安全的错误处理：
 do {
     let model = try await Xybrid.model("kokoro-82m").load()
     let result = try await model.runAsync(envelope: envelope)
-} catch XybridError.ModelNotFound(let modelId) {
-    print("Model not found: \(modelId)")
-} catch XybridError.InferenceFailed(let message) {
+} catch XybridError.modelNotFound(let id) {
+    print("Model not found: \(id)")
+} catch XybridError.inferenceError(let message) {
     print("Inference failed: \(message)")
-} catch XybridError.InvalidInput(let message) {
-    print("Invalid input: \(message)")
-} catch XybridError.IoError(let message) {
+} catch XybridError.ioError(let message) {
     print("I/O error: \(message)")
 } catch {
-    print("Unexpected error: \(error.localizedDescription)")
+    print(error.localizedDescription)
 }
 ```
 
