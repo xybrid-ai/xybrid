@@ -362,10 +362,18 @@ All SDK errors throw `XybridException`. Loading errors are surfaced via `LoadErr
 
 ## Platform Support
 
-| Platform | Status | Accelerators |
-|----------|--------|--------------|
-| macOS | Supported | Metal, CoreML |
-| iOS | Supported | Metal, CoreML |
-| Android | Supported | NNAPI |
-| Linux | Supported | CPU |
-| Windows | Planned | DirectML |
+Precompiled libraries ship for iOS (device and Simulator, arm64), macOS on
+Apple Silicon, Android (arm64-v8a, x86_64), Linux (x86_64) and Windows
+(x86_64). Where a model runs depends on its format:
+
+| Model format | iOS device | iOS Simulator | macOS | Android, Linux, Windows |
+|--------------|------------|---------------|-------|-------------------------|
+| GGUF (llama.cpp: LLMs, vision-language models) | Metal GPU | CPU | Metal GPU | CPU |
+| Whisper (whisper.cpp) | CPU; optional Core ML encoder | CPU; optional Core ML encoder | Metal GPU | CPU |
+| ONNX (ONNX Runtime) | CPU | CPU | CPU | CPU |
+
+On iOS, whisper.cpp runs the encoder on Core ML when a
+`<model>-encoder.mlmodelc` (e.g. `ggml-base.en-encoder.mlmodelc`) sits beside
+the model file. ONNX Runtime's Core ML execution provider is linked on iOS and
+macOS, but the SDK does not select it yet, so ONNX models run on the CPU. No
+path uses NNAPI or DirectML.

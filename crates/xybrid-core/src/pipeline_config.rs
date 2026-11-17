@@ -177,7 +177,11 @@ impl StageConfig {
         matches!(self.target(), Some("device"))
     }
 
-    /// Get the execution provider override (cpu, coreml, coreml-ane, coreml-gpu).
+    /// Get the requested ONNX Runtime execution provider (cpu, coreml,
+    /// coreml-ane, coreml-gpu).
+    ///
+    /// The value is parsed but not applied yet; see
+    /// `StageObjectConfig::execution_provider`.
     pub fn execution_provider(&self) -> Option<&str> {
         match self {
             StageConfig::Simple(_) => None,
@@ -236,9 +240,12 @@ pub struct StageObjectConfig {
     #[serde(default)]
     pub provider: Option<String>,
 
-    /// ONNX Runtime execution provider override.
-    /// If not set, auto-selection will be used based on model hints.
-    /// Valid values: "cpu", "coreml", "coreml-ane", "coreml-gpu"
+    /// ONNX Runtime execution provider requested for this stage: "cpu",
+    /// "coreml", "coreml-ane" or "coreml-gpu".
+    ///
+    /// Parsed but not applied yet. No runtime path reads this value: every
+    /// ONNX session runs on the CPU execution provider whatever it says, and
+    /// nothing is auto-selected when it is unset.
     #[serde(default)]
     pub execution_provider: Option<String>,
 

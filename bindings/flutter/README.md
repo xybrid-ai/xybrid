@@ -435,13 +435,21 @@ await for (final token in model.runStreamingWithContext(envelope, context)) {
 
 ## Platform Support
 
-| Platform | ONNX Runtime | Candle | LLM (llama.cpp) | Notes |
-|----------|:---:|:---:|:---:|-------|
-| **macOS** | ✅ | ✅ Metal | ✅ | Apple Silicon only (M1+) |
-| **iOS** | ✅ CoreML | ✅ Metal | ✅ | arm64, downloads ORT from HuggingFace |
-| **Android** | ✅ | — | ✅ | arm64-v8a, x86_64; ORT from Maven Central |
-| **Linux** | ✅ | ✅ CPU | ✅ | x86_64 |
-| **Windows** | ✅ | ✅ CPU | ✅ | x86_64 |
+Precompiled libraries ship for iOS (device and Simulator, arm64), macOS on
+Apple Silicon (M1+), Android (arm64-v8a, x86_64), Linux (x86_64) and Windows
+(x86_64). Where a model runs depends on its format:
+
+| Model format | iOS device | iOS Simulator | macOS | Android, Linux, Windows |
+|--------------|------------|---------------|-------|-------------------------|
+| GGUF (llama.cpp: LLMs, vision-language models) | Metal GPU | CPU | Metal GPU | CPU |
+| Whisper (whisper.cpp) | CPU; optional Core ML encoder | CPU; optional Core ML encoder | Metal GPU | CPU |
+| ONNX (ONNX Runtime) | CPU | CPU | CPU | CPU |
+
+On iOS, whisper.cpp runs the encoder on Core ML when a
+`<model>-encoder.mlmodelc` (e.g. `ggml-base.en-encoder.mlmodelc`) sits beside
+the model file. ONNX Runtime's Core ML execution provider is linked on iOS and
+macOS, but the SDK does not select it yet, so ONNX models run on the CPU. The
+precompiled libraries do not include Candle.
 
 ### Model Support
 
@@ -449,7 +457,7 @@ await for (final token in model.runStreamingWithContext(envelope, context)) {
 |-------|------|:---:|
 | Kokoro 82M | TTS | ✅ |
 | KittenTTS Nano | TTS | ✅ |
-| Whisper Tiny (Candle) | ASR | ✅ |
+| Whisper Tiny (whisper.cpp) | ASR | ✅ |
 | Wav2Vec2 (ONNX) | ASR | ✅ |
 | SmolLM2 360M | LLM | ✅ |
 | Qwen 2.5 0.5B | LLM | ✅ |

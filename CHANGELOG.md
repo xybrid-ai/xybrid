@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `set-natives-mode.sh` toggle, Troubleshooting covers the Bazel and SwiftPM
   flow, and the dead "Full Plan" links are gone from the Swift, Kotlin and tools
   READMEs, along with the two placeholder build scripts they described (#805).
+- **The docs stop claiming ONNX models run on Core ML or NNAPI.** The pipeline
+  `execution_provider` key is documented as parsed but not applied yet (every
+  ONNX session runs on the CPU), and the Flutter platform tables say what each
+  model format runs on (#806).
 
 ## [0.20.0] - 2026-11-17
 
