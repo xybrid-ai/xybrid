@@ -169,8 +169,8 @@ classes:
         static: true
         params: [{ name: filePath, type: String }]
         return: XybridModelLoader
-        notes: "Loads a raw GGUF file directly. Auto-generates model_metadata.json from GGUF binary header if not present."
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+        notes: "Loads a raw GGUF file directly. Auto-generates model_metadata.json from GGUF binary header if not present. Swift: ModelLoader.fromModelFile(_ url: URL), or Xybrid.model(.modelFile(url))."
+        status: { dart: planned, kotlin: planned, swift: implemented, csharp: implemented }
       fromHuggingFace:
         static: true
         params: [{ name: repo, type: String }]
@@ -197,7 +197,7 @@ classes:
       download:
         # Starts the download in the background without loading, so a blocking
         # host has something to watch. Returns null for a source with nothing
-        # to fetch (bundle, directory, Hugging Face repo). Named StartDownload
+        # to fetch (bundle, directory, model file, Hugging Face repo). Named StartDownload
         # in C#.
         return: "XybridDownload?"
         status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
@@ -342,7 +342,8 @@ classes:
           - { name: envelope, type: Envelope }
           - { name: options, type: RunOptions }
         return: XybridResult
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Swift and Kotlin (partial): the same call is run(envelope, options), plus runAsync."
+        status: { rust: implemented, dart: planned, kotlin: partial, swift: partial, csharp: planned }
       runWithContext:
         async: true
         params:
@@ -350,7 +351,8 @@ classes:
           - { name: context, type: ConversationContext }
           - { name: config, type: "GenerationConfig?", default: "null" }
         return: XybridResult
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+        notes: "Swift and Kotlin take RunOptions rather than a GenerationConfig: runWithContext(envelope, context, options)."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       runWithContextOptions:
         async: true
         params:
@@ -358,20 +360,22 @@ classes:
           - { name: context, type: ConversationContext }
           - { name: options, type: RunOptions }
         return: XybridResult
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Swift and Kotlin (partial): the same call is runWithContext(envelope, context, options); see runWithContext."
+        status: { rust: implemented, dart: planned, kotlin: partial, swift: partial, csharp: planned }
       runStreaming:
         params:
           - { name: envelope, type: Envelope }
           - { name: config, type: "GenerationConfig?" }
         return: "Stream<StreamToken>"
-        notes: "Dart accepts two extra optional named params beyond the contract shape: cancellationToken (issue 10) and preempt (issue 11). preempt defaults to false (drop-if-busy / serialized — the existing behavior). When preempt=true AND a cancellationToken is supplied, the run cancels the model's previously in-flight streaming run before acquiring the model write lock (latest-frame-wins), so a continuous live-capture loop can flip from drop-if-busy to cancel-and-replace without head-of-line blocking. preempt with no token is a no-op. Threaded Dart→FFI→SDK (run_streaming_with_options_preempt); the cancel-and-replace slot is a separate mutex on the model, never held across the handle write lock."
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+        notes: "Dart accepts two extra optional named params beyond the contract shape: cancellationToken (issue 10) and preempt (issue 11). preempt defaults to false (drop-if-busy / serialized — the existing behavior). When preempt=true AND a cancellationToken is supplied, the run cancels the model's previously in-flight streaming run before acquiring the model write lock (latest-frame-wins), so a continuous live-capture loop can flip from drop-if-busy to cancel-and-replace without head-of-line blocking. preempt with no token is a no-op. Threaded Dart→FFI→SDK (run_streaming_with_options_preempt); the cancel-and-replace slot is a separate mutex on the model, never held across the handle write lock. Swift (partial): streamTokens(envelope:options:) returns an AsyncSequence of XybridStreamToken; generation config rides XybridRunOptions, cancelling the consuming task stops generation at the next token, and there is no preempt. Kotlin (partial): streamTokens(envelope, options) returns a Flow of XybridStreamToken with the same semantics."
+        status: { dart: implemented, kotlin: partial, swift: partial, csharp: implemented }
       runStreamingWithOptions:
         params:
           - { name: envelope, type: Envelope }
           - { name: options, type: RunOptions }
         return: "Stream<StreamToken>"
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Swift and Kotlin (partial): streamTokens(envelope, options) takes RunOptions; see runStreaming."
+        status: { rust: implemented, dart: planned, kotlin: partial, swift: partial, csharp: planned }
       runTtsStreaming:
         params:
           - { name: envelope, type: Envelope }
@@ -392,15 +396,16 @@ classes:
           - { name: context, type: ConversationContext }
           - { name: config, type: "GenerationConfig?" }
         return: "Stream<StreamToken>"
-        notes: "Dart accepts the same two extra optional named params as runStreaming: cancellationToken (issue 10) and preempt (issue 11, default false). preempt=true + a cancellationToken makes this run cancel the model's previously in-flight streaming run before taking the write lock (latest-frame-wins). See runStreaming notes for the full cancel-and-replace contract."
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+        notes: "Dart accepts the same two extra optional named params as runStreaming: cancellationToken (issue 10) and preempt (issue 11, default false). preempt=true + a cancellationToken makes this run cancel the model's previously in-flight streaming run before taking the write lock (latest-frame-wins). See runStreaming notes for the full cancel-and-replace contract. Swift (partial): the pull API runStreamWithContext(envelope:context:options:) returns a stream id drained with streamNext(streamId:) and closed with streamClose(streamId:); there is no AsyncSequence form and no preempt. Kotlin (partial): the same pull API, runStreamWithContext(envelope, context, options)."
+        status: { dart: implemented, kotlin: partial, swift: partial, csharp: implemented }
       runStreamingWithContextOptions:
         params:
           - { name: envelope, type: Envelope }
           - { name: context, type: ConversationContext }
           - { name: options, type: RunOptions }
         return: "Stream<StreamToken>"
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Swift and Kotlin (partial): the pull API runStreamWithContext(envelope, context, options) takes RunOptions; see runStreamingWithContext."
+        status: { rust: implemented, dart: planned, kotlin: partial, swift: partial, csharp: planned }
       benchmark:
         async: true
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }

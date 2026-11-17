@@ -309,6 +309,12 @@ def check_metadata(path, before, after, old, new, date, checksum, workspace):
         expected = before
         if path == "Package.swift":
             expected = replace_one(expected, f'let sdkVersion = "{old}"'.encode(), f'let sdkVersion = "{new}"'.encode())
+            # The external-user comment is a SwiftPM install pin (install_pins.py);
+            # a bump moves its version and nothing else. Baselines from before
+            # the pin existed have no such line.
+            pin = f'/xybrid-ai/xybrid", from: "{old}")'.encode()
+            if pin in before:
+                expected = replace_one(expected, pin, f'/xybrid-ai/xybrid", from: "{new}")'.encode())
             if checksum is not None:
                 matches = re.findall(rb'^let xybridFFIChecksum = "([0-9a-f]{64})"$', before, re.M)
                 require(len(matches) == 1, "unsupported Swift checksum baseline")

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-17
+
 ### Added
 
 - **Registry telemetry:** CI runs now label their registry calls. When the
@@ -21,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still drops the whole header. Every SDK built on the Rust core sends it; the
   browser SDK (`@xybrid/web`) can't read environment variables and doesn't.
   See [Registry call telemetry](docs/telemetry/registry.md#labelling-ci-runs).
+- **Swift: load a local GGUF file.** `ModelLoader.fromModelFile(_:)` and
+  `Xybrid.model(.modelFile(url))` load a raw GGUF with no `model_metadata.json`,
+  as React Native's `fromModelFile` and Unity's `FromModelFile` already do:
+  `load()` generates the metadata from the GGUF header and writes it next to the
+  file unless one is there. `ModelSource` gains a `.modelFile(URL)` case, so a
+  `switch` over it without a `default` needs one more arm.
 
 ### Fixed
 
@@ -52,6 +60,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `backend: gateway` sent `gpt-4o-mini` (or `deepseek-flash`) and got
   `404 model_not_found`. With `backend: direct`, a stage still uses the
   provider's own model id.
+- **The Swift README no longer calls the SDK "Coming Soon".** Its opening banner
+  told production users to pick Flutter or Kotlin, while the same README
+  documents the SwiftPM install of the shipped package. The Chinese and
+  Japanese READMEs and the pipelines page also stop listing Swift, Kotlin and
+  Unity pipelines as coming soon or planned, matching the English README.
+- **The iOS docs match the Swift package.** The iOS page, the Swift README and
+  the pages that repeat them drop the "early access" label and the iOS 13 /
+  macOS 10.15 minimums: the package supports iOS 16.0 and later, on devices and
+  the arm64 Simulator, and ships no macOS slice. The accelerator tables (the
+  iOS page, the READMEs, the installation guide and the feature matrix) no
+  longer claim the Apple Neural Engine: GGUF models run on llama.cpp's Metal
+  backend on devices and on the CPU in the Simulator, and ONNX models run on the
+  CPU. The Simulator known issue
+  ([#179](https://github.com/xybrid-ai/xybrid/issues/179), fixed in 0.4.0-alpha)
+  is gone, and building needs Xcode 15.3 (Swift 5.10).
+- **The iOS example README is current.** It targets iOS 16.0, loads models
+  with `Xybrid.model(...).load()` instead of the blocking `Model(fromRegistry:)`,
+  and no longer says Swift lacks token streaming: `streamTokens` has shipped,
+  and the iOS page, the Swift README, the streaming docs and the API reference
+  now document it (Kotlin's `streamTokens` too), and the streaming page no
+  longer calls live transcription planned. What Swift still lacks for live
+  vision is named instead: Flutter's `preempt` flag and raw-frame `imageRaw`
+  envelopes.
+- **`Package.swift` points external users at the current release.** Its
+  install comment said `exact: "0.1.0-beta13"`; it now uses `from:` with the
+  current version, and `just bump-version` rewrites it with the other SwiftPM
+  install snippets. The trusted zzz SDK source policy accepts that line moving
+  with the version in a release bump.
 
 ## [0.19.0] - 2026-11-14
 

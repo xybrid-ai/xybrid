@@ -45,7 +45,7 @@ Otherwise tell the user what you're about to do, in one line, before running any
 | Rust | `Cargo.toml` depends on `xybrid-sdk` | `.env` | | `XYBRID_API_KEY` |
 | Python | `xybrid` in `pyproject.toml` / `requirements*.txt` | `.env` | | `XYBRID_API_KEY` |
 | Android (Kotlin) | `settings.gradle(.kts)`, `ai.xybrid:xybrid-kotlin` | `local.properties` (Gradle root) | | `xybrid.apiKey` |
-| iOS / macOS (Swift) | `*.xcodeproj` / `project.yml` / `Project.swift` using `Xybrid` | `Config/Secrets.xcconfig` | | `XYBRID_API_KEY` |
+| iOS (Swift) | `*.xcodeproj` / `project.yml` / `Project.swift` using `Xybrid` | `Config/Secrets.xcconfig` | | `XYBRID_API_KEY` |
 | Flutter | `pubspec.yaml` with `xybrid_flutter` | `.env.xybrid` | | `XYBRID_API_KEY` |
 | Expo | `package.json` with `expo` and `@xybrid/react-native` | `.env.local` | `EXPO_PUBLIC_XYBRID_API_KEY` | `EXPO_PUBLIC_XYBRID_API_KEY` |
 | React Native (bare) | `package.json` with `@xybrid/react-native`, no `expo` | the env loader's file, usually `.env` | | `XYBRID_API_KEY` |
@@ -334,7 +334,7 @@ android {
 }
 ```
 
-### iOS / macOS (Swift)
+### iOS (Swift)
 
 The key: `Config/Secrets.xcconfig` (create the `Config` directory first), which the CLI writes as `XYBRID_API_KEY = sk_live_…`.
 
@@ -391,7 +391,7 @@ struct MyApp: App {
 }
 ```
 
-UIKit apps call `XybridSetup.start()` in `application(_:didFinishLaunchingWithOptions:)` and flush in `sceneDidEnterBackground`. A SwiftPM tool without an Info.plist reads `ProcessInfo.processInfo.environment["XYBRID_API_KEY"]` and the dotenv instead.
+UIKit apps call `XybridSetup.start()` in `application(_:didFinishLaunchingWithOptions:)` and flush in `sceneDidEnterBackground`.
 
 ### Flutter
 

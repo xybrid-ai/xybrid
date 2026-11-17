@@ -47,7 +47,7 @@ cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli
 By default, `cargo install` builds without hardware acceleration. For optimal performance, add platform features:
 
 ```bash
-# macOS — Metal GPU + Apple Neural Engine + llama.cpp
+# macOS — Metal GPU + llama.cpp + whisper.cpp
 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-macos
 
 # Linux / Windows — ONNX + llama.cpp
@@ -118,7 +118,7 @@ only binaries you compile yourself.
 | **Individual flags** | |
 | `ort-download` | Download prebuilt ONNX Runtime binaries |
 | `ort-dynamic` | Load ONNX Runtime .so at runtime |
-| `ort-coreml` | Apple Neural Engine acceleration |
+| `ort-coreml` | Links ONNX Runtime's Core ML execution provider (the SDK does not select it yet) |
 | `candle` | Candle ML backend (Whisper models) |
 | `candle-metal` | Metal GPU acceleration for Candle |
 | `candle-cuda` | CUDA GPU acceleration for Candle |

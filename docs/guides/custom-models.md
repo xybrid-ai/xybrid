@@ -238,16 +238,23 @@ val model = loader.load()
 val result = model.run(XybridEnvelope.text("Hello, world!"))
 ```
 
-### Swift (iOS / macOS)
+### Swift (iOS)
 
 ```swift
 import Xybrid
 
-let loader = try ModelLoader.fromDirectory(path: "/path/to/my-custom-model")
-let model = try loader.load()
+let url = URL(fileURLWithPath: "/path/to/my-custom-model")
+let model = try await Xybrid.model(.directory(url)).load()
 
-let result = try model.run(envelope: .text("Hello, world!"))
+let result = try await model.runAsync(envelope: .text("Hello, world!"))
 ```
+
+A single llama.cpp GGUF file needs no hand-written metadata: Swift's
+`Xybrid.model(.modelFile(ggufURL))`, like React Native's `fromModelFile` and
+Unity's `FromModelFile`, writes `model_metadata.json` next to it on `load()`
+when that file is absent. The GGUF's directory must therefore be writable: an
+iOS app bundle is read-only, so copy the GGUF into the app container first, or
+ship a `model_metadata.json` beside it.
 
 ### Unity (C#)
 
@@ -323,17 +330,17 @@ if (!modelDir.exists()) {
 val loader = ModelLoader.fromDirectory(modelDir.absolutePath)
 ```
 
-### iOS / macOS — App Bundle
+### iOS — App Bundle
 
 Add model files to your Xcode project as a folder reference:
 
 ```swift
 // Models added to the Xcode project are in the app bundle
-guard let modelPath = Bundle.main.path(forResource: "my-model", ofType: nil) else {
+guard let modelURL = Bundle.main.url(forResource: "my-model", withExtension: nil) else {
     fatalError("Model directory not found in bundle")
 }
 
-let loader = try ModelLoader.fromDirectory(path: modelPath)
+let model = try await Xybrid.model(.directory(modelURL)).load()
 ```
 
 ### Unity — StreamingAssets
