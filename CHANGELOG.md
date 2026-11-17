@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Swift samples on the iOS page and in the Swift README compile.** Error
+  Handling catches the generated `XybridError` cases (`modelNotFound(id:)`,
+  `inferenceError(message:)`, `ioError(message:)`), Result Handling switches on
+  `XybridOutputType` instead of strings and no longer reads a `result.error`
+  that does not exist, and the README's audio envelope uses
+  `audio(pcmData:sampleRate:channels:)`. A failed run throws, so the samples no
+  longer check `result.success` (#804).
+
 ## [0.20.0] - 2026-11-17
 
 ### Added

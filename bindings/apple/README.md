@@ -52,11 +52,9 @@ let envelope = XybridEnvelope.text(
 // Run inference without blocking the caller's executor.
 let result = try await model.runAsync(envelope: envelope)
 
-// Access the result
-if result.success {
-    if let audioBytes = result.audioBytes {
-        // Play or save the audio
-    }
+// Access the result (a failed run throws instead of returning one)
+if let audioBytes = result.audioBytes {
+    // Play or save the audio
 }
 ```
 
@@ -208,7 +206,7 @@ python3 tools/scripts/observability_capture/run_scenario.py --binding swift --ou
 | `ModelLoader` | Cheap model reference; call `load()` to perform I/O |
 | `XybridModel` | A loaded model ready for inference |
 | `XybridEnvelope` | Input data container (audio, text, embedding, image, or multi-part user message) |
-| `XybridResult` | Inference result with success status and output data |
+| `XybridResult` | Inference result with output data (a failed run throws `XybridError`) |
 | `XybridError` | Error enum for error handling |
 
 ### Creating Envelopes
@@ -223,14 +221,14 @@ let ttsEnvelope = XybridEnvelope.text(
 
 // Speech-to-Text input
 let asrEnvelope = XybridEnvelope.audio(
-    bytes: audioData,
+    pcmData: audioData,
     sampleRate: 16000,
     channels: 1
 )
 
 // Embedding input
 let embeddingEnvelope = XybridEnvelope.embedding(
-    data: [0.1, 0.2, 0.3, ...]
+    data: [0.1, 0.2, 0.3]
 )
 
 // Vision-language input
