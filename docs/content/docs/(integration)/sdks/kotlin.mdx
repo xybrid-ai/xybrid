@@ -99,8 +99,8 @@ The SDK provides short aliases matching the full qualified names:
 return `XybridEnvelope`.
 
 Use `Xybrid.model(id)` for the registry shorthand, or pass a typed
-`ModelSource.bundle(...)`, `ModelSource.directory(...)`, or
-`ModelSource.huggingFace(...)`. These calls return an unloaded `ModelLoader`;
+`ModelSource.bundle(...)`, `ModelSource.directory(...)`,
+`ModelSource.huggingFace(...)`, or `ModelSource.modelFile(...)` (a raw GGUF). These calls return an unloaded `ModelLoader`;
 call suspending `load()` to perform the work. Java and existing worker-thread
 callers can use the explicitly blocking `loadBlocking()` method.
 

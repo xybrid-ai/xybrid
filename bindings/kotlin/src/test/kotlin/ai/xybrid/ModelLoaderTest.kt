@@ -1,6 +1,8 @@
 package ai.xybrid
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ModelLoaderTest {
@@ -29,5 +31,15 @@ class ModelLoaderTest {
             ModelSource.HuggingFace("org/model"),
             ModelSource.huggingFace("org/model"),
         )
+        assertEquals(ModelSource.ModelFile("model.gguf"), ModelSource.modelFile("model.gguf"))
+    }
+
+    @Test
+    fun modelFileLoaderIsUnloadedAndHasNothingToDownload() {
+        val loader = XybridModelLoader.fromModelFile("/data/models/qwen/model.gguf")
+
+        assertEquals(ModelSource.ModelFile("/data/models/qwen/model.gguf"), loader.source)
+        assertNull(loader.download())
+        assertFalse(loader.willSpeculate)
     }
 }

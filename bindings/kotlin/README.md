@@ -294,7 +294,7 @@ try {
 
 | Type | Description |
 |------|-------------|
-| `ModelSource` | Registry, bundle, directory, or Hugging Face model location |
+| `ModelSource` | Registry, bundle, directory, local GGUF file, or Hugging Face model location |
 | `ModelLoader` / `XybridModelLoader` | Cheap model reference; call `load()` to perform I/O |
 | `XybridModel` | Loaded model ready for inference |
 | `Envelope` | Factory for `XybridEnvelope` inputs (`text`, `audio`, `embedding`, `image`, `userMessage`) |
@@ -311,6 +311,7 @@ try {
 | `ModelLoader.fromBundle(path: String)` | Describe a local `.xyb` bundle |
 | `ModelLoader.fromDirectory(path: String)` | Describe an extracted directory |
 | `ModelLoader.fromHuggingFace(repo: String)` | Describe a Hugging Face repository |
+| `ModelLoader.fromModelFile(path: String)` | Describe a raw llama.cpp GGUF file; `load()` writes `model_metadata.json` next to it if absent |
 | `loader.load()` | Resolve, download if needed, and load without blocking the caller's thread |
 | `loader.loadBlocking()` | Explicit synchronous load for an existing worker thread |
 

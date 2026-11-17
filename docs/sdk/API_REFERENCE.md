@@ -264,6 +264,7 @@ class XybridModelLoader {
     fun fromRegistry(modelId: String): XybridModelLoader
     fun fromBundle(path: String): XybridModelLoader
     fun fromDirectory(path: String): XybridModelLoader
+    fun fromModelFile(path: String): XybridModelLoader
     fun fromRegistrySpeculative(id: String): XybridModelLoader
   }
 
@@ -412,7 +413,7 @@ var result = model.Run(Envelope.Text("Hello!"));
 | `fromDirectory()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingFace()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingfaceWithRevision()` | — | ✅ | ✅ | ✅ |
-| `fromModelFile()` | — | — | ✅ | ✅ |
+| `fromModelFile()` | — | ✅ | ✅ | ✅ |
 | `load()` | ✅ | ✅ | ✅ | ✅ |
 | `loadWithProgress()` | ✅ | — | — | — |
 | `download()` / `StartDownload()` | — | ✅ | ✅ | ✅ |

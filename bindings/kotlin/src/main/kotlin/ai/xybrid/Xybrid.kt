@@ -582,6 +582,9 @@ sealed interface ModelSource {
     /** A Hugging Face repository (`org/repo` or `org/repo:variant`). */
     data class HuggingFace(val repo: String) : ModelSource
 
+    /** A raw llama.cpp GGUF file on disk. See [XybridModelLoader.fromModelFile]. */
+    data class ModelFile(val path: String) : ModelSource
+
     /**
      * A registry model served from the cloud gateway while its weights
      * download in the background. See
@@ -605,6 +608,10 @@ sealed interface ModelSource {
         /** Describe a Hugging Face repository. */
         @JvmStatic
         fun huggingFace(repo: String): ModelSource = HuggingFace(repo)
+
+        /** Describe a raw GGUF file. */
+        @JvmStatic
+        fun modelFile(path: String): ModelSource = ModelFile(path)
 
         /** Describe a registry model to be served from the cloud while it downloads. */
         @JvmStatic
@@ -636,6 +643,7 @@ class XybridModelLoader private constructor(
         is ModelSource.Bundle -> XybridModel.fromBundle(current.path)
         is ModelSource.Directory -> XybridModel.fromDirectory(current.path)
         is ModelSource.HuggingFace -> XybridModel.fromHuggingface(current.repo)
+        is ModelSource.ModelFile -> XybridModel.fromModelFile(current.path)
         is ModelSource.RegistrySpeculative ->
             XybridModel.fromRegistrySpeculative(current.id)
     }
@@ -659,14 +667,19 @@ class XybridModelLoader private constructor(
      * ```
      *
      * Returns `null` for a source with nothing to fetch — a local bundle,
-     * directory, or Hugging Face repo — where [load] is the whole story.
+     * directory, model file, or Hugging Face repo — where [load] is the whole
+     * story.
      * Cancelling the collecting scope unsubscribes from updates; call
      * [XybridDownload.cancel] to stop the transfer itself.
      */
     fun download(): XybridDownload? = when (val current = source) {
         is ModelSource.Registry -> XybridDownload(current.id)
         is ModelSource.RegistrySpeculative -> XybridDownload(current.id)
-        is ModelSource.Bundle, is ModelSource.Directory, is ModelSource.HuggingFace -> null
+        is ModelSource.Bundle,
+        is ModelSource.Directory,
+        is ModelSource.HuggingFace,
+        is ModelSource.ModelFile,
+        -> null
     }
 
     /**
@@ -721,6 +734,21 @@ class XybridModelLoader private constructor(
         @JvmStatic
         fun fromHuggingFace(repo: String): XybridModelLoader =
             from(ModelSource.huggingFace(repo))
+
+        /**
+         * Create a loader for a raw llama.cpp GGUF file, such as one the app
+         * downloaded.
+         *
+         * No `model_metadata.json` is needed. [load] generates it from the GGUF
+         * header and writes it next to the file, unless one is already there,
+         * then loads the file's directory. Put each GGUF in its own directory in
+         * app-private storage (`Context.filesDir`, for example): the directory
+         * must be writable, and an existing `model_metadata.json` is used as
+         * is, so a second GGUF in the same directory would load the first one's
+         * model. Copy a file the user picks into app storage first.
+         */
+        @JvmStatic
+        fun fromModelFile(path: String): XybridModelLoader = from(ModelSource.modelFile(path))
 
         /** Compatibility spelling retained for existing Kotlin callers. */
         @JvmStatic
