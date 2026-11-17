@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.20.0
+
 * Added: registry calls made under CI (`CI` set to anything but empty, `0` or
   `false`, or `XYBRID_CI=1`) end the `X-Xybrid-Client` header with `ci=1`, so
   registry analytics can leave test traffic out of real usage. `XYBRID_CI=0`

@@ -10,7 +10,7 @@ import PackageDescription
 //
 // FOR EXTERNAL USERS (consuming via GitHub):
 //
-//   .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.19.0")
+//   .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.20.0")
 //
 // FOR LOCAL DEVELOPMENT:
 //
@@ -37,7 +37,7 @@ let useLocalNatives = false
 
 // Version for remote XybridFFI download (used when useLocalNatives = false).
 // Updated by the release workflow at tag time.
-let sdkVersion = "0.19.0"
+let sdkVersion = "0.20.0"
 
 // SHA-256 of XybridFFI-v<sdkVersion>.xcframework.zip on the GitHub release.
 // Updated by `bindings/apple/scripts/sync-spm-checksum.sh` (or the release
