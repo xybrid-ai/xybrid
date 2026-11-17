@@ -885,8 +885,9 @@ objc_library(
     ],
     copts = [
         "-std=c++17",
-        # Consumers may target older iOS than the bridge needs (the Flutter pod
-        # declares 13.0); every newer API must sit behind @available.
+        # Every shipped iOS config builds for 16.0 (--ios_minimum_os), but a
+        # cargo build of the same source can target an older iOS through
+        # IPHONEOS_DEPLOYMENT_TARGET; every newer API must sit behind @available.
         "-Werror=unguarded-availability-new",
     ],
     # The bridge includes upstream's ABI header as "coreml/whisper-encoder.h".

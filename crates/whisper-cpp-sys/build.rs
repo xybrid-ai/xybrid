@@ -267,8 +267,9 @@ fn compile_coreml_encoder(manifest_dir: &Path, whisper_dir: &Path) {
         .cpp(true)
         .std("c++17")
         .flag("-fobjc-arc")
-        // Consumers may target older iOS than the bridge needs (the Flutter
-        // pod declares 13.0); every newer API must sit behind @available.
+        // The shipped bindings target iOS 16, but a cargo build of this crate
+        // can target an older iOS through IPHONEOS_DEPLOYMENT_TARGET; every
+        // newer API must sit behind @available.
         .flag("-Werror=unguarded-availability-new")
         .include(&native)
         .include(whisper_dir.join("src"))
