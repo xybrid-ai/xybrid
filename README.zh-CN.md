@@ -249,7 +249,8 @@ let result = model.run(&Envelope::text("国破山河在，城春草木深"))?;
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny-ggml  # 语音 → 文本
+  - id: asr
+    model: whisper-tiny-ggml  # 语音 → 文本
   - model: qwen2.5-0.5b       # 用 LLM 处理
   - model: kokoro-82m         # 文本 → 语音
 ```
@@ -267,17 +268,23 @@ final result = await pipeline.run(XybridEnvelope.audio(bytes: audioBytes, sample
 
 **Kotlin:**
 ```kotlin
-// 多模型流水线（MMP）支持即将推出，当前请使用单模型加载
+val pipeline = XybridPipeline.fromYamlAsync(yamlString)
+val result = pipeline.runAsync(inputEnvelope)
+val transcript = result.stage("asr")?.text  // 每个阶段的输出，而不只是最后一个
 ```
 
 **Swift:**
 ```swift
-// 多模型流水线（MMP）支持即将推出，当前请使用单模型加载
+let pipeline = try await XybridPipeline.fromYamlAsync(yamlString)
+let result = try await pipeline.runAsync(envelope: inputEnvelope)
+let transcript = result.stage("asr")?.text  // 每个阶段的输出，而不只是最后一个
 ```
 
 **Unity (C#):**
 ```csharp
-// 多模型流水线（MMP）支持即将推出，当前请使用单模型加载
+using var pipeline = Pipeline.FromYaml(yamlString);
+PipelineResult result = pipeline.Run(inputEnvelope);
+string transcript = result.Stage("asr")?.Text;  // 每个阶段的输出，而不只是最后一个
 ```
 
 **Rust:**
@@ -394,7 +401,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 | 模型下载与缓存 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 硬件加速 | Metal, ANE | CPU | Metal, ANE | CPU，可选 Vulkan | CPU |
 
-**SDK MMP 支持：** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
+**SDK MMP 支持：** Flutter ✅ · Rust ✅ · Kotlin ✅ · Swift ✅ · React Native ✅ · Unity ✅
 
 **工具调用：** 本地模型调用你定义的函数——工具就是普通数据，循环由你的代码掌控。
 参见[工具调用指南](https://docs.xybrid.dev/zh/docs/guides/tool-calling)。
