@@ -261,11 +261,19 @@ class XybridResult {
 
 ```dart
 class StreamToken {
-  final String token;            // 生成的 Token 文本
-  final int index;               // Token 位置
-  final String cumulativeText;   // 目前已生成的全部文本
-  final bool isFinal;            // 是否为序列中的最后一个 Token
-  final String? finishReason;    // "stop"、"length"、"error"
+  final String token;                    // 生成的 Token 文本
+  final int index;                       // 从零开始的 Token 位置
+  final String cumulativeText;           // 目前已输出的文本，不含工具调用块
+  final bool isFinal;                    // 是否为序列中的最后一个 Token
+  final String? finishReason;            // "stop"、"length"、"tool_calls" 或 "error: <message>"
+  final XybridInferenceMetrics? metrics; // 仅在最后一个 Token 上提供
+  final ObservationRef? observation;     // 轨迹引用，仅在最后一个 Token 上提供
+  final List<ToolCall> toolCalls;        // 仅在最后一个 Token 上提供，其他情况为空
+  final String? rawText;                 // 包含工具调用块的本轮原始文本；无工具调用时为 null
+
+  bool get hasToolCalls;                 // toolCalls 非空
+  bool get isError;                      // finishReason 以 "error:" 开头
+  String? get errorMessage;              // 错误 Token 的错误信息
 }
 ```
 
@@ -348,7 +356,7 @@ class XybridException implements Exception {
 }
 ```
 
-所有 SDK 错误均抛出 `XybridException`。使用 `loadWithProgress()` 时，加载错误通过 `LoadError` 事件上报。
+除 Token 流式方法（`runStreaming`、`runStreamingWithContext`、`runStreamingWithFallback`）外，所有 SDK 错误均抛出 `XybridException`；这些方法改为以一个错误 Token 结束流（`StreamToken.isError`、`StreamToken.errorMessage`）。使用 `loadWithProgress()` 时，加载错误通过 `LoadError` 事件上报。
 
 ---
 
