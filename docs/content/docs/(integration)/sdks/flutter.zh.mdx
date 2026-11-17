@@ -354,10 +354,12 @@ class XybridException implements Exception {
 
 ## 平台支持
 
-| 平台 | 状态 | 加速器 |
-|----------|--------|--------------|
-| macOS | 支持 | Metal、CoreML |
-| iOS | 支持 | Metal、CoreML |
-| Android | 支持 | NNAPI |
-| Linux | 支持 | CPU |
-| Windows | 规划中 | DirectML |
+预编译库覆盖 iOS（真机与模拟器，arm64）、Apple Silicon 上的 macOS、Android（arm64-v8a、x86_64）、Linux（x86_64）和 Windows（x86_64）。模型在哪里运行取决于其格式：
+
+| 模型格式 | iOS 真机 | iOS 模拟器 | macOS | Android、Linux、Windows |
+|--------------|------------|---------------|-------|-------------------------|
+| GGUF（llama.cpp：LLM、视觉语言模型） | Metal GPU | CPU | Metal GPU | CPU |
+| Whisper（whisper.cpp） | CPU；可选 Core ML 编码器 | CPU；可选 Core ML 编码器 | Metal GPU | CPU |
+| ONNX（ONNX Runtime） | CPU | CPU | CPU | CPU |
+
+在 iOS 上，模型文件旁有 `<model>-encoder.mlmodelc`（如 `ggml-base.en-encoder.mlmodelc`）时，whisper.cpp 会在 Core ML 上运行编码器。iOS 和 macOS 链接了 ONNX Runtime 的 Core ML 执行提供程序，但 SDK 尚未选用它，因此 ONNX 模型在 CPU 上运行。没有任何路径使用 NNAPI 或 DirectML。
