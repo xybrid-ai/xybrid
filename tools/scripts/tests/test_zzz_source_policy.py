@@ -75,7 +75,7 @@ checksum = "trusted-external-checksum"
 ''',
         POLICY.MANIFEST: '{"schema_version":4,"release":"v0.1.0-rc.8"}\n',
         POLICY.VERIFIER: '# Frozen verifier; importing this is forbidden.\nraise RuntimeError("DO NOT RUN")\n',
-        "Package.swift": 'import PackageDescription\nlet useLocalNatives = false\nlet sdkVersion = "0.13.0"\nlet xybridFFIChecksum = "' + "a" * 64 + '"\n',
+        "Package.swift": 'import PackageDescription\n//   .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.13.0")\nlet useLocalNatives = false\nlet sdkVersion = "0.13.0"\nlet xybridFFIChecksum = "' + "a" * 64 + '"\n',
         "bindings/react-native/package.json": '{\n  "version": "0.13.0",\n  "scripts": {"prepack": "trusted-command"},\n  "xybrid": {"iosXcframeworkSha256": "' + "a" * 64 + '"}\n}\n',
         "bindings/unity/package.json": '{"version": "0.13.0", "name": "trusted"}\n',
         "bindings/web/package.json": '{"version": "0.13.0", "scripts": {"build": "trusted"}}\n',
@@ -134,6 +134,7 @@ def canonical_bump(files, old, new, date=DATE, checksum=CHECKSUM):
             result[path] = text
         elif path == "Package.swift":
             text = text.replace('let sdkVersion = "' + old + '"', 'let sdkVersion = "' + new + '"', 1)
+            text = text.replace('/xybrid-ai/xybrid", from: "' + old + '")', '/xybrid-ai/xybrid", from: "' + new + '")', 1)
             if checksum is not None:
                 text = re.sub(r'(?m)^let xybridFFIChecksum = "[a-f0-9]{64}"$',
                               'let xybridFFIChecksum = "' + checksum + '"', text)
@@ -335,6 +336,8 @@ class SourcePolicyTests(unittest.TestCase):
         variants = [
             ("Package.swift", self.bump["Package.swift"].replace("useLocalNatives = false", "useLocalNatives = true")),
             ("Package.swift", self.bump["Package.swift"] + '\nlet url = "https://evil.invalid"\n'),
+            ("Package.swift", self.bump["Package.swift"].replace('github.com/xybrid-ai/xybrid", from:', 'evil.invalid/xybrid", from:')),
+            ("Package.swift", self.bump["Package.swift"].replace(f'from: "{NEW}"', 'from: "9.9.9"')),
             ("bindings/react-native/package.json", self.bump["bindings/react-native/package.json"].replace("trusted-command", "evil-command")),
             ("bindings/web/package.json", self.bump["bindings/web/package.json"].replace('"trusted"', '"evil"')),
         ]

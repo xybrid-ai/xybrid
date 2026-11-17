@@ -97,7 +97,10 @@ PINS: Tuple[Pin, ...] = (
         r'\.package\(\s*(?:name:\s*"[^"\n]*"\s*,\s*)?url:\s*"https://github\.com/xybrid-ai/xybrid(?:\.git)?"\s*,\s*'
         r'(?:(?:from|exact):\s*|\.(?:upToNextMajor|upToNextMinor)\(\s*from:\s*|\.exact\(\s*)?"{version}"',
         (_README, _README_ZH, _README_JA, "bindings/apple/README.md",
-         _SDKS + "ios.mdx", _SDKS + "ios.zh.mdx", _QUICKSTART, _QUICKSTART_ZH),
+         _SDKS + "ios.mdx", _SDKS + "ios.zh.mdx", _QUICKSTART, _QUICKSTART_ZH,
+         # The manifest's comment for external users. Not a doc, so the
+         # repo-wide snippet scan in the test never reaches it.
+         "Package.swift"),
     ),
     Pin(
         "Xcode dependency rule",

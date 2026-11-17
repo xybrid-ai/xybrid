@@ -75,6 +75,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer calls live transcription planned. What Swift still lacks for live
   vision is named instead: Flutter's `preempt` flag and raw-frame `imageRaw`
   envelopes.
+- **`Package.swift` points external users at the current release.** Its
+  install comment said `exact: "0.1.0-beta13"`; it now uses `from:` with the
+  current version, and `just bump-version` rewrites it with the other SwiftPM
+  install snippets. The trusted zzz SDK source policy accepts that line moving
+  with the version in a release bump.
 
 ## [0.19.0] - 2026-11-14
 
