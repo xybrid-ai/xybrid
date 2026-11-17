@@ -709,7 +709,9 @@ jobs:
       - name: Stage Observability SDK for npm approval
         env:
           VERSION: ${{ needs.publish-release.outputs.version }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_OBSERVABILITY_TOKEN }}
+          # Its own token if set, else the React Native one. An empty token
+          # with no trusted publisher fails with ENEEDAUTH (v0.19.0).
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_OBSERVABILITY_TOKEN || secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           test "$(node -p "require('./package.json').version")" = "$VERSION"
@@ -724,8 +726,9 @@ jobs:
 
   # =========================================================================
   # Stage @xybrid/web using the exact archive built and tested by release-prep.
-  # Separate opt-in and stage-only token let its first-publish/trusted-publisher
-  # setup happen independently of React Native. See bindings/web/RELEASING.md.
+  # A separate opt-in lets its first-publish/trusted-publisher setup happen
+  # independently of React Native; with no NPM_WEB_TOKEN it stages with
+  # NPM_TOKEN. See bindings/web/RELEASING.md.
   # =========================================================================
   publish-web-npm:
     name: Publish Web SDK (npm)
@@ -786,7 +789,7 @@ jobs:
       - name: Stage Web SDK for npm approval
         env:
           VERSION: ${{ needs.publish-release.outputs.version }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_WEB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_WEB_TOKEN || secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           test "$(node -p "require('./package.json').version")" = "$VERSION"

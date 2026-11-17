@@ -28,8 +28,9 @@ skip versions already public on npm.
 2. Configure `@xybrid/observability`'s trusted publishing on npmjs.com for
    repository `xybrid-ai/xybrid`, workflow `release-publish.yml`, with stage-only
    permission. The workflow requests GitHub OIDC and provenance. Until that is
-   configured, supply a stage-only granular token scoped to this package in
-   secret `NPM_OBSERVABILITY_TOKEN`.
+   configured, supply a stage-only granular token that covers this package in
+   secret `NPM_OBSERVABILITY_TOKEN`. Without that secret the job uses
+   `NPM_TOKEN`, React Native's token, which must then cover this package too.
 3. Set `NPM_OBSERVABILITY_PUBLISH_ENABLED=true` for standalone publishing.
    `NPM_WEB_PUBLISH_ENABLED=true` also enables this dependency publisher.
 4. Approve the staged observability version with 2FA on npmjs.com before web.
