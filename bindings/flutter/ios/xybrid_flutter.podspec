@@ -38,11 +38,15 @@ with intelligent routing based on device capabilities. Supports ASR, TTS, and LL
   s.platform = :ios, '16.0'
   s.swift_version = '5.0'
 
-  # System frameworks required for ML inference
-  # - Metal: GPU compute for Candle models
-  # - MetalPerformanceShaders: Optimized ML primitives
-  # - Accelerate: BLAS/LAPACK for CPU inference (ONNX Runtime)
-  # - CoreML: Apple Neural Engine acceleration (CoreML EP)
+  # System frameworks the Rust library links against
+  # - Metal: llama.cpp's GPU backend (ggml-metal) and xybrid-core's Metal
+  #   device probe
+  # - MetalPerformanceShaders: no known user. Candle's Metal backend links it,
+  #   but no preset enables Candle now. Removal waits on a link test (#807)
+  # - Accelerate: ggml's CPU backend (llama.cpp and whisper.cpp)
+  # - CoreML: ONNX Runtime's Core ML execution provider (linked; the SDK does
+  #   not select it yet), whisper.cpp's Core ML encoder and the native Core ML
+  #   adapter (the `coreml` feature)
   s.frameworks = 'Metal', 'MetalPerformanceShaders', 'Accelerate', 'CoreML'
 
   s.script_phase = {

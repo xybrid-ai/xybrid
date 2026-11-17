@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `execution_provider` key is documented as parsed but not applied yet (every
   ONNX session runs on the CPU), and the Flutter platform tables say what each
   model format runs on (#806).
+- **Apple build comments describe the build.** `ort-coreml` is described as
+  linking ONNX Runtime's Core ML execution provider (not Neural Engine
+  acceleration), including in the error shown when it is enabled off Apple, and
+  the iOS build comments no longer mention Candle or "Metal OFF" (#807).
 
 ## [0.20.0] - 2026-11-17
 
