@@ -381,7 +381,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 }
 ```
 
-完整 schema 见 [model metadata 文档](docs/sdk/API_REFERENCE.md)，或参考 [`integration-tests/fixtures/models/`](integration-tests/fixtures/models/) 中的现有示例。
+完整 schema 见 [model metadata 文档](docs/sdk/MODEL_METADATA.md)，或参考 [`integration-tests/fixtures/models/`](integration-tests/fixtures/models/) 中的现有示例。
 
 </details>
 

@@ -253,13 +253,13 @@ xybrid run --model smollm2-360m --input-text "What is the capital of France?"
 
 ### Vision-Language Input
 
-Vision-language models require a build with `vision` or `llm-llamacpp-vision`
-enabled, plus a model bundle that includes the vision encoder artifact.
-Platform presets alone are text-only; compose a preset with
-`llm-llamacpp-vision` for local VLM generation.
+Vision-language models need a build with `llm-llamacpp-vision`, plus a model
+bundle that includes the vision encoder artifact. Every platform preset already
+enables `llm-llamacpp-vision`, so a preset build runs VLMs with no extra
+feature:
 
 ```bash
-cargo build --release -p xybrid-cli --features platform-macos,llm-llamacpp-vision
+cargo build --release -p xybrid-cli --features platform-macos
 ```
 
 ```bash
