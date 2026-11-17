@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that does not exist, and the README's audio envelope uses
   `audio(pcmData:sampleRate:channels:)`. A failed run throws, so the samples no
   longer check `result.success` (#804).
+- **The Swift README describes the current build.** Its Structure tree points
+  at the repo-root `Package.swift`, the local XCFramework steps include the
+  `set-natives-mode.sh` toggle, Troubleshooting covers the Bazel and SwiftPM
+  flow, and the dead "Full Plan" links are gone from the Swift, Kotlin and tools
+  READMEs, along with the two placeholder build scripts they described (#805).
 
 ## [0.20.0] - 2026-11-17
 
