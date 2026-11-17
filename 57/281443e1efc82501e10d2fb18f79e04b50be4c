@@ -1,0 +1,23 @@
+bindings/web/RELEASING.md
+  s_c71d4075e707b1::t_33a275221421ed 63,81-85
+.github/workflows/release-publish.yml
+  s_c71d4075e707b1::t_33a275221421ed 712-714,729-731,792
+bindings/observability-js/RELEASING.md
+  s_c71d4075e707b1::t_33a275221421ed 31-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "57281443e1efc82501e10d2fb18f79e04b50be4c",
+  "prompts": {},
+  "sessions": {
+    "s_c71d4075e707b1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cffbbe7a-bbf1-4169-9127-5955ff8d56f4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <3216616+theGlenn@users.noreply.github.com>"
+    }
+  }
+}
