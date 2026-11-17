@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   linking ONNX Runtime's Core ML execution provider (not Neural Engine
   acceleration), including in the error shown when it is enabled off Apple, and
   the iOS build comments no longer mention Candle or "Metal OFF" (#807).
+- **The streaming docs list the real `finishReason` values** (`stop`,
+  `length`, `tool_calls`), say how each SDK reports a failed stream, and
+  document `tokenId`, `toolCalls` and `rawText` (#808).
 
 ## [0.20.0] - 2026-11-17
 

@@ -91,10 +91,21 @@ string response = model.RunStreamingText("Tell me a story.", token =>
 | Property | Type | Description |
 |----------|------|-------------|
 | `token` | `String` | Generated token text |
-| `index` | `int` | Token position in sequence |
-| `cumulativeText` | `String` | All text generated so far |
+| `tokenId` | integer or null | Raw token ID, when the backend exposes one. Swift `Int64?`, Kotlin `Long?`, Unity `long?`. Dart has no such field |
+| `index` | non-negative integer | Zero-based token position in the sequence. Dart `int`, Swift `UInt64`, Kotlin `ULong`, Unity `uint` |
+| `cumulativeText` | `String` | The text emitted so far. Tool-call blocks are left out, so this can differ from the model's raw output (see `rawText`) |
 | `isFinal` | `bool` | Whether this is the last token. Dart always ends the stream with one. Unity's `IsFinal`, and a non-null `finishReason` in Swift and Kotlin, mark the terminal token, but a run that generates no text ends without one: treat the end of the loop as the end of the stream |
-| `finishReason` | `String?` | `"stop"`, `"length"`, or `"error"` |
+| `finishReason` | `String?` | Set on the terminal token: `"stop"` (end of sequence or a stop sequence), `"length"` (hit `max_tokens`) or `"tool_calls"` (the turn ended on a tool call; see `toolCalls`). Cloud-routed runs pass the gateway's reason through unchanged, so other values can appear. In Dart, a failed run reports `"error: <message>"` here; see [Failures](#failures) |
+| `toolCalls` | list | Tool calls the model asked for. Terminal token only: empty on every other token and on turns that call no tool. See [Streaming Chat With Tools](/docs/guides/tool-calling#streaming-chat-with-tools) |
+| `rawText` | `String?` | The turn's raw output, tool-call block included. Pass it as `priorAssistantText` to continue the turn. Terminal token only, and only when `toolCalls` is not empty |
+
+### Failures
+
+No SDK reports a failure as a bare `"error"` finish reason. Each SDK reports it differently:
+
+- **Flutter**: the stream ends with a token whose `finishReason` starts with `"error: "` and carries the message. Check `token.isError` and read `token.errorMessage`. This token can follow a normal final token.
+- **Swift and Kotlin**: `streamTokens` throws `XybridError`, so the `for try await` loop (Swift) or the `collect` call (Kotlin) throws. In the pull API, `streamNext` throws.
+- **Unity**: `RunStreaming` returns an `InferenceResult` with `Success` set to false. Call `result.ThrowIfFailed()` to throw. `RunStreamingText` calls it for you.
 
 ## SDK Support
 

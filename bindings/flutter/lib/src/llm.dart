@@ -22,7 +22,8 @@ class StreamToken {
   final bool isFinal;
 
   /// Finish reason if this is the final token (e.g., "stop", "length",
-  /// "tool_calls", "error").
+  /// "tool_calls"). A failed run ends the stream with a token whose reason is
+  /// `"error: <message>"`; see [isError] and [errorMessage].
   final String? finishReason;
 
   /// Final inference metrics supplied by native completion.
