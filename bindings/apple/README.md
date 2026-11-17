@@ -245,13 +245,22 @@ runtime error instead of an opaque memory pressure failure.
 
 ## Structure
 
+The Swift package manifest is the repo-root [`Package.swift`](../../Package.swift),
+not a file in this directory. It serves both SPM consumers and local
+development; its `useLocalNatives` flag picks the xcframework.
+
 ```
 apple/
-├── Package.swift                    # Swift Package manifest (local dev: path-based binaryTarget)
+├── BUILD.bazel                      # Bazel targets for XybridFFI.xcframework
 ├── Sources/
 │   └── Xybrid/                      # Swift source
 │       ├── Xybrid.swift             # Public API, extensions, type aliases
 │       └── xybrid_bolt.swift        # BoltFFI-generated Swift bindings (DO NOT EDIT)
+├── Tests/
+│   └── XybridTests/                 # Swift unit tests (the XybridTests target)
+├── include/
+│   └── xybrid-bolt.h                # BoltFFI-generated C header the xcframework ships (DO NOT EDIT)
+├── scripts/                         # set-natives-mode.sh, sync-spm-checksum.sh, gen-bolt-bindings.sh, ...
 └── XCFrameworks/                    # Local-dev unzip target for the Bazel-built xcframework
     └── XybridFFI.xcframework/       # (gitignored; unzipped from bazel-bin)
 ```
@@ -269,7 +278,10 @@ the [Rust crate](../../crates/xybrid/).
 
 ## Building the XCFramework
 
-The XCFramework containing the compiled Rust library must be built before using the Swift package.
+This section is for local development only. Apps that add the package with SPM
+get the release XCFramework automatically: with `useLocalNatives = false`, the
+committed state, SPM downloads `XybridFFI-v<version>.xcframework.zip` from the
+GitHub release.
 
 ### Prerequisites
 
@@ -292,11 +304,19 @@ bazel build --config=ios //bindings/apple:XybridFFI
 
 # Unzip it where the Swift package's local-natives mode looks
 unzip -o bazel-bin/bindings/apple/XybridFFI.xcframework.zip -d bindings/apple/XCFrameworks
+
+# Point the root Package.swift at the local xcframework
+./bindings/apple/scripts/set-natives-mode.sh --set-local
 ```
 
 This produces `XCFrameworks/XybridFFI.xcframework` containing:
 - iOS device (arm64)
 - iOS simulator (arm64)
+
+Without `--set-local`, the package keeps using the release xcframework, not your
+build. `useLocalNatives = true` is for local development only. Toggle back to
+remote mode before committing:
+`./bindings/apple/scripts/set-natives-mode.sh --set-remote`.
 
 ### Build Output
 
@@ -353,35 +373,32 @@ before publication. The standard release workflow still uses `:XybridFFI`.
 
 ### Troubleshooting
 
-#### "error: linker 'cc' not found"
+#### SPM can't find the local xcframework, or ignores your build
 
-**Cause**: Xcode Command Line Tools not installed.
+**Cause**: The root `Package.swift` is in remote mode, or the xcframework is not
+where local mode looks.
 
-**Fix**: Run `xcode-select --install`
+**Fix**: Run `./bindings/apple/scripts/set-natives-mode.sh --status`.
 
-#### "error: target 'aarch64-apple-ios' not installed"
+- `useLocalNatives = false`: SPM uses the release xcframework. Run
+  `./bindings/apple/scripts/set-natives-mode.sh --set-local`.
+- `useLocalNatives = true`: SPM reads
+  `bindings/apple/XCFrameworks/XybridFFI.xcframework`. Check that this
+  directory exists. If it does not, run the `unzip` command above from the repo
+  root.
 
-**Cause**: Missing Rust target.
+Do not add the xcframework to your Xcode project's "Frameworks, Libraries, and
+Embedded Content" yourself. Apps depend on the `Xybrid` product, and SPM
+resolves the `XybridFFI` binary target.
 
-**Fix**: Build via Bazel (`bazel build --config=ios //bindings/apple:XybridFFI`) — it provides its own Rust toolchain and targets
+#### "Cannot find 'boltffi_…' in scope" in `xybrid_bolt.swift`
 
-#### "xcodebuild: error: cannot be used together with -create-xcframework"
+**Cause**: The xcframework's C header is older than the committed Swift
+bindings. In remote mode, the release xcframework can predate the bindings on
+`master`. In local mode, the unzipped xcframework can predate your last pull.
 
-**Cause**: Conflicting xcodebuild options or incompatible library format.
-
-**Fix**: Ensure you're using static libraries (.a files), not dynamic (.dylib).
-
-#### Build works but Swift can't find the module
-
-**Cause**: XCFramework not in expected location or not linked.
-
-**Fix**: Ensure `XCFrameworks/XybridFFI.xcframework` exists and is listed in your Xcode project's "Frameworks, Libraries, and Embedded Content".
-
-#### "Undefined symbols for architecture arm64"
-
-**Cause**: XCFramework built for different architecture than target.
-
-**Fix**: Rebuild with `bazel build --config=ios //bindings/apple:XybridFFI`.
+**Fix**: Build and unzip the xcframework again (see [Building](#building)),
+then run `./bindings/apple/scripts/set-natives-mode.sh --set-local`.
 
 ### Non-macOS Developers
 
@@ -402,7 +419,3 @@ The Swift bindings are generated from `crates/xybrid-bolt/` using [BoltFFI](http
 ## Telemetry
 
 The Apple binding reports `binding=swift` in a small `X-Xybrid-Client` header attached to registry metadata calls. See [docs/telemetry/registry.md](../../docs/telemetry/registry.md) for the exact wire format and the opt-out switch (`XYBRID_TELEMETRY_OPTOUT=1`).
-
-## Full Plan
-
-See [DRAFT-PLATFORM-SDK-RESTRUCTURE.md](../../docs/architecture/DRAFT-PLATFORM-SDK-RESTRUCTURE.md) for the complete restructuring plan.
