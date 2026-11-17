@@ -77,6 +77,23 @@ for try await token in model.streamTokens(envelope: XybridEnvelope.text("Tell me
 task that consumes it, or breaking out of the loop, stops generation at the
 next token.
 
+### Loading a local GGUF file
+
+A llama.cpp GGUF file the app downloaded loads directly, with no
+`model_metadata.json` to write:
+
+```swift
+let model = try await Xybrid.model(.modelFile(ggufURL)).load()
+```
+
+`load()` generates `model_metadata.json` from the GGUF header and writes it
+next to the file, unless one is already there. The generated file caps the
+context at 4,096 tokens; raise its `context_length` for longer chats. Put each
+GGUF in its own directory inside the app container, such as Application
+Support: the app bundle is read-only, and a `model_metadata.json` already in
+the directory is used as is, so a second GGUF there would load the first one's
+model. Copy a file the user picks into the app container before loading it.
+
 ### Reasoning (thinking models)
 
 Reasoning models (metadata `reasoning: true`, e.g. `lfm2.5-1.2b-thinking`)
@@ -187,7 +204,7 @@ python3 tools/scripts/observability_capture/run_scenario.py --binding swift --ou
 
 | Type | Description |
 |------|-------------|
-| `ModelSource` | Registry, bundle, directory, or Hugging Face model location |
+| `ModelSource` | Registry, bundle, directory, local GGUF file, or Hugging Face model location |
 | `ModelLoader` | Cheap model reference; call `load()` to perform I/O |
 | `XybridModel` | A loaded model ready for inference |
 | `XybridEnvelope` | Input data container (audio, text, embedding, image, or multi-part user message) |

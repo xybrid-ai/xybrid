@@ -103,8 +103,15 @@ let model = try await Xybrid.model("whisper-tiny-ggml").load()
 let model = try await Xybrid.model(.bundle(bundleURL)).load()
 ```
 
-`Xybrid.model(...)` 只创建廉价的、未加载的引用。本地 Bundle 和目录使用
-`URL` 与 `.bundle(url)` / `.directory(url)`。`load()` 是显式的异步加载边界。
+`Xybrid.model(...)` 只创建廉价的、未加载的引用。本地 Bundle、目录和 GGUF 文件来源通过 `.bundle(url)`、`.directory(url)` 和 `.modelFile(url)` 传入 `URL`；Hugging Face 使用 `.huggingFace("org/repo")`。异步 `load()` 是解析、下载、磁盘访问和运行时初始化的显式边界。只应在已有的工作线程中调用 `loadSync()`。
+
+### 从本地 GGUF 文件
+
+```swift
+let model = try await Xybrid.model(.modelFile(ggufURL)).load()
+```
+
+原始的 llama.cpp GGUF 无需 `model_metadata.json`。`load()` 会根据 GGUF 头部生成该文件并写在 GGUF 旁边，上下文上限为 4,096 个 Token（需要更长对话时调高其中的 `context_length`）。请把每个 GGUF 放在应用容器内的独立目录中，例如 Application Support。应用 Bundle 是只读的，无法在其中写入 `model_metadata.json`；目录中已有的 `model_metadata.json` 会被原样使用：在同一目录中加载第二个 GGUF 时，实际加载的仍是第一个 GGUF 的模型。用户选取的文件请先复制到应用容器内再加载。
 
 ---
 

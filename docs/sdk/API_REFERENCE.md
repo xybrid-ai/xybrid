@@ -283,12 +283,14 @@ public enum ModelSource {
   case directory(URL)
   case huggingFace(String)
   case registrySpeculative(String)
+  case modelFile(URL)  // raw GGUF; load() writes model_metadata.json beside it if absent
 }
 
 public struct ModelLoader {
   let source: ModelSource
 
   static func fromRegistrySpeculative(_ id: String) -> Self
+  static func fromModelFile(_ url: URL) -> Self
   var willSpeculate: Bool { get }
 
   func load() async throws -> XybridModel
@@ -410,6 +412,7 @@ var result = model.Run(Envelope.Text("Hello!"));
 | `fromDirectory()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingFace()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingfaceWithRevision()` | — | ✅ | ✅ | ✅ |
+| `fromModelFile()` | — | — | ✅ | ✅ |
 | `load()` | ✅ | ✅ | ✅ | ✅ |
 | `loadWithProgress()` | ✅ | — | — | — |
 | `download()` / `StartDownload()` | — | ✅ | ✅ | ✅ |
@@ -2211,7 +2214,7 @@ format.
 ### Swift-specific
 
 - Uses hand-written Swift facades over BoltFFI-generated types
-- Uses `URL` for local bundle and directory model sources
+- Uses `URL` for local bundle, directory, and GGUF file model sources
 - Uses `async throws` for model loading; `loadSync()` is the explicit blocking form
 
 ### Unity/C#-specific

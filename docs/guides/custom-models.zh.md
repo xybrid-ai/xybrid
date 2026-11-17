@@ -236,11 +236,13 @@ val result = model.run(XybridEnvelope.text("Hello, world!"))
 ```swift
 import Xybrid
 
-let loader = try ModelLoader.fromDirectory(path: "/path/to/my-custom-model")
-let model = try loader.load()
+let url = URL(fileURLWithPath: "/path/to/my-custom-model")
+let model = try await Xybrid.model(.directory(url)).load()
 
-let result = try model.run(envelope: .text("Hello, world!"))
+let result = try await model.runAsync(envelope: .text("Hello, world!"))
 ```
+
+单个 llama.cpp GGUF 文件无需手写元数据：Swift 的 `Xybrid.model(.modelFile(ggufURL))` 与 React Native 的 `fromModelFile`、Unity 的 `FromModelFile` 一样，会在 `load()` 时（若文件旁尚无 `model_metadata.json`）在文件旁写入该文件。因此 GGUF 所在目录必须可写：iOS 应用 Bundle 是只读的，请先把 GGUF 复制到应用容器内，或在其旁边随附 `model_metadata.json`。
 
 ### Unity (C#)
 
@@ -322,11 +324,11 @@ val loader = ModelLoader.fromDirectory(modelDir.absolutePath)
 
 ```swift
 // 添加到 Xcode 项目的模型位于应用包中
-guard let modelPath = Bundle.main.path(forResource: "my-model", ofType: nil) else {
+guard let modelURL = Bundle.main.url(forResource: "my-model", withExtension: nil) else {
     fatalError("Model directory not found in bundle")
 }
 
-let loader = try ModelLoader.fromDirectory(path: modelPath)
+let model = try await Xybrid.model(.directory(modelURL)).load()
 ```
 
 ### Unity — StreamingAssets

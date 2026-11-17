@@ -169,8 +169,8 @@ classes:
         static: true
         params: [{ name: filePath, type: String }]
         return: XybridModelLoader
-        notes: "Loads a raw GGUF file directly. Auto-generates model_metadata.json from GGUF binary header if not present."
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+        notes: "Loads a raw GGUF file directly. Auto-generates model_metadata.json from GGUF binary header if not present. Swift: ModelLoader.fromModelFile(_ url: URL), or Xybrid.model(.modelFile(url))."
+        status: { dart: planned, kotlin: planned, swift: implemented, csharp: implemented }
       fromHuggingFace:
         static: true
         params: [{ name: repo, type: String }]
@@ -197,7 +197,7 @@ classes:
       download:
         # Starts the download in the background without loading, so a blocking
         # host has something to watch. Returns null for a source with nothing
-        # to fetch (bundle, directory, Hugging Face repo). Named StartDownload
+        # to fetch (bundle, directory, model file, Hugging Face repo). Named StartDownload
         # in C#.
         return: "XybridDownload?"
         status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
