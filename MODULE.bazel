@@ -300,7 +300,7 @@ register_toolchains("@llvm//toolchain:all")
 osx = use_extension("@llvm//extensions:osx.bzl", "osx")
 
 # The macOS-CPU CLI links frameworks pulled in by the darwin dep graph
-# (objc2-metal/-io-kit/-core-ml, sysinfo, candle-metal — link directives fire
+# (objc2-metal/-io-kit/-core-ml, sysinfo — link directives fire
 # even though the GPU code paths are cfg'd off). The extension's default
 # framework set is minimal, and the tag REPLACES the defaults, so list them
 # too. Stub-only (.tbd) — cheap to include.
