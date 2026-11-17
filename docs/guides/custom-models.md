@@ -202,7 +202,7 @@ For the full field reference, see [MODEL_METADATA.md](../sdk/MODEL_METADATA.md).
 
 ```rust
 use xybrid_sdk::ModelLoader;
-use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 
 let loader = ModelLoader::from_directory("/path/to/my-custom-model")?;
 let model = loader.load()?;
@@ -211,7 +211,8 @@ let input = Envelope {
     kind: EnvelopeKind::Text("Hello, world!".into()),
     metadata: Default::default(),
 };
-let output = model.run(&input)?;
+// The second argument is an optional `GenerationConfig`.
+let output = model.run(&input, None)?;
 ```
 
 ### Flutter (Dart)
@@ -222,20 +223,21 @@ import 'package:xybrid_flutter/xybrid_flutter.dart';
 final loader = XybridModelLoader.fromDirectory('/path/to/my-custom-model');
 final model = await loader.load();
 
-final result = await model.run(
-  envelope: XybridEnvelope.text(text: 'Hello, world!'),
-);
+final result = await model.run(XybridEnvelope.text('Hello, world!'));
 ```
 
 ### Kotlin (Android)
 
 ```kotlin
+import ai.xybrid.Envelope
 import ai.xybrid.ModelLoader
+import ai.xybrid.runAsync
 
+// Inside a coroutine: load() and runAsync() suspend.
 val loader = ModelLoader.fromDirectory("/path/to/my-custom-model")
 val model = loader.load()
 
-val result = model.run(XybridEnvelope.text("Hello, world!"))
+val result = model.runAsync(Envelope.text("Hello, world!"))
 ```
 
 ### Swift (iOS)
@@ -447,7 +449,7 @@ sentence-transformers' (see [Sentence Embeddings](#sentence-embeddings)).
 
 ```rust
 use xybrid_sdk::ModelLoader;
-use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let loader = ModelLoader::from_directory("my-minilm")?;
@@ -458,10 +460,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         metadata: Default::default(),
     };
 
-    let output = model.run(&input)?;
+    let output = model.run(&input, None)?;
 
-    // output.kind is EnvelopeKind::Embedding(Vec<f32>): 384 dimensions, unit length
-    if let EnvelopeKind::Embedding(embedding) = &output.kind {
+    // embedding() returns the vector: 384 dimensions, unit length
+    if let Some(embedding) = output.embedding() {
         println!("Embedding dimensions: {}", embedding.len());
         println!("First 5 values: {:?}", &embedding[..5]);
     }

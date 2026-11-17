@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The Unity examples target iOS 16**, the floor the Unity iOS library is
   built for, and the starter README's iOS, Windows and platform notes are
   current (#809).
+- **Stale docs claims from #646.** The custom-models guide's Rust, Flutter and
+  Kotlin snippets match the SDKs, every page agrees that the platform presets
+  include the vision path, the cache docs say cached models do not expire, and
+  the feature matrix matches the Cargo manifests (#646).
 
 ## [0.20.0] - 2026-11-17
 

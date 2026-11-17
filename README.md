@@ -411,7 +411,7 @@ The installer also adds `/xybrid-connect`, which connects your project to the Xy
 }
 ```
 
-See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or look at existing examples in [`integration-tests/fixtures/models/`](integration-tests/fixtures/models/).
+See the [model metadata docs](docs/sdk/MODEL_METADATA.md) for the full schema, or look at existing examples in [`integration-tests/fixtures/models/`](integration-tests/fixtures/models/).
 
 </details>
 
