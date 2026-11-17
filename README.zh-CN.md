@@ -399,7 +399,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 | 嵌入模型 | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | 多模型流水线（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 模型下载与缓存 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 硬件加速 | Metal, ANE | CPU | Metal, ANE | CPU，可选 Vulkan | CPU |
+| 硬件加速 | 真机 Metal（llama.cpp）；模拟器 CPU | CPU | Metal | CPU，可选 Vulkan | CPU |
 
 **SDK MMP 支持：** Flutter ✅ · Rust ✅ · Kotlin ✅ · Swift ✅ · React Native ✅ · Unity ✅
 
@@ -421,7 +421,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 - **无需发版即可更换模型** — 模型在运行时从注册表解析并缓存在设备上。
 - **云端回退** — 按次调用选择启用（[文档](https://docs.xybrid.dev/zh/docs/concepts/hybrid-execution)）。
 - **可控的遥测** — 需通过 API 密钥主动启用（[文档](docs/telemetry/registry.md)）。
-- **硬件加速** — Apple 平台支持 Metal 与 Apple Neural Engine，Linux 可选启用 Vulkan；Android 与 Windows 目前为 CPU（[文档](docs/INSTALLATION.md#platform-features)）。
+- **硬件加速** — Apple 平台支持 Metal，Linux 可选启用 Vulkan；Android 与 Windows 目前为 CPU（[文档](docs/INSTALLATION.md#platform-features)）。
 
 ### 与其他方案对比
 

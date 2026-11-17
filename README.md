@@ -429,7 +429,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Embeddings | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | Multi-Model Pipelines (MMP) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Hardware Acceleration | Metal, ANE on devices; CPU llama.cpp on Simulator | CPU | Metal, ANE | CPU, opt-in Vulkan | CPU |
+| Hardware Acceleration | Metal (llama.cpp) on devices; CPU on Simulator | CPU | Metal | CPU, opt-in Vulkan | CPU |
 
 **SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin ✅ · Swift ✅ · React Native ✅ · Unity ✅
 
@@ -459,7 +459,7 @@ Registry models are coming.
   ([docs](https://docs.xybrid.dev/en/docs/concepts/hybrid-execution)).
 - **Telemetry you control** — opt-in behind an API key
   ([docs](docs/telemetry/registry.md)).
-- **Hardware acceleration** — Metal and the Apple Neural Engine on Apple, opt-in
+- **Hardware acceleration** — Metal on Apple, opt-in
   Vulkan on Linux; Android and Windows are CPU today
   ([docs](docs/INSTALLATION.md#platform-features)).
 

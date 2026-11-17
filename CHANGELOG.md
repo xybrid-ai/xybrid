@@ -57,6 +57,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documents the SwiftPM install of the shipped package. The Chinese and
   Japanese READMEs and the pipelines page also stop listing Swift, Kotlin and
   Unity pipelines as coming soon or planned, matching the English README.
+- **The iOS docs match the Swift package.** The iOS page, the Swift README and
+  the pages that repeat them drop the "early access" label and the iOS 13 /
+  macOS 10.15 minimums: the package supports iOS 16.0 and later, on devices and
+  the arm64 Simulator, and ships no macOS slice. The accelerator tables (the
+  iOS page, the READMEs, the installation guide and the feature matrix) no
+  longer claim the Apple Neural Engine: GGUF models run on llama.cpp's Metal
+  backend on devices and on the CPU in the Simulator, and ONNX models run on the
+  CPU. The Simulator known issue
+  ([#179](https://github.com/xybrid-ai/xybrid/issues/179), fixed in 0.4.0-alpha)
+  is gone, and building needs Xcode 15.3 (Swift 5.10).
 
 ## [0.19.0] - 2026-11-14
 

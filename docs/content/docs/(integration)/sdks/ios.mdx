@@ -1,12 +1,12 @@
 ---
-title: iOS / macOS
+title: iOS
 description: Native Swift SDK for on-device ML inference
 ---
 
-The Swift SDK provides native bindings to the Xybrid runtime via BoltFFI for iOS and macOS applications.
+The Swift SDK provides native bindings to the Xybrid runtime via BoltFFI for iOS applications.
 
 <Callout type="info">
-The Swift SDK is in early access. Releases ship a prebuilt `XybridFFI` xcframework via Swift Package Manager. Known issue: building for the iOS Simulator on Apple Silicon requires the `useLocalNatives = true` workaround — see [#179](https://github.com/xybrid-ai/xybrid/issues/179). For cross-platform development, see the [Flutter SDK](/docs/sdks/flutter).
+Releases ship a prebuilt `XybridFFI` xcframework via Swift Package Manager, with slices for iOS devices and the iOS Simulator (both arm64). For cross-platform development, see the [Flutter SDK](/docs/sdks/flutter).
 </Callout>
 
 ## Installation
@@ -21,7 +21,7 @@ dependencies: [
 
 Or in Xcode: **File > Add Package Dependencies** and enter the repository URL.
 
-**Supported platforms:** iOS 13.0+, macOS 10.15+
+**Supported platforms:** iOS 16.0+, on devices and the iOS Simulator on Apple Silicon Macs. Building needs Xcode 15.3+ (Swift 5.10). macOS is not supported; see [Platform Support](#platform-support).
 
 ## Quick Start
 
@@ -311,8 +311,18 @@ The SDK provides short aliases for convenience:
 
 ## Platform Support
 
-| Platform | Status | Accelerators |
-|----------|--------|--------------|
-| iOS | Supported | Metal, CoreML, ANE |
-| macOS (Apple Silicon) | Supported | Metal, CoreML, ANE |
-| macOS (Intel) | Supported | CPU |
+The Swift package supports iOS 16.0 and later only. The prebuilt `XybridFFI`
+xcframework ships two slices, iOS device (arm64) and iOS Simulator (arm64), and
+no macOS slice, so the package does not declare macOS. For a macOS app, use the
+[Flutter SDK](/docs/sdks/flutter) (macOS 14+ on Apple Silicon) or the Rust crate
+from the [Quick Start](/docs/quickstart).
+
+| Model format | iOS device | iOS Simulator |
+|--------------|------------|---------------|
+| GGUF (llama.cpp: LLMs, vision-language models) | Metal GPU | CPU |
+| Whisper (whisper.cpp) | CPU; the encoder runs on Core ML when a `<model>-encoder.mlmodelc` (e.g. `ggml-base.en-encoder.mlmodelc`) sits beside the model file | CPU; the same Core ML encoder path applies |
+| ONNX (ONNX Runtime) | CPU | CPU |
+
+GGUF inference runs on llama.cpp's Metal backend, which has no Apple Neural
+Engine path. Of the paths above, only the optional Core ML Whisper encoder can
+reach the Neural Engine, and Core ML decides at run time whether it does.

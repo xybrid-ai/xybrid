@@ -1,6 +1,6 @@
 //
 //  Xybrid.swift
-//  Xybrid SDK for iOS/macOS
+//  Xybrid SDK for iOS
 //
 //  Hand-written wrappers + a compatibility shim that smooths over the
 //  uniffi → bolt migration. The BoltFFI-generated bindings live in
@@ -31,7 +31,7 @@ private let boltIsSpeculativeCloudEnabled = isSpeculativeCloudEnabled
 private let boltHasApiKey = hasApiKey
 private let boltSetProviderApiKey = setProviderApiKey
 
-/// Main entry point for the Xybrid SDK on iOS/macOS.
+/// Main entry point for the Xybrid SDK on iOS.
 ///
 /// Call `Xybrid.initialize()` once before using any other Xybrid functionality.
 /// It registers the binding identifier so registry calls are attributed to the
@@ -84,9 +84,7 @@ public enum Xybrid {
     /// reading through the SDK's push-state surface so the routing
     /// engine has live battery telemetry. Thermal state on Apple
     /// platforms is sourced from `NSProcessInfo.thermalState` directly
-    /// in `xybrid-core` (no host wiring needed). On macOS, both
-    /// battery (IOKit) and thermal (NSProcessInfo) are in-Rust, so
-    /// nothing extra is registered here.
+    /// in `xybrid-core` (no host wiring needed).
     ///
     /// - Parameters:
     ///   - apiKey: Xybrid API key for the cloud gateway.

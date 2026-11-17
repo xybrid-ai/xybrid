@@ -86,7 +86,7 @@ X-Xybrid-Client: binding=rust; sdk_version=0.19.0; core_version=0.19.0; platform
 | `kotlin` | Android library via BoltFFI. | `Xybrid.init(context)` (`bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt`); until then, the native library's Android fallback (`crates/xybrid-bolt/src/lib.rs`) |
 | `python` | Python package via BoltFFI. | `import xybrid` (`bindings/python/xybrid/__init__.py`) |
 | `react-native` | React Native package, wrapping the Swift and Kotlin SDKs. | Every bridged call, before the SDK it wraps (`bindings/react-native/ios/XybridModuleImpl.swift`, `bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt`) |
-| `swift` | iOS / macOS Swift package via BoltFFI. | `Xybrid.initialize()` (`bindings/apple/Sources/Xybrid/Xybrid.swift`); until then, the native library's Apple-platform fallback, set by any model, download or pipeline constructor (`crates/xybrid-bolt/src/lib.rs`) |
+| `swift` | iOS Swift package via BoltFFI. | `Xybrid.initialize()` (`bindings/apple/Sources/Xybrid/Xybrid.swift`); until then, the native library's Apple-platform fallback, set by any model, download or pipeline constructor (`crates/xybrid-bolt/src/lib.rs`) |
 | `unity` | Unity / C# binding via BoltFFI. | Static constructors on the generated types that reach native code (`bindings/unity/Runtime/BoltSupplement/BindingRegistration.cs`) |
 | `web` | Browser SDK (`@xybrid/web`). It sends only `binding`, `sdk_version` and `platform`, and has no opt-out or CI label: browsers have no environment variables. | Every registry resolve request (`bindings/web/src/internal/registry.ts`) |
 

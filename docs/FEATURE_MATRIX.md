@@ -24,7 +24,7 @@ This document provides a comprehensive reference for all feature flags, platform
 | **default** | Default features | `ort-download` (llama.cpp opted into via `llm-llamacpp` or platform preset) |
 | **ort-download** | Download prebuilt ONNX Runtime binaries | `ort/download-binaries`, `ort/tls-native` |
 | **ort-dynamic** | Load ONNX Runtime .so at runtime | `ort/load-dynamic` |
-| **ort-coreml** | Apple Neural Engine acceleration | `ort/coreml` |
+| **ort-coreml** | Links ONNX Runtime's Core ML execution provider (the SDK does not select it yet) | `ort/coreml` |
 | **candle** | Pure Rust ML framework — the SafeTensors Whisper path. **Opt-in only**: no `platform-*` preset enables it (`asr-whispercpp` / whisper.cpp is the shipped ASR backend). Android-compatible | `candle-core`, `candle-nn`, `candle-transformers`, `safetensors`, `byteorder`, `num-traits`, `rayon` |
 | **candle-hub** | Candle + HuggingFace Hub download support | `candle`, `hf-hub` (requires OpenSSL — **not for Android**) |
 | **candle-metal** | Candle with Metal GPU acceleration | `candle`, `candle-core/metal`, `candle-nn/metal` |
@@ -123,7 +123,7 @@ Candle is **not** in any preset. It cost ~1.3 MiB stripped on the same Android p
 | Preset | Target Platform | Core Features Enabled | VLM Default | ASR Default | Rationale |
 |--------|-----------------|----------------------|-------------|-------------|-----------|
 | **platform-android** | Android (all ABIs) | `ort-dynamic`, `llm-llamacpp-vision`, `asr-whispercpp` | On | whisper.cpp | Dynamic ORT loading for AAR distribution; whisper.cpp for Whisper ASR on the ggml llama.cpp already links (+0.2 MiB stripped); llama.cpp has runtime SIMD detection; mistral.rs causes SIGILL on devices without ARMv8.2-A FP16 |
-| **platform-ios** | iOS (arm64, simulator) | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp` | On | whisper.cpp | Static ORT linking; CoreML for ANE acceleration; llama.cpp uses Metal on devices and CPU on the simulator |
+| **platform-ios** | iOS (arm64, simulator) | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp` | On | whisper.cpp | Static ORT linking; ORT's Core ML execution provider is linked but the SDK does not select it; llama.cpp uses Metal on devices and CPU on the simulator |
 | **platform-macos** | macOS (arm64, x86_64) | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp` | On | whisper.cpp | Same as iOS - unified Apple platform features |
 | **platform-desktop** | Linux, Windows | `ort-download`, `llm-llamacpp-vision`, `asr-whispercpp` | On | whisper.cpp | Static ORT linking; llama.cpp for LLM inference and whisper.cpp for ASR (unified across all platforms); on Linux set `XYBRID_LLAMA_CPP_VULKAN=1` for Vulkan-enabled custom builds |
 
