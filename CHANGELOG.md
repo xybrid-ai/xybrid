@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Kotlin: load a local GGUF file.** `ModelLoader.fromModelFile(path)` and
+  `Xybrid.model(ModelSource.modelFile(path))` load a raw GGUF with no
+  `model_metadata.json`, as Swift, React Native and Unity already do: `load()`
+  generates the metadata from the GGUF header and writes it next to the file
+  unless one is there. `ModelSource` gains a `ModelFile` case, so a `when` over
+  it without an `else` needs one more branch.
+
 ## [0.20.0] - 2026-11-17
 
 ### Added

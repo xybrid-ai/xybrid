@@ -97,8 +97,8 @@ SDK 提供与完整限定名对应的短别名：
 （`Envelope.text(...)`、`Envelope.image(...)`、`Envelope.userMessage(...)`），返回 `XybridEnvelope`。
 
 `Xybrid.model(id)` 是注册表模型的简写，也可以传入类型化的
-`ModelSource.bundle(...)`、`ModelSource.directory(...)` 或
-`ModelSource.huggingFace(...)`。这些调用只返回未加载的 `ModelLoader`；
+`ModelSource.bundle(...)`、`ModelSource.directory(...)`、
+`ModelSource.huggingFace(...)` 或 `ModelSource.modelFile(...)`（原始 GGUF 文件）。这些调用只返回未加载的 `ModelLoader`；
 调用挂起函数 `load()` 才会执行加载。Java 调用方或已在工作线程上的调用方
 可以使用显式阻塞的 `loadBlocking()`。
 

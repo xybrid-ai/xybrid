@@ -582,7 +582,11 @@ sealed interface ModelSource {
     /** A Hugging Face repository (`org/repo` or `org/repo:variant`). */
     data class HuggingFace(val repo: String) : ModelSource
 
-    /** A raw llama.cpp GGUF file on disk. See [XybridModelLoader.fromModelFile]. */
+    /**
+     * A raw llama.cpp GGUF file on disk, for text generation only. See
+     * [XybridModelLoader.fromModelFile] for the generated metadata, the 4,096-token
+     * context cap and the error for a missing file.
+     */
     data class ModelFile(val path: String) : ModelSource
 
     /**
@@ -745,7 +749,19 @@ class XybridModelLoader private constructor(
          * app-private storage (`Context.filesDir`, for example): the directory
          * must be writable, and an existing `model_metadata.json` is used as
          * is, so a second GGUF in the same directory would load the first one's
-         * model. Copy a file the user picks into app storage first.
+         * model. Copy a file the user picks into app storage first: an APK
+         * `assets/` entry and a `content://` URI are not file paths.
+         *
+         * The generated context is capped at 4,096 tokens, so llama.cpp does not
+         * allocate a KV cache for the model's full native context. Raise
+         * `context_length` in the sidecar for longer chats.
+         *
+         * This is for text generation only: the generated metadata uses the text
+         * GGUF template, without a vision projector. A vision GGUF with an mmproj
+         * still needs [ModelSource.directory].
+         *
+         * `load()` and `loadBlocking()` throw [XybridError.ConfigError] ("GGUF file
+         * not found: <path>") when the file does not exist.
          */
         @JvmStatic
         fun fromModelFile(path: String): XybridModelLoader = from(ModelSource.modelFile(path))

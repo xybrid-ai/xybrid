@@ -101,6 +101,23 @@ val model = Xybrid.model(ModelSource.bundle("/path/to/model.xyb")).load()
 `Xybrid.model(...)` 只创建廉价的、未加载的引用。`load()` 是显式的加载边界，
 可能解析元数据、下载文件、访问磁盘并初始化运行时。
 
+### 从本地 GGUF 文件
+
+```kotlin
+val model = Xybrid.model(ModelSource.modelFile(ggufFile.path)).load()
+```
+
+无需 `model_metadata.json`：`load()` 会根据 GGUF 文件头生成，并在文件旁写入
+（若该处尚无此文件）。
+
+- 目录必须可写。APK 的 `assets/` 中的 GGUF 不是文件路径，`content://` URI 也不是；
+  请先把文件复制到应用存储中，例如 `context.filesDir`。
+- 已有的 `model_metadata.json` 会被原样使用，因此请让每个 GGUF 单独占用一个目录。
+- 生成的上下文长度上限为 4,096 个 token；需要更长对话时，请在该文件中调高
+  `context_length`。
+- 仅用于文本生成。带 mmproj 的视觉 GGUF 仍需使用 `ModelSource.directory`。
+- 文件不存在时抛出 `XybridError.ConfigError`（"GGUF file not found: path"）。
+
 ---
 
 ## 下载进度

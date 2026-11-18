@@ -107,12 +107,31 @@ val model = Xybrid.model(ModelSource.bundle("/path/to/model.xyb")).load()
 
 `Xybrid.model(...)` creates a cheap, unloaded reference. Use
 `ModelSource.directory(path)` and `ModelSource.huggingFace("org/repo")` for an
-unpacked directory and Hugging Face respectively, or `ModelSource.modelFile(path)`
-for a raw GGUF file the app downloaded (Xybrid writes `model_metadata.json` next
-to it, so keep each GGUF in its own writable directory such as `filesDir`). Suspending `load()` is the
+unpacked directory and Hugging Face respectively, and `ModelSource.modelFile(path)`
+for a raw GGUF file (see below). Suspending `load()` is the
 explicit boundary that may resolve metadata, download artifacts, access disk,
 and initialize the runtime. Use `loadBlocking()` only from Java or an existing
 worker thread.
+
+### From a Local GGUF File
+
+```kotlin
+val model = Xybrid.model(ModelSource.modelFile(ggufFile.path)).load()
+```
+
+No `model_metadata.json` is needed: `load()` generates one from the GGUF header
+and writes it next to the file, unless one is already there.
+
+- The directory must be writable. A GGUF in the APK's `assets/` is not a file
+  path, and neither is a `content://` URI. Copy the file into app storage first,
+  for example `context.filesDir`.
+- An existing `model_metadata.json` is used as is, so keep each GGUF in its own
+  directory.
+- The generated context is capped at 4,096 tokens. Raise `context_length` in the
+  sidecar for longer chats.
+- This is for text generation only. A vision GGUF with an mmproj still needs
+  `ModelSource.directory`.
+- A missing file throws `XybridError.ConfigError` ("GGUF file not found: path").
 
 ---
 

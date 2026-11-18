@@ -242,7 +242,7 @@ let model = try await Xybrid.model(.directory(url)).load()
 let result = try await model.runAsync(envelope: .text("Hello, world!"))
 ```
 
-单个 llama.cpp GGUF 文件无需手写元数据：Swift 的 `Xybrid.model(.modelFile(ggufURL))` 与 React Native 的 `fromModelFile`、Unity 的 `FromModelFile` 一样，会在 `load()` 时（若文件旁尚无 `model_metadata.json`）在文件旁写入该文件。因此 GGUF 所在目录必须可写：iOS 应用 Bundle 是只读的，请先把 GGUF 复制到应用容器内，或在其旁边随附 `model_metadata.json`。
+单个 llama.cpp GGUF 文件无需手写元数据：Swift 的 `Xybrid.model(.modelFile(ggufURL))` 与 Kotlin 的 `fromModelFile`、React Native 的 `fromModelFile`、Unity 的 `FromModelFile` 一样，会在 `load()` 时（若文件旁尚无 `model_metadata.json`）在文件旁写入该文件。因此 GGUF 所在目录必须可写：iOS 应用 Bundle 是只读的，请先把 GGUF 复制到应用容器内，或在其旁边随附 `model_metadata.json`。
 
 ### Unity (C#)
 
