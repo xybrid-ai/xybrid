@@ -275,8 +275,11 @@ class Platform(BaseHTTPRequestHandler):
         if self.closed:
             return self.reply(403, {"error": "agent_signup_closed", "message": "closed", "reason": "disabled"})
         if self.path == "/v1/agent/challenge":
-            return self.reply(200, {"challenge": "xybrid-pow-test-vector", "difficulty": 8,
-                                    "expires_at": "2999-01-01T00:00:00Z", "algorithm": "sha256-leading-zero-bits"})
+            answer = {"challenge": "xybrid-pow-test-vector", "difficulty": 8,
+                      "expires_at": "2999-01-01T00:00:00Z", "algorithm": "sha256-leading-zero-bits"}
+            if type(self).collect_via is not None:
+                answer["collect_via"] = type(self).collect_via
+            return self.reply(200, answer)
         bearer = self.headers.get("Authorization")
         if self.path == "/v1/agent/workspace" and bearer in (f"Bearer {KEY}", f"Bearer {OTHER_KEY}"):
             if type(self).workspace_failure:
@@ -320,6 +323,7 @@ class ScriptContractTests(unittest.TestCase):
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Platform)
         Platform.closed, Platform.requests, Platform.workspace, Platform.workspace_failure = False, [], {}, None
         Platform.provision = {}
+        Platform.collect_via = None
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
 
@@ -403,7 +407,7 @@ class ScriptContractTests(unittest.TestCase):
         self.assertLessEqual(set(body), {"source", "project_name", "install_id", "client_info", "challenge", "nonce"})
         self.assertEqual(body["nonce"], "47")
 
-        code, again = self.run_script(app, "connect", "--write-env", ".env")
+        code, again = self.run_script(app, "connect", "--write-env", ".env", "--via", "docs")
         self.assertEqual((code, again["status"]), (0, "existing"))
         self.assertEqual(len([r for r in Platform.requests if r[0] == "POST"]), 1, "no second workspace")
         code, status = self.run_script(app, "status")
@@ -633,19 +637,55 @@ class ScriptContractTests(unittest.TestCase):
 
     def test_a_provisioning_answer_off_the_contract_is_retried_not_saved(self):
         app = self.repo("naive-provision")
+        Platform.collect_via = True
         Platform.provision = {"key_expires_at": "2999-01-01T00:00:00"}
-        code, report = self.run_script(app, "connect", "--write-env", ".env")
+        code, report = self.run_script(app, "connect", "--write-env", ".env", "--via", "web-copy", "--binding", "python")
         self.assertEqual((code, report["error"]["code"]), (1, "invalid_platform_response"), report)
         self.assertFalse((app / ".env").exists())
         saved = self.saved()
         self.assertEqual(saved["credentials"], [])
         (pending,) = saved["pending"]
+        self.assertEqual(pending["client_info"]["via"], "web-copy")
         Platform.provision = {}
-        code, report = self.run_script(app, "connect", "--write-env", ".env")
+        code, report = self.run_script(app, "connect", "--write-env", ".env", "--via", "docs")
         self.assertEqual((code, report["status"]), (0, "created"), report)
         keys = [r[3]["Idempotency-Key"] for r in Platform.requests if r[0] == "POST"]
         self.assertEqual(keys, [pending["idempotency_key"]] * 2, "the retry repeats the same request")
+        self.assertEqual([r[2]["client_info"] for r in Platform.requests if r[0] == "POST"],
+                         [pending["client_info"]] * 2)
         self.assertEqual(self.saved()["credentials"][0]["key_expires_at"], "2999-01-01T00:00:00.123456789Z")
+
+    def test_an_unknown_entrypoint_is_omitted_even_if_the_retry_specifies_a_known_one(self):
+        app = self.repo("unknown-via")
+        Platform.collect_via = True
+        Platform.provision = {"key_expires_at": "2999-01-01T00:00:00"}
+        code, report = self.run_script(app, "connect", "--write-env", ".env", "--via", "not-allowlisted")
+        self.assertEqual((code, report["error"]["code"]), (1, "invalid_platform_response"), report)
+        self.assertNotIn("via", self.saved()["pending"][0]["client_info"])
+        Platform.provision = {}
+        code, report = self.run_script(app, "connect", "--write-env", ".env", "--via", "docs")
+        self.assertEqual((code, report["status"]), (0, "created"), report)
+        posts = [request[2] for request in Platform.requests if request[0] == "POST"]
+        self.assertEqual(len(posts), 2)
+        self.assertTrue(all("via" not in body["client_info"] for body in posts))
+
+    def test_via_requires_an_explicit_grant_and_a_retry_keeps_its_omission(self):
+        for gate in (None, False, "true"):
+            with self.subTest(gate=gate):
+                app = self.repo(f"closed-via-{gate}")
+                Platform.collect_via = gate
+                Platform.requests = []
+                Platform.provision = {"key_expires_at": "2999-01-01T00:00:00"}
+                code, report = self.run_script(app, "connect", "--write-env", ".env", "--via", "web-copy")
+                self.assertEqual((code, report["error"]["code"]), (1, "invalid_platform_response"), report)
+                [pending] = self.saved()["pending"]
+                self.assertNotIn("via", pending["client_info"])
+                Platform.collect_via = True
+                Platform.provision = {}
+                code, report = self.run_script(app, "connect", "--write-env", ".env", "--via", "docs", "--binding", "python")
+                self.assertEqual((code, report["status"]), (0, "created"), report)
+                self.assertEqual([r[2]["client_info"] for r in Platform.requests if r[0] == "POST"],
+                                 [pending["client_info"]] * 2)
 
     # --- the project file, read and written as the CLI does ----------------------
 

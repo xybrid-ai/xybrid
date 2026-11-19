@@ -45,6 +45,8 @@ export function GET() {
     '',
     `The full text of every page is at ${SITE}/llms-full.txt.` +
       (chinese ? ` Most pages are also available in Chinese, starting at ${SITE}${chinese.url}.` : ''),
+    '',
+    `For agent setup, see ${SITE}${source.getPage(['cli', 'reference', 'connect'], language)?.url ?? '/en/docs/cli/reference/connect'}. Preserve the first Xybrid setup entrypoint; if this index was the first entrypoint, use llms-txt. Only pass --via when xybrid connect --help lists it.`,
   ];
   for (const section of sections(source.getPageTree(language).children)) {
     lines.push('', `## ${section.title}`, '');

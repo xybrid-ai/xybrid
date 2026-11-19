@@ -36,7 +36,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::CliError;
+use super::{client::ClientInfo, CliError};
 
 /// Overrides the store location.
 pub(crate) const CREDENTIALS_FILE_ENV: &str = "XYBRID_CREDENTIALS_FILE";
@@ -166,6 +166,8 @@ pub(crate) struct PendingRequest {
     pub project_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_info: Option<ClientInfo>,
     pub started_at: DateTime<Utc>,
 }
 
@@ -1279,8 +1281,15 @@ pub(crate) mod tests {
             claim_token: None,
             project_name: None,
             source: None,
+            client_info: None,
             started_at: at(0),
         };
+        let legacy = serde_json::to_value(&pending).unwrap();
+        assert!(legacy.get("client_info").is_none());
+        assert_eq!(
+            serde_json::from_value::<PendingRequest>(legacy).unwrap(),
+            pending
+        );
         file.set_pending(pending.clone());
         file.set_pending(pending.clone());
         assert_eq!(file.pending.len(), 1);

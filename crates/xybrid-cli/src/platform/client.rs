@@ -35,25 +35,68 @@ pub(crate) struct Challenge {
     pub difficulty: u8,
     #[serde(default)]
     pub algorithm: Option<String>,
+    #[serde(default)]
+    pub collect_via: Value,
 }
 
 /// The allowlisted, non-identifying client facts sent with `connect`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ClientInfo {
-    pub cli_version: &'static str,
-    pub os: &'static str,
-    pub arch: &'static str,
-    pub binding: &'static str,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_version: Option<String>,
+    pub os: String,
+    pub arch: String,
+    pub binding: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
 }
 
 impl ClientInfo {
-    pub(crate) fn current() -> Self {
+    pub(crate) fn current(via: Option<&str>) -> Self {
         Self {
-            cli_version: env!("CARGO_PKG_VERSION"),
-            os: std::env::consts::OS,
-            arch: std::env::consts::ARCH,
-            binding: "cli",
+            cli_version: Some(env!("CARGO_PKG_VERSION").into()),
+            os: std::env::consts::OS.into(),
+            arch: std::env::consts::ARCH.into(),
+            binding: "cli".into(),
+            via: connect_via(via).map(str::to_owned),
         }
+    }
+}
+
+pub(crate) fn connect_via(value: Option<&str>) -> Option<&'static str> {
+    [
+        "web-copy",
+        "setup-prompt",
+        "llms-txt",
+        "skill",
+        "mcp",
+        "docs",
+    ]
+    .into_iter()
+    .find(|candidate| Some(*candidate) == value)
+}
+
+#[test]
+fn client_info_serializes_only_recognized_entrypoints() {
+    for via in [
+        "web-copy",
+        "setup-prompt",
+        "llms-txt",
+        "skill",
+        "mcp",
+        "docs",
+    ] {
+        let info = serde_json::to_value(ClientInfo::current(Some(via))).unwrap();
+        assert_eq!(info["via"], via);
+    }
+    for via in [
+        None,
+        Some("unknown"),
+        Some("DOCS"),
+        Some("docs?private=value"),
+    ] {
+        let info = serde_json::to_value(ClientInfo::current(via)).unwrap();
+        assert!(info.get("via").is_none());
     }
 }
 

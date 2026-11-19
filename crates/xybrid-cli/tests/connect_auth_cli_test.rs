@@ -166,7 +166,7 @@ fn sends_no_identifying_fields(request: &HttpMockRequest) -> bool {
         "challenge",
         "nonce",
     ];
-    let info = ["cli_version", "os", "arch", "binding"];
+    let info = ["cli_version", "os", "arch", "binding", "via"];
     body.keys().all(|k| top.contains(&k.as_str()))
         && body
             .get("client_info")
@@ -175,14 +175,22 @@ fn sends_no_identifying_fields(request: &HttpMockRequest) -> bool {
 }
 
 fn mock_challenge(server: &MockServer) -> Mock<'_> {
+    mock_challenge_with_via(server, None)
+}
+
+fn mock_challenge_with_via(server: &MockServer, collect_via: Option<Value>) -> Mock<'_> {
     server.mock(|when, then| {
         when.method(GET).path("/v1/agent/challenge");
-        then.status(200).json_body(json!({
+        let mut body = json!({
             "challenge": CHALLENGE,
             "difficulty": 8,
             "expires_at": iso(0),
             "algorithm": "sha256-leading-zero-bits",
-        }));
+        });
+        if let Some(collect_via) = collect_via {
+            body["collect_via"] = collect_via;
+        }
+        then.status(200).json_body(body);
     })
 }
 
@@ -629,7 +637,9 @@ fn a_new_env_file_is_created_private_and_reused_on_the_next_connect() {
     );
 
     // Same project again: the saved credential is checked and reused.
-    let again = sandbox.run(&connect_args(&url));
+    let mut args = connect_args(&url);
+    args.extend(["--via", "docs"]);
+    let again = sandbox.run(&args);
     assert_eq!(again.code, Some(0), "{again}");
     again.assert_no_secret(KEY);
     let report = again.json();
@@ -2485,6 +2495,55 @@ fn mock_connect_unanswered(server: &MockServer) -> Mock<'_> {
     })
 }
 
+#[test]
+fn connect_omits_via_without_an_explicit_grant_and_keeps_omission_on_retry() {
+    require_git!();
+    for gate in [None, Some(json!(false)), Some(json!("true"))] {
+        let sandbox = Sandbox::new();
+        let server = MockServer::start();
+        let mut challenge = mock_challenge_with_via(&server, gate);
+        let mut failing = mock_connect_unanswered(&server);
+        let url = server.base_url();
+        let run = sandbox.run(&platform_args(
+            &url,
+            &["connect", "--json", "--via", "web-copy"],
+        ));
+        assert_eq!(run.code, Some(1), "{run}");
+        challenge.assert_hits(1);
+        challenge.delete();
+        failing.assert_hits(1);
+        failing.delete();
+
+        let pending = sandbox.credentials()["pending"][0].clone();
+        let info = &pending["client_info"];
+        assert!(info.get("via").is_none());
+        let enabled = mock_challenge_with_via(&server, Some(json!(true)));
+        let retry = server.mock(|when, then| {
+            when.method(POST)
+                .path("/v1/agent/connect")
+                .header(
+                    "Idempotency-Key",
+                    pending["idempotency_key"].as_str().unwrap(),
+                )
+                .matches(|request| {
+                    let body = request.body.as_ref().unwrap();
+                    let body: Value = serde_json::from_slice(body).unwrap();
+                    body["client_info"].get("via").is_none()
+                })
+                .json_body_partial(json!({"client_info": info}).to_string());
+            then.status(200)
+                .json_body(provision(KEY, Some(CLAIM_TOKEN), 7, true));
+        });
+        let run = sandbox.run(&platform_args(
+            &url,
+            &["connect", "--json", "--via", "docs"],
+        ));
+        assert_eq!(run.code, Some(0), "{run}");
+        enabled.assert_hits(0);
+        retry.assert_hits(1);
+    }
+}
+
 /// After a lost `connect --new` answer the suggested command repeats that
 /// request: it keeps `--new`, so the saved key of the old workspace is not
 /// reused instead, and `--allow-ci`, so CI doesn't skip it.
@@ -2493,7 +2552,7 @@ fn the_suggested_rerun_repeats_a_lost_new_workspace_request() {
     require_git!();
     let sandbox = Sandbox::new();
     let server = MockServer::start();
-    let challenge = mock_challenge(&server);
+    let challenge = mock_challenge_with_via(&server, Some(json!(true)));
     let mut first = mock_connect(&server);
     let url = server.base_url();
     let run = sandbox.run(&platform_args(&url, &["connect", "--json"]));
@@ -2504,7 +2563,17 @@ fn the_suggested_rerun_repeats_a_lost_new_workspace_request() {
     let mut failing = mock_connect_unanswered(&server);
     let ci = [("CI", "true")];
     let run = sandbox.run_with(
-        &platform_args(&url, &["connect", "--new", "--allow-ci", "--json"]),
+        &platform_args(
+            &url,
+            &[
+                "connect",
+                "--new",
+                "--allow-ci",
+                "--via",
+                "web-copy",
+                "--json",
+            ],
+        ),
         &ci,
     );
     assert_eq!(run.code, Some(1), "{run}");
@@ -2520,6 +2589,7 @@ fn the_suggested_rerun_repeats_a_lost_new_workspace_request() {
     failing.delete();
     let pending = sandbox.credentials()["pending"][0].clone();
     assert_eq!(pending["kind"], "connect");
+    assert_eq!(pending["client_info"]["via"], "web-copy");
     let idempotency_key = pending["idempotency_key"].as_str().unwrap().to_string();
 
     // The platform had created the workspace: the suggested command gets it
@@ -2527,13 +2597,15 @@ fn the_suggested_rerun_repeats_a_lost_new_workspace_request() {
     let retry = server.mock(|when, then| {
         when.method(POST)
             .path("/v1/agent/connect")
-            .header("Idempotency-Key", idempotency_key.as_str());
+            .header("Idempotency-Key", idempotency_key.as_str())
+            .matches(sends_no_identifying_fields)
+            .json_body_partial(json!({"client_info": {"via": "web-copy"}}).to_string());
         then.status(200)
             .json_body(provision(SECOND_KEY, Some(SECOND_CLAIM_TOKEN), 7, true));
     });
     let reuse = mock_workspace(&server, KEY, workspace(false, false, "none"));
     let mut args: Vec<&str> = rerun.iter().map(String::as_str).collect();
-    args.push("--json");
+    args.extend(["--json", "--via", "docs"]);
     let run = sandbox.run_with(&args, &ci);
     assert_eq!(run.code, Some(0), "{run}");
     let report = run.json();

@@ -15,10 +15,22 @@ description: 无需登录，把项目连接到一个可认领的 Xybrid 工作�
 ```bash
 xybrid connect --write-env .env
 xybrid connect --write-env local.properties
-xybrid connect --agent claude-code --write-env .env --json
+xybrid connect --write-env .env --json
 ```
 
 请在项目的代码仓库中运行。凭据按代码仓库和平台主机分别保存。
+
+由代理执行时，请保留引导你到这里的指令中最早的 **Xybrid 设置入口**。只有从本文档开始时，
+才使用 `docs`。在 Bash 中，如果已有入口，请将其设为 `XYBRID_SETUP_VIA`；在其他 shell
+中，请先检查 `xybrid connect --help` 是否列出 `--via`，未列出时省略该选项：
+
+```bash
+if xybrid connect --help | grep -q -- '--via'; then
+  xybrid connect --via "${XYBRID_SETUP_VIA:-docs}" --write-env .env --json
+else
+  xybrid connect --write-env .env --json
+fi
+```
 
 ## 选项
 
@@ -26,7 +38,8 @@ xybrid connect --agent claude-code --write-env .env --json
 |------|------|
 | `--write-env <PATH>` | 把密钥写入这个未被 Git 跟踪的项目文件，并将其加入 gitignore |
 | `--env-name <VAR>` | 在 `--write-env` 文件中设置的变量。默认为 `XYBRID_API_KEY`，在 `.properties` 文件中为 `xybrid.apiKey`。Expo 项目请传入 `EXPO_PUBLIC_XYBRID_API_KEY` |
-| `--agent <NAME>` | 代理自行上报的名称，例如 `claude-code`。可能时会从 `CLAUDECODE=1` 检测 |
+| `--agent <NAME>` | 实际使用的代理自行上报的名称，与设置入口无关。条件允许时从 `CLAUDECODE=1` 检测 |
+| `--via <ENTRYPOINT>` | 仅在支持时使用：`web-copy`、`setup-prompt`、`llms-txt`、`skill`、`mcp` 或 `docs`。仅在通知期结束且平台启用采集后发送；重试保留原值或省略状态，复用工作区不受影响 |
 | `--project-name <NAME>` | 新工作区或新项目的名称。默认为代码仓库的目录名 |
 | `--new` | 即使该项目已有保存的凭据，也创建新的工作区。绝不替换项目文件中已有的密钥 |
 | `--allow-ci` | 即使检测到 CI 环境也进行连接。隐私退出设置仍然生效 |
