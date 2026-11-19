@@ -14,7 +14,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `model_metadata.json`, as Swift, React Native and Unity already do: `load()`
   generates the metadata from the GGUF header and writes it next to the file
   unless one is there. `ModelSource` gains a `ModelFile` case, so a `when` over
-  it without an `else` needs one more branch.
+  it without an `else` needs one more branch (#812).
+
+### Fixed
+
+- **The Swift samples on the iOS page and in the Swift README compile.** Error
+  Handling catches the generated `XybridError` cases (`modelNotFound(id:)`,
+  `inferenceError(message:)`, `ioError(message:)`), Result Handling switches on
+  `XybridOutputType` instead of strings and no longer reads a `result.error`
+  that does not exist, and the README's audio envelope uses
+  `audio(pcmData:sampleRate:channels:)`. A failed run throws, so the samples no
+  longer check `result.success` (#804).
+- **The Swift README describes the current build.** Its Structure tree points
+  at the repo-root `Package.swift`, the local XCFramework steps include the
+  `set-natives-mode.sh` toggle, Troubleshooting covers the Bazel and SwiftPM
+  flow, and the dead "Full Plan" links are gone from the Swift, Kotlin and tools
+  READMEs, along with the two placeholder build scripts they described (#805).
+- **The docs stop claiming ONNX models run on Core ML or NNAPI.** The pipeline
+  `execution_provider` key is documented as parsed but not applied yet (every
+  ONNX session runs on the CPU), and the Flutter platform tables say what each
+  model format runs on (#806).
+- **Apple build comments describe the build.** `ort-coreml` is described as
+  linking ONNX Runtime's Core ML execution provider (not Neural Engine
+  acceleration), including in the error shown when it is enabled off Apple, and
+  the iOS build comments no longer mention Candle or "Metal OFF" (#807).
+- **The streaming docs list the real `finishReason` values** (`stop`,
+  `length`, `tool_calls`), say how each SDK reports a failed stream, and
+  document `tokenId`, `toolCalls` and `rawText` (#808).
+- **The Unity examples target iOS 16**, the floor the Unity iOS library is
+  built for, and the starter README's iOS, Windows and platform notes are
+  current (#809).
+- **Stale docs claims from #646.** The custom-models guide's Rust, Flutter and
+  Kotlin snippets match the SDKs, every page agrees that the platform presets
+  include the vision path, the cache docs say cached models do not expire, and
+  the feature matrix matches the Cargo manifests (#646).
 
 ## [0.20.0] - 2026-11-17
 

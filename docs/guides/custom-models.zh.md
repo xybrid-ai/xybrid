@@ -195,7 +195,7 @@ curl -L "$BASE/tokenizer.json" -o embeddinggemma-2/tokenizer.json
 
 ```rust
 use xybrid_sdk::ModelLoader;
-use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 
 let loader = ModelLoader::from_directory("/path/to/my-custom-model")?;
 let model = loader.load()?;
@@ -204,7 +204,8 @@ let input = Envelope {
     kind: EnvelopeKind::Text("Hello, world!".into()),
     metadata: Default::default(),
 };
-let output = model.run(&input)?;
+// 第二个参数是可选的 `GenerationConfig`。
+let output = model.run(&input, None)?;
 ```
 
 ### Flutter (Dart)
@@ -215,20 +216,21 @@ import 'package:xybrid_flutter/xybrid_flutter.dart';
 final loader = XybridModelLoader.fromDirectory('/path/to/my-custom-model');
 final model = await loader.load();
 
-final result = await model.run(
-  envelope: XybridEnvelope.text(text: 'Hello, world!'),
-);
+final result = await model.run(XybridEnvelope.text('Hello, world!'));
 ```
 
 ### Kotlin (Android)
 
 ```kotlin
+import ai.xybrid.Envelope
 import ai.xybrid.ModelLoader
+import ai.xybrid.runAsync
 
+// 需在协程中调用：load() 与 runAsync() 都是挂起函数。
 val loader = ModelLoader.fromDirectory("/path/to/my-custom-model")
 val model = loader.load()
 
-val result = model.run(XybridEnvelope.text("Hello, world!"))
+val result = model.runAsync(Envelope.text("Hello, world!"))
 ```
 
 ### Swift (iOS)
@@ -434,7 +436,7 @@ EOF
 
 ```rust
 use xybrid_sdk::ModelLoader;
-use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let loader = ModelLoader::from_directory("my-minilm")?;
@@ -445,10 +447,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         metadata: Default::default(),
     };
 
-    let output = model.run(&input)?;
+    let output = model.run(&input, None)?;
 
-    // output.kind 为 EnvelopeKind::Embedding(Vec<f32>)，共 384 维，单位长度
-    if let EnvelopeKind::Embedding(embedding) = &output.kind {
+    // embedding() 返回该向量，共 384 维，单位长度
+    if let Some(embedding) = output.embedding() {
         println!("Embedding dimensions: {}", embedding.len());
         println!("First 5 values: {:?}", &embedding[..5]);
     }

@@ -5,8 +5,10 @@
 //  - zero-fills the output and counts the failure when a run fails;
 //  - drains temporaries in autorelease pools (Rust threads have none);
 //  - calls MLModel directly, without upstream's app-wide MLModel category;
-//  - declines below iOS 16. The Flutter pod targets iOS 13, so newer APIs sit
-//    behind availability checks, enforced by -Werror=unguarded-availability-new.
+//  - declines below iOS 16. The shipped bindings target iOS 16, but a cargo
+//    build of this crate can target an older iOS through
+//    IPHONEOS_DEPLOYMENT_TARGET, so newer APIs sit behind availability checks,
+//    enforced by -Werror=unguarded-availability-new.
 
 #if !__has_feature(objc_arc)
 #error This file must be compiled with automatic reference counting enabled (-fobjc-arc)

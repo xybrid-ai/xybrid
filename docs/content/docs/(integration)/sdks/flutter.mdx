@@ -269,11 +269,19 @@ Token from streaming LLM inference.
 
 ```dart
 class StreamToken {
-  final String token;            // Generated token text
-  final int index;               // Token position
-  final String cumulativeText;   // All text so far
-  final bool isFinal;            // Last token in sequence
-  final String? finishReason;    // "stop", "length", "error"
+  final String token;                    // Generated token text
+  final int index;                       // Zero-based token position
+  final String cumulativeText;           // Text emitted so far, tool-call blocks left out
+  final bool isFinal;                    // Last token in sequence
+  final String? finishReason;            // "stop", "length", "tool_calls", or "error: <message>"
+  final XybridInferenceMetrics? metrics; // Final token only
+  final ObservationRef? observation;     // Trace reference, final token only
+  final List<ToolCall> toolCalls;        // Final token only; empty otherwise
+  final String? rawText;                 // Raw turn text with the tool-call block; null without tool calls
+
+  bool get hasToolCalls;                 // toolCalls is not empty
+  bool get isError;                      // finishReason starts with "error:"
+  String? get errorMessage;              // The message of an error token
 }
 ```
 
@@ -356,16 +364,24 @@ class XybridException implements Exception {
 }
 ```
 
-All SDK errors throw `XybridException`. Loading errors are surfaced via `LoadError` events when using `loadWithProgress()`.
+All SDK errors throw `XybridException`, except in the token-streaming methods (`runStreaming`, `runStreamingWithContext`, `runStreamingWithFallback`): those end the stream with an error token instead (`StreamToken.isError`, `StreamToken.errorMessage`). Loading errors are surfaced via `LoadError` events when using `loadWithProgress()`.
 
 ---
 
 ## Platform Support
 
-| Platform | Status | Accelerators |
-|----------|--------|--------------|
-| macOS | Supported | Metal, CoreML |
-| iOS | Supported | Metal, CoreML |
-| Android | Supported | NNAPI |
-| Linux | Supported | CPU |
-| Windows | Planned | DirectML |
+Precompiled libraries ship for iOS (device and Simulator, arm64), macOS on
+Apple Silicon, Android (arm64-v8a, x86_64), Linux (x86_64) and Windows
+(x86_64). Where a model runs depends on its format:
+
+| Model format | iOS device | iOS Simulator | macOS | Android, Linux, Windows |
+|--------------|------------|---------------|-------|-------------------------|
+| GGUF (llama.cpp: LLMs, vision-language models) | Metal GPU | CPU | Metal GPU | CPU |
+| Whisper (whisper.cpp) | CPU; optional Core ML encoder | CPU; optional Core ML encoder | Metal GPU | CPU |
+| ONNX (ONNX Runtime) | CPU | CPU | CPU | CPU |
+
+On iOS, whisper.cpp runs the encoder on Core ML when a
+`<model>-encoder.mlmodelc` (e.g. `ggml-base.en-encoder.mlmodelc`) sits beside
+the model file. ONNX Runtime's Core ML execution provider is linked on iOS and
+macOS, but the SDK does not select it yet, so ONNX models run on the CPU. No
+path uses NNAPI or DirectML.

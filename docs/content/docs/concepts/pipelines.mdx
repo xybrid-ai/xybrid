@@ -70,7 +70,7 @@ stages:
 | `backend` | `gateway` (default) uses Xybrid Platform with `XYBRID_API_KEY`; `direct` with an OpenAI-compatible provider calls the provider's API with `$<PROVIDER>_API_KEY` |
 | `gateway_url`, `api_key` | Explicit endpoint and credential for the cloud leg (`api_key` accepts `$ENV_VAR`); credentials are never inherited across origins |
 | `thinking` | DeepSeek only: `enabled` or `disabled` (DeepSeek reasons by default; `disabled` keeps `max_tokens` for the answer) |
-| `execution_provider` | ONNX Runtime override: `cpu`, `coreml`, `coreml-ane`, `coreml-gpu` (auto-selected if unset) |
+| `execution_provider` | ONNX Runtime execution provider: `cpu`, `coreml`, `coreml-ane`, `coreml-gpu`. Parsed, not applied yet: ONNX models run on the CPU whatever the value, and nothing is auto-selected when it is unset |
 | *(any other key)* | Passed to the stage as an option — `system_prompt`, `max_tokens`, `temperature`, `top_p` apply to both legs of a hybrid stage |
 
 <Callout type="info">

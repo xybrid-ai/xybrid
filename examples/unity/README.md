@@ -73,7 +73,7 @@ All examples require:
 - **Native libraries** (built from Rust source)
 
 Platform-specific requirements:
-- **iOS**: Xcode 14+, iOS 15.0+ target
+- **iOS**: Xcode 14+, iOS 16.0+ target
 - **Android**: Android SDK, NDK (via Unity Hub), API 28+
 - **macOS**: For editor testing
 

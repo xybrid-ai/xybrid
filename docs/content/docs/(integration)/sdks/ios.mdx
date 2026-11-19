@@ -41,10 +41,8 @@ let model = try await Xybrid.model("kokoro-82m").load()
 let envelope = Envelope.text("Hello, world!")
 let result = try await model.runAsync(envelope: envelope)
 
-if result.success {
-    print("Output: \(result.text ?? "")")
-    print("Latency: \(result.latency)s")
-}
+print("Output: \(result.text ?? "")")
+print("Latency: \(result.latency)s")
 ```
 
 On iOS, `Xybrid.initialize()` enables `UIDevice` battery monitoring and subscribes to `UIDevice.batteryLevelDidChangeNotification`, forwarding readings to the routing engine. Thermal state on Apple platforms is sourced from `NSProcessInfo.thermalState` directly in `xybrid-core`.
@@ -178,7 +176,7 @@ print("Transcription: \(result.text ?? "")")
 let envelope = Envelope.text("Hello, how are you?")
 
 // With voice and speed
-let envelope = Envelope.text("Hello", voice: "af_heart", speed: 1.0)
+let voiced = Envelope.text("Hello", voice: "af_heart", speed: 1.0)
 
 let result = try model.run(envelope: envelope)
 if let audioBytes = result.audioBytes {
@@ -268,39 +266,42 @@ SDK, and without one the engine falls back to fixed windows.
 
 ## Result Handling
 
+A failed run throws a `XybridError` instead of returning a result, so a result
+needs no success check (see [Error Handling](#error-handling)). Switch on
+`outputType` to read the output:
+
 ```swift
 let result = try model.run(envelope: envelope)
 
-if result.success {
-    switch result.outputType {
-    case "text":
-        print("Text: \(result.text!)")
-    case "audio":
-        playAudio(result.audioBytes!)
-    case "embedding":
-        process(result.embedding!)
-    default:
-        break
-    }
-    print("Latency: \(result.latency)s")  // TimeInterval in seconds
-} else {
-    print("Error: \(result.error ?? "Unknown")")
+switch result.outputType {
+case .text:
+    print("Text: \(result.text ?? "")")
+case .audio:
+    if let audio = result.audioBytes { playAudio(audio) }
+case .embedding:
+    if let vector = result.embedding { process(vector) }
+default:
+    break
 }
+print("Latency: \(result.latency)s")  // TimeInterval in seconds
 ```
 
 ### XybridResult Properties
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `success` | `Bool` | Whether inference succeeded |
-| `error` | `String?` | Error message if failed |
-| `outputType` | `String` | `"text"`, `"audio"`, or `"embedding"` |
+| `success` | `Bool` | Always `true`; a failed run throws instead |
+| `outputType` | `XybridOutputType` | `.text`, `.audio`, `.embedding`, `.decisions`, or `.unknown` |
 | `text` | `String?` | Text output (ASR, LLM) |
 | `audioBytes` | `Data?` | Audio output (TTS) |
 | `embedding` | `[Float]?` | Embedding vector |
 | `latencyMs` | `UInt32` | Inference latency in ms |
-| `isFailure` | `Bool` | Convenience: `!success` |
+| `isFailure` | `Bool` | `true` when the result carries no output (`outputType == .unknown`) |
 | `latency` | `TimeInterval` | Latency in seconds |
+| `modelId` | `String` | ID of the model that produced the result |
+| `reasoningContent` | `String?` | Model reasoning, kept apart from the answer text |
+| `toolCalls` | `[XybridToolCall]` | Tool calls the model emitted; empty unless the request offered tools |
+| `observation` | `XybridObservationRef?` | The run's trace reference, when it was traced |
 
 ---
 
@@ -312,18 +313,21 @@ The SDK uses a Swift error enum for type-safe error handling:
 do {
     let model = try await Xybrid.model("kokoro-82m").load()
     let result = try await model.runAsync(envelope: envelope)
-} catch XybridError.ModelNotFound(let modelId) {
-    print("Model not found: \(modelId)")
-} catch XybridError.InferenceFailed(let message) {
+} catch XybridError.modelNotFound(let id) {
+    print("Model not found: \(id)")
+} catch XybridError.inferenceError(let message) {
     print("Inference failed: \(message)")
-} catch XybridError.InvalidInput(let message) {
-    print("Invalid input: \(message)")
-} catch XybridError.IoError(let message) {
+} catch XybridError.ioError(let message) {
     print("I/O error: \(message)")
 } catch {
-    print("Unexpected error: \(error.localizedDescription)")
+    print(error.localizedDescription)
 }
 ```
+
+Cases are lowerCamelCase with labeled associated values, such as
+`modelNotFound(id:)` and `inferenceError(message:)`. `XybridError` conforms to
+`LocalizedError`, so `localizedDescription` gives a readable message for every
+case.
 
 ---
 

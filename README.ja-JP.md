@@ -382,7 +382,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 }
 ```
 
-完全なスキーマについては[モデルメタデータドキュメント](docs/sdk/API_REFERENCE.md)を参照するか、[`integration-tests/fixtures/models/`](integration-tests/fixtures/models/)の既存の例をご覧ください。
+完全なスキーマについては[モデルメタデータドキュメント](docs/sdk/MODEL_METADATA.md)を参照するか、[`integration-tests/fixtures/models/`](integration-tests/fixtures/models/)の既存の例をご覧ください。
 
 </details>
 

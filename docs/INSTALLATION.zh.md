@@ -191,12 +191,10 @@ xybrid run --model smollm2-360m --input-text "What is the capital of France?"
 
 ### 视觉模型输入
 
-视觉语言模型需要启用 `vision` 或 `llm-llamacpp-vision` 编译的版本，
-以及包含视觉编码器构件的模型Bundle。仅使用平台预设时仅支持纯文本输入；
-如需本地 VLM 生成，请将预设与 `llm-llamacpp-vision` 组合。
+视觉语言模型需要启用 `llm-llamacpp-vision` 编译的版本，以及包含视觉编码器构件的模型Bundle。每个平台预设都已启用 `llm-llamacpp-vision`，因此直接用预设构建即可运行 VLM，无需额外特性：
 
 ```bash
-cargo build --release -p xybrid-cli --features platform-macos,llm-llamacpp-vision
+cargo build --release -p xybrid-cli --features platform-macos
 ```
 
 ```bash
