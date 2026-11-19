@@ -47,6 +47,9 @@ pub struct TranscribeParams {
     ///
     /// Passed as whisper.cpp's `initial_prompt` on this request. This is text
     /// context for recognition, not an instruction for an assistant to follow.
+    /// The prompt is trimmed and sent with a single leading space, as
+    /// openai-whisper and faster-whisper do (`" " + prompt.strip()`); a prompt
+    /// that is blank after trimming is treated as no prompt.
     /// Interior null bytes are rejected without echoing the prompt.
     pub prompt: Option<String>,
     /// Language code (e.g. `"en"`). `None` auto-detects.
