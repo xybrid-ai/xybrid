@@ -65,6 +65,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   linked, not in use. Loading a pipeline whose stage sets `execution_provider`
   to anything but `cpu` logs a warning, and `xybrid run`, `xybrid repl` and
   `xybrid prepare` print one (#806).
+- **Flutter: `runStreamingWithContext` ends a turn on one final token.** It
+  emitted the native terminal token and then a second final token for the
+  metrics. On a tool-call turn that second token reported `finishReason:
+  'stop'`, no `toolCalls`, and a `cumulativeText` that included the raw
+  tool-call block; a turn cut off by `maxTokens` also ended on `'stop'`
+  instead of `'length'`. The stream now merges the two, as `runStreaming` and
+  `runStreamingWithFallback` do: the last token keeps the native index, text,
+  finish reason, `toolCalls` and `rawText`, and carries `metrics` and
+  `observation`. Code that expected two `isFinal` tokens per turn sees one.
+  When a tool-call block is suppressed but does not parse, the stream no
+  longer carries the raw output; `runWithContext` returns it in
+  `XybridResult.text` (#820).
 
 ## [0.20.0] - 2026-11-17
 

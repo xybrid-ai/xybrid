@@ -19,6 +19,7 @@ import 'tools.dart';
 
 // Native completion supplies metrics and correlation after the terminal token.
 // Hold that terminal token so successful turns still finalize exactly once.
+// Shared by runStreaming, runStreamingWithContext and runStreamingWithFallback.
 Stream<StreamToken> _tokensWithCompletion(
     Stream<FfiStreamEvent> stream) async* {
   StreamToken? pendingFinal;
@@ -675,6 +676,12 @@ class XybridModel {
   /// context.pushText(buffer.toString(), MessageRole.assistant);
   /// ```
   ///
+  /// A successful turn ends with exactly one final token
+  /// ([StreamToken.isFinal]). It keeps the native finish reason, tool calls
+  /// and [StreamToken.rawText], and carries the run's [StreamToken.metrics]
+  /// and [StreamToken.observation]. A failed run ends the stream with an
+  /// error token ([StreamToken.isError]), which can follow a final token.
+  ///
   /// Pass an optional [cancellationToken] to make the run cancellable: calling
   /// [CancellationToken.cancel] (or unsubscribing from the stream) halts
   /// generation at the next token boundary and releases the model write lock.
@@ -708,54 +715,7 @@ class XybridModel {
         options: options?.toFfi(),
       );
 
-      // This method emits the native terminal token AND a completion token
-      // (the latter is where metrics arrive). Tool calls must be delivered
-      // across that pair exactly once, or a caller looping on [hasToolCalls]
-      // would execute every tool twice.
-      var emittedToolCalls = false;
-
-      await for (final event in stream) {
-        switch (event) {
-          case FfiStreamEvent_Token(:final field0):
-            final calls =
-                field0.toolCalls.map(ToolCall.fromFfi).toList(growable: false);
-            if (calls.isNotEmpty) emittedToolCalls = true;
-            yield StreamToken(
-              token: field0.token,
-              index: field0.index,
-              cumulativeText: field0.cumulativeText,
-              isFinal: field0.finishReason != null,
-              finishReason: field0.finishReason,
-              toolCalls: calls,
-              rawText: field0.rawText,
-            );
-          case FfiStreamEvent_Complete(:final field0):
-            final calls = emittedToolCalls
-                ? const <ToolCall>[]
-                : field0.toolCalls
-                    .map(ToolCall.fromFfi)
-                    .toList(growable: false);
-            yield StreamToken(
-              token: '',
-              index: 0,
-              cumulativeText: field0.text ?? '',
-              isFinal: true,
-              finishReason: calls.isEmpty ? 'stop' : 'tool_calls',
-              metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
-              observation: field0.observation,
-              toolCalls: calls,
-              rawText: calls.isEmpty ? null : field0.text,
-            );
-          case FfiStreamEvent_Error(:final field0):
-            yield StreamToken(
-              token: '',
-              index: 0,
-              cumulativeText: '',
-              isFinal: true,
-              finishReason: 'error: $field0',
-            );
-        }
-      }
+      yield* _tokensWithCompletion(stream);
     } catch (e) {
       yield StreamToken(
         token: '',
