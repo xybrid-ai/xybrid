@@ -114,6 +114,9 @@ namespace Xybrid
         /// <summary>Gets the error message if inference failed, or null if successful.</summary>
         public string Error { get; }
 
+        /// <summary>Error from a speculative cloud attempt that recovered on-device.</summary>
+        public string SpeculativeCloudError { get; private set; }
+
         /// <summary>Gets the text output (for ASR or LLM models), or null if not applicable.</summary>
         public string Text { get; }
 
@@ -155,8 +158,7 @@ namespace Xybrid
 
         /// <summary>
         /// Gets whether this answer came from the device or the cloud gateway.
-        /// Cloud fallback keeps the model id identical on both legs, so this is
-        /// the only way to tell them apart. Defaults to
+        /// Defaults to
         /// <see cref="XybridBolt.XybridExecutionTarget.Local"/> for synthesized
         /// failures, which never reached the cloud.
         /// </summary>
@@ -246,6 +248,7 @@ namespace Xybrid
             var speech = TtsStreamResult.FromBolt(result);
             bool hasSpeechStatus = false;
             string phonemeTimingsJson = null;
+            string speculativeCloudError = null;
             ulong? tokensIn = null;
             ulong? tokensOut = null;
             foreach (var entry in result.Envelope.Metadata)
@@ -256,6 +259,8 @@ namespace Xybrid
                     tokensOut = parsedOutputTokens;
                 else if (entry.Key == "tts_status")
                     hasSpeechStatus = true;
+                else if (entry.Key == "speculative_cloud_error")
+                    speculativeCloudError = entry.Value;
                 else if (entry.Key == PhonemeTimingParser.MetadataKey && phonemeTimingsJson == null)
                     phonemeTimingsJson = entry.Value;
             }
@@ -280,6 +285,7 @@ namespace Xybrid
                 TokensOut = tokensOut,
                 SpeechStatus = hasSpeechStatus ? speech.Status : (TtsStatus?)null,
                 LimitedChunks = hasSpeechStatus ? speech.LimitedChunks : (uint?)null,
+                SpeculativeCloudError = speculativeCloudError,
             };
         }
 

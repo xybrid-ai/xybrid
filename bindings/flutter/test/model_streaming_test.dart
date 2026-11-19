@@ -161,6 +161,7 @@ FfiStreamEvent _finalToken(String text) => FfiStreamEvent.token(
 
 FfiStreamEvent _complete(String text,
         {ObservationRef? observation,
+        String? cloudError,
         List<FfiToolCall> toolCalls = const []}) =>
     FfiStreamEvent.complete(
       FfiResult(
@@ -171,6 +172,7 @@ FfiStreamEvent _complete(String text,
         executionTarget: FfiExecutionTarget.local,
         metrics: const FfiInferenceMetrics(totalMs: 10, stageLatenciesMs: []),
         toolCalls: toolCalls,
+        speculativeCloudError: cloudError,
       ),
     );
 
@@ -196,6 +198,27 @@ void main() {
           options: const RunOptions(),
         ),
   };
+
+  test('each stream reports a recovered cloud error only on completion',
+      () async {
+    const error = '502 Upstream provider error (xycloud)';
+    for (final run in [
+      ...runs.values,
+      () => model.runStreamingWithContext(
+          XybridEnvelope.text('Hi'), ConversationContext()),
+    ]) {
+      api.events = [
+        _finalToken('answer'),
+        _complete('answer', cloudError: error),
+      ];
+      final tokens = await run().toList();
+      expect(tokens.last.cumulativeText, 'answer');
+      expect(tokens.last.isError, isFalse);
+      expect(tokens.last.speculativeCloudError, error);
+      expect(tokens.where((token) => token.speculativeCloudError != null),
+          hasLength(1));
+    }
+  });
 
   for (final MapEntry(key: method, value: run) in runs.entries) {
     group(method, () {

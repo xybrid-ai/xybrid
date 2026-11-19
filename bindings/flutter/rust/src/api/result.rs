@@ -89,9 +89,11 @@ pub struct FfiResult {
     /// turn. The raw tool-call block stays in `text` untouched, and malformed
     /// model output yields an empty list rather than an error.
     pub tool_calls: Vec<FfiToolCall>,
+    /// Error from a speculative cloud attempt this run recovered from on-device.
+    pub speculative_cloud_error: Option<String>,
 }
 
-/// Versioned run carrier; the legacy result record remains unchanged.
+/// Versioned run carrier for legacy and decision results.
 ///
 /// The Rust library and generated Dart bridge must ship together. FRB checks
 /// their content hashes before a call can decode this carrier.
@@ -266,14 +268,12 @@ impl FfiResult {
                     arguments_json: call.function.arguments,
                 })
                 .collect(),
+            speculative_cloud_error: r.speculative_cloud_error().map(str::to_owned),
         })
     }
 }
 
 /// Where a result was produced — the observed fact, not a routing preference.
-///
-/// Cloud fallback (speculative or reactive) keeps the model id identical on
-/// both legs by design, so this is the only way to tell them apart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FfiExecutionTarget {
     Local,

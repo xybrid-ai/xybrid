@@ -750,14 +750,11 @@ impl FfiStreamToken {
 /// Lifecycle of a model download.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FfiDownloadState {
-    /// Bytes still in flight. For a speculative load, runs are served from
-    /// the cloud meanwhile.
+    /// Bytes still in flight. Speculative runs try the cloud meanwhile.
     Downloading,
     /// Every artifact landed and the model is usable.
     Ready,
-    /// Download failed — for a speculative load the cloud keeps serving and
-    /// the model never becomes local. Surfacing this is the only way the UI
-    /// can stop waiting.
+    /// Download failed; a speculative model never becomes local.
     Failed,
     /// The download was cancelled by the caller.
     Cancelled,
@@ -862,8 +859,8 @@ impl FfiModelLoader {
         FfiModelLoader(ModelLoader::from_registry(&model_id))
     }
 
-    /// Loader that serves from the cloud gateway while the registry weights
-    /// download in the background, instead of blocking on the download.
+    /// Try the registry id at the cloud gateway while the weights download.
+    /// Only ids also listed in the gateway catalog can be served remotely.
     ///
     /// `load()` then returns almost immediately with a cloud-backed model that
     /// switches to on-device by itself once the download lands. Requires a
@@ -965,8 +962,7 @@ impl FfiModel {
             .map(super::observability::FfiObservationRef::from_sdk)
     }
 
-    /// Whether runs are currently answered by the cloud because the local
-    /// weights are not ready yet. `false` for ordinary local models.
+    /// Whether a run would try the gateway because the local weights are not ready.
     ///
     /// This predicts the *next* run; `FfiResult.executionTarget` reports what a
     /// run that already happened actually did. They differ when a cloud leg
@@ -1031,7 +1027,7 @@ impl FfiModel {
                     }
                     xybrid_sdk::DownloadState::Failed => {
                         let _ = sink.add(FfiLoadEvent::Error(
-                            "speculative model download failed; still serving from cloud"
+                            "speculative model download failed; local inference unavailable"
                                 .to_string(),
                         ));
                         break;
@@ -1041,7 +1037,7 @@ impl FfiModel {
                         // download — but the state exists, so report it rather
                         // than leaving the stream hanging if that changes.
                         let _ = sink.add(FfiLoadEvent::Error(
-                            "model download cancelled; still serving from cloud".to_string(),
+                            "model download cancelled; local inference unavailable".to_string(),
                         ));
                         break;
                     }

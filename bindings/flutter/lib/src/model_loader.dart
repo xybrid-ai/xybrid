@@ -63,6 +63,7 @@ Stream<StreamToken> _tokensWithCompletion(
                 (calls.isEmpty ? 'stop' : 'tool_calls'),
             metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
             observation: field0.observation,
+            speculativeCloudError: field0.speculativeCloudError,
             toolCalls: calls,
             rawText: terminal?.rawText ?? (calls.isEmpty ? null : field0.text),
           );
@@ -244,8 +245,8 @@ class XybridModelLoader {
     return XybridModelLoader._(FfiModelLoader.fromRegistry(modelId: modelId));
   }
 
-  /// Create a loader that serves from the cloud gateway while the registry
-  /// weights download in the background, instead of blocking on the download.
+  /// Try the registry id at the cloud gateway while the weights download.
+  /// Only ids also listed in the gateway catalog can be served remotely.
   ///
   /// [load] then returns almost immediately with a cloud-backed model that
   /// switches to on-device by itself once the download lands. Requires an API
@@ -374,8 +375,7 @@ class XybridModel {
   /// Immutable reference for the load that created this model.
   ObservationRef? get loadObservationRef => inner.loadObservationRef();
 
-  /// Whether runs are currently answered by the cloud because the local
-  /// weights are not ready yet. `false` for ordinary local models.
+  /// Whether a run would try the gateway because the local weights are not ready.
   ///
   /// This predicts the *next* run; [XybridResult.executionTarget] reports what
   /// a run that already happened actually did. They differ when a cloud leg
@@ -743,6 +743,7 @@ class XybridModel {
               finishReason: calls.isEmpty ? 'stop' : 'tool_calls',
               metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
               observation: field0.observation,
+              speculativeCloudError: field0.speculativeCloudError,
               toolCalls: calls,
               rawText: calls.isEmpty ? null : field0.text,
             );

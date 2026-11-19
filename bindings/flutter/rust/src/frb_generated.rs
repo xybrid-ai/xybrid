@@ -7164,6 +7164,7 @@ impl SseDecode for crate::api::result::FfiResult {
             <crate::api::result::FfiExecutionTarget>::sse_decode(deserializer);
         let mut var_metrics = <crate::api::result::FfiInferenceMetrics>::sse_decode(deserializer);
         let mut var_toolCalls = <Vec<crate::api::model::FfiToolCall>>::sse_decode(deserializer);
+        let mut var_speculativeCloudError = <Option<String>>::sse_decode(deserializer);
         return crate::api::result::FfiResult {
             observation: var_observation,
             success: var_success,
@@ -7175,6 +7176,7 @@ impl SseDecode for crate::api::result::FfiResult {
             execution_target: var_executionTarget,
             metrics: var_metrics,
             tool_calls: var_toolCalls,
+            speculative_cloud_error: var_speculativeCloudError,
         };
     }
 }
@@ -9359,6 +9361,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::result::FfiResult {
             self.execution_target.into_into_dart().into_dart(),
             self.metrics.into_into_dart().into_dart(),
             self.tool_calls.into_into_dart().into_dart(),
+            self.speculative_cloud_error.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -10702,6 +10705,7 @@ impl SseEncode for crate::api::result::FfiResult {
         <crate::api::result::FfiExecutionTarget>::sse_encode(self.execution_target, serializer);
         <crate::api::result::FfiInferenceMetrics>::sse_encode(self.metrics, serializer);
         <Vec<crate::api::model::FfiToolCall>>::sse_encode(self.tool_calls, serializer);
+        <Option<String>>::sse_encode(self.speculative_cloud_error, serializer);
     }
 }
 

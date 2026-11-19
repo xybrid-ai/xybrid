@@ -319,10 +319,13 @@ const download = await loader.download();
 for await (const status of download!.progress()) setProgress(status.progress);
 const model = await loader.load();
 
-// Answer from the cloud while the weights download (needs an API key and a
-// chat model the registry serves as a direct GGUF download).
+// With an API key, a direct GGUF or vision-language chat variant tries its
+// registry id at the gateway while it downloads.
 const fast = await ModelLoader.fromRegistrySpeculative('lfm2.5-350m').load();
-await fast.isCloudServing(); // true until the local weights land
+await fast.isCloudServing(); // predicts an attempt, not gateway availability
+const answer = await fast.run(Envelope.text('Hello'));
+const cloudError = answer.envelope.metadata?.speculative_cloud_error;
+// Present if the cloud attempt failed before output and this run succeeded locally.
 
 await Xybrid.modelCacheStatus();       // bytes and models on disk
 await Xybrid.removeCachedModel('qwen3.5-0.8b');

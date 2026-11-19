@@ -62,16 +62,15 @@ pub(crate) const MIN_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 /// Lifecycle of a model download.
 ///
 /// Also describes the background download behind a speculative load, where
-/// `Downloading` means runs are being served from the cloud meanwhile.
+/// `Downloading` means runs can try the registry id at the gateway.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DownloadState {
     /// Bytes still in flight.
     Downloading,
     /// Every artifact landed, verified and extracted — the model is usable.
     Ready,
-    /// The download failed. For a speculative load the cloud keeps serving and
-    /// `is_loaded()` will never flip, so surfacing this is the only way a host
-    /// can stop waiting.
+    /// The download failed. A speculative model cannot recover locally;
+    /// runs can still try the gateway.
     Failed,
     /// The caller asked for the download to stop (see [`ModelDownload::cancel`]).
     Cancelled,

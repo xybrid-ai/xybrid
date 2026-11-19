@@ -154,8 +154,9 @@ public enum Xybrid {
 
     /// Sets the process-wide default for speculative cloud serving.
     ///
-    /// Speculation answers from the cloud gateway while a registry model's
-    /// weights download in the background, instead of blocking on the download.
+    /// Speculation tries the registry id at the gateway while its weights
+    /// download. Only ids also listed in the gateway catalog can be served
+    /// remotely.
     ///
     /// This is the *default* for loads that do not opt in per-load;
     /// ``ModelLoader/fromRegistrySpeculative(_:)`` opts in explicitly and is
@@ -339,8 +340,7 @@ public enum ModelSource: Sendable, Equatable {
     /// A Hugging Face repository (`org/repo` or `org/repo:variant`).
     case huggingFace(String)
 
-    /// A registry model served from the cloud gateway while its weights
-    /// download in the background. See
+    /// Try the registry id at the gateway while its weights download. See
     /// ``ModelLoader/fromRegistrySpeculative(_:)``.
     case registrySpeculative(String)
 
@@ -365,8 +365,8 @@ public struct ModelLoader: Sendable {
         Self(source: .registry(id))
     }
 
-    /// Create a loader that answers from the cloud gateway while the registry
-    /// weights download in the background, instead of blocking on the download.
+    /// Try the registry id at the cloud gateway while the weights download.
+    /// Only ids also listed in the gateway catalog can be served remotely.
     ///
     /// ``load()`` returns almost immediately with a cloud-backed model that
     /// switches to on-device by itself once the download lands. Requires an API

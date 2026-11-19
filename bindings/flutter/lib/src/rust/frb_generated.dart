@@ -5788,8 +5788,8 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   FfiResult dco_decode_ffi_result(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return FfiResult(
       observation: dco_decode_opt_box_autoadd_ffi_observation_ref(arr[0]),
       success: dco_decode_bool(arr[1]),
@@ -5801,6 +5801,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       executionTarget: dco_decode_ffi_execution_target(arr[7]),
       metrics: dco_decode_ffi_inference_metrics(arr[8]),
       toolCalls: dco_decode_list_ffi_tool_call(arr[9]),
+      speculativeCloudError: dco_decode_opt_String(arr[10]),
     );
   }
 
@@ -7436,6 +7437,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     var var_executionTarget = sse_decode_ffi_execution_target(deserializer);
     var var_metrics = sse_decode_ffi_inference_metrics(deserializer);
     var var_toolCalls = sse_decode_list_ffi_tool_call(deserializer);
+    var var_speculativeCloudError = sse_decode_opt_String(deserializer);
     return FfiResult(
         observation: var_observation,
         success: var_success,
@@ -7446,7 +7448,8 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         latencyMs: var_latencyMs,
         executionTarget: var_executionTarget,
         metrics: var_metrics,
-        toolCalls: var_toolCalls);
+        toolCalls: var_toolCalls,
+        speculativeCloudError: var_speculativeCloudError);
   }
 
   @protected
@@ -9212,6 +9215,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_ffi_execution_target(self.executionTarget, serializer);
     sse_encode_ffi_inference_metrics(self.metrics, serializer);
     sse_encode_list_ffi_tool_call(self.toolCalls, serializer);
+    sse_encode_opt_String(self.speculativeCloudError, serializer);
   }
 
   @protected
@@ -10200,8 +10204,7 @@ class FfiModelImpl extends RustOpaque implements FfiModel {
         that: this,
       );
 
-  /// Whether runs are currently answered by the cloud because the local
-  /// weights are not ready yet. `false` for ordinary local models.
+  /// Whether a run would try the gateway because the local weights are not ready.
   ///
   /// This predicts the *next* run; `FfiResult.executionTarget` reports what a
   /// run that already happened actually did. They differ when a cloud leg

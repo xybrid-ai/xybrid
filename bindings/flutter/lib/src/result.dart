@@ -110,11 +110,11 @@ class XybridResult {
       _legacy?.observation ?? _decision?.observation;
 
   /// Whether this answer came from the device or the cloud gateway.
-  ///
-  /// Cloud fallback — speculative or reactive — keeps the model id identical on
-  /// both legs by design, so this is the only way to tell them apart.
   FfiExecutionTarget get executionTarget =>
       _legacy?.executionTarget ?? _decision!.executionTarget;
+
+  /// Error from the gateway attempt if this run recovered on-device.
+  String? get speculativeCloudError => _legacy?.speculativeCloudError;
 
   /// Text output (for ASR models).
   ///

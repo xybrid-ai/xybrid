@@ -69,6 +69,7 @@ fn pipeline_ffi_result(result: &PipelineExecutionResult) -> Result<FfiResult, St
         // Pipelines don't offer tools, so a pipeline run never produces
         // tool calls.
         tool_calls: Vec::new(),
+        speculative_cloud_error: None,
     })
 }
 

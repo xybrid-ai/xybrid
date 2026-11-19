@@ -149,9 +149,6 @@ sealed class FfiDecisionValue with _$FfiDecisionValue {
 }
 
 /// Where a result was produced — the observed fact, not a routing preference.
-///
-/// Cloud fallback (speculative or reactive) keeps the model id identical on
-/// both legs by design, so this is the only way to tell them apart.
 enum FfiExecutionTarget {
   local,
   cloud,
@@ -238,6 +235,9 @@ class FfiResult {
   /// model output yields an empty list rather than an error.
   final List<FfiToolCall> toolCalls;
 
+  /// Error from a speculative cloud attempt this run recovered from on-device.
+  final String? speculativeCloudError;
+
   const FfiResult({
     this.observation,
     required this.success,
@@ -249,6 +249,7 @@ class FfiResult {
     required this.executionTarget,
     required this.metrics,
     required this.toolCalls,
+    this.speculativeCloudError,
   });
 
   @override
@@ -262,7 +263,8 @@ class FfiResult {
       latencyMs.hashCode ^
       executionTarget.hashCode ^
       metrics.hashCode ^
-      toolCalls.hashCode;
+      toolCalls.hashCode ^
+      speculativeCloudError.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -278,7 +280,8 @@ class FfiResult {
           latencyMs == other.latencyMs &&
           executionTarget == other.executionTarget &&
           metrics == other.metrics &&
-          toolCalls == other.toolCalls;
+          toolCalls == other.toolCalls &&
+          speculativeCloudError == other.speculativeCloudError;
 }
 
 @freezed

@@ -53,6 +53,19 @@ namespace Xybrid.Tests.Editor
         }
 
         [Test]
+        public void LocalRecoveryKeepsTheAnswerAndTheSpeculativeCloudError()
+        {
+            const string error = "404 model_not_found";
+            using InferenceResult recovered = InferenceResult.FromBolt(Decode(ResultWire(cloudError: error)));
+            Assert.IsTrue(recovered.Success);
+            Assert.AreEqual("answer", recovered.Text);
+            Assert.AreEqual(XybridExecutionTarget.Local, recovered.ExecutionTarget);
+            Assert.AreEqual(error, recovered.SpeculativeCloudError);
+            using InferenceResult ordinary = InferenceResult.FromBolt(Decode(ResultWire()));
+            Assert.IsNull(ordinary.SpeculativeCloudError);
+        }
+
+        [Test]
         public void FromBoltParsesPhonemeTimingsFromMetadata()
         {
             // Through the wire, so the non-ASCII phoneme survives UTF-8 too.
@@ -225,11 +238,13 @@ namespace Xybrid.Tests.Editor
             }
         }
 
-        private static byte[] ResultWire(string? typedReasoning = null)
+        private static byte[] ResultWire(string? typedReasoning = null, string? cloudError = null)
         {
+            var metadata = new List<XybridMetadataEntry> { new XybridMetadataEntry("reasoning_content", "metadata reasoning") };
+            if (cloudError != null) metadata.Add(new XybridMetadataEntry("speculative_cloud_error", cloudError));
             var envelope = new XybridEnvelope(
                 new XybridEnvelopeKind.Text("answer"),
-                new[] { new XybridMetadataEntry("reasoning_content", "metadata reasoning") }
+                metadata.ToArray()
             );
             var metrics = new XybridInferenceMetrics(
                 7,
