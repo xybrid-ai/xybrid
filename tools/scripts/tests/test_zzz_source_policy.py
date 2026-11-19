@@ -1,6 +1,7 @@
 """Offline security contracts for the draft source gate; no candidate code runs."""
 
 import copy
+import datetime
 import hashlib
 import importlib.util
 import io
@@ -8,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -78,7 +80,10 @@ checksum = "trusted-external-checksum"
         "Package.swift": 'import PackageDescription\n//   .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.13.0")\nlet useLocalNatives = false\nlet sdkVersion = "0.13.0"\nlet xybridFFIChecksum = "' + "a" * 64 + '"\n',
         "bindings/react-native/package.json": '{\n  "version": "0.13.0",\n  "scripts": {"prepack": "trusted-command"},\n  "xybrid": {"iosXcframeworkSha256": "' + "a" * 64 + '"}\n}\n',
         "bindings/unity/package.json": '{"version": "0.13.0", "name": "trusted"}\n',
-        "bindings/web/package.json": '{"version": "0.13.0", "scripts": {"build": "trusted"}}\n',
+        "bindings/web/package.json": '{"version": "0.13.0", "dependencies": {"@xybrid/observability": "0.13.0"}, "scripts": {"build": "trusted"}}\n',
+        "bindings/observability-js/package.json": '{"version": "0.13.0", "scripts": {"build": "trusted"}}\n',
+        "bindings/observability-js/src/version.ts": 'export const VERSION = "0.13.0";\n',
+        POLICY.LLAMA_TRACKING: json.dumps({"tag": "v0.8.0", "commit": "a" * 40}, indent=2) + "\n",
         "bindings/python/pyproject.toml": '[project]\nname = "xybrid"\nversion = "0.13.0"\n[build-system]\nrequires = ["trusted"]\n',
         "bindings/python/xybrid/_bolt/__init__.py": 'PACKAGE_VERSION = "0.13.0"\nraise RuntimeError("DO NOT IMPORT CANDIDATE")\n',
         "CHANGELOG.md": '# Changelog\n\n## [Unreleased]\n\n### Fixed\n\n- Already reviewed.\n',
@@ -89,7 +94,7 @@ checksum = "trusted-external-checksum"
         "bindings/react-native/android/build.gradle": 'dependencies { api "ai.xybrid:xybrid-kotlin:0.13.0" }\n',
         "bindings/web/src/version.ts": 'export const SDK_VERSION = "0.13.0";\n',
         "bindings/apple/XybridFFI-Info.plist": '<plist><string>0.13.0</string><string>0.13.0</string></plist>\n',
-        "README.md": '# Trusted SDK\nInstall version 0.13.0.\n',
+        "README.md": '# Trusted SDK\nReleases 0.13.0 and later.\n\n```toml\nxybrid = "0.13.0"\n```\n',
         "docs/content/docs/quickstart.mdx": 'import Reviewed from "./reviewed";\n<Reviewed version="0.13.0" />\n',
         "src/frozen.rs": 'fn main() { panic!("DO NOT EXECUTE"); }\n',
         ".gitattributes": '*.md filter=never-run\n',
@@ -128,6 +133,8 @@ def canonical_bump(files, old, new, date=DATE, checksum=CHECKSUM):
             result[path] = "[[package]]".join(parts)
         elif path in POLICY.JSON_PACKAGES:
             text = text.replace('"version": "' + old + '"', '"version": "' + new + '"', 1)
+            if path == "bindings/web/package.json":
+                text = text.replace(f'"@xybrid/observability": "{old}"', f'"@xybrid/observability": "{new}"')
             if path == "bindings/react-native/package.json" and checksum is not None:
                 previous = json.loads(files[path])["xybrid"]["iosXcframeworkSha256"]
                 text = text.replace('"' + previous + '"', '"' + checksum + '"', 1)
@@ -140,20 +147,22 @@ def canonical_bump(files, old, new, date=DATE, checksum=CHECKSUM):
                               'let xybridFFIChecksum = "' + checksum + '"', text)
             result[path] = text
         elif path == "CHANGELOG.md" and new != old:
-            result[path] = text.replace("## [Unreleased]\n", f"## [Unreleased]\n\n---\n\n## [{new}] - {date}\n", 1)
+            result[path] = text.replace("## [Unreleased]\n", f"## [Unreleased]\n\n## [{new}] - {date}\n", 1)
         elif path == "bindings/flutter/CHANGELOG.md" and new != old:
             result[path] = text.replace("## Unreleased\n", f"## Unreleased\n\n## {new}\n", 1)
         elif path == "bindings/flutter/example/pubspec.lock":
             result[path] = re.sub(r'(?m)(^  xybrid_flutter:\n(?:    .*\n)*?    version: ")' + re.escape(old) + r'("$)',
                                   lambda match: match[1] + new + match[2], text)
-        elif path in POLICY.VERSION_TEXT:
-            result[path] = text.replace(old, new)
+        elif path == "README.md":
+            result[path] = text.replace(f'xybrid = "{old}"', f'xybrid = "{new}"')
         elif path == "bindings/apple/XybridFFI-Info.plist":
             result[path] = text.replace(f"<string>{old.split('-')[0]}</string>", f"<string>{new.split('-')[0]}</string>")
         elif path == "bindings/python/xybrid/_bolt/__init__.py":
             result[path] = text.replace(f'PACKAGE_VERSION = "{old}"', f'PACKAGE_VERSION = "{new}"', 1)
         elif path == "bindings/web/src/version.ts":
             result[path] = text.replace(f'export const SDK_VERSION = "{old}";', f'export const SDK_VERSION = "{new}";', 1)
+        elif path == "bindings/observability-js/src/version.ts":
+            result[path] = f'export const VERSION = "{new}";\n'
         elif path == "bindings/flutter/pubspec.yaml":
             result[path] = text.replace(f"version: {old}", f"version: {new}", 1)
         elif path == "bindings/kotlin/build.gradle.kts":
@@ -164,7 +173,7 @@ def canonical_bump(files, old, new, date=DATE, checksum=CHECKSUM):
 
 
 class Repository:
-    def __init__(self, directory, files):
+    def __init__(self, directory, files, gitlink_path="vendor/pinned", gitlink="1" * 40):
         self.path = Path(directory)
         self.environment = {"PATH": os.defpath, "LC_ALL": "C", "GIT_CONFIG_NOSYSTEM": "1",
                             "GIT_CONFIG_GLOBAL": os.devnull, "GIT_AUTHOR_NAME": "Policy Test",
@@ -178,7 +187,8 @@ class Repository:
         self.git("config", "maintenance.auto", "false")
         self.write(files)
         # An unchanged gitlink need not exist in the superproject object store.
-        self.gitlink = "1" * 40
+        self.gitlink_path = gitlink_path
+        self.gitlink = gitlink
         self.base = self.commit()
 
     def git(self, *arguments):
@@ -194,7 +204,7 @@ class Repository:
     def commit(self):
         self.git("add", ".")
         # Keep an intentionally uninitialized submodule in each fixture tree.
-        self.git("update-index", "--add", "--cacheinfo", "160000," + self.gitlink + ",vendor/pinned")
+        self.git("update-index", "--add", "--cacheinfo", f"160000,{self.gitlink},{self.gitlink_path}")
         self.git("commit", "--quiet", "--allow-empty", "-m", "policy fixture")
         return self.git("rev-parse", "HEAD")
 
@@ -323,6 +333,7 @@ class SourcePolicyTests(unittest.TestCase):
             "bindings/react-native/android/build.gradle": '\nexec { commandLine "evil" }\n',
             "bindings/python/xybrid/_bolt/__init__.py": '\nimport subprocess; subprocess.run(["evil"])\n',
             "bindings/web/src/version.ts": '\nfetch("https://evil.invalid");\n',
+            "bindings/observability-js/src/version.ts": '\nfetch("https://evil.invalid");\n',
             "docs/content/docs/quickstart.mdx": '\nexport const stolen = process.env;\n',
             "bindings/flutter/pubspec.yaml": '\nhooks: {build: evil}\n',
             "bindings/python/pyproject.toml": '\n[tool.evil]\nscript = "steal"\n',
@@ -331,6 +342,18 @@ class SourcePolicyTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.rejected({path: self.bump[path] + injection})
                 self.repo.write({path: self.bump[path]})
+
+    def test_only_install_pins_can_move_in_documentation(self):
+        self.rejected({"README.md": self.bump["README.md"].replace(f"Releases {OLD}", f"Releases {NEW}")})
+
+    def test_llama_release_stamp_cannot_change_the_upstream_pin(self):
+        path = POLICY.LLAMA_TRACKING
+        original = json.loads(self.files[path])
+        for change in ({"commit": "b" * 40}, {"tag": "v9.9.9"}, {"extra": "unreviewed"}):
+            with self.subTest(change=change):
+                stamp = {**original, **change, "sdk_release": {"version": NEW, "commit": original["commit"]}}
+                self.rejected({path: json.dumps(stamp, indent=2) + "\n"})
+        self.rejected({path: json.dumps({**original, "sdk_release": {"version": NEW, "commit": "b" * 40}}, indent=2) + "\n"})
 
     def test_rejects_changes_to_native_mode_script_urls_and_package_hooks(self):
         variants = [
@@ -562,31 +585,58 @@ class ActualRepositoryMetadataTests(unittest.TestCase):
         self.assertRegex(result["candidate_tree_sha256"], r"^[0-9a-f]{64}$")
 
     def test_real_current_metadata_structure_accepts_only_canonical_bump(self):
-        """Includes the real generated PACKAGE_VERSION and all workspace manifests."""
         root = tomllib.loads((ROOT / "Cargo.toml").read_text())
         old = root["workspace"]["package"]["version"]
         major, minor, _ = old.split(".")
         new = f"{major}.{int(minor) + 1}.0"
-        paths = POLICY.VERSION_TEXT | POLICY.JSON_PACKAGES | {
-            "Cargo.toml", "Cargo.lock", POLICY.MANIFEST, POLICY.VERIFIER, "Package.swift", "CHANGELOG.md",
-            "bindings/flutter/CHANGELOG.md", "bindings/flutter/pubspec.yaml",
-            "bindings/flutter/example/pubspec.lock", "bindings/kotlin/build.gradle.kts",
-            "bindings/react-native/android/build.gradle", "bindings/python/pyproject.toml",
-            "bindings/python/xybrid/_bolt/__init__.py", "bindings/web/src/version.ts",
-            "bindings/apple/XybridFFI-Info.plist",
-        } | {member + "/Cargo.toml" for member in root["workspace"]["members"]}
+        scripts = "tools/scripts/"
+        sync = scripts + "version-sync.sh"
+        pins = scripts + "install_pins.py"
+        update = scripts + "llamacpp_update.py"
+        generator = scripts + "gen_python_bolt.py"
+        paths = POLICY.metadata_paths(root["workspace"]["members"]) | {
+            POLICY.MANIFEST, POLICY.VERIFIER, sync, pins, update, "crates/llama-cpp-sys/build.rs",
+        }
         files = {path: (ROOT / path).read_text() for path in paths}
-        self.assertIn(f'PACKAGE_VERSION = "{old}"', files["bindings/python/xybrid/_bolt/__init__.py"])
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
-            repo = Repository(directory, files)
-            bumped = canonical_bump(files, old, new)
-            self.assertNotEqual(files["Cargo.toml"], bumped["Cargo.toml"])
-            self.assertNotEqual(files["bindings/python/xybrid/_bolt/__init__.py"],
-                                bumped["bindings/python/xybrid/_bolt/__init__.py"])
-            self.assertIn(f'PACKAGE_VERSION = "{new}"', bumped["bindings/python/xybrid/_bolt/__init__.py"])
-            repo.write(bumped)
+        generated = "bindings/python/xybrid/_bolt/__init__.py"
+        self.assertIn(f'PACKAGE_VERSION = "{old}"', files[generated])
+        modeled = canonical_bump(files, old, new)
+        files[generator] = (
+            "import os, shutil\nfrom pathlib import Path\n"
+            f"shutil.copyfile(os.environ['BUMPED_BOLT'], Path(__file__).resolve().parents[2] / {generated!r})\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            checkout = base / "repo"
+            checkout.mkdir()
+            repo = Repository(checkout, files, "vendor/llama-cpp", json.loads(files[POLICY.LLAMA_TRACKING])["commit"])
+            repo.git("switch", "--quiet", "-c", f"release/v{new}")
+            binary = base / "bin"
+            binary.mkdir()
+            (binary / "python3").symlink_to(sys.executable)
+            cargo = binary / "cargo"
+            cargo.write_text('#!/bin/sh\nset -eu\n[ "$*" = "update --workspace --quiet" ]\ncp "$BUMPED_LOCK" Cargo.lock\n')
+            cargo.chmod(0o755)
+            bumped_lock = base / "Cargo.lock"
+            bumped_lock.write_text(modeled["Cargo.lock"])
+            bumped_bolt = base / "_generated.py"
+            bumped_bolt.write_text(modeled[generated])
+            release = runpy.run_path(str(ROOT / update))
+            release_date = datetime.date.today().isoformat()
+            with patch.dict(os.environ, repo.environment, clear=True):
+                release["bump_internal_pins"](checkout, new)
+                result = subprocess.run(
+                    ["bash", str(checkout / sync), new], cwd=checkout,
+                    env={**repo.environment, "PATH": f"{binary}{os.pathsep}{os.defpath}",
+                         "BUMPED_LOCK": str(bumped_lock), "BUMPED_BOLT": str(bumped_bolt)},
+                    capture_output=True, text=True, timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                release["promote_changelogs"](checkout, new)
+            tracking = json.loads((checkout / POLICY.LLAMA_TRACKING).read_text())
+            self.assertEqual(tracking["sdk_release"], {"version": new, "commit": tracking["commit"]})
             candidate = repo.commit()
-            binding = repo.bind(candidate, release_version=new)
+            binding = repo.bind(candidate, release_version=new, release_date=release_date, checksum=None)
             self.assertEqual(binding["candidate_commit"], candidate)
             self.assertEqual(binding["release_metadata"]["version"], new)
             self.assertEqual(binding["engine_manifest_sha256"], hashlib.sha256(files[POLICY.MANIFEST].encode()).hexdigest())
@@ -594,7 +644,7 @@ class ActualRepositoryMetadataTests(unittest.TestCase):
             changelog = (repo.path / "CHANGELOG.md").read_text()
             repo.write({"CHANGELOG.md": changelog + "\n### Added\n\n- Custom 0.13.1 release prose.\n"})
             with self.assertRaises(POLICY.PolicyError):
-                repo.bind(repo.commit(), release_version=new)
+                repo.bind(repo.commit(), release_version=new, release_date=release_date, checksum=None)
 
 
 if __name__ == "__main__":
