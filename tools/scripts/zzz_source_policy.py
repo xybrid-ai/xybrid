@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import posixpath
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -29,19 +30,23 @@ WORKFLOW = ".github/workflows/trusted-zzz-sdk.yml"  # Proposed; not wired by thi
 SECRET_NAMES = ("ZZZ_GITHUB_TOKEN", "ZZZ_RELEASE_REPOSITORY", "XYBRID_ZZZ_USE_GH_AUTH")
 JSON_PACKAGES = {
     "bindings/react-native/package.json", "bindings/unity/package.json",
-    "bindings/web/package.json",
+    "bindings/web/package.json", "bindings/observability-js/package.json",
 }
-VERSION_TEXT = {
-    "README.md", "docs/content/docs/quickstart.mdx", "docs/content/docs/quickstart.zh.mdx",
-    "bindings/unity/README.md",
-    "docs/content/docs/(integration)/sdks/android.mdx",
-    "docs/content/docs/(integration)/sdks/android.zh.mdx",
-    "docs/content/docs/(integration)/sdks/flutter.mdx",
-    "docs/content/docs/(integration)/sdks/flutter.zh.mdx",
-    "docs/content/docs/(integration)/sdks/ios.mdx",
-    "docs/content/docs/(integration)/sdks/ios.zh.mdx",
-    "docs/content/docs/(integration)/sdks/react-native.mdx",
-}
+LLAMA_TRACKING = ".github/llamacpp-version.json"
+INSTALL_PINS = {}
+for pin, pin_path in runpy.run_path(str(Path(__file__).resolve().with_name("install_pins.py")))["registrations"]():
+    INSTALL_PINS.setdefault(pin_path, []).append(pin.pattern)
+
+
+def metadata_paths(members):
+    return INSTALL_PINS.keys() | JSON_PACKAGES | {
+        "Cargo.toml", "Cargo.lock", "Package.swift", "CHANGELOG.md", "bindings/flutter/CHANGELOG.md",
+        "bindings/apple/XybridFFI-Info.plist", "bindings/flutter/example/pubspec.lock",
+        "bindings/flutter/pubspec.yaml", "bindings/kotlin/build.gradle.kts",
+        "bindings/react-native/android/build.gradle", "bindings/python/pyproject.toml",
+        "bindings/python/xybrid/_bolt/__init__.py", "bindings/web/src/version.ts",
+        "bindings/observability-js/src/version.ts", LLAMA_TRACKING,
+    } | {member + "/Cargo.toml" for member in members}
 
 
 class PolicyError(Exception):
@@ -281,6 +286,19 @@ def expected_toml(data, path, old, new, workspace):
     return value
 
 
+def render_install_pins(path, before, old, new):
+    def replace(match):
+        if match["version"] != old:
+            return match[0]
+        start, end = match.span("version")
+        return match.string[match.start():start] + new + match.string[end:match.end()]
+
+    text = before.decode("utf-8")
+    for pattern in INSTALL_PINS[path]:
+        text = pattern.sub(replace, text)
+    return text.encode("utf-8")
+
+
 def check_metadata(path, before, after, old, new, date, checksum, workspace):
     quoted = [(json.dumps(old).encode(), json.dumps(new).encode())]
     if path == "Cargo.lock":
@@ -299,6 +317,9 @@ def check_metadata(path, before, after, old, new, date, checksum, workspace):
         expected = copy.deepcopy(json_bytes(before, MAX_METADATA))
         require(expected["version"] == old, "unsupported JSON package version baseline")
         expected["version"] = new
+        if path == "bindings/web/package.json" and "@xybrid/observability" in expected.get("dependencies", {}):
+            require(expected["dependencies"]["@xybrid/observability"] == old, "unsupported web dependency version baseline")
+            expected["dependencies"]["@xybrid/observability"] = new
         if path == "bindings/react-native/package.json" and checksum is not None:
             original = expected["xybrid"]["iosXcframeworkSha256"]
             expected["xybrid"]["iosXcframeworkSha256"] = checksum
@@ -306,26 +327,23 @@ def check_metadata(path, before, after, old, new, date, checksum, workspace):
         require(json_bytes(after, MAX_METADATA) == expected, "JSON changed outside approved version/checksum values")
         literals_only(before, after, quoted)
     else:
-        expected = before
+        expected = render_install_pins(path, before, old, new) if path in INSTALL_PINS else before
         if path == "Package.swift":
             expected = replace_one(expected, f'let sdkVersion = "{old}"'.encode(), f'let sdkVersion = "{new}"'.encode())
-            # The external-user comment is a SwiftPM install pin (install_pins.py);
-            # a bump moves its version and nothing else. Baselines from before
-            # the pin existed have no such line.
-            pin = f'/xybrid-ai/xybrid", from: "{old}")'.encode()
-            if pin in before:
-                expected = replace_one(expected, pin, f'/xybrid-ai/xybrid", from: "{new}")'.encode())
             if checksum is not None:
                 matches = re.findall(rb'^let xybridFFIChecksum = "([0-9a-f]{64})"$', before, re.M)
                 require(len(matches) == 1, "unsupported Swift checksum baseline")
                 expected = replace_one(expected, b'let xybridFFIChecksum = "' + matches[0] + b'"',
                                        f'let xybridFFIChecksum = "{checksum}"'.encode())
         elif path == "CHANGELOG.md" and old != new:
-            expected = replace_one(before, b"## [Unreleased]\n", f"## [Unreleased]\n\n---\n\n## [{new}] - {date}\n".encode())
+            expected = replace_one(before, b"## [Unreleased]\n", f"## [Unreleased]\n\n## [{new}] - {date}\n".encode())
         elif path == "bindings/flutter/CHANGELOG.md" and old != new:
             expected = replace_one(before, b"## Unreleased\n", f"## Unreleased\n\n## {new}\n".encode())
-        elif path in VERSION_TEXT:
-            expected = before.replace(old.encode(), new.encode())
+        elif path == LLAMA_TRACKING and before != after:
+            state = json_bytes(before, MAX_METADATA)
+            require(state.get("tag") is not None, "release stamp requires a tracked llama.cpp tag")
+            state["sdk_release"] = {"version": new, "commit": sha(state["commit"])}
+            expected = (json.dumps(state, indent=2) + "\n").encode()
         elif path == "bindings/apple/XybridFFI-Info.plist":
             expected = before.replace(f"<string>{old.split('-')[0]}</string>".encode(),
                                       f"<string>{new.split('-')[0]}</string>".encode())
@@ -340,6 +358,7 @@ def check_metadata(path, before, after, old, new, date, checksum, workspace):
                 "bindings/react-native/android/build.gradle": (f"ai.xybrid:xybrid-kotlin:{old}", f"ai.xybrid:xybrid-kotlin:{new}"),
                 "bindings/python/xybrid/_bolt/__init__.py": (f'PACKAGE_VERSION = "{old}"', f'PACKAGE_VERSION = "{new}"'),
                 "bindings/web/src/version.ts": (f'export const SDK_VERSION = "{old}";', f'export const SDK_VERSION = "{new}";'),
+                "bindings/observability-js/src/version.ts": (f'export const VERSION = "{old}";', f'export const VERSION = "{new}";'),
             }
             if path in patterns:
                 first, second = patterns[path]
@@ -380,13 +399,7 @@ def source_binding(repo, trusted_master, candidate, release_version, release_dat
         name = toml(git.blob(baseline[path]))["package"]["name"]
         require(name not in workspace, "duplicate workspace package name")
         workspace[name] = member
-    metadata = VERSION_TEXT | JSON_PACKAGES | {
-        "Cargo.toml", "Cargo.lock", "Package.swift", "CHANGELOG.md", "bindings/flutter/CHANGELOG.md",
-        "bindings/apple/XybridFFI-Info.plist", "bindings/flutter/example/pubspec.lock",
-        "bindings/flutter/pubspec.yaml", "bindings/kotlin/build.gradle.kts",
-        "bindings/react-native/android/build.gradle", "bindings/python/pyproject.toml",
-        "bindings/python/xybrid/_bolt/__init__.py", "bindings/web/src/version.ts",
-    } | {path + "/Cargo.toml" for path in workspace.values()}
+    metadata = metadata_paths(workspace.values())
     for path in sorted(baseline):
         if path in metadata:
             require(baseline[path][0] == "100644", "metadata must remain a regular nonexecutable file")
