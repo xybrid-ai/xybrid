@@ -259,6 +259,15 @@ var model = XybridModel.FromHuggingfaceWithRevision("org/repo:Q8_0", "v1.0");
 ### Kotlin
 
 ```kotlin
+sealed interface ModelSource {
+    data class Registry(val id: String) : ModelSource
+    data class Bundle(val path: String) : ModelSource
+    data class Directory(val path: String) : ModelSource
+    data class HuggingFace(val repo: String) : ModelSource
+    data class ModelFile(val path: String) : ModelSource
+    data class RegistrySpeculative(val id: String) : ModelSource
+}
+
 class XybridModelLoader {
   companion object {
     fun fromRegistry(modelId: String): XybridModelLoader

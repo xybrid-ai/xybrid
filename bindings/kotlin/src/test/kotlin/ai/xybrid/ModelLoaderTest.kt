@@ -36,9 +36,11 @@ class ModelLoaderTest {
 
     @Test
     fun modelFileLoaderIsUnloadedAndHasNothingToDownload() {
-        val loader = XybridModelLoader.fromModelFile("/data/models/qwen/model.gguf")
+        val path = "/data/models/qwen/model.gguf"
+        val loader = XybridModelLoader.fromModelFile(path)
 
-        assertEquals(ModelSource.ModelFile("/data/models/qwen/model.gguf"), loader.source)
+        assertEquals(ModelSource.ModelFile(path), loader.source)
+        assertEquals(loader.source, Xybrid.model(ModelSource.modelFile(path)).source)
         assertNull(loader.download())
         assertFalse(loader.willSpeculate)
     }

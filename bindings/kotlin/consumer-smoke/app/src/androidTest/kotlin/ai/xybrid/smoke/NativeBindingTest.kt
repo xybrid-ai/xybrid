@@ -46,6 +46,7 @@ class NativeBindingTest {
             ModelLoader.fromModelFile(missing).loadBlocking()
             fail("loading a missing GGUF should throw")
         } catch (error: XybridError.ConfigError) {
+            assertTrue(error.message, error.message.contains("GGUF file not found"))
             assertTrue(error.message, error.message.contains(missing))
         }
     }

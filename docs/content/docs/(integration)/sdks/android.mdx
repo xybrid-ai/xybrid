@@ -124,14 +124,14 @@ and writes it next to the file, unless one is already there.
 
 - The directory must be writable. A GGUF in the APK's `assets/` is not a file
   path, and neither is a `content://` URI. Copy the file into app storage first,
-  for example `context.filesDir`.
-- An existing `model_metadata.json` is used as is, so keep each GGUF in its own
-  directory.
+  for example a directory under `context.noBackupFilesDir`.
+- Keep each GGUF in its own directory. An existing `model_metadata.json` is
+  used as is, so a second GGUF there would load the first model.
 - The generated context is capped at 4,096 tokens. Raise `context_length` in the
   sidecar for longer chats.
 - This is for text generation only. A vision GGUF with an mmproj still needs
   `ModelSource.directory`.
-- A missing file throws `XybridError.ConfigError` ("GGUF file not found: path").
+- A missing file throws `XybridError.ConfigError` (`GGUF file not found: <path>`).
 
 ---
 
