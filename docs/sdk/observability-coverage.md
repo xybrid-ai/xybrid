@@ -118,6 +118,9 @@ policy and first-terminal-wins implementation.
 | Browser | Worker propagation and generation result reference | Portable JS observer handles; browser model dispose | Application-owned provider lifecycle | Worker/control tests and typecheck. Staging runtime lane (step 6, run by hand): Chromium 149 runs the [staging scenario](../../tools/scripts/observability_staging/README.md) on the CI web artifact with the pinned SmolLM2 GGUF, exporting traces, and in a second session evaluation logs, straight to Xybrid staging; all 25 checks passed. Neither `@xybrid/web` nor `@xybrid/observability` stamps `xybrid.sdk.binding` (the application owns the provider), so browser rows carry no binding |
 | Portable JS | Explicit W3C controls / references | Workflow/tool/inference/load operations | Callback plus declarative policy, cancellable exporters | Shared fixtures, decoded wire and transport/lifecycle tests; real packed OTel 3.0/0.300 and 3.1/0.301 installations |
 
+The Kotlin CI lane probes the OTLP receiver through `adb reverse` before
+instrumentation, so emulator Wi-Fi does not need to be ready.
+
 The `lifecycle.shutdown` check requires the final counters after shutdown
 rather than zeros, so a lane passes it only with natives that keep the last
 snapshot readable; a native built before that change fails it. The lane
