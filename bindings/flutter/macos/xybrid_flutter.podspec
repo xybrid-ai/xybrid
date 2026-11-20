@@ -49,7 +49,7 @@ with intelligent routing based on device capabilities. Supports ASR, TTS, and LL
     # ONNX Runtime (ort-sys) does not provide prebuilt x86_64-apple-darwin binaries.
     # Intel Macs are not supported. Apple Silicon Macs run arm64 natively.
     'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64',
-    'OTHER_LDFLAGS' => '-force_load ${BUILT_PRODUCTS_DIR}/libxybrid_flutter_ffi.a -lc++ -framework SystemConfiguration -framework Security -framework CoreFoundation -framework Metal -framework MetalPerformanceShaders -framework Accelerate',
+    'OTHER_LDFLAGS' => '-force_load ${BUILT_PRODUCTS_DIR}/libxybrid_flutter_ffi.a -lc++ -framework SystemConfiguration -framework Security -framework CoreFoundation -framework Metal -framework Accelerate',
   }
 
   # Automatically configure user's app to exclude x86_64 on macOS.
@@ -58,6 +58,10 @@ with intelligent routing based on device capabilities. Supports ASR, TTS, and LL
     'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64',
   }
 
-  # Required frameworks for reqwest HTTP client, TLS, and Candle Metal/Accelerate acceleration
-  s.frameworks = ['SystemConfiguration', 'Security', 'CoreFoundation', 'Metal', 'MetalPerformanceShaders', 'Accelerate']
+  # Required frameworks for the reqwest HTTP client, TLS, and ggml's Metal and
+  # Accelerate backends (llama.cpp, whisper.cpp). MetalPerformanceShaders is
+  # not linked: only Candle's Metal backend needs it (its `metal` dependency
+  # references MPSSupportsMTLDevice) and no preset enables Candle. A custom
+  # build with `candle-metal` must add it here and to OTHER_LDFLAGS above.
+  s.frameworks = ['SystemConfiguration', 'Security', 'CoreFoundation', 'Metal', 'Accelerate']
 end

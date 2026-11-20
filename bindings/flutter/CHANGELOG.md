@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Changed: the iOS and macOS pods no longer link MetalPerformanceShaders.
+  Nothing in the native library references it; a custom build with
+  `candle-metal` must add the framework itself.
+
 ## 0.20.0
 
 * Added: registry calls made under CI (`CI` set to anything but empty, `0` or

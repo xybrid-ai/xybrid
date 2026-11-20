@@ -6,7 +6,8 @@ engine, build an SDK, change native pins or enable `tts-zzz` in public artifacts
 It does not establish redistribution rights or supply terms, notices, schema 5
 receipts, Android qualification, CPU qualification or final SDK qualification.
 
-The checker runs from reviewed master code in a credential-free step. It reads
+The checker and its sibling `install_pins.py` must come from the same reviewed
+master checkout and run in a credential-free step. The checker reads
 immutable local Git objects from an explicitly supplied repository and permits
 only a narrow rendering of version/checksum metadata over a reviewed master
 commit. It never executes or imports a candidate blob, runs a release branch's
@@ -81,11 +82,18 @@ regular metadata blobs can contain the approved changes.
   package names must match the trusted workspace. Only source-less workspace
   package versions may change in `Cargo.lock`; external versions, dependency
   records, source URLs and checksums stay byte/structure constrained.
-- SDK package versions, the generated Python `PACKAGE_VERSION`, the web version
-  constant, Flutter's plugin lock entry, Kotlin/RN version literals, Apple
-  version strings and the enumerated installation examples receive fixed
-  replacements. Other code, dependency features, hooks and package scripts
+- SDK package versions (including JS observability), the generated Python
+  `PACKAGE_VERSION`, the web and JS observability version constants, the web
+  package's matching `@xybrid/observability` pin, Flutter's plugin lock entry,
+  Kotlin/RN version literals and Apple version strings receive fixed replacements.
+  Docs use only the `version` groups registered in the trusted `install_pins.py`
+  that match the baseline SDK version; references to the same version in prose
+  stay unchanged. Other code, dependency features, hooks and package scripts
   cannot change. Swift's remote/local mode and package code remain exact.
+- `.github/llamacpp-version.json` can stay unchanged or receive the exact
+  `sdk_release` stamp produced by `record_release`: the requested SDK version
+  and the upstream commit already recorded in the trusted file. The upstream
+  ref, commit and all other tracking fields stay unchanged.
 - The root changelog may only insert a fixed new-version/date heading after
   `[Unreleased]`; the Flutter changelog may only insert its fixed version
   heading. New prose, rearrangement, whitespace rewrites and arbitrary Markdown
@@ -107,6 +115,23 @@ A quote/escape-aware scan enforces that bound before parsing, independently of
 Python's platform-dependent parser recursion limit; string contents do not count
 as containers. The policy is intentionally conservative: a valid release outside
 these forms needs a separately reviewed policy or trusted baseline change.
+
+To replay the v0.20.0 bump against its parent from a clone with both commits:
+
+```sh
+master=$(git rev-parse 76deb6bd)
+release=$(git rev-parse 1e98d9fe)
+context=$(mktemp)
+printf '{"repository":"xybrid-ai/xybrid","workflow_path":".github/workflows/trusted-zzz-sdk.yml","workflow_commit":"%s","ref":"refs/heads/master","event":"workflow_dispatch","run_id":1,"run_attempt":1}\n' "$master" > "$context"
+python3 -I tools/scripts/zzz_source_policy.py --repo . \
+  --trusted-master "$master" --candidate "$release" \
+  --version 0.20.0 --release-date 2026-11-17 --producer-context "$context" \
+  --xcframework-sha256 060a65307e79a9603a1957b4f18aa04e5c228ee17b4b91a79e393061d4c85b44
+rm -f "$context"
+```
+
+The checksum here is the known historical value for the replay, not an
+approval source for a new release.
 
 ## Resource and credential boundary
 

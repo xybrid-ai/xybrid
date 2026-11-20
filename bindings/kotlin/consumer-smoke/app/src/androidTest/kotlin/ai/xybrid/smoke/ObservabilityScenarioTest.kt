@@ -13,8 +13,8 @@ import org.junit.runner.RunWith
  * The shared observability scenario on Android, through the shipped AAR.
  *
  * Skipped unless the runner gets `-e xybridScenarioEndpoint <url>`, the capture
- * receiver as the device reaches it (`http://10.0.2.2:<port>` from an
- * emulator), so the dlopen gates' `connectedDebugAndroidTest` never runs it.
+ * receiver as the device reaches it (`http://127.0.0.1:<port>` via `adb reverse`),
+ * so the dlopen gates' `connectedDebugAndroidTest` never runs it.
  * `observability-scenario.sh` passes it, then copies
  * `files/observability-scenario/expectations.json` off the device with
  * `run-as` for `check_capture.py`. The file is written even when a step
@@ -25,7 +25,7 @@ class ObservabilityScenarioTest {
     @Test
     fun exportsTheSharedScenario() {
         val endpoint = InstrumentationRegistry.getArguments().getString(ENDPOINT_ARGUMENT)
-        assumeTrue("pass -e $ENDPOINT_ARGUMENT http://10.0.2.2:<port>", !endpoint.isNullOrEmpty())
+        assumeTrue("pass -e $ENDPOINT_ARGUMENT http://127.0.0.1:<port>", !endpoint.isNullOrEmpty())
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         // Registers the binding the exported resource names (xybrid.sdk.binding = kotlin).
         Xybrid.init(context)

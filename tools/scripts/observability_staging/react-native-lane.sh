@@ -129,8 +129,11 @@ pixel_run() {
 }
 
 iphone_build() {
-    local repo="$1" xcframework="${2:-$1/bazel-bin/bindings/apple/XybridFFI.xcframework.zip}"
-    local example="$repo/bindings/react-native/example" jsi
+    local repo xcframework example jsi
+    repo="$(cd "$1" && pwd)"
+    xcframework="${2:-$repo/bazel-bin/bindings/apple/XybridFFI.xcframework.zip}"
+    [[ "$xcframework" == /* ]] || xcframework="$PWD/$xcframework"
+    example="$repo/bindings/react-native/example"
     cd "$example"
     npm ci --no-audit --no-fund
     CI=1 EXPO_NO_GIT_STATUS=1 npx expo prebuild --platform ios --clean --no-install
@@ -143,7 +146,7 @@ iphone_build() {
         -string "Loads JavaScript from Metro and sends staging telemetry to a Collector on this network." \
         ios/example/Info.plist
     # The pod's own override (ios/xybrid_natives.rb): the candidate XCFramework, never a release download.
-    (cd ios && XYBRID_XCFRAMEWORK_PATH="$xcframework" pod install)
+    XYBRID_XCFRAMEWORK_PATH="$xcframework" bash "$repo/bindings/react-native/scripts/pod-install.sh" "$example"
     patch_expo_jsi_for_xcode27 "$example"
     # As in build-react-native.yml: prebuild ExpoModulesJSI so its nested xcodebuild phase is a no-op.
     jsi=node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh
@@ -152,7 +155,7 @@ iphone_build() {
     fi
     xcodebuild build -workspace ios/example.xcworkspace -scheme example -configuration Debug \
         -destination "platform=iOS,id=$IOS_UDID" -derivedDataPath "$IOS_DERIVED" -allowProvisioningUpdates \
-        DEVELOPMENT_TEAM="$IOS_TEAM"
+        DEVELOPMENT_TEAM="$IOS_TEAM" SKIP_BUNDLING=1
     xcrun devicectl device install app --device "$IOS_UDID" "$IOS_DERIVED/Build/Products/Debug-iphoneos/example.app"
 }
 
