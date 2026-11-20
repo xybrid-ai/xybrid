@@ -1,7 +1,9 @@
 import { RootProvider } from 'fumadocs-ui/provider/next';
 import { defineI18nUI } from 'fumadocs-ui/i18n';
 import { Inter } from 'next/font/google';
+import { DocsAnalytics } from '@/components/docs-analytics';
 import { i18n } from '@/lib/i18n';
+import { source } from '@/lib/source';
 import '../global.css';
 
 const inter = Inter({
@@ -37,11 +39,16 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const { lang } = await params;
+  const analyticsConfigured = process.env.NEXT_PUBLIC_ANALYTICS_ENABLED === 'true' &&
+    Boolean(process.env.POSTHOG_DOCS_KEY?.trim()) && i18n.languages.some((language) => language === lang);
 
   return (
     <html lang={lang} className={inter.className} suppressHydrationWarning>
       <body className="flex flex-col min-h-screen">
         <RootProvider i18n={provider(lang)}>{children}</RootProvider>
+        {analyticsConfigured && (
+          <DocsAnalytics paths={[`/${lang}`, ...source.getPages(lang).map((page) => page.url)]} />
+        )}
       </body>
     </html>
   );

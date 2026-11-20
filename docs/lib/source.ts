@@ -11,6 +11,13 @@ export const source = loader({
   i18n,
 });
 
+export function localizedPagePaths() {
+  return i18n.languages.flatMap((language) => [
+    `/${language}`,
+    ...source.getPages(language).map((page) => page.url),
+  ]);
+}
+
 export function getPageImage(page: InferPageType<typeof source>) {
   const segments = [...page.slugs, 'image.png'];
 
