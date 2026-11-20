@@ -56,6 +56,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Kotlin snippets match the SDKs, every page agrees that the platform presets
   include the vision path, the cache docs say cached models do not expire, and
   the feature matrix matches the Cargo manifests (#646).
+- **Rust: `ExecutionProviderInfo::current()` reports what ONNX Runtime runs
+  on.** `name` is `cpu` on every build: it was `coreml-ane` or `coreml` when
+  xybrid-sdk's `ort-coreml` feature was on, although every ONNX session is
+  built on the CPU execution provider. `coreml_available` is true whenever
+  ONNX Runtime's Core ML execution provider is linked, including under the
+  `platform-ios` and `platform-macos` presets, where it was false; it means
+  linked, not in use. Loading a pipeline whose stage sets `execution_provider`
+  to anything but `cpu` logs a warning, and `xybrid run`, `xybrid repl` and
+  `xybrid prepare` print one (#806).
 
 ## [0.20.0] - 2026-11-17
 
