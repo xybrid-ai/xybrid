@@ -378,7 +378,7 @@ jobs:
   # (tools/scripts/observability_capture/scenario.md) through the public Kotlin
   # wrapper, inside the dlopen gate's consumer APK and shipped x86_64 AAR on the
   # same emulator image. ObservabilityScenarioTest exports OTLP/JSON to
-  # capture_server.py on the runner (10.0.2.2 from the emulator) and writes
+  # capture_server.py on the runner (device loopback via adb reverse) and writes
   # expectations.json, which observability-scenario.sh copies off the device;
   # check_capture.py then compares the two. Its checks cover parent-in,
   # references out, manual operations, redaction and omission, release-cancels,
@@ -449,7 +449,7 @@ jobs:
           exit 1
 
       # run_scenario.py starts the receiver on a free port, fills {endpoint}
-      # (http://10.0.2.2:<port>) and {expectations}, runs the test through
+      # (http://127.0.0.1:<port>) and {expectations}, runs the test through
       # observability-scenario.sh, and fails unless every check passes.
       - name: Run the observability scenario on the emulator
         uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
@@ -461,7 +461,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
           script: |
-            python3 tools/scripts/observability_capture/run_scenario.py --binding kotlin --endpoint-host 10.0.2.2 --out-dir observability-scenario -- bash bindings/kotlin/consumer-smoke/observability-scenario.sh {endpoint} {expectations}
+            python3 tools/scripts/observability_capture/run_scenario.py --binding kotlin --endpoint-host 127.0.0.1 --out-dir observability-scenario -- bash bindings/kotlin/consumer-smoke/observability-scenario.sh {endpoint} {expectations}
 
       # capture.jsonl, expectations.json, report.json, the instrumentation
       # output and a logcat dump, for diagnosing a failed check.

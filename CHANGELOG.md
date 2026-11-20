@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The trusted SDK source checker accepts normal release bumps.** It checks
+  only registered install pins in docs, accepts the observability JS and web
+  version pins, and recognizes the exact changelog heading and llama.cpp release
+  stamp written by the release tools without allowing unrelated edits (#811).
 - **The Swift samples on the iOS page and in the Swift README compile.** Error
   Handling catches the generated `XybridError` cases (`modelNotFound(id:)`,
   `inferenceError(message:)`, `ioError(message:)`), Result Handling switches on
