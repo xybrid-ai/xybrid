@@ -29,9 +29,9 @@ Pod::Spec.new do |s|
   # local build. See ios/xybrid_natives.rb for the order and overrides.
   s.vendored_frameworks = XybridNatives.prepare!(__dir__)
 
-  # System frameworks the Rust core links against (mirrors Package.swift).
-  s.frameworks = "Metal", "MetalPerformanceShaders", "MetalPerformanceShadersGraph",
-                 "CoreML", "Accelerate", "Security"
+  # System frameworks the Rust core links against (mirrors Package.swift;
+  # tools/scripts/tests/test_apple_linked_frameworks.py keeps them equal).
+  s.frameworks = "Metal", "CoreML", "Accelerate", "Security"
   s.libraries  = "c++"
 
   s.pod_target_xcconfig = {

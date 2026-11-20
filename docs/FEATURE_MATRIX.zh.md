@@ -28,7 +28,7 @@
 | **candle** | 纯 Rust ML 框架 — SafeTensors Whisper 路径。**仅可显式启用**，自 whisper.cpp 取代其 ASR 角色后已从所有平台预设中移除 | `candle-core`、`candle-nn`、`candle-transformers`、`safetensors`、`byteorder`、`num-traits` |
 | **asr-whispercpp** | whisper.cpp 语音识别，运行在 llama.cpp 已链接的 ggml 上。需要 `llm-llamacpp` —— ggml 正是由它提供 | `xybrid-whisper`、`xybrid-whisper-sys` |
 | **candle-hub** | Candle + HuggingFace Hub 下载支持 | `candle`、`hf-hub`（基于 rustls，无需 OpenSSL） |
-| **candle-metal** | 带 Metal 显卡加速的 Candle | `candle`、`candle-core/metal`、`candle-nn/metal` |
+| **candle-metal** | 带 Metal 显卡加速的 Candle。其 `metal` 依赖会引用 MetalPerformanceShaders，而 SDK 的清单均不链接该框架：cdylib 或可执行文件会自动链接它，链接由该特性构建的静态库的应用需自行添加该框架 | `candle`、`candle-core/metal`、`candle-nn/metal` |
 | **candle-cuda** | 带 CUDA 显卡加速的 Candle | `candle`、`candle-core/cuda` |
 | **llm-mistral** | mistral.rs LLM 后端（CPU） | `mistralrs` |
 | **llm-mistral-metal** | 带 Metal 加速的 mistral.rs | `llm-mistral`、`mistralrs/metal` |

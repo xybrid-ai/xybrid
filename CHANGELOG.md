@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Apple: the SDKs no longer link MetalPerformanceShaders.** `Package.swift`,
+  the `swift` branch manifest, the React Native pod and the Flutter iOS and
+  macOS pods dropped `MetalPerformanceShaders` (and
+  `MetalPerformanceShadersGraph`). They were added in 0.1.0-beta4 for Candle's
+  Metal backend, whose `metal` dependency references `MPSSupportsMTLDevice`;
+  Candle left the platform presets in #476, and no library shipped in v0.20.0
+  references either framework. CI now fails if the XCFramework or the Flutter
+  Apple libraries reference an MPS symbol, and links the XCFramework's device
+  slice. An app whose own code uses MetalPerformanceShaders, or a custom build
+  with `candle-metal`, must link the framework itself (#807).
+
 ### Fixed
 
 - **The trusted SDK source checker accepts normal release bumps.** It checks
