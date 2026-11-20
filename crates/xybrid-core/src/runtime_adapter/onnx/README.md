@@ -4,11 +4,11 @@ ONNX Runtime inference backend via the [ort](https://crates.io/crates/ort) crate
 
 ## Overview
 
-The ONNX adapter is the default runtime backend for xybrid. It provides hardware-accelerated inference across all platforms using Microsoft's ONNX Runtime.
+The ONNX adapter is the default runtime backend for xybrid. It runs inference on every platform through Microsoft's ONNX Runtime.
 
 **Key features:**
 - **Cross-platform**: Works on macOS, Linux, Windows, iOS, Android
-- **Hardware acceleration**: Metal (Apple), CUDA (NVIDIA), NNAPI (Android)
+- **CPU execution**: every session runs on ONNX Runtime's CPU execution provider (see [Execution Providers](#execution-providers))
 - **Mature ecosystem**: Supports models from PyTorch, TensorFlow, scikit-learn
 - **Dynamic shapes**: Handles variable batch sizes and sequence lengths
 
@@ -20,7 +20,7 @@ onnx/
 ├── adapter.rs       # OnnxRuntimeAdapter (RuntimeAdapter trait impl)
 ├── backend.rs       # OnnxBackend (InferenceBackend trait impl)
 ├── session.rs       # ONNXSession wrapper (ort crate integration)
-├── mobile.rs        # ONNXMobileRuntimeAdapter (Android NNAPI)
+├── mobile.rs        # ONNXMobileRuntimeAdapter (Android; NNAPI is detected, not used)
 └── README.md        # This file
 ```
 
@@ -81,21 +81,15 @@ pub struct ONNXSession {
 
 **Use when:** Direct ONNX Runtime access needed.
 
-## Hardware Acceleration
+## Execution Providers
 
-| Platform | Backend | Auto-enabled |
-|----------|---------|--------------|
-| macOS/iOS | Metal | Yes |
-| Android | NNAPI | Via `ONNXMobileRuntimeAdapter` |
-| Linux/Windows | CUDA | If available |
-| All | CPU | Fallback |
-
-Metal is automatically enabled on Apple platforms:
-
-```rust
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-let use_metal = true;
-```
+Every session the runtime builds runs on ONNX Runtime's CPU execution provider,
+on every platform. Apple builds with `ort-coreml` (the `platform-ios` and
+`platform-macos` presets) link the Core ML execution provider, but no session
+selects it; the Android adapter detects NNAPI and does not use it. A pipeline
+stage's `execution_provider` key is parsed, not applied, and loading such a
+stage logs a warning. `xybrid_sdk::ExecutionProviderInfo::current()` reports
+the same.
 
 ## Usage
 
@@ -151,14 +145,14 @@ inputs.insert("input".to_string(), ArrayD::zeros(vec![1, 3, 224, 224]));
 let outputs = backend.run_inference(inputs)?;
 ```
 
-### Android NNAPI
+### Android
 
 ```rust
 #[cfg(target_os = "android")]
 use xybrid_core::runtime_adapter::ONNXMobileRuntimeAdapter;
 
 let mut adapter = ONNXMobileRuntimeAdapter::new();
-adapter.load_model("model.onnx")?;  // Uses NNAPI automatically
+adapter.load_model("model.onnx")?;  // CPU execution provider
 ```
 
 ## Execution Template
@@ -221,7 +215,6 @@ ONNX Runtime supports models exported from:
 **Choose ONNX when:**
 - You have an existing ONNX model
 - You need maximum compatibility
-- Hardware acceleration is critical
 
 **Choose Candle when:**
 - You want pure Rust (no C++ deps)

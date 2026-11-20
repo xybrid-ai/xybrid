@@ -447,7 +447,8 @@ classes:
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       executionProviderInfo:
         return: ExecutionProviderInfo
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Rust only today, as ExecutionProviderInfo::current() (a build-level read, not a model method). It describes ONNX Runtime: name is always cpu, because every ONNX session is built on the CPU execution provider, and coremlAvailable means the Core ML execution provider is linked into the build, not that a session uses it. GGUF, whisper.cpp, Core ML bundle and Candle models are not described. Flutter already reports the linked features through Xybrid.runtimeFeatures(). No binding exports it (see issue 509)."
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
 
   # -------------------------------------------------------------------
   # 4. XybridPipeline

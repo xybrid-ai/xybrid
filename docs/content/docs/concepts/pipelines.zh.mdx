@@ -70,7 +70,7 @@ stages:
 | `backend` | `gateway`（默认）通过 `XYBRID_API_KEY` 访问 Xybrid Platform；对 OpenAI 兼容提供商使用 `direct` 会以 `$<PROVIDER>_API_KEY` 直接调用其 API |
 | `gateway_url`、`api_key` | 云端分支的显式端点与凭据（`api_key` 接受 `$ENV_VAR`）；凭据绝不会跨源继承 |
 | `thinking` | 仅 DeepSeek：`enabled` 或 `disabled`（DeepSeek 默认开启推理；`disabled` 把 `max_tokens` 留给回答） |
-| `execution_provider` | ONNX Runtime 执行提供程序：`cpu`、`coreml`、`coreml-ane`、`coreml-gpu`。目前只解析、尚未生效：无论取值如何，ONNX 模型都在 CPU 上运行；不设置时也不会自动选择 |
+| `execution_provider` | ONNX Runtime 执行提供程序：`cpu`、`coreml`、`coreml-ane`、`coreml-gpu`。目前只解析、尚未生效：无论取值如何，ONNX 模型都在 CPU 上运行；不设置时也不会自动选择。阶段将其设为 `cpu` 以外的值时，加载流水线会记录一条警告（iOS 与 Android SDK 将其写入系统日志；其他平台仅在宿主安装了 Rust `log` 日志记录器时可见），`xybrid run`、`xybrid repl` 与 `xybrid prepare` 会将其打印出来 |
 | *（其他任意键）* | 作为阶段选项传递 — 常用：`system_prompt`、`max_tokens`、`temperature` |
 
 <Callout type="info">
