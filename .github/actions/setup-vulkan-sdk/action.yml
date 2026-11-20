@@ -40,7 +40,7 @@ runs:
     # There is no fallback key: an SDK version/checksum change must miss.
     - name: Cache Linux Vulkan SDK archive
       if: runner.os == 'Linux' && runner.arch == 'X64'
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/xybrid-vulkan/vulkansdk-${{ inputs.vulkan-version }}.tar.xz
         key: vulkan-sdk-archive-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.vulkan-version }}-${{ inputs.linux-sha256 }}
@@ -58,6 +58,6 @@ runs:
 
     - name: Install Vulkan SDK
       if: runner.os != 'Linux' || runner.arch != 'X64'
-      uses: jakoch/install-vulkan-sdk-action@37effcfa045411f8bfbbda26df2fd1b3bf3436fa # v1.6.0
+      uses: jakoch/install-vulkan-sdk-action@7fe84289ddbf750f7eff9f8e4588e600e1dd06c8 # v1.8.1
       with:
         vulkan_version: ${{ inputs.vulkan-version }}
