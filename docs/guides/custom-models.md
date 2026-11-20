@@ -226,6 +226,14 @@ final model = await loader.load();
 final result = await model.run(XybridEnvelope.text('Hello, world!'));
 ```
 
+A single llama.cpp GGUF file needs no hand-written metadata:
+`XybridModelLoader.fromModelFile('/path/to/model.gguf')` writes
+`model_metadata.json` next to it on `load()` when that file is absent. The
+GGUF's directory must therefore be writable: Flutter assets are not files on
+disk and the iOS app bundle is read-only, so copy the GGUF under
+`getApplicationSupportDirectory()` first (see "Flutter — Bundled Assets"
+below).
+
 ### Kotlin (Android)
 
 ```kotlin

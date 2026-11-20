@@ -227,7 +227,8 @@ class LoadError extends LoadEvent {
   const LoadError(this.message) : super._();
 }
 
-/// Prepares a model for loading from registry or local bundle.
+/// Prepares a model for loading from the registry, Hugging Face, a local
+/// bundle or directory, or a raw GGUF file.
 class XybridModelLoader {
   /// The underlying FRB model loader.
   final FfiModelLoader _inner;
@@ -285,6 +286,32 @@ class XybridModelLoader {
   /// Throws if the directory doesn't exist or metadata is missing/invalid.
   factory XybridModelLoader.fromDirectory(String path) {
     return XybridModelLoader._(FfiModelLoader.fromDirectory(path: path));
+  }
+
+  /// Create a loader for a raw llama.cpp GGUF file, which needs no
+  /// `model_metadata.json`.
+  ///
+  /// Creating the loader touches no disk. [load] and [loadWithProgress]
+  /// generate the metadata from the GGUF header, write it beside the file as
+  /// `model_metadata.json` unless one is already there, then load that
+  /// directory. So:
+  ///
+  /// * The directory must be writable. Flutter assets are not files on disk
+  ///   and the iOS app bundle is read-only: copy the GGUF into a directory of
+  ///   your own, such as one under `getApplicationSupportDirectory()`, and
+  ///   pass the file's full path.
+  /// * An existing `model_metadata.json` is used as it is, so keep one GGUF
+  ///   per directory.
+  /// * The generated context window is capped at 4,096 tokens; raise
+  ///   `context_length` in the file for longer conversations.
+  /// * The generated metadata has no vision projector: load a vision GGUF
+  ///   with an mmproj through [XybridModelLoader.fromDirectory].
+  ///
+  /// [load] throws [XybridException] with `GGUF file not found: <path>` when
+  /// the file is missing. Nothing is downloaded, so [loadWithProgress] emits
+  /// only [LoadComplete] or [LoadError].
+  factory XybridModelLoader.fromModelFile(String path) {
+    return XybridModelLoader._(FfiModelLoader.fromModelFile(path: path));
   }
 
   /// Create a loader for a model from a HuggingFace Hub repository.
