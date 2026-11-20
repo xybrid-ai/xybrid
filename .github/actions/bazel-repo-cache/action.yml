@@ -87,7 +87,7 @@ runs:
   using: composite
   steps:
     - name: Restore the pinned apple_support archive
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/xybrid-bazel-downloads/${{ inputs.apple-support-sha256 }}
         key: apple-support-${{ inputs.apple-support-sha256 }}
@@ -98,7 +98,7 @@ runs:
     # a pull request serves that PR only; the entry that protects everything is the
     # one a master run saves.
     - name: Restore the pinned macOS SDK
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/bazel-repo/content_addressable/sha256/${{ inputs.macos-sdk-sha256 }}
         key: macos-sdk-${{ inputs.macos-sdk-sha256 }}
