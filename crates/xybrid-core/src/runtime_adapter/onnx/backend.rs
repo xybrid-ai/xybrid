@@ -17,10 +17,7 @@ use std::path::Path;
 /// ONNX Runtime inference backend
 ///
 /// This backend uses ONNX Runtime (via the ort crate) for model execution.
-/// It provides hardware-accelerated inference on various platforms:
-/// - macOS/iOS: Metal backend
-/// - Android: NNAPI backend
-/// - Desktop: CPU backend with optional CUDA
+/// Sessions run on ONNX Runtime's CPU execution provider on every platform.
 pub struct OnnxBackend {
     /// ONNX Runtime session
     session: Option<ONNXSession>,
