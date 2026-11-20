@@ -162,19 +162,20 @@ FfiStreamEvent _finalToken(String text) => FfiStreamEvent.token(
 FfiStreamEvent _complete(String text,
         {ObservationRef? observation,
         String? cloudError,
-        List<FfiToolCall> toolCalls = const []}) =>
-    FfiStreamEvent.complete(
-      FfiResult(
-        success: true,
-        observation: observation,
-        text: text,
-        latencyMs: 10,
-        executionTarget: FfiExecutionTarget.local,
-        metrics: const FfiInferenceMetrics(totalMs: 10, stageLatenciesMs: []),
-        toolCalls: toolCalls,
-        speculativeCloudError: cloudError,
-      ),
-    );
+        List<FfiToolCall> toolCalls = const []}) {
+  final result = FfiResult(
+    success: true,
+    observation: observation,
+    text: text,
+    latencyMs: 10,
+    executionTarget: FfiExecutionTarget.local,
+    metrics: const FfiInferenceMetrics(totalMs: 10, stageLatenciesMs: []),
+    toolCalls: toolCalls,
+  );
+  return cloudError == null
+      ? FfiStreamEvent.complete(result)
+      : FfiStreamEvent.recovered(result, cloudError);
+}
 
 void main() {
   final api = _StreamApi();

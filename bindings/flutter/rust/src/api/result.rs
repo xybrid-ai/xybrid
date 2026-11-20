@@ -89,11 +89,9 @@ pub struct FfiResult {
     /// turn. The raw tool-call block stays in `text` untouched, and malformed
     /// model output yields an empty list rather than an error.
     pub tool_calls: Vec<FfiToolCall>,
-    /// Error from a speculative cloud attempt this run recovered from on-device.
-    pub speculative_cloud_error: Option<String>,
 }
 
-/// Versioned run carrier for legacy and decision results.
+/// Versioned run carrier; the legacy result record remains unchanged.
 ///
 /// The Rust library and generated Dart bridge must ship together. FRB checks
 /// their content hashes before a call can decode this carrier.
@@ -101,6 +99,8 @@ pub struct FfiResult {
 pub enum FfiRunResult {
     Legacy(FfiResult),
     Decision(FfiDecisionResult),
+    /// Local answer and the preceding speculative cloud error.
+    Recovered(FfiResult, String),
 }
 
 /// Ordered decision answers and execution metadata for a completed request.
@@ -217,8 +217,23 @@ impl FfiRunResult {
                 observation: result.observation_ref().map(FfiObservationRef::from_sdk),
             }));
         }
-        FfiResult::try_from_inference_result(result).map(Self::Legacy)
+        map_completion(result, Self::Legacy, Self::Recovered)
     }
+}
+
+/// Wraps a converted result as `complete`, or as `recovered` with the error of
+/// the speculative cloud attempt this run recovered from. Keeps the legacy
+/// record's layout unchanged, so an older native library still decodes.
+pub(crate) fn map_completion<T>(
+    result: &InferenceResult,
+    complete: impl FnOnce(FfiResult) -> T,
+    recovered: impl FnOnce(FfiResult, String) -> T,
+) -> Result<T, String> {
+    let output = FfiResult::try_from_inference_result(result)?;
+    Ok(match result.speculative_cloud_error() {
+        Some(error) => recovered(output, error.to_owned()),
+        None => complete(output),
+    })
 }
 
 /// Check that `FfiResult` has a field for an output of this kind.
@@ -268,7 +283,6 @@ impl FfiResult {
                     arguments_json: call.function.arguments,
                 })
                 .collect(),
-            speculative_cloud_error: r.speculative_cloud_error().map(str::to_owned),
         })
     }
 }

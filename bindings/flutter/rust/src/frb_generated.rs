@@ -7164,7 +7164,6 @@ impl SseDecode for crate::api::result::FfiResult {
             <crate::api::result::FfiExecutionTarget>::sse_decode(deserializer);
         let mut var_metrics = <crate::api::result::FfiInferenceMetrics>::sse_decode(deserializer);
         let mut var_toolCalls = <Vec<crate::api::model::FfiToolCall>>::sse_decode(deserializer);
-        let mut var_speculativeCloudError = <Option<String>>::sse_decode(deserializer);
         return crate::api::result::FfiResult {
             observation: var_observation,
             success: var_success,
@@ -7176,7 +7175,6 @@ impl SseDecode for crate::api::result::FfiResult {
             execution_target: var_executionTarget,
             metrics: var_metrics,
             tool_calls: var_toolCalls,
-            speculative_cloud_error: var_speculativeCloudError,
         };
     }
 }
@@ -7228,6 +7226,11 @@ impl SseDecode for crate::api::result::FfiRunResult {
                 let mut var_field0 =
                     <crate::api::result::FfiDecisionResult>::sse_decode(deserializer);
                 return crate::api::result::FfiRunResult::Decision(var_field0);
+            }
+            2 => {
+                let mut var_field0 = <crate::api::result::FfiResult>::sse_decode(deserializer);
+                let mut var_field1 = <String>::sse_decode(deserializer);
+                return crate::api::result::FfiRunResult::Recovered(var_field0, var_field1);
             }
             _ => {
                 unimplemented!("");
@@ -7297,6 +7300,11 @@ impl SseDecode for crate::api::model::FfiStreamEvent {
             2 => {
                 let mut var_field0 = <String>::sse_decode(deserializer);
                 return crate::api::model::FfiStreamEvent::Error(var_field0);
+            }
+            3 => {
+                let mut var_field0 = <crate::api::result::FfiResult>::sse_decode(deserializer);
+                let mut var_field1 = <String>::sse_decode(deserializer);
+                return crate::api::model::FfiStreamEvent::Recovered(var_field0, var_field1);
             }
             _ => {
                 unimplemented!("");
@@ -9361,7 +9369,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::result::FfiResult {
             self.execution_target.into_into_dart().into_dart(),
             self.metrics.into_into_dart().into_dart(),
             self.tool_calls.into_into_dart().into_dart(),
-            self.speculative_cloud_error.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -9418,6 +9425,12 @@ impl flutter_rust_bridge::IntoDart for crate::api::result::FfiRunResult {
             crate::api::result::FfiRunResult::Decision(field0) => {
                 [1.into_dart(), field0.into_into_dart().into_dart()].into_dart()
             }
+            crate::api::result::FfiRunResult::Recovered(field0, field1) => [
+                2.into_dart(),
+                field0.into_into_dart().into_dart(),
+                field1.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
             _ => {
                 unimplemented!("");
             }
@@ -9515,6 +9528,12 @@ impl flutter_rust_bridge::IntoDart for crate::api::model::FfiStreamEvent {
             crate::api::model::FfiStreamEvent::Error(field0) => {
                 [2.into_dart(), field0.into_into_dart().into_dart()].into_dart()
             }
+            crate::api::model::FfiStreamEvent::Recovered(field0, field1) => [
+                3.into_dart(),
+                field0.into_into_dart().into_dart(),
+                field1.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
             _ => {
                 unimplemented!("");
             }
@@ -10705,7 +10724,6 @@ impl SseEncode for crate::api::result::FfiResult {
         <crate::api::result::FfiExecutionTarget>::sse_encode(self.execution_target, serializer);
         <crate::api::result::FfiInferenceMetrics>::sse_encode(self.metrics, serializer);
         <Vec<crate::api::model::FfiToolCall>>::sse_encode(self.tool_calls, serializer);
-        <Option<String>>::sse_encode(self.speculative_cloud_error, serializer);
     }
 }
 
@@ -10739,6 +10757,11 @@ impl SseEncode for crate::api::result::FfiRunResult {
             crate::api::result::FfiRunResult::Decision(field0) => {
                 <i32>::sse_encode(1, serializer);
                 <crate::api::result::FfiDecisionResult>::sse_encode(field0, serializer);
+            }
+            crate::api::result::FfiRunResult::Recovered(field0, field1) => {
+                <i32>::sse_encode(2, serializer);
+                <crate::api::result::FfiResult>::sse_encode(field0, serializer);
+                <String>::sse_encode(field1, serializer);
             }
             _ => {
                 unimplemented!("");
@@ -10801,6 +10824,11 @@ impl SseEncode for crate::api::model::FfiStreamEvent {
             crate::api::model::FfiStreamEvent::Error(field0) => {
                 <i32>::sse_encode(2, serializer);
                 <String>::sse_encode(field0, serializer);
+            }
+            crate::api::model::FfiStreamEvent::Recovered(field0, field1) => {
+                <i32>::sse_encode(3, serializer);
+                <crate::api::result::FfiResult>::sse_encode(field0, serializer);
+                <String>::sse_encode(field1, serializer);
             }
             _ => {
                 unimplemented!("");

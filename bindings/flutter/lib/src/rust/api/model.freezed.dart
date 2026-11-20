@@ -504,6 +504,7 @@ mixin _$FfiStreamEvent {
     required TResult Function(FfiStreamToken field0) token,
     required TResult Function(FfiResult field0) complete,
     required TResult Function(String field0) error,
+    required TResult Function(FfiResult field0, String field1) recovered,
   }) =>
       throw _privateConstructorUsedError;
   @optionalTypeArgs
@@ -511,6 +512,7 @@ mixin _$FfiStreamEvent {
     TResult? Function(FfiStreamToken field0)? token,
     TResult? Function(FfiResult field0)? complete,
     TResult? Function(String field0)? error,
+    TResult? Function(FfiResult field0, String field1)? recovered,
   }) =>
       throw _privateConstructorUsedError;
   @optionalTypeArgs
@@ -518,6 +520,7 @@ mixin _$FfiStreamEvent {
     TResult Function(FfiStreamToken field0)? token,
     TResult Function(FfiResult field0)? complete,
     TResult Function(String field0)? error,
+    TResult Function(FfiResult field0, String field1)? recovered,
     required TResult orElse(),
   }) =>
       throw _privateConstructorUsedError;
@@ -526,6 +529,7 @@ mixin _$FfiStreamEvent {
     required TResult Function(FfiStreamEvent_Token value) token,
     required TResult Function(FfiStreamEvent_Complete value) complete,
     required TResult Function(FfiStreamEvent_Error value) error,
+    required TResult Function(FfiStreamEvent_Recovered value) recovered,
   }) =>
       throw _privateConstructorUsedError;
   @optionalTypeArgs
@@ -533,6 +537,7 @@ mixin _$FfiStreamEvent {
     TResult? Function(FfiStreamEvent_Token value)? token,
     TResult? Function(FfiStreamEvent_Complete value)? complete,
     TResult? Function(FfiStreamEvent_Error value)? error,
+    TResult? Function(FfiStreamEvent_Recovered value)? recovered,
   }) =>
       throw _privateConstructorUsedError;
   @optionalTypeArgs
@@ -540,6 +545,7 @@ mixin _$FfiStreamEvent {
     TResult Function(FfiStreamEvent_Token value)? token,
     TResult Function(FfiStreamEvent_Complete value)? complete,
     TResult Function(FfiStreamEvent_Error value)? error,
+    TResult Function(FfiStreamEvent_Recovered value)? recovered,
     required TResult orElse(),
   }) =>
       throw _privateConstructorUsedError;
@@ -639,6 +645,7 @@ class _$FfiStreamEvent_TokenImpl extends FfiStreamEvent_Token {
     required TResult Function(FfiStreamToken field0) token,
     required TResult Function(FfiResult field0) complete,
     required TResult Function(String field0) error,
+    required TResult Function(FfiResult field0, String field1) recovered,
   }) {
     return token(field0);
   }
@@ -649,6 +656,7 @@ class _$FfiStreamEvent_TokenImpl extends FfiStreamEvent_Token {
     TResult? Function(FfiStreamToken field0)? token,
     TResult? Function(FfiResult field0)? complete,
     TResult? Function(String field0)? error,
+    TResult? Function(FfiResult field0, String field1)? recovered,
   }) {
     return token?.call(field0);
   }
@@ -659,6 +667,7 @@ class _$FfiStreamEvent_TokenImpl extends FfiStreamEvent_Token {
     TResult Function(FfiStreamToken field0)? token,
     TResult Function(FfiResult field0)? complete,
     TResult Function(String field0)? error,
+    TResult Function(FfiResult field0, String field1)? recovered,
     required TResult orElse(),
   }) {
     if (token != null) {
@@ -673,6 +682,7 @@ class _$FfiStreamEvent_TokenImpl extends FfiStreamEvent_Token {
     required TResult Function(FfiStreamEvent_Token value) token,
     required TResult Function(FfiStreamEvent_Complete value) complete,
     required TResult Function(FfiStreamEvent_Error value) error,
+    required TResult Function(FfiStreamEvent_Recovered value) recovered,
   }) {
     return token(this);
   }
@@ -683,6 +693,7 @@ class _$FfiStreamEvent_TokenImpl extends FfiStreamEvent_Token {
     TResult? Function(FfiStreamEvent_Token value)? token,
     TResult? Function(FfiStreamEvent_Complete value)? complete,
     TResult? Function(FfiStreamEvent_Error value)? error,
+    TResult? Function(FfiStreamEvent_Recovered value)? recovered,
   }) {
     return token?.call(this);
   }
@@ -693,6 +704,7 @@ class _$FfiStreamEvent_TokenImpl extends FfiStreamEvent_Token {
     TResult Function(FfiStreamEvent_Token value)? token,
     TResult Function(FfiStreamEvent_Complete value)? complete,
     TResult Function(FfiStreamEvent_Error value)? error,
+    TResult Function(FfiStreamEvent_Recovered value)? recovered,
     required TResult orElse(),
   }) {
     if (token != null) {
@@ -791,6 +803,7 @@ class _$FfiStreamEvent_CompleteImpl extends FfiStreamEvent_Complete {
     required TResult Function(FfiStreamToken field0) token,
     required TResult Function(FfiResult field0) complete,
     required TResult Function(String field0) error,
+    required TResult Function(FfiResult field0, String field1) recovered,
   }) {
     return complete(field0);
   }
@@ -801,6 +814,7 @@ class _$FfiStreamEvent_CompleteImpl extends FfiStreamEvent_Complete {
     TResult? Function(FfiStreamToken field0)? token,
     TResult? Function(FfiResult field0)? complete,
     TResult? Function(String field0)? error,
+    TResult? Function(FfiResult field0, String field1)? recovered,
   }) {
     return complete?.call(field0);
   }
@@ -811,6 +825,7 @@ class _$FfiStreamEvent_CompleteImpl extends FfiStreamEvent_Complete {
     TResult Function(FfiStreamToken field0)? token,
     TResult Function(FfiResult field0)? complete,
     TResult Function(String field0)? error,
+    TResult Function(FfiResult field0, String field1)? recovered,
     required TResult orElse(),
   }) {
     if (complete != null) {
@@ -825,6 +840,7 @@ class _$FfiStreamEvent_CompleteImpl extends FfiStreamEvent_Complete {
     required TResult Function(FfiStreamEvent_Token value) token,
     required TResult Function(FfiStreamEvent_Complete value) complete,
     required TResult Function(FfiStreamEvent_Error value) error,
+    required TResult Function(FfiStreamEvent_Recovered value) recovered,
   }) {
     return complete(this);
   }
@@ -835,6 +851,7 @@ class _$FfiStreamEvent_CompleteImpl extends FfiStreamEvent_Complete {
     TResult? Function(FfiStreamEvent_Token value)? token,
     TResult? Function(FfiStreamEvent_Complete value)? complete,
     TResult? Function(FfiStreamEvent_Error value)? error,
+    TResult? Function(FfiStreamEvent_Recovered value)? recovered,
   }) {
     return complete?.call(this);
   }
@@ -845,6 +862,7 @@ class _$FfiStreamEvent_CompleteImpl extends FfiStreamEvent_Complete {
     TResult Function(FfiStreamEvent_Token value)? token,
     TResult Function(FfiStreamEvent_Complete value)? complete,
     TResult Function(FfiStreamEvent_Error value)? error,
+    TResult Function(FfiStreamEvent_Recovered value)? recovered,
     required TResult orElse(),
   }) {
     if (complete != null) {
@@ -942,6 +960,7 @@ class _$FfiStreamEvent_ErrorImpl extends FfiStreamEvent_Error {
     required TResult Function(FfiStreamToken field0) token,
     required TResult Function(FfiResult field0) complete,
     required TResult Function(String field0) error,
+    required TResult Function(FfiResult field0, String field1) recovered,
   }) {
     return error(field0);
   }
@@ -952,6 +971,7 @@ class _$FfiStreamEvent_ErrorImpl extends FfiStreamEvent_Error {
     TResult? Function(FfiStreamToken field0)? token,
     TResult? Function(FfiResult field0)? complete,
     TResult? Function(String field0)? error,
+    TResult? Function(FfiResult field0, String field1)? recovered,
   }) {
     return error?.call(field0);
   }
@@ -962,6 +982,7 @@ class _$FfiStreamEvent_ErrorImpl extends FfiStreamEvent_Error {
     TResult Function(FfiStreamToken field0)? token,
     TResult Function(FfiResult field0)? complete,
     TResult Function(String field0)? error,
+    TResult Function(FfiResult field0, String field1)? recovered,
     required TResult orElse(),
   }) {
     if (error != null) {
@@ -976,6 +997,7 @@ class _$FfiStreamEvent_ErrorImpl extends FfiStreamEvent_Error {
     required TResult Function(FfiStreamEvent_Token value) token,
     required TResult Function(FfiStreamEvent_Complete value) complete,
     required TResult Function(FfiStreamEvent_Error value) error,
+    required TResult Function(FfiStreamEvent_Recovered value) recovered,
   }) {
     return error(this);
   }
@@ -986,6 +1008,7 @@ class _$FfiStreamEvent_ErrorImpl extends FfiStreamEvent_Error {
     TResult? Function(FfiStreamEvent_Token value)? token,
     TResult? Function(FfiStreamEvent_Complete value)? complete,
     TResult? Function(FfiStreamEvent_Error value)? error,
+    TResult? Function(FfiStreamEvent_Recovered value)? recovered,
   }) {
     return error?.call(this);
   }
@@ -996,6 +1019,7 @@ class _$FfiStreamEvent_ErrorImpl extends FfiStreamEvent_Error {
     TResult Function(FfiStreamEvent_Token value)? token,
     TResult Function(FfiStreamEvent_Complete value)? complete,
     TResult Function(FfiStreamEvent_Error value)? error,
+    TResult Function(FfiStreamEvent_Recovered value)? recovered,
     required TResult orElse(),
   }) {
     if (error != null) {
@@ -1017,6 +1041,174 @@ abstract class FfiStreamEvent_Error extends FfiStreamEvent {
   /// with the given fields replaced by the non-null parameter values.
   @JsonKey(includeFromJson: false, includeToJson: false)
   _$$FfiStreamEvent_ErrorImplCopyWith<_$FfiStreamEvent_ErrorImpl>
+      get copyWith => throw _privateConstructorUsedError;
+}
+
+/// @nodoc
+abstract class _$$FfiStreamEvent_RecoveredImplCopyWith<$Res> {
+  factory _$$FfiStreamEvent_RecoveredImplCopyWith(
+          _$FfiStreamEvent_RecoveredImpl value,
+          $Res Function(_$FfiStreamEvent_RecoveredImpl) then) =
+      __$$FfiStreamEvent_RecoveredImplCopyWithImpl<$Res>;
+  @useResult
+  $Res call({FfiResult field0, String field1});
+}
+
+/// @nodoc
+class __$$FfiStreamEvent_RecoveredImplCopyWithImpl<$Res>
+    extends _$FfiStreamEventCopyWithImpl<$Res, _$FfiStreamEvent_RecoveredImpl>
+    implements _$$FfiStreamEvent_RecoveredImplCopyWith<$Res> {
+  __$$FfiStreamEvent_RecoveredImplCopyWithImpl(
+      _$FfiStreamEvent_RecoveredImpl _value,
+      $Res Function(_$FfiStreamEvent_RecoveredImpl) _then)
+      : super(_value, _then);
+
+  /// Create a copy of FfiStreamEvent
+  /// with the given fields replaced by the non-null parameter values.
+  @pragma('vm:prefer-inline')
+  @override
+  $Res call({
+    Object? field0 = null,
+    Object? field1 = null,
+  }) {
+    return _then(_$FfiStreamEvent_RecoveredImpl(
+      null == field0
+          ? _value.field0
+          : field0 // ignore: cast_nullable_to_non_nullable
+              as FfiResult,
+      null == field1
+          ? _value.field1
+          : field1 // ignore: cast_nullable_to_non_nullable
+              as String,
+    ));
+  }
+}
+
+/// @nodoc
+
+class _$FfiStreamEvent_RecoveredImpl extends FfiStreamEvent_Recovered {
+  const _$FfiStreamEvent_RecoveredImpl(this.field0, this.field1) : super._();
+
+  @override
+  final FfiResult field0;
+  @override
+  final String field1;
+
+  @override
+  String toString() {
+    return 'FfiStreamEvent.recovered(field0: $field0, field1: $field1)';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        (other.runtimeType == runtimeType &&
+            other is _$FfiStreamEvent_RecoveredImpl &&
+            (identical(other.field0, field0) || other.field0 == field0) &&
+            (identical(other.field1, field1) || other.field1 == field1));
+  }
+
+  @override
+  int get hashCode => Object.hash(runtimeType, field0, field1);
+
+  /// Create a copy of FfiStreamEvent
+  /// with the given fields replaced by the non-null parameter values.
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  @override
+  @pragma('vm:prefer-inline')
+  _$$FfiStreamEvent_RecoveredImplCopyWith<_$FfiStreamEvent_RecoveredImpl>
+      get copyWith => __$$FfiStreamEvent_RecoveredImplCopyWithImpl<
+          _$FfiStreamEvent_RecoveredImpl>(this, _$identity);
+
+  @override
+  @optionalTypeArgs
+  TResult when<TResult extends Object?>({
+    required TResult Function(FfiStreamToken field0) token,
+    required TResult Function(FfiResult field0) complete,
+    required TResult Function(String field0) error,
+    required TResult Function(FfiResult field0, String field1) recovered,
+  }) {
+    return recovered(field0, field1);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult? whenOrNull<TResult extends Object?>({
+    TResult? Function(FfiStreamToken field0)? token,
+    TResult? Function(FfiResult field0)? complete,
+    TResult? Function(String field0)? error,
+    TResult? Function(FfiResult field0, String field1)? recovered,
+  }) {
+    return recovered?.call(field0, field1);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult maybeWhen<TResult extends Object?>({
+    TResult Function(FfiStreamToken field0)? token,
+    TResult Function(FfiResult field0)? complete,
+    TResult Function(String field0)? error,
+    TResult Function(FfiResult field0, String field1)? recovered,
+    required TResult orElse(),
+  }) {
+    if (recovered != null) {
+      return recovered(field0, field1);
+    }
+    return orElse();
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult map<TResult extends Object?>({
+    required TResult Function(FfiStreamEvent_Token value) token,
+    required TResult Function(FfiStreamEvent_Complete value) complete,
+    required TResult Function(FfiStreamEvent_Error value) error,
+    required TResult Function(FfiStreamEvent_Recovered value) recovered,
+  }) {
+    return recovered(this);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult? mapOrNull<TResult extends Object?>({
+    TResult? Function(FfiStreamEvent_Token value)? token,
+    TResult? Function(FfiStreamEvent_Complete value)? complete,
+    TResult? Function(FfiStreamEvent_Error value)? error,
+    TResult? Function(FfiStreamEvent_Recovered value)? recovered,
+  }) {
+    return recovered?.call(this);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult maybeMap<TResult extends Object?>({
+    TResult Function(FfiStreamEvent_Token value)? token,
+    TResult Function(FfiStreamEvent_Complete value)? complete,
+    TResult Function(FfiStreamEvent_Error value)? error,
+    TResult Function(FfiStreamEvent_Recovered value)? recovered,
+    required TResult orElse(),
+  }) {
+    if (recovered != null) {
+      return recovered(this);
+    }
+    return orElse();
+  }
+}
+
+abstract class FfiStreamEvent_Recovered extends FfiStreamEvent {
+  const factory FfiStreamEvent_Recovered(
+          final FfiResult field0, final String field1) =
+      _$FfiStreamEvent_RecoveredImpl;
+  const FfiStreamEvent_Recovered._() : super._();
+
+  @override
+  FfiResult get field0;
+  String get field1;
+
+  /// Create a copy of FfiStreamEvent
+  /// with the given fields replaced by the non-null parameter values.
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  _$$FfiStreamEvent_RecoveredImplCopyWith<_$FfiStreamEvent_RecoveredImpl>
       get copyWith => throw _privateConstructorUsedError;
 }
 

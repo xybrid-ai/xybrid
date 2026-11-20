@@ -100,7 +100,7 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Returns a stream of events:
   /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-  /// - `FfiStreamEvent::Complete` when inference finishes
+  /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
   /// - `FfiStreamEvent::Error` if an error occurs
   ///
   /// For non-LLM models, a single Token event is emitted with the full result.
@@ -143,7 +143,7 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Returns a stream of events:
   /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-  /// - `FfiStreamEvent::Complete` when inference finishes
+  /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
   /// - `FfiStreamEvent::Error` if an error occurs
   ///
   /// Pass an optional `config` to control generation parameters.
@@ -581,6 +581,12 @@ sealed class FfiStreamEvent with _$FfiStreamEvent {
   const factory FfiStreamEvent.error(
     String field0,
   ) = FfiStreamEvent_Error;
+
+  /// Local completion and the preceding speculative cloud error.
+  const factory FfiStreamEvent.recovered(
+    FfiResult field0,
+    String field1,
+  ) = FfiStreamEvent_Recovered;
 }
 
 /// Token received during streaming inference.

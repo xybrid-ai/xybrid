@@ -11,18 +11,21 @@ FfiRunResult _ffiResult({
   String? reasoningContent,
   String? speculativeCloudError,
   List<FfiToolCall> toolCalls = const [],
-}) =>
-    FfiRunResult.legacy(FfiResult(
-      success: true,
-      observation: observation,
-      text: text,
-      reasoningContent: reasoningContent,
-      latencyMs: 10,
-      executionTarget: FfiExecutionTarget.local,
-      metrics: _metrics,
-      toolCalls: toolCalls,
-      speculativeCloudError: speculativeCloudError,
-    ));
+}) {
+  final result = FfiResult(
+    success: true,
+    observation: observation,
+    text: text,
+    reasoningContent: reasoningContent,
+    latencyMs: 10,
+    executionTarget: FfiExecutionTarget.local,
+    metrics: _metrics,
+    toolCalls: toolCalls,
+  );
+  return speculativeCloudError == null
+      ? FfiRunResult.legacy(result)
+      : FfiRunResult.recovered(result, speculativeCloudError);
+}
 
 void main() {
   test('local recovery preserves both the answer and the cloud error', () {

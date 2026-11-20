@@ -14,7 +14,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'result.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `ensure_ffi_payload`, `from_core`, `from_core`, `from_sdk`, `try_from_inference_result`, `try_from_inference_result`
+// These functions are ignored because they are not marked as `pub`: `ensure_ffi_payload`, `from_core`, `from_core`, `from_sdk`, `map_completion`, `try_from_inference_result`, `try_from_inference_result`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `from`
 
 /// An answer in original question order.
@@ -235,9 +235,6 @@ class FfiResult {
   /// model output yields an empty list rather than an error.
   final List<FfiToolCall> toolCalls;
 
-  /// Error from a speculative cloud attempt this run recovered from on-device.
-  final String? speculativeCloudError;
-
   const FfiResult({
     this.observation,
     required this.success,
@@ -249,7 +246,6 @@ class FfiResult {
     required this.executionTarget,
     required this.metrics,
     required this.toolCalls,
-    this.speculativeCloudError,
   });
 
   @override
@@ -263,8 +259,7 @@ class FfiResult {
       latencyMs.hashCode ^
       executionTarget.hashCode ^
       metrics.hashCode ^
-      toolCalls.hashCode ^
-      speculativeCloudError.hashCode;
+      toolCalls.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -280,8 +275,7 @@ class FfiResult {
           latencyMs == other.latencyMs &&
           executionTarget == other.executionTarget &&
           metrics == other.metrics &&
-          toolCalls == other.toolCalls &&
-          speculativeCloudError == other.speculativeCloudError;
+          toolCalls == other.toolCalls;
 }
 
 @freezed
@@ -294,6 +288,12 @@ sealed class FfiRunResult with _$FfiRunResult {
   const factory FfiRunResult.decision(
     FfiDecisionResult field0,
   ) = FfiRunResult_Decision;
+
+  /// Local answer and the preceding speculative cloud error.
+  const factory FfiRunResult.recovered(
+    FfiResult field0,
+    String field1,
+  ) = FfiRunResult_Recovered;
 }
 
 /// Statistic used by a score answer.

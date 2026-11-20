@@ -15,7 +15,7 @@ use crate::frb_generated::StreamSink;
 
 use super::context::FfiConversationContext;
 use super::device;
-use super::result::{FfiResult, FfiRunResult};
+use super::result::{map_completion, FfiResult, FfiRunResult};
 use super::spawn_reporting_panics;
 
 // Use the canonical SDK-to-FFI conversion to retain the source chain when
@@ -636,6 +636,8 @@ pub enum FfiStreamEvent {
     Complete(FfiResult),
     /// An error occurred
     Error(String),
+    /// Local completion and the preceding speculative cloud error.
+    Recovered(FfiResult, String),
 }
 
 /// Event emitted during streaming TTS. Audio rides the stream as raw 16-bit LE
@@ -808,10 +810,7 @@ impl FfiStreamEvent {
     /// The event that ends a successful run: `Complete` only when the result
     /// converts, so a stream never completes with its output dropped.
     fn completion(result: &InferenceResult) -> Self {
-        match FfiResult::try_from_inference_result(result) {
-            Ok(result) => FfiStreamEvent::Complete(result),
-            Err(error) => FfiStreamEvent::Error(error),
-        }
+        map_completion(result, Self::Complete, Self::Recovered).unwrap_or_else(Self::Error)
     }
 }
 
@@ -1084,7 +1083,7 @@ impl FfiModel {
     ///
     /// Returns a stream of events:
     /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-    /// - `FfiStreamEvent::Complete` when inference finishes
+    /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
     /// - `FfiStreamEvent::Error` if an error occurs
     ///
     /// For non-LLM models, a single Token event is emitted with the full result.
@@ -1336,7 +1335,7 @@ impl FfiModel {
             .run_with_context_options(&envelope.into_envelope(), &ctx_guard, &options)
             .map_err(sdk_error_message)?;
 
-        FfiResult::try_from_inference_result(&result).map(FfiRunResult::Legacy)
+        map_completion(&result, FfiRunResult::Legacy, FfiRunResult::Recovered)
     }
 
     /// Run inference with streaming output and conversation context.
@@ -1346,7 +1345,7 @@ impl FfiModel {
     ///
     /// Returns a stream of events:
     /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-    /// - `FfiStreamEvent::Complete` when inference finishes
+    /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
     /// - `FfiStreamEvent::Error` if an error occurs
     ///
     /// Pass an optional `config` to control generation parameters.

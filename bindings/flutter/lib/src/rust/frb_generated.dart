@@ -5788,8 +5788,8 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   FfiResult dco_decode_ffi_result(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 11)
-      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return FfiResult(
       observation: dco_decode_opt_box_autoadd_ffi_observation_ref(arr[0]),
       success: dco_decode_bool(arr[1]),
@@ -5801,7 +5801,6 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       executionTarget: dco_decode_ffi_execution_target(arr[7]),
       metrics: dco_decode_ffi_inference_metrics(arr[8]),
       toolCalls: dco_decode_list_ffi_tool_call(arr[9]),
-      speculativeCloudError: dco_decode_opt_String(arr[10]),
     );
   }
 
@@ -5839,6 +5838,11 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       case 1:
         return FfiRunResult_Decision(
           dco_decode_box_autoadd_ffi_decision_result(raw[1]),
+        );
+      case 2:
+        return FfiRunResult_Recovered(
+          dco_decode_box_autoadd_ffi_result(raw[1]),
+          dco_decode_String(raw[2]),
         );
       default:
         throw Exception("unreachable");
@@ -5894,6 +5898,11 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       case 2:
         return FfiStreamEvent_Error(
           dco_decode_String(raw[1]),
+        );
+      case 3:
+        return FfiStreamEvent_Recovered(
+          dco_decode_box_autoadd_ffi_result(raw[1]),
+          dco_decode_String(raw[2]),
         );
       default:
         throw Exception("unreachable");
@@ -7437,7 +7446,6 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     var var_executionTarget = sse_decode_ffi_execution_target(deserializer);
     var var_metrics = sse_decode_ffi_inference_metrics(deserializer);
     var var_toolCalls = sse_decode_list_ffi_tool_call(deserializer);
-    var var_speculativeCloudError = sse_decode_opt_String(deserializer);
     return FfiResult(
         observation: var_observation,
         success: var_success,
@@ -7448,8 +7456,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         latencyMs: var_latencyMs,
         executionTarget: var_executionTarget,
         metrics: var_metrics,
-        toolCalls: var_toolCalls,
-        speculativeCloudError: var_speculativeCloudError);
+        toolCalls: var_toolCalls);
   }
 
   @protected
@@ -7497,6 +7504,10 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         var var_field0 =
             sse_decode_box_autoadd_ffi_decision_result(deserializer);
         return FfiRunResult_Decision(var_field0);
+      case 2:
+        var var_field0 = sse_decode_box_autoadd_ffi_result(deserializer);
+        var var_field1 = sse_decode_String(deserializer);
+        return FfiRunResult_Recovered(var_field0, var_field1);
       default:
         throw UnimplementedError('');
     }
@@ -7554,6 +7565,10 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       case 2:
         var var_field0 = sse_decode_String(deserializer);
         return FfiStreamEvent_Error(var_field0);
+      case 3:
+        var var_field0 = sse_decode_box_autoadd_ffi_result(deserializer);
+        var var_field1 = sse_decode_String(deserializer);
+        return FfiStreamEvent_Recovered(var_field0, var_field1);
       default:
         throw UnimplementedError('');
     }
@@ -9215,7 +9230,6 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_ffi_execution_target(self.executionTarget, serializer);
     sse_encode_ffi_inference_metrics(self.metrics, serializer);
     sse_encode_list_ffi_tool_call(self.toolCalls, serializer);
-    sse_encode_opt_String(self.speculativeCloudError, serializer);
   }
 
   @protected
@@ -9247,6 +9261,10 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       case FfiRunResult_Decision(field0: final field0):
         sse_encode_i_32(1, serializer);
         sse_encode_box_autoadd_ffi_decision_result(field0, serializer);
+      case FfiRunResult_Recovered(field0: final field0, field1: final field1):
+        sse_encode_i_32(2, serializer);
+        sse_encode_box_autoadd_ffi_result(field0, serializer);
+        sse_encode_String(field1, serializer);
     }
   }
 
@@ -9292,6 +9310,10 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       case FfiStreamEvent_Error(field0: final field0):
         sse_encode_i_32(2, serializer);
         sse_encode_String(field0, serializer);
+      case FfiStreamEvent_Recovered(field0: final field0, field1: final field1):
+        sse_encode_i_32(3, serializer);
+        sse_encode_box_autoadd_ffi_result(field0, serializer);
+        sse_encode_String(field1, serializer);
     }
   }
 
@@ -10242,7 +10264,7 @@ class FfiModelImpl extends RustOpaque implements FfiModel {
   ///
   /// Returns a stream of events:
   /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-  /// - `FfiStreamEvent::Complete` when inference finishes
+  /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
   /// - `FfiStreamEvent::Error` if an error occurs
   ///
   /// For non-LLM models, a single Token event is emitted with the full result.
@@ -10293,7 +10315,7 @@ class FfiModelImpl extends RustOpaque implements FfiModel {
   ///
   /// Returns a stream of events:
   /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-  /// - `FfiStreamEvent::Complete` when inference finishes
+  /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
   /// - `FfiStreamEvent::Error` if an error occurs
   ///
   /// Pass an optional `config` to control generation parameters.

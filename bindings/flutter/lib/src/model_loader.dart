@@ -43,7 +43,8 @@ Stream<StreamToken> _tokensWithCompletion(
             if (token.toolCalls.isNotEmpty) emittedToolCalls = true;
             yield token;
           }
-        case FfiStreamEvent_Complete(:final field0):
+        case FfiStreamEvent_Complete(:final field0) ||
+              FfiStreamEvent_Recovered(:final field0):
           final terminal = pendingFinal;
           pendingFinal = null;
           final calls = emittedToolCalls
@@ -63,7 +64,8 @@ Stream<StreamToken> _tokensWithCompletion(
                 (calls.isEmpty ? 'stop' : 'tool_calls'),
             metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
             observation: field0.observation,
-            speculativeCloudError: field0.speculativeCloudError,
+            speculativeCloudError:
+                event is FfiStreamEvent_Recovered ? event.field1 : null,
             toolCalls: calls,
             rawText: terminal?.rawText ?? (calls.isEmpty ? null : field0.text),
           );
@@ -729,7 +731,8 @@ class XybridModel {
               toolCalls: calls,
               rawText: field0.rawText,
             );
-          case FfiStreamEvent_Complete(:final field0):
+          case FfiStreamEvent_Complete(:final field0) ||
+                FfiStreamEvent_Recovered(:final field0):
             final calls = emittedToolCalls
                 ? const <ToolCall>[]
                 : field0.toolCalls
@@ -743,7 +746,8 @@ class XybridModel {
               finishReason: calls.isEmpty ? 'stop' : 'tool_calls',
               metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
               observation: field0.observation,
-              speculativeCloudError: field0.speculativeCloudError,
+              speculativeCloudError:
+                  event is FfiStreamEvent_Recovered ? event.field1 : null,
               toolCalls: calls,
               rawText: calls.isEmpty ? null : field0.text,
             );

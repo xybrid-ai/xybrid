@@ -89,12 +89,13 @@ class XybridResult {
   final FfiRunResult _inner;
 
   FfiResult? get _legacy => switch (_inner) {
-        FfiRunResult_Legacy(:final field0) => field0,
+        FfiRunResult_Legacy(:final field0) ||
+        FfiRunResult_Recovered(:final field0) => field0,
         FfiRunResult_Decision() => null,
       };
 
   FfiDecisionResult? get _decision => switch (_inner) {
-        FfiRunResult_Legacy() => null,
+        FfiRunResult_Legacy() || FfiRunResult_Recovered() => null,
         FfiRunResult_Decision(:final field0) => field0,
       };
 
@@ -114,7 +115,10 @@ class XybridResult {
       _legacy?.executionTarget ?? _decision!.executionTarget;
 
   /// Error from the gateway attempt if this run recovered on-device.
-  String? get speculativeCloudError => _legacy?.speculativeCloudError;
+  String? get speculativeCloudError => switch (_inner) {
+        FfiRunResult_Recovered(:final field1) => field1,
+        FfiRunResult_Legacy() || FfiRunResult_Decision() => null,
+      };
 
   /// Text output (for ASR models).
   ///
