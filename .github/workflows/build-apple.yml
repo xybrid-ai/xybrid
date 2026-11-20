@@ -83,6 +83,19 @@ jobs:
             file "$BIN" | grep -qi 'archive' || { echo "Error: $BIN is not an ar archive"; exit 1; }
             grep -q "<string>$slice</string>" "$XCFW/Info.plist" || { echo "Error: $slice not in Info.plist"; exit 1; }
             echo "OK: $slice -> $(lipo -info "$BIN" | sed 's/.*: //')"
+            # No Apple manifest links MetalPerformanceShaders (#807), so an MPS
+            # symbol here is undefined in every app that links this slice: link
+            # the framework again in Package.swift, the swift-branch manifest
+            # (release-publish.yml) and the React Native and Flutter podspecs
+            # in the same change. This sees link-time references only. Metal is
+            # the control: without its symbol the scan read nothing.
+            UNDEF="$(nm -u "$BIN" 2>/dev/null || true)"
+            test "$(printf '%s\n' "$UNDEF" | grep -cE '(^| )_MTLCreateSystemDefaultDevice$' || true)" -gt 0 \
+              || { echo "Error: $slice: nm -u lists no Metal symbol, so the MPS check would prove nothing"; exit 1; }
+            if printf '%s\n' "$UNDEF" | grep -E '(^| )_(MPS|OBJC_(CLASS|METACLASS)_\$_MPS)' | sort -u; then
+              echo "::error::$slice references MetalPerformanceShaders, which no Apple manifest links (#807)"; exit 1
+            fi
+            echo "OK: $slice references no MetalPerformanceShaders symbol"
           done
           echo "XCFramework verify: device + simulator slices OK"
 
@@ -194,3 +207,19 @@ jobs:
           name: observability-runtime-swift
           path: ${{ runner.temp }}/observability-swift
           if-no-files-found: warn
+
+      # The steps above link only the simulator slice. build-for-testing on a
+      # generic iOS device links XybridTests.xctest for arm64 iphoneos against
+      # the ios-arm64 slice with Package.swift's linkerSettings, so a framework
+      # the device archive needs but the manifest does not link fails here
+      # (#807). It reuses the local-natives flip from the wrapper build; its own
+      # DerivedData leaves the simulator builds alone. No device, no signing.
+      - name: Link the device slice (iOS, no signing)
+        run: |
+          set -euo pipefail
+          xcodebuild build-for-testing \
+            -scheme Xybrid \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData-device" \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO
