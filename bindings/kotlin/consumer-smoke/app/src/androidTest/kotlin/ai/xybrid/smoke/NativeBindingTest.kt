@@ -3,12 +3,15 @@ package ai.xybrid.smoke
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ai.xybrid.Envelope
+import ai.xybrid.ModelLoader
 import ai.xybrid.Xybrid
 import ai.xybrid.XybridConversationContext
+import ai.xybrid.XybridError
 import ai.xybrid.version
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 
 /** Executes the packaged JNI on Android without a model, credentials, or network. */
 @RunWith(AndroidJUnit4::class)
@@ -28,6 +31,23 @@ class NativeBindingTest {
             assertEquals(input.kind, context.history().single().kind)
             context.clear()
             assertEquals(0u, context.historyLen())
+        }
+    }
+
+    /** A missing GGUF is reported by path, which shows the loader reached the native model-file path. */
+    @Test
+    fun testModelFileLoaderReportsAMissingFileByPath() {
+        Xybrid.init(InstrumentationRegistry.getInstrumentation().targetContext)
+        val missing = File(
+            InstrumentationRegistry.getInstrumentation().targetContext.cacheDir,
+            "xybrid-missing/absent.gguf",
+        ).path
+        try {
+            ModelLoader.fromModelFile(missing).loadBlocking()
+            fail("loading a missing GGUF should throw")
+        } catch (error: XybridError.ConfigError) {
+            assertTrue(error.message, error.message.contains("GGUF file not found"))
+            assertTrue(error.message, error.message.contains(missing))
         }
     }
 }

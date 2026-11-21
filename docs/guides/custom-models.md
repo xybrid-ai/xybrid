@@ -260,8 +260,8 @@ let result = try await model.runAsync(envelope: .text("Hello, world!"))
 ```
 
 A single llama.cpp GGUF file needs no hand-written metadata: Swift's
-`Xybrid.model(.modelFile(ggufURL))`, like React Native's `fromModelFile` and
-Unity's `FromModelFile`, writes `model_metadata.json` next to it on `load()`
+`Xybrid.model(.modelFile(ggufURL))`, like Kotlin's `fromModelFile`, React Native's
+`fromModelFile` and Unity's `FromModelFile`, writes `model_metadata.json` next to it on `load()`
 when that file is absent. The GGUF's directory must therefore be writable: an
 iOS app bundle is read-only, so copy the GGUF into the app container first, or
 ship a `model_metadata.json` beside it.
