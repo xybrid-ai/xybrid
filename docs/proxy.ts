@@ -27,7 +27,10 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
 
   if (markdown) {
     return NextResponse.rewrite(new URL(markdown, request.nextUrl), {
-      // the URL has two representations, selected by `Accept`
+      // The URL has two representations, selected by `Accept`. As the
+      // Fumadocs llms guide notes, Next.js discards `Vary` on App Router page
+      // responses, so the HTML can't carry it; set it at the CDN if a shared
+      // cache serves the docs.
       headers: { Vary: 'Accept' },
     });
   }
