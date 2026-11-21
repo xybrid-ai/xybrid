@@ -209,7 +209,7 @@ rules and size budgets as the SDK's own content.
 
 ### Model Loading
 
-Load models from the Xybrid registry or local bundles:
+Load models from the Xybrid registry, a local bundle or a raw GGUF file:
 
 ```dart
 // From registry (downloads + caches automatically)
@@ -218,11 +218,26 @@ final model = await XybridModelLoader.fromRegistry('kokoro-82m').load();
 // From local bundle
 final model = await XybridModelLoader.fromBundle('path/to/model.xyb').load();
 
+// From a raw llama.cpp GGUF file (no model_metadata.json needed)
+final model = await XybridModelLoader.fromModelFile('/abs/path/model.gguf').load();
+
 // Check if already cached
 if (Xybrid.isModelCached('kokoro-82m')) {
   print('Model ready, no download needed');
 }
 ```
+
+`fromModelFile` touches no disk until `load()`, which generates
+`model_metadata.json` from the GGUF header and writes it next to the file
+unless one is already there, with the context capped at 4,096 tokens (raise
+its `context_length` for longer chats). So the directory must be writable:
+assets are not files on disk and the iOS app bundle is read-only, so copy the
+GGUF into a directory of its own under `getApplicationSupportDirectory()`
+first. An existing `model_metadata.json` is used as is, so keep one GGUF per
+directory. The generated metadata has no vision projector; load a vision GGUF
+with an mmproj through `fromDirectory`. A missing file makes `load()` throw an
+`XybridException` containing `GGUF file not found: <path>`, and
+`loadWithProgress()` emits only `LoadComplete` or `LoadError`.
 
 ### Download Progress
 
@@ -555,7 +570,7 @@ https://github.com/xybrid-ai/xybrid/tree/master/examples/flutter
 | Class | Purpose |
 |-------|---------|
 | `Xybrid` | SDK initialization, cache checking, factory methods |
-| `XybridModelLoader` | Load models from registry or local bundle |
+| `XybridModelLoader` | Load models from the registry, Hugging Face, a local bundle or directory, or a GGUF file |
 | `XybridModel` | Run inference (batch, streaming, with context) |
 | `XybridEnvelope` | Type-safe inputs: audio, text, embedding |
 | `XybridResult` | Inference output: text, audio, embedding, latency |

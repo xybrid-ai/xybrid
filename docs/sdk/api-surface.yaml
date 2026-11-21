@@ -169,8 +169,8 @@ classes:
         static: true
         params: [{ name: filePath, type: String }]
         return: XybridModelLoader
-        notes: "Loads a raw GGUF file directly. Auto-generates model_metadata.json from GGUF binary header if not present. Swift: ModelLoader.fromModelFile(_ url: URL), or Xybrid.model(.modelFile(url))."
-        status: { dart: planned, kotlin: planned, swift: implemented, csharp: implemented }
+        notes: "Loads a raw GGUF file without hand-written metadata: generates model_metadata.json from the GGUF header, writes it beside the file and loads that directory. An existing model_metadata.json is kept, even one written for another GGUF, so keep one GGUF per directory. Swift: ModelLoader.fromModelFile(_ url: URL), or Xybrid.model(.modelFile(url)). Dart: XybridModelLoader.fromModelFile(String path); the loader touches no disk until load(), and loadWithProgress() emits only LoadComplete or LoadError."
+        status: { dart: implemented, kotlin: planned, swift: implemented, csharp: implemented }
       fromHuggingFace:
         static: true
         params: [{ name: repo, type: String }]

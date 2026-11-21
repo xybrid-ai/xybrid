@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+* Added: `XybridModelLoader.fromModelFile(path)` loads a raw llama.cpp GGUF
+  with no `model_metadata.json`. Creating the loader touches no disk; `load()`
+  writes the generated metadata next to the file unless one is already there,
+  with the context capped at 4,096 tokens, so the directory must be writable:
+  copy assets and bundled files under `getApplicationSupportDirectory()` first.
+  `loadWithProgress()` emits only `LoadComplete` or `LoadError`.
 * Fixed: `runStreamingWithContext` ends a successful turn on one final token,
   as `runStreaming` and `runStreamingWithFallback` do. It used to emit the
   native terminal token and then a second final token (`token: ''`,
