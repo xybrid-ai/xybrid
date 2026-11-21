@@ -9,6 +9,16 @@ const lang = ':lang(en|zh)';
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
+  async redirects() {
+    return [
+      // share images moved under the locale; links social sites cached keep working
+      {
+        source: '/og/docs/:path*',
+        destination: '/en/og/docs/:path*',
+        permanent: true,
+      },
+    ];
+  },
   async rewrites() {
     // the files for agents, served by `app/[lang]/llms.mdx/[...path]`
     return [
