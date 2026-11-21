@@ -189,6 +189,24 @@ impl StageConfig {
         }
     }
 
+    /// Warning text for a stage whose `execution_provider` will not be applied.
+    ///
+    /// The key is parsed but not applied: ONNX models run on ONNX Runtime's CPU
+    /// execution provider whatever it says. `cpu` asks for what already
+    /// happens, so it gets no warning. The SDK logs this text when it loads a
+    /// pipeline, and the CLI prints it.
+    pub fn unapplied_execution_provider_warning(&self) -> Option<String> {
+        let provider = self.execution_provider()?;
+        if provider.eq_ignore_ascii_case("cpu") {
+            return None;
+        }
+        Some(format!(
+            "stage '{}': execution_provider '{}' is not applied yet; ONNX models run on the CPU",
+            self.stage_id(),
+            provider
+        ))
+    }
+
     /// Convert to StageObjectConfig for uniform handling.
     pub fn to_object(&self) -> StageObjectConfig {
         match self {
@@ -452,5 +470,33 @@ stages:
 "#;
         let config = PipelineConfig::from_yaml(yaml).unwrap();
         assert_eq!(config.stages[0].execution_provider(), None);
+    }
+
+    #[test]
+    fn stage_with_execution_provider_gets_a_not_applied_warning() {
+        let yaml = r#"
+stages:
+  - id: vision
+    model: mobilenet-v2
+    execution_provider: coreml-ane
+  - mobilenet-v2
+  - model: mobilenet-v2
+    execution_provider: CPU
+"#;
+        let config = PipelineConfig::from_yaml(yaml).unwrap();
+        let warning = config.stages[0]
+            .unapplied_execution_provider_warning()
+            .expect("a non-cpu provider is warned about");
+        assert!(warning.contains("stage 'vision'"), "{warning}");
+        assert!(warning.contains("coreml-ane"), "{warning}");
+        assert!(warning.contains("not applied"), "{warning}");
+        assert_eq!(
+            config.stages[1].unapplied_execution_provider_warning(),
+            None
+        );
+        assert_eq!(
+            config.stages[2].unapplied_execution_provider_warning(),
+            None
+        );
     }
 }

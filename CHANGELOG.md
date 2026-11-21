@@ -16,8 +16,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unless one is there. `ModelSource` gains a `ModelFile` case, so a `when` over
   it without an `else` needs one more branch (#812).
 
+- **Flutter: load a local GGUF file.** `XybridModelLoader.fromModelFile(path)`
+  loads a raw llama.cpp GGUF with no `model_metadata.json`, as Swift's
+  `ModelLoader.fromModelFile`, React Native's `fromModelFile` and Unity's
+  `FromModelFile` already do: `load()` generates the metadata from the GGUF
+  header and writes it next to the file unless one is there, with the context
+  capped at 4,096 tokens. Creating the loader does no disk I/O, and
+  `loadWithProgress()` reports only `LoadComplete` or `LoadError`. The
+  facade's sidecar step is now the public `prepare_model_file`, shared by the
+  bolt bindings and Flutter (#813).
+
+### Changed
+
+- **Apple: the SDKs no longer link MetalPerformanceShaders.** `Package.swift`,
+  the `swift` branch manifest, the React Native pod and the Flutter iOS and
+  macOS pods dropped `MetalPerformanceShaders` (and
+  `MetalPerformanceShadersGraph`). They were added in 0.1.0-beta4 for Candle's
+  Metal backend, whose `metal` dependency references `MPSSupportsMTLDevice`;
+  Candle left the platform presets in #476, and no library shipped in v0.20.0
+  references either framework. CI now fails if the XCFramework or the Flutter
+  Apple libraries reference an MPS symbol, and links the XCFramework's device
+  slice. An app whose own code uses MetalPerformanceShaders, or a custom build
+  with `candle-metal`, must link the framework itself (#807).
+
 ### Fixed
 
+- **The trusted SDK source checker accepts normal release bumps.** It checks
+  only registered install pins in docs, accepts the observability JS and web
+  version pins, and recognizes the exact changelog heading and llama.cpp release
+  stamp written by the release tools without allowing unrelated edits (#811).
 - **The Swift samples on the iOS page and in the Swift README compile.** Error
   Handling catches the generated `XybridError` cases (`modelNotFound(id:)`,
   `inferenceError(message:)`, `ioError(message:)`), Result Handling switches on
@@ -48,6 +75,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Kotlin snippets match the SDKs, every page agrees that the platform presets
   include the vision path, the cache docs say cached models do not expire, and
   the feature matrix matches the Cargo manifests (#646).
+- **Rust: `ExecutionProviderInfo::current()` reports what ONNX Runtime runs
+  on.** `name` is `cpu` on every build: it was `coreml-ane` or `coreml` when
+  xybrid-sdk's `ort-coreml` feature was on, although every ONNX session is
+  built on the CPU execution provider. `coreml_available` is true whenever
+  ONNX Runtime's Core ML execution provider is linked, including under the
+  `platform-ios` and `platform-macos` presets, where it was false; it means
+  linked, not in use. Loading a pipeline whose stage sets `execution_provider`
+  to anything but `cpu` logs a warning, and `xybrid run`, `xybrid repl` and
+  `xybrid prepare` print one (#806).
+- **Flutter: `runStreamingWithContext` ends a turn on one final token.** It
+  emitted the native terminal token and then a second final token for the
+  metrics. On a tool-call turn that second token reported `finishReason:
+  'stop'`, no `toolCalls`, and a `cumulativeText` that included the raw
+  tool-call block; a turn cut off by `maxTokens` also ended on `'stop'`
+  instead of `'length'`. The stream now merges the two, as `runStreaming` and
+  `runStreamingWithFallback` do: the last token keeps the native index, text,
+  finish reason, `toolCalls` and `rawText`, and carries `metrics` and
+  `observation`. Code that expected two `isFinal` tokens per turn sees one.
+  When a tool-call block is suppressed but does not parse, the stream no
+  longer carries the raw output; `runWithContext` returns it in
+  `XybridResult.text` (#820).
+- **`fromModelFile` accepts a bare file name.** A GGUF named without a
+  directory, such as `model.gguf` in the working directory, now loads. The
+  shared facade step wrote its `model_metadata.json` and then failed with
+  `Directory not found` (#813).
+- **Two first loads of the same GGUF no longer race.** `fromModelFile` wrote
+  `model_metadata.json` in place, so a load starting at the same moment could
+  read the file half written and fail to parse it. The sidecar is now written
+  to a temporary file and linked into place, and an existing one is never
+  replaced (#813).
 
 ## [0.20.0] - 2026-11-17
 

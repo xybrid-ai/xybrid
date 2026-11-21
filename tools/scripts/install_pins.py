@@ -23,6 +23,7 @@ docs.xybrid.dev name the rc until the final release moves them on.
 A new install snippet goes into PINS. tests/test_install_pins.py fails while a
 tracked doc carries a snippet its pin does not list, or names a package with a
 version that no pin owns; CI's Repo checks job runs it on every pull request.
+The trusted release source policy also uses this table to constrain release bumps.
 Standard library only, and Python 3.9 compatible: version-sync.sh runs it on
 bare CI runners and laptops.
 

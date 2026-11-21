@@ -294,6 +294,8 @@ pipeline and ships nothing. Never commit `Package.swift useLocalNatives = true`
 (local-dev only; breaks remote SPM — run `bindings/apple/scripts/set-natives-mode.sh
 --set-remote`). Full ritual + gotchas: **§ Releases** below.
 
+If a release tool starts writing new metadata, update the exact trusted rendering in `tools/scripts/zzz_source_policy.py` and its real-bump regression test.
+
 ---
 
 # Section 0 — xybrid project decisions

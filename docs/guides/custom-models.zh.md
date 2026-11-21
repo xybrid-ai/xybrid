@@ -219,6 +219,8 @@ final model = await loader.load();
 final result = await model.run(XybridEnvelope.text('Hello, world!'));
 ```
 
+单个 llama.cpp GGUF 文件无需手写元数据：`XybridModelLoader.fromModelFile('/path/to/model.gguf')` 会在 `load()` 时（若文件旁尚无 `model_metadata.json`）在文件旁写入该文件。因此 GGUF 所在目录必须可写：Flutter assets 不是磁盘上的文件，iOS 应用 Bundle 是只读的，请先把 GGUF 复制到 `getApplicationSupportDirectory()` 下（见下文“Flutter — 打包资源”）。
+
 ### Kotlin (Android)
 
 ```kotlin

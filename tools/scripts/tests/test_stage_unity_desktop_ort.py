@@ -1,7 +1,5 @@
 import hashlib
-import io
 import sys
-import tarfile
 import tempfile
 import unittest
 import zipfile
@@ -12,21 +10,35 @@ from unittest import mock
 SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from stage_unity_desktop_ort import RuntimeSpec, stage_from_archive
+from stage_unity_desktop_ort import (
+    NUPKG_URL,
+    ORT_VERSION,
+    RUNTIMES,
+    RuntimeSpec,
+    stage_from_archive,
+)
 
 
 class StageUnityDesktopOrtTests(unittest.TestCase):
+    def test_both_platforms_come_from_the_pinned_nuget_package(self):
+        self.assertTrue(NUPKG_URL.startswith("https://api.nuget.org/"))
+        self.assertIn(f"/microsoft.ml.onnxruntime/{ORT_VERSION}/", NUPKG_URL)
+        for platform, spec in RUNTIMES.items():
+            with self.subTest(platform=platform):
+                self.assertEqual(spec.url, NUPKG_URL)
+                self.assertRegex(spec.sha256, r"^[0-9a-f]{64}$")
+                self.assertTrue(spec.archive_member.startswith("runtimes/"))
+        self.assertEqual(RUNTIMES["linux"].sha256, RUNTIMES["windows"].sha256)
+
     def test_linux_archive_stages_runtime_under_the_load_name(self):
         payload = b"linux-onnxruntime"
-        member = "onnxruntime-linux-x64-1.23.2/lib/libonnxruntime.so.1.23.2"
+        member = "runtimes/linux-x64/native/libonnxruntime.so"
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            archive = root / "ort.tgz"
-            with tarfile.open(archive, "w:gz") as tar:
-                info = tarfile.TarInfo(member)
-                info.size = len(payload)
-                tar.addfile(info, io.BytesIO(payload))
+            archive = root / "ort.nupkg"
+            with zipfile.ZipFile(archive, "w") as zip_file:
+                zip_file.writestr(member, payload)
 
             spec = self.spec("linux", member, "libonnxruntime.so", archive)
             output = root / "Linux"
@@ -40,7 +52,7 @@ class StageUnityDesktopOrtTests(unittest.TestCase):
 
     def test_windows_archive_stages_runtime_and_windows_metadata(self):
         payload = b"windows-onnxruntime"
-        member = "onnxruntime-win-x64-1.23.2/lib/onnxruntime.dll"
+        member = "runtimes/win-x64/native/onnxruntime.dll"
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -85,7 +97,7 @@ class StageUnityDesktopOrtTests(unittest.TestCase):
                 zip_file.writestr("README.md", "no runtime here")
             spec = self.spec(
                 "windows",
-                "onnxruntime-win-x64-1.23.2/lib/onnxruntime.dll",
+                "runtimes/win-x64/native/onnxruntime.dll",
                 "onnxruntime.dll",
                 archive,
             )
@@ -98,7 +110,7 @@ class StageUnityDesktopOrtTests(unittest.TestCase):
 
     def test_replace_failure_removes_temporary_runtime(self):
         payload = b"windows-onnxruntime"
-        member = "onnxruntime-win-x64-1.23.2/lib/onnxruntime.dll"
+        member = "runtimes/win-x64/native/onnxruntime.dll"
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

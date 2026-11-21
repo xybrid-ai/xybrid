@@ -28,7 +28,7 @@ SPEC CHECKSUMS:
   battery_plus: 0ed4cf1e771b535a89ac7323e0855ec734cf745f
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   path_provider_foundation: 0b743cbb62d8e47eab856f09262bb8c1ddcfe6ba
-  xybrid_flutter: e04ee30ec8e689c744f5fb9334e9a734bc6ad35d
+  xybrid_flutter: e475c3864e3071123f592700370afa7d0853369d
 
 PODFILE CHECKSUM: d3100dfb09e6decb727cf5bac9bcc2fd3ca5d128
 

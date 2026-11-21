@@ -866,6 +866,8 @@ jobs:
           echo "URL: $URL"
           echo "Checksum: $CHECKSUM"
 
+          # linkerSettings must equal the root Package.swift's
+          # (tools/scripts/tests/test_apple_linked_frameworks.py).
           cat > Package.swift << SWIFT_EOF
           // swift-tools-version:5.7
           import PackageDescription
@@ -890,8 +892,6 @@ jobs:
                       linkerSettings: [
                           .linkedLibrary("c++"),
                           .linkedFramework("Metal"),
-                          .linkedFramework("MetalPerformanceShaders"),
-                          .linkedFramework("MetalPerformanceShadersGraph"),
                           .linkedFramework("CoreML"),
                           .linkedFramework("Accelerate"),
                           .linkedFramework("Security"),

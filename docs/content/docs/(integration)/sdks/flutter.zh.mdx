@@ -149,6 +149,19 @@ await for (final event in loader.loadWithProgress()) {
 （例如 Hugging Face 仓库），`totalBytes` 为 `null`；无论哪种情况 `downloadedBytes`
 都是准确值，可用于显示已下载体积、速度和剩余时间。
 
+## 加载本地 GGUF 文件
+
+```dart
+import 'package:path_provider/path_provider.dart';
+
+// 每个 GGUF 一个目录：用户选择的文件，或从应用 Bundle 中复制出来的 asset。
+final support = await getApplicationSupportDirectory();
+final path = '${support.path}/models/my-model/my-model.gguf';
+final model = await XybridModelLoader.fromModelFile(path).load();
+```
+
+原始的 llama.cpp GGUF 无需 `model_metadata.json`。创建加载器不会访问磁盘；`load()` 会根据 GGUF 头部生成该文件并写在 GGUF 旁边，上下文上限为 4,096 个 Token（需要更长对话时调高其中的 `context_length`）。请把每个 GGUF 放在可写的独立目录中，例如 `getApplicationSupportDirectory()` 下的目录：`pubspec.yaml` 中声明的 assets 不是磁盘上的文件，iOS 应用 Bundle 是只读的，都无法写入 `model_metadata.json`。目录中已有的 `model_metadata.json` 会被原样使用：在同一目录中加载第二个 GGUF 时，实际加载的仍是第一个 GGUF 的模型。生成的元数据不含视觉投影器，带 mmproj 的视觉 GGUF 仍需使用 `fromDirectory`。文件不存在时，`load()` 会抛出消息包含 `GGUF file not found: <path>` 的 `XybridException`；`loadWithProgress()` 没有可下载的内容，只会发出 `LoadComplete` 或 `LoadError`。
+
 ---
 
 ## API 参考
@@ -183,7 +196,11 @@ class Xybrid {
 ```dart
 class XybridModelLoader {
   factory XybridModelLoader.fromRegistry(String modelId);
+  factory XybridModelLoader.fromRegistrySpeculative(String modelId);
   factory XybridModelLoader.fromBundle(String path);
+  factory XybridModelLoader.fromDirectory(String path);
+  factory XybridModelLoader.fromHuggingFace(String repo);
+  factory XybridModelLoader.fromModelFile(String path);
 
   Future<XybridModel> load();
   Stream<LoadEvent> loadWithProgress();

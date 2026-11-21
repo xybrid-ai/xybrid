@@ -223,6 +223,8 @@ class XybridModelLoader {
   factory XybridModelLoader.fromRegistry(String modelId);
   factory XybridModelLoader.fromBundle(String path);
   factory XybridModelLoader.fromDirectory(String path);
+  // Raw llama.cpp GGUF; load() writes model_metadata.json beside it if absent
+  factory XybridModelLoader.fromModelFile(String path);
 
   // Serve from the cloud gateway while the weights download in the background
   factory XybridModelLoader.fromRegistrySpeculative(String modelId);
@@ -422,7 +424,7 @@ var result = model.Run(Envelope.Text("Hello!"));
 | `fromDirectory()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingFace()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingfaceWithRevision()` | — | ✅ | ✅ | ✅ |
-| `fromModelFile()` | — | ✅ | ✅ | ✅ |
+| `fromModelFile()` | ✅ | ✅ | ✅ | ✅ |
 | `load()` | ✅ | ✅ | ✅ | ✅ |
 | `loadWithProgress()` | ✅ | — | — | — |
 | `download()` / `StartDownload()` | — | ✅ | ✅ | ✅ |
@@ -725,7 +727,9 @@ class XybridModel {
   Future<void> warmup();
   Future<void> unload();
 
-  // Hardware info
+  // Hardware info (planned; Rust only today, as ExecutionProviderInfo::current()).
+  // Describes ONNX Runtime: name is always "cpu"; coremlAvailable means the
+  // Core ML execution provider is linked into the build, not in use.
   ExecutionProviderInfo executionProviderInfo();
 }
 ```
@@ -869,7 +873,7 @@ println!("{} {:.3}", best.id, best.score);
 | `downloadStatus()` | ✅ | ✅ | ✅ | ✅ |
 | `awaitDownload()` | — | ✅ | ✅ | ✅ |
 | `downloadProgress()` | ✅ | ✅ | ✅ | ✅ |
-| `executionProviderInfo()` | — | — | — | — |
+| `executionProviderInfo()` / `ExecutionProviderInfo::current()` | Rust ✅ | planned | planned | planned |
 
 While a speculative load is still downloading, `isCloudServing()` is true and
 `downloadStatus()` returns a consistent read of the state (`downloading` /
