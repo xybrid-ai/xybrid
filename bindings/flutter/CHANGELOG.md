@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+* Fixed: `runStreamingWithContext` ends a successful turn on one final token,
+  as `runStreaming` and `runStreamingWithFallback` do. It used to emit the
+  native terminal token and then a second final token (`token: ''`,
+  `index: 0`) for the metrics. On a tool-call turn that second token reported
+  `finishReason: 'stop'`, empty `toolCalls` and a `cumulativeText` containing
+  the raw tool-call block, and a turn cut off by `maxTokens` ended on
+  `'stop'` instead of `'length'`. The single final token keeps the terminal
+  token's `index`, `cumulativeText`, `finishReason`, `toolCalls` and
+  `rawText`, and carries `metrics` and `observation`. Code that expected two
+  `isFinal` tokens per turn sees one. When a tool-call block is suppressed but
+  does not parse, the stream no longer carries the raw output; `runWithContext`
+  returns it in `XybridResult.text`.
 * Changed: the iOS and macOS pods no longer link MetalPerformanceShaders.
   Nothing in the native library references it; a custom build with
   `candle-metal` must add the framework itself.

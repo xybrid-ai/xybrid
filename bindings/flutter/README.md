@@ -103,10 +103,10 @@ An invalid explicit `traceparent` is rejected before any work starts: `run`
 and `XybridPipeline.run` throw `XybridException`, token streams end with an
 error token, `runTtsStreaming` fails its stream with a `StateError`, and
 `XybridStreamSession.fromModel`, `withObservation` and the manual `start*`
-calls throw. Normal and fallback
-streams merge `observation` and metrics into one terminal token, preserving its
-native index and finish reason. Context streams retain their separate
-metrics/completion token. Tool calls are delivered once.
+calls throw. Every token stream (`runStreaming`, `runStreamingWithContext`,
+`runStreamingWithFallback`) merges `observation` and metrics into one terminal
+token, preserving its native index and finish reason. Tool calls are delivered
+once.
 
 Every traced surface takes observation controls and returns a reference
 (`null` when untraced or suppressed):
