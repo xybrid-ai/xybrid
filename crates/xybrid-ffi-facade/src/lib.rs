@@ -2107,7 +2107,8 @@ impl VoiceInfo {
 ///
 /// [`Error::ConfigError`] when `path` is empty or names no file, or when the
 /// metadata cannot be generated; [`Error::IoError`] when the sidecar cannot be
-/// written, for example into a read-only app bundle.
+/// written, for example into a read-only app bundle or on a filesystem that
+/// does not support hard links. An existing sidecar does not need a hard link.
 pub fn prepare_model_file(path: &str) -> Result<std::path::PathBuf> {
     if path.is_empty() {
         return Err(Error::ConfigError {
@@ -2151,8 +2152,19 @@ pub fn prepare_model_file(path: &str) -> Result<std::path::PathBuf> {
 /// ever exposing a partial file. The bytes go to a uniquely named temporary
 /// file in the same directory, which is then hard-linked into place; a link
 /// never replaces an existing file. Losing that race to a concurrent call is
-/// success, since the winner published the same generated metadata.
+/// success. If the filesystem cannot publish without replacement, this fails
+/// without modifying the destination.
 fn publish_if_absent(path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
+    publish_if_absent_with_link(path, contents, |source, destination| {
+        std::fs::hard_link(source, destination)
+    })
+}
+
+fn publish_if_absent_with_link(
+    path: &std::path::Path,
+    contents: &[u8],
+    link: impl FnOnce(&std::path::Path, &std::path::Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
     use std::hash::{Hash, Hasher};
     use std::io::{ErrorKind, Write};
 
@@ -2180,15 +2192,11 @@ fn publish_if_absent(path: &std::path::Path, contents: &[u8]) -> std::io::Result
         .open(&temporary)?;
     let written = file.write_all(contents);
     drop(file);
-    let published = written.and_then(|()| match std::fs::hard_link(&temporary, path) {
+    let published = written.and_then(|()| match link(&temporary, path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == ErrorKind::AlreadyExists => Ok(()),
-        // A filesystem without hard links (FAT, exFAT): a rename is atomic
-        // too, but it replaces, so only rename onto a missing file.
-        Err(_) if path.exists() => Ok(()),
-        Err(_) => std::fs::rename(&temporary, path),
+        Err(error) => Err(error),
     });
-    // This call created the temporary file; a rename has already moved it.
     let _ = std::fs::remove_file(&temporary);
     published
 }
@@ -5609,6 +5617,37 @@ stages:
                 .collect();
             names.sort();
             assert_eq!(names, ["model.gguf", "model_metadata.json"]);
+        }
+    }
+
+    #[test]
+    fn sidecar_publication_fails_safely_without_hard_links() {
+        use std::io::{Error, ErrorKind};
+
+        for competing_writer in [false, true] {
+            let dir = tempfile::TempDir::new().unwrap();
+            let sidecar = dir.path().join("model_metadata.json");
+            let existing = b"user-authored metadata";
+            let error =
+                publish_if_absent_with_link(&sidecar, b"generated metadata", |source, target| {
+                    assert_eq!(std::fs::read(source).unwrap(), b"generated metadata");
+                    if competing_writer {
+                        std::fs::write(target, existing).unwrap();
+                    }
+                    Err(Error::new(ErrorKind::Unsupported, "hard links unavailable"))
+                })
+                .unwrap_err();
+
+            assert_eq!(error.kind(), ErrorKind::Unsupported);
+            if competing_writer {
+                assert_eq!(std::fs::read(&sidecar).unwrap(), existing);
+            } else {
+                assert!(!sidecar.exists());
+            }
+            assert_eq!(
+                std::fs::read_dir(dir.path()).unwrap().count(),
+                usize::from(competing_writer)
+            );
         }
     }
 
