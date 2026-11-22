@@ -3,8 +3,7 @@ import { type InferPageType, llms, loader } from 'fumadocs-core/source';
 import { lucideIconsPlugin } from 'fumadocs-core/source/lucide-icons';
 import { i18n } from '@/lib/i18n';
 
-/** The public origin of the docs. */
-export const SITE = 'https://docs.xybrid.dev';
+export { SITE } from '@/lib/discovery';
 
 // See https://fumadocs.dev/docs/headless/source-api for more info
 export const source = loader({

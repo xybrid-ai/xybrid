@@ -1,19 +1,10 @@
 import Link from 'next/link';
+import { homeContent } from '@/lib/home';
+import { i18n } from '@/lib/i18n';
 
-const translations = {
-  en: {
-    tagline: 'Hybrid Cloud-Edge ML Inference Orchestrator',
-    description:
-      'Run ML models on-device or in the cloud with intelligent routing based on device capabilities. Built in Rust with Flutter bindings.',
-    quickstart: 'Quickstart',
-  },
-  zh: {
-    tagline: '混合云边缘 ML 推理编排器',
-    description:
-      '在设备端或云端运行 ML 模型，基于设备能力智能路由。使用 Rust 构建，支持 Flutter 绑定。',
-    quickstart: '快速开始',
-  },
-};
+export function generateStaticParams() {
+  return i18n.languages.map((lang) => ({ lang }));
+}
 
 export default async function HomePage({
   params,
@@ -21,7 +12,7 @@ export default async function HomePage({
   params: Promise<{ lang: string }>;
 }) {
   const { lang } = await params;
-  const t = translations[lang as keyof typeof translations] || translations.en;
+  const t = homeContent(lang);
 
   return (
     <div className="flex flex-col justify-center text-center flex-1 px-4">

@@ -22,6 +22,10 @@ const config = {
   async rewrites() {
     // the files for agents, served by `app/[lang]/llms.mdx/[...path]`
     return [
+      {
+        source: `/${lang}/index.md`,
+        destination: '/:lang/llms.mdx/index.md',
+      },
       // `/en/docs/quickstart.md`, the Markdown of a page
       {
         source: `/${lang}/docs/:path*.md`,
