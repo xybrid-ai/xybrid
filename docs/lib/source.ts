@@ -3,7 +3,7 @@ import { type InferPageType, llms, loader } from 'fumadocs-core/source';
 import { lucideIconsPlugin } from 'fumadocs-core/source/lucide-icons';
 import { i18n } from '@/lib/i18n';
 
-/** The public origin. Links in the files for agents are absolute, so they work out of context. */
+/** The public origin of the docs. */
 export const SITE = 'https://docs.xybrid.dev';
 
 // See https://fumadocs.dev/docs/headless/source-api for more info
@@ -31,9 +31,7 @@ export function getPageImage(page: InferPageType<typeof source>) {
  * `/<lang>/llms.txt` and `/<lang>/llms-full.txt`.
  */
 export const docsLlms = llms(source, {
-  renderPage: async (page) => `# ${page.data.title} (${SITE}${page.url})
+  renderPage: async (page) => `# ${page.data.title} (${page.url})
 
 ${await page.data.getText('processed')}`,
-  // `item.url` is a page, or in the files the `.md` file of a page
-  renderUrl: (item) => (item.url.startsWith('/') ? `${SITE}${item.url}` : item.url),
 });

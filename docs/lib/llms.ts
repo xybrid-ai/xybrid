@@ -7,10 +7,10 @@ import { docsLlms, SITE, source } from '@/lib/source';
 const summary: Record<string, string> = {
   en: `> Xybrid is an on-device AI SDK: speech-to-text, text-to-speech, LLMs, vision and embeddings run locally in mobile, desktop and game apps (Flutter, Swift, Kotlin, React Native, Unity, Rust, a CLI, and a browser preview). Local inference needs no account or key; cloud fallback and trace export are opt-in.
 
-The full text of every page is at <${SITE}/llms-full.txt>, and each link below is the Markdown of one page. Most pages are also available in Chinese: <${SITE}/zh/llms.txt>.`,
+The full text of every page is at <${SITE}/llms-full.txt>, and each link below is the Markdown of one page. Most pages are also available in Chinese: <${SITE}/zh/llms.txt>. Agents can also search and read the docs over MCP at <${SITE}/api/mcp>.`,
   zh: `> Xybrid 是一个本地 AI SDK：语音转文字、文字转语音、大语言模型、视觉模型和嵌入模型直接在移动端、桌面端和游戏应用中本地运行（Flutter、Swift、Kotlin、React Native、Unity、Rust、命令行，以及浏览器预览版）。本地推理无需账号或密钥；云端回退和轨迹导出需另行显式开启。
 
-所有页面的全文位于 <${SITE}/zh/llms-full.txt>，下方每个链接都是一个页面的 Markdown。部分页面尚未翻译，以英文提供。英文索引：<${SITE}/llms.txt>。`,
+所有页面的全文位于 <${SITE}/zh/llms-full.txt>，下方每个链接都是一个页面的 Markdown。部分页面尚未翻译，以英文提供。英文索引：<${SITE}/llms.txt>。AI 代理也可以通过 MCP 搜索和阅读文档：<${SITE}/api/mcp>。`,
 };
 
 /**
