@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.21.0
+
 * Added: `XybridModelLoader.fromModelFile(path)` loads a raw llama.cpp GGUF
   with no `model_metadata.json`. Creating the loader touches no disk; `load()`
   writes the generated metadata next to the file unless one is already there,
