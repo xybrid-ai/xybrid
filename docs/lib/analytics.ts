@@ -13,7 +13,7 @@ const campaignSources = new Map([
   ['newsletter', 'newsletter'],
 ]);
 
-const destinations = ['docs', 'console', 'github'] as const;
+const destinations = ['console', 'github'] as const;
 type Destination = (typeof destinations)[number];
 
 export type DocsEvent = {
@@ -56,7 +56,6 @@ export function referrerDomain(referrer: string) {
 export function outboundDestination(url: URL, currentOrigin: string): Destination | undefined {
   if (url.protocol !== 'https:' || url.origin === currentOrigin || url.username || url.password) return;
   switch (url.origin) {
-    case DOCS_ORIGIN: return 'docs';
     case 'https://console.xybrid.dev': return 'console';
     case 'https://github.com': return 'github';
   }

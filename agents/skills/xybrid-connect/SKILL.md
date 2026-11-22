@@ -74,10 +74,12 @@ If `~/.xybrid` isn't writable (some sandboxes), the CLI fails with a `credential
 From the repository root, preserve the first **Xybrid setup entrypoint** supplied by the instructions that brought you here (`web-copy`, `setup-prompt`, `llms-txt`, `skill`, `mcp`, or `docs`). Only default to `skill` when the skill itself was the entrypoint. The following Bash example uses `XYBRID_SETUP_VIA` to carry that earlier value. In any shell, inspect `xybrid connect --help` and omit `--via` if it isn't listed. Use the target file selected in Step 2 (and `--env-name` if needed).
 
 ```bash
+env_args=(--write-env '<file>')
+# If Step 2 selects a custom name: env_args+=(--env-name '<name>')
 if xybrid connect --help | grep -q -- '--via'; then
-  xybrid connect --via "${XYBRID_SETUP_VIA:-skill}" --write-env .env --json
+  xybrid connect --via "${XYBRID_SETUP_VIA:-skill}" "${env_args[@]}" --json
 else
-  xybrid connect --write-env .env --json
+  xybrid connect "${env_args[@]}" --json
 fi
 ```
 
@@ -719,7 +721,7 @@ The reference implementation is [`scripts/xybrid_agent_connect.py`](scripts/xybr
 
 ```bash
 curl -sSL -o "${TMPDIR:-/tmp}/xybrid_agent_connect.py" https://raw.githubusercontent.com/xybrid-ai/xybrid/master/agents/skills/xybrid-connect/scripts/xybrid_agent_connect.py
-# sha256: 53d79d24388e45de43750a6ab7c706bdb491568e7a0cfea628610e363cbab484
+# sha256: fc2b18a45432a2245ffee5b8fe4268d4a204aee2b4eb636cf165678f67659e88
 python3 -I "${TMPDIR:-/tmp}/xybrid_agent_connect.py" connect --write-env .env --via "${XYBRID_SETUP_VIA:-skill}" --binding python
 python3 -I "${TMPDIR:-/tmp}/xybrid_agent_connect.py" status   # Step 7, instead of `xybrid auth status --json`
 python3 -I "${TMPDIR:-/tmp}/xybrid_agent_connect.py" claim    # the private claim link again

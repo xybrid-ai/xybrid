@@ -2556,6 +2556,15 @@ fn connect_omits_via_without_an_explicit_grant_and_keeps_omission_on_retry() {
 
 #[test]
 fn a_replacement_challenge_can_revoke_attribution_on_the_same_request() {
+    check_attribution_revocation(8);
+}
+
+#[test]
+fn a_failing_replacement_challenge_still_persists_revocation() {
+    check_attribution_revocation(255);
+}
+
+fn check_attribution_revocation(replacement_difficulty: u8) {
     require_git!();
     let sandbox = Sandbox::new();
     let server = MockServer::start();
@@ -2575,7 +2584,14 @@ fn a_replacement_challenge_can_revoke_attribution_on_the_same_request() {
     let pending = sandbox.credentials()["pending"][0].clone();
     assert_eq!(pending["client_info"]["via"], "web-copy");
     let key = pending["idempotency_key"].as_str().unwrap();
-    let revoked = mock_challenge_with_via(&server, Some(json!(false)));
+    let revoked = server.mock(|when, then| {
+        when.method(GET).path("/v1/agent/challenge");
+        then.status(200).json_body(json!({
+            "challenge": CHALLENGE,
+            "difficulty": replacement_difficulty,
+            "collect_via": false,
+        }));
+    });
     let expired = server.mock(|when, then| {
         when.method(POST)
             .path("/v1/agent/connect")
@@ -2601,10 +2617,19 @@ fn a_replacement_challenge_can_revoke_attribution_on_the_same_request() {
     assert_eq!(run.code, Some(1), "{run}");
     expired.assert_hits(1);
     revoked.assert_hits(1);
-    retry.assert_hits(1);
     let saved = sandbox.credentials()["pending"][0].clone();
     assert_eq!(saved["idempotency_key"], key);
     assert!(saved["client_info"].get("via").is_none());
+    if replacement_difficulty == 255 {
+        retry.assert_hits(0);
+        let run = sandbox.run(&platform_args(
+            &url,
+            &["connect", "--json", "--via", "docs"],
+        ));
+        assert_eq!(run.code, Some(1), "{run}");
+        revoked.assert_hits(1);
+    }
+    retry.assert_hits(1);
 }
 
 /// After a lost `connect --new` answer the suggested command repeats that

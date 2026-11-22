@@ -1,3 +1,4 @@
+import { checkRateLimit } from '@vercel/firewall';
 import { ANALYTICS_MAX_BYTES, DOCS_ORIGIN, analyticsAllowed, capturePayload } from './analytics.ts';
 
 const endpoint = 'https://us.i.posthog.com/i/v0/e/';
@@ -28,7 +29,13 @@ export async function relayEvent(request: Request, paths: ReadonlySet<string>) {
 
   try {
     const event = capturePayload(await readEvent(request), paths);
-    if (event) {
+    if (event && process.env.VERCEL === '1' && process.env.NODE_ENV === 'production') {
+      const limit = await checkRateLimit('docs-analytics-relay', {
+        headers: new Headers({ host: new URL(DOCS_ORIGIN).host }),
+        rateLimitKey: 'global',
+        timeout: 750,
+      });
+      if (limit.rateLimited || limit.error) return empty();
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

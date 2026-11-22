@@ -1333,6 +1333,17 @@ impl Session<'_> {
     /// Fetch and solve a challenge into `pending`, then persist it.
     fn solve_into(&mut self, pending: &mut PendingRequest) -> Result<(), Failed> {
         let challenge = self.client.challenge()?;
+        if challenge.collect_via.as_bool() != Some(true)
+            && pending
+                .client_info
+                .as_mut()
+                .and_then(|info| info.via.take())
+                .is_some()
+            && pending.challenge.is_some()
+        {
+            self.file.set_pending(pending.clone());
+            self.save()?;
+        }
         if let Some(algorithm) = &challenge.algorithm {
             if algorithm != pow::ALGORITHM {
                 return Err(CliError::new(
@@ -1360,10 +1371,6 @@ impl Session<'_> {
                 ),
             )
         })?;
-        let collecting = challenge.collect_via.as_bool() == Some(true);
-        if let Some(info) = pending.client_info.as_mut().filter(|_| !collecting) {
-            info.via = None;
-        }
         pending.challenge = Some(challenge.challenge);
         pending.nonce = Some(nonce.to_string());
         self.file.set_pending(pending.clone());

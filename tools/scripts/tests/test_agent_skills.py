@@ -275,7 +275,7 @@ class Platform(BaseHTTPRequestHandler):
         if self.closed:
             return self.reply(403, {"error": "agent_signup_closed", "message": "closed", "reason": "disabled"})
         if self.path == "/v1/agent/challenge":
-            answer = {"challenge": "xybrid-pow-test-vector", "difficulty": 8,
+            answer = {"challenge": "xybrid-pow-test-vector", "difficulty": type(self).difficulty,
                       "expires_at": "2999-01-01T00:00:00Z", "algorithm": "sha256-leading-zero-bits"}
             if type(self).collect_via is not None:
                 answer["collect_via"] = type(self).collect_via
@@ -328,6 +328,7 @@ class ScriptContractTests(unittest.TestCase):
         Platform.closed, Platform.requests, Platform.workspace, Platform.workspace_failure = False, [], {}, None
         Platform.provision = {}
         Platform.collect_via = None
+        Platform.difficulty = 8
         Platform.revoke_via_on_post = False
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
@@ -704,6 +705,28 @@ class ScriptContractTests(unittest.TestCase):
         self.assertNotIn("via", retry[2]["client_info"])
         self.assertEqual(first[3]["Idempotency-Key"], retry[3]["Idempotency-Key"])
         self.assertNotIn("via", self.saved()["pending"][0]["client_info"])
+
+    def test_a_failing_replacement_challenge_still_persists_revocation(self):
+        app = self.repo("revocation-before-solve")
+        Platform.collect_via = True
+        Platform.provision = {"key_expires_at": "invalid"}
+        code, report = self.run_script(app, "connect", "--write-env", ".env", "--via", "web-copy")
+        self.assertEqual((code, report["error"]["code"]), (1, "invalid_platform_response"), report)
+        self.assertEqual(self.saved()["pending"][0]["client_info"]["via"], "web-copy")
+
+        Platform.revoke_via_on_post = True
+        Platform.difficulty = 256
+        code, report = self.run_script(app, "connect", "--write-env", ".env")
+        self.assertEqual((code, report["error"]["code"]), (1, "unsupported_challenge"), report)
+        self.assertNotIn("via", self.saved()["pending"][0]["client_info"])
+
+        Platform.provision = {}
+        Platform.requests = []
+        code, report = self.run_script(app, "connect", "--write-env", ".env", "--via", "docs")
+        self.assertEqual((code, report["status"]), (0, "created"), report)
+        [post] = Platform.requests
+        self.assertEqual(post[0], "POST")
+        self.assertNotIn("via", post[2]["client_info"])
 
     # --- the project file, read and written as the CLI does ----------------------
 

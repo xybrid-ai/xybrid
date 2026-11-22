@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DOCS_ORIGIN, analyticsAllowed, capturePayload } from './analytics.ts';
+import { DOCS_ORIGIN, analyticsAllowed, capturePayload, outboundDestination } from './analytics.ts';
 import { relayEvent } from './analytics-relay.ts';
 
 const notice = '2025-06-01T12:00:00Z';
@@ -27,6 +27,7 @@ test('capture rejects unlisted URLs and events and invalid timestamps', () => {
     { path: '/en/private' },
     { event: '$identify' },
     { event: 'outbound_navigation', destination: 'elsewhere' },
+    { event: 'outbound_navigation', destination: 'docs' },
     { timestamp: undefined },
     { timestamp: '2025-02-30T12:00:00.000Z' },
     { timestamp: '2025-06-01T12:06:00.000Z' },
@@ -61,11 +62,23 @@ test('capture rebuilds allowlisted properties and preserves each event timestamp
   assert.equal(leave?.properties.campaign_source, undefined);
 });
 
+test('outbound navigation only includes external console and GitHub links', () => {
+  assert.equal(outboundDestination(new URL(`${DOCS_ORIGIN}/en`), DOCS_ORIGIN), undefined);
+  assert.equal(outboundDestination(new URL('https://console.xybrid.dev'), DOCS_ORIGIN), 'console');
+  assert.equal(outboundDestination(new URL('https://github.com/xybrid-ai/xybrid'), DOCS_ORIGIN), 'github');
+});
+
 test('relay does not forward before notice, without a key, or from another origin', async (context) => {
-  const fetch = context.mock.method(globalThis, 'fetch', async (..._args: Parameters<typeof globalThis.fetch>) => new Response(null));
+  const quotaUrl = `${DOCS_ORIGIN}/.well-known/vercel/rate-limit-api/docs-analytics-relay`;
+  let quotaStatus: number | undefined = 204;
+  const fetch = context.mock.method(globalThis, 'fetch', async (...args: Parameters<typeof globalThis.fetch>) => {
+    if (args[0] !== quotaUrl) return new Response(null);
+    if (quotaStatus === undefined) throw new Error('rate limiter unavailable');
+    return new Response(null, { status: quotaStatus });
+  });
   context.mock.method(Date, 'now', () => now);
   const original = process.env;
-  process.env = { ...original, NEXT_PUBLIC_ANALYTICS_ENABLED: 'true', POSTHOG_DOCS_KEY: 'test-key' };
+  process.env = { ...original, NODE_ENV: 'production', VERCEL: '1', NEXT_PUBLIC_ANALYTICS_ENABLED: 'true', POSTHOG_DOCS_KEY: 'test-key' };
   context.after(() => { process.env = original; });
   delete process.env.NEXT_PUBLIC_ANALYTICS_NOTICE_EFFECTIVE_AT;
   const relay = async (site = DOCS_ORIGIN, origin = DOCS_ORIGIN) => {
@@ -89,11 +102,29 @@ test('relay does not forward before notice, without a key, or from another origi
   process.env.NEXT_PUBLIC_ANALYTICS_ENABLED = 'true';
   await relay('https://preview.example.com');
   await relay(DOCS_ORIGIN, 'https://other.example.com');
+  delete process.env.VERCEL;
+  await relay();
   assert.equal(fetch.mock.callCount(), 0);
 
+  process.env.VERCEL = '1';
+  for (const status of [429, 404, 503, undefined]) {
+    quotaStatus = status;
+    await relay();
+  }
+  assert.equal(fetch.mock.callCount(), 4);
+  for (const { arguments: [url, init] } of fetch.mock.calls) {
+    assert.equal(url, quotaUrl);
+    const headers = new Headers(init?.headers);
+    assert.equal(headers.get('x-rr-cookie'), null);
+    assert.equal(headers.get('x-rr-origin'), null);
+    assert.match(headers.get('x-vercel-rate-limit-key') ?? '', /^global-/);
+  }
+
+  quotaStatus = 204;
   await relay();
-  assert.equal(fetch.mock.callCount(), 1);
-  const [, init] = fetch.mock.calls[0].arguments;
+  assert.equal(fetch.mock.callCount(), 6);
+  const [url, init] = fetch.mock.calls[5].arguments;
+  assert.equal(url, 'https://us.i.posthog.com/i/v0/e/');
   assert.deepEqual(init?.headers, { 'Content-Type': 'application/json' });
   assert.deepEqual(JSON.parse(String(init?.body)), { ...capturePayload(pageview, paths, now), api_key: 'test-key' });
 });

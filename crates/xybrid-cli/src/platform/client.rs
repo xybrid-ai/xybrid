@@ -76,30 +76,6 @@ pub(crate) fn connect_via(value: Option<&str>) -> Option<&'static str> {
     .find(|candidate| Some(*candidate) == value)
 }
 
-#[test]
-fn client_info_serializes_only_recognized_entrypoints() {
-    for via in [
-        "web-copy",
-        "setup-prompt",
-        "llms-txt",
-        "skill",
-        "mcp",
-        "docs",
-    ] {
-        let info = serde_json::to_value(ClientInfo::current(Some(via))).unwrap();
-        assert_eq!(info["via"], via);
-    }
-    for via in [
-        None,
-        Some("unknown"),
-        Some("DOCS"),
-        Some("docs?private=value"),
-    ] {
-        let info = serde_json::to_value(ClientInfo::current(via)).unwrap();
-        assert!(info.get("via").is_none());
-    }
-}
-
 /// `POST /v1/agent/connect` body.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ConnectBody<'a> {
@@ -394,6 +370,30 @@ pub(crate) fn safe_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn client_info_serializes_only_recognized_entrypoints() {
+        for via in [
+            "web-copy",
+            "setup-prompt",
+            "llms-txt",
+            "skill",
+            "mcp",
+            "docs",
+        ] {
+            let info = serde_json::to_value(ClientInfo::current(Some(via))).unwrap();
+            assert_eq!(info["via"], via);
+        }
+        for via in [
+            None,
+            Some("unknown"),
+            Some("DOCS"),
+            Some("docs?private=value"),
+        ] {
+            let info = serde_json::to_value(ClientInfo::current(via)).unwrap();
+            assert!(info.get("via").is_none());
+        }
+    }
 
     #[test]
     fn provision_debug_redacts_secrets() {

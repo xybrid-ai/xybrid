@@ -1304,6 +1304,9 @@ def provision(args, host, lock, data, root):
     def solve_into(record):
         status, body, _ = call(host, "GET", "/v1/agent/challenge")
         check_failure(status, body, record, lock, data)
+        if body.get("collect_via") is not True and record.get("client_info", {}).pop("via", None) is not None:
+            if record in data["pending"]:
+                lock.save(data)
         challenge, difficulty = body.get("challenge"), body.get("difficulty")
         if body.get("algorithm") not in (None, "sha256-leading-zero-bits") or not isinstance(challenge, str) or \
                 not challenge or len(challenge) > 512 or any(ord(c) < 32 for c in challenge) or \
@@ -1313,8 +1316,6 @@ def provision(args, host, lock, data, root):
         nonce = solve(challenge, difficulty, time.monotonic() + max(5, (expires - now()).total_seconds() - 15))
         if nonce is None:
             raise fail("challenge_too_hard", "the proof of work did not finish before the challenge expired")
-        if body.get("collect_via") is not True:
-            record.get("client_info", {}).pop("via", None)
         record.update(challenge=challenge, nonce=str(nonce))
         if record not in data["pending"]:
             data["pending"].append(record)

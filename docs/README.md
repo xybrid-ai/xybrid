@@ -34,10 +34,15 @@ the server-only `POSTHOG_DOCS_KEY` for the isolated US Xybrid analytics project.
 Set the effective timestamp from the actual notice and do not backdate it.
 Enable **Discard client IP data** on that project before turning collection on.
 Build and deploy with the same gate values; `NEXT_PUBLIC_*` is inlined at build time.
+Before enabling collection, configure a Vercel Firewall SDK rate limit with ID
+`docs-analytics-relay` and a threshold appropriate for the analytics budget.
+The relay uses one shared bucket across visitors and forwards nothing if the
+limit is exceeded, missing, or unavailable. No browser headers are sent to
+the rate-limit check. Optionally add a separate per-IP edge limit on `POST /relay`.
 
 Only HTTPS `docs.xybrid.dev` sends events. The first-party `/relay` forwards
-allowlisted pageviews, exits and explicit outbound navigation to Docs, Console
-or GitHub without forwarding browser headers, URLs with queries or fragments,
+allowlisted pageviews, exits and explicit outbound navigation to Console or
+GitHub without forwarding browser headers, URLs with queries or fragments,
 or arbitrary campaign values. Only the initial pageview may include the external
 referring hostname; no referrer URL, path, port, query, or fragment is sent.
 No docs page has a setup-prompt copy control to

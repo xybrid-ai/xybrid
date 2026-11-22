@@ -13,6 +13,7 @@
   "dependencies": {
     "@fumadocs/language": "0.2.21",
     "@modelcontextprotocol/server": "^2.4.0",
+    "@vercel/firewall": "1.2.6",
     "fumadocs-core": "16.19.5",
     "fumadocs-mdx": "15.6.4",
     "fumadocs-ui": "16.19.5",
