@@ -261,11 +261,21 @@ var model = XybridModel.FromHuggingfaceWithRevision("org/repo:Q8_0", "v1.0");
 ### Kotlin
 
 ```kotlin
+sealed interface ModelSource {
+    data class Registry(val id: String) : ModelSource
+    data class Bundle(val path: String) : ModelSource
+    data class Directory(val path: String) : ModelSource
+    data class HuggingFace(val repo: String) : ModelSource
+    data class ModelFile(val path: String) : ModelSource
+    data class RegistrySpeculative(val id: String) : ModelSource
+}
+
 class XybridModelLoader {
   companion object {
     fun fromRegistry(modelId: String): XybridModelLoader
     fun fromBundle(path: String): XybridModelLoader
     fun fromDirectory(path: String): XybridModelLoader
+    fun fromModelFile(path: String): XybridModelLoader
     fun fromRegistrySpeculative(id: String): XybridModelLoader
   }
 
@@ -414,7 +424,7 @@ var result = model.Run(Envelope.Text("Hello!"));
 | `fromDirectory()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingFace()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingfaceWithRevision()` | — | ✅ | ✅ | ✅ |
-| `fromModelFile()` | ✅ | — | ✅ | ✅ |
+| `fromModelFile()` | ✅ | ✅ | ✅ | ✅ |
 | `load()` | ✅ | ✅ | ✅ | ✅ |
 | `loadWithProgress()` | ✅ | — | — | — |
 | `download()` / `StartDownload()` | — | ✅ | ✅ | ✅ |

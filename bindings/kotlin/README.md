@@ -81,6 +81,25 @@ import ai.xybrid.Xybrid
 val model = Xybrid.model(ModelSource.bundle("/path/to/model/bundle")).load()
 ```
 
+### Loading a Local GGUF File
+
+For text generation with a local llama.cpp GGUF, no `model_metadata.json` is
+needed:
+
+```kotlin
+import ai.xybrid.ModelLoader
+
+val model = ModelLoader.fromModelFile(ggufFile.path).load()
+```
+
+`load()` writes `model_metadata.json` beside the GGUF if it does not already
+exist. The generated context is capped at 4,096 tokens; raise `context_length`
+in the metadata for longer chats. Copy a GGUF from APK assets or a `content://`
+URI to a writable directory such as one under `context.noBackupFilesDir`.
+Use one directory per GGUF: an existing metadata file is used as is, so a
+second GGUF in the same directory would load the first model. Vision GGUFs
+with an mmproj still use `ModelSource.directory`.
+
 ### Speech (Phonon / Kitten TTS 2)
 
 The arm64-v8a library links the zzz speech engine statically, so arm64
@@ -294,7 +313,7 @@ try {
 
 | Type | Description |
 |------|-------------|
-| `ModelSource` | Registry, bundle, directory, or Hugging Face model location |
+| `ModelSource` | Registry, bundle, directory, local GGUF file, or Hugging Face model location |
 | `ModelLoader` / `XybridModelLoader` | Cheap model reference; call `load()` to perform I/O |
 | `XybridModel` | Loaded model ready for inference |
 | `Envelope` | Factory for `XybridEnvelope` inputs (`text`, `audio`, `embedding`, `image`, `userMessage`) |
@@ -311,6 +330,7 @@ try {
 | `ModelLoader.fromBundle(path: String)` | Describe a local `.xyb` bundle |
 | `ModelLoader.fromDirectory(path: String)` | Describe an extracted directory |
 | `ModelLoader.fromHuggingFace(repo: String)` | Describe a Hugging Face repository |
+| `ModelLoader.fromModelFile(path: String)` | Describe a raw llama.cpp GGUF file; `load()` writes `model_metadata.json` next to it if absent |
 | `loader.load()` | Resolve, download if needed, and load without blocking the caller's thread |
 | `loader.loadBlocking()` | Explicit synchronous load for an existing worker thread |
 
