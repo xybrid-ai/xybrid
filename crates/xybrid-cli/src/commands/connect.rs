@@ -1361,11 +1361,7 @@ impl Session<'_> {
             )
         })?;
         let collecting = challenge.collect_via.as_bool() == Some(true);
-        if let Some(info) = pending
-            .client_info
-            .as_mut()
-            .filter(|_| pending.challenge.is_none() && !collecting)
-        {
+        if let Some(info) = pending.client_info.as_mut().filter(|_| !collecting) {
             info.via = None;
         }
         pending.challenge = Some(challenge.challenge);
@@ -1834,6 +1830,9 @@ fn connect_command(
     let mut command = format!("`xybrid{} connect", host_flags(host)?);
     if repeat_new && args.new {
         command.push_str(" --new");
+    }
+    if let Some(via) = connect_via(args.via.as_deref()).filter(|_| repeat_new) {
+        push_flag(&mut command, "--via", via)?;
     }
     if let Some(path) = write_env {
         // A path that isn't Unicode can't be shown without changing it.

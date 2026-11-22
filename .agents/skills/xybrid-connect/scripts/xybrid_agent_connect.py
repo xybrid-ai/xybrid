@@ -1313,7 +1313,7 @@ def provision(args, host, lock, data, root):
         nonce = solve(challenge, difficulty, time.monotonic() + max(5, (expires - now()).total_seconds() - 15))
         if nonce is None:
             raise fail("challenge_too_hard", "the proof of work did not finish before the challenge expired")
-        if "challenge" not in record and body.get("collect_via") is not True:
+        if body.get("collect_via") is not True:
             record.get("client_info", {}).pop("via", None)
         record.update(challenge=challenge, nonce=str(nonce))
         if record not in data["pending"]:

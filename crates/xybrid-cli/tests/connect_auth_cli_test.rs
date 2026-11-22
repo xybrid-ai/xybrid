@@ -978,7 +978,17 @@ fn an_unreachable_platform_exits_4() {
     };
     let url = format!("http://127.0.0.1:{port}");
 
-    let run = sandbox.run(&connect_args(&url));
+    let run = sandbox.run(&platform_args(
+        &url,
+        &[
+            "connect",
+            "--json",
+            "--write-env",
+            ".env",
+            "--via",
+            "web-copy",
+        ],
+    ));
     assert_eq!(run.code, Some(4), "{run}");
     let report = run.json();
     assert_eq!(report["status"], "offline");
@@ -988,7 +998,7 @@ fn an_unreachable_platform_exits_4() {
     assert!(tell.contains("no workspace was created"), "{tell}");
     assert!(
         tell.contains(&format!(
-            "`xybrid --platform-url {url} connect --write-env .env --allow-custom-host`"
+            "`xybrid --platform-url {url} connect --via web-copy --write-env .env --allow-custom-host`"
         )),
         "{tell}"
     );
@@ -2544,6 +2554,59 @@ fn connect_omits_via_without_an_explicit_grant_and_keeps_omission_on_retry() {
     }
 }
 
+#[test]
+fn a_replacement_challenge_can_revoke_attribution_on_the_same_request() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    let url = server.base_url();
+    let mut granted = mock_challenge_with_via(&server, Some(json!(true)));
+    let mut unanswered = mock_connect_unanswered(&server);
+    let run = sandbox.run(&platform_args(
+        &url,
+        &["connect", "--json", "--via", "web-copy"],
+    ));
+    assert_eq!(run.code, Some(1), "{run}");
+    granted.assert_hits(1);
+    unanswered.assert_hits(1);
+    granted.delete();
+    unanswered.delete();
+
+    let pending = sandbox.credentials()["pending"][0].clone();
+    assert_eq!(pending["client_info"]["via"], "web-copy");
+    let key = pending["idempotency_key"].as_str().unwrap();
+    let revoked = mock_challenge_with_via(&server, Some(json!(false)));
+    let expired = server.mock(|when, then| {
+        when.method(POST)
+            .path("/v1/agent/connect")
+            .header("Idempotency-Key", key)
+            .json_body_partial(json!({"client_info": {"via": "web-copy"}}).to_string());
+        then.status(400)
+            .json_body(json!({"error": "challenge_expired"}));
+    });
+    let retry = server.mock(|when, then| {
+        when.method(POST)
+            .path("/v1/agent/connect")
+            .header("Idempotency-Key", key)
+            .matches(|request| {
+                let body: Value = serde_json::from_slice(request.body.as_ref().unwrap()).unwrap();
+                body["client_info"].get("via").is_none()
+            });
+        then.status(502).body("bad gateway");
+    });
+    let run = sandbox.run(&platform_args(
+        &url,
+        &["connect", "--json", "--via", "docs"],
+    ));
+    assert_eq!(run.code, Some(1), "{run}");
+    expired.assert_hits(1);
+    revoked.assert_hits(1);
+    retry.assert_hits(1);
+    let saved = sandbox.credentials()["pending"][0].clone();
+    assert_eq!(saved["idempotency_key"], key);
+    assert!(saved["client_info"].get("via").is_none());
+}
+
 /// After a lost `connect --new` answer the suggested command repeats that
 /// request: it keeps `--new`, so the saved key of the old workspace is not
 /// reused instead, and `--allow-ci`, so CI doesn't skip it.
@@ -2583,7 +2646,7 @@ fn the_suggested_rerun_repeats_a_lost_new_workspace_request() {
     let rerun = suggested_rerun(tell);
     assert_eq!(
         rerun.join(" "),
-        format!("--platform-url {url} connect --new --allow-ci --allow-custom-host")
+        format!("--platform-url {url} connect --new --via web-copy --allow-ci --allow-custom-host")
     );
     failing.assert_hits(1);
     failing.delete();
@@ -2605,7 +2668,7 @@ fn the_suggested_rerun_repeats_a_lost_new_workspace_request() {
     });
     let reuse = mock_workspace(&server, KEY, workspace(false, false, "none"));
     let mut args: Vec<&str> = rerun.iter().map(String::as_str).collect();
-    args.extend(["--json", "--via", "docs"]);
+    args.push("--json");
     let run = sandbox.run_with(&args, &ci);
     assert_eq!(run.code, Some(0), "{run}");
     let report = run.json();

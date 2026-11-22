@@ -301,6 +301,10 @@ class Platform(BaseHTTPRequestHandler):
         type(self).requests.append(("POST", self.path, body, dict(self.headers)))
         if self.closed:
             return self.reply(403, {"error": "agent_signup_closed", "message": "closed", "reason": "disabled"})
+        if type(self).revoke_via_on_post:
+            type(self).revoke_via_on_post = False
+            type(self).collect_via = False
+            return self.reply(400, {"error": "challenge_expired"})
         if not body["nonce"].isdigit() or independent_bits(body["challenge"], int(body["nonce"])) < 8:
             return self.reply(400, {"error": "proof_of_work_invalid", "message": "no"})
         answer = {"api_key": KEY, "key_prefix": KEY[8:16], "scope": "client",
@@ -324,6 +328,7 @@ class ScriptContractTests(unittest.TestCase):
         Platform.closed, Platform.requests, Platform.workspace, Platform.workspace_failure = False, [], {}, None
         Platform.provision = {}
         Platform.collect_via = None
+        Platform.revoke_via_on_post = False
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
 
@@ -686,6 +691,19 @@ class ScriptContractTests(unittest.TestCase):
                 self.assertEqual((code, report["status"]), (0, "created"), report)
                 self.assertEqual([r[2]["client_info"] for r in Platform.requests if r[0] == "POST"],
                                  [pending["client_info"]] * 2)
+
+    def test_a_replacement_challenge_can_revoke_attribution_on_the_same_request(self):
+        app = self.repo("revoked-via")
+        Platform.collect_via = True
+        Platform.revoke_via_on_post = True
+        Platform.provision = {"key_expires_at": "2999-01-01T00:00:00"}
+        code, report = self.run_script(app, "connect", "--write-env", ".env", "--via", "web-copy")
+        self.assertEqual((code, report["error"]["code"]), (1, "invalid_platform_response"), report)
+        first, retry = [request for request in Platform.requests if request[0] == "POST"]
+        self.assertEqual(first[2]["client_info"]["via"], "web-copy")
+        self.assertNotIn("via", retry[2]["client_info"])
+        self.assertEqual(first[3]["Idempotency-Key"], retry[3]["Idempotency-Key"])
+        self.assertNotIn("via", self.saved()["pending"][0]["client_info"])
 
     # --- the project file, read and written as the CLI does ----------------------
 

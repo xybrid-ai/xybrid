@@ -44,7 +44,10 @@ No docs page has a setup-prompt copy control to
 instrument. A random in-memory ID is replaced on each page visit; it is never
 stored or used to identify a person. Heatmaps, replay, autocapture, dead-click
 and performance capture are off by construction: there is no PostHog browser
-SDK or remote configuration, only explicit events. Treat exits as best effort.
+SDK or remote configuration, only explicit events. The relay preserves each
+event's occurrence time and drops timestamps more than five minutes from its
+clock. Treat exits as best effort. Run `pnpm test` for the analytics checks;
+the docs build runs them too.
 
 ### Fumadocs MDX
 

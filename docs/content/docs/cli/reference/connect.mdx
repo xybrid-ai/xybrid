@@ -44,7 +44,7 @@ fi
 | `--write-env <PATH>` | Write the key to this untracked project file and gitignore it |
 | `--env-name <VAR>` | Variable to set in `--write-env`. Default `XYBRID_API_KEY`, or `xybrid.apiKey` in a `.properties` file. For Expo, pass `EXPO_PUBLIC_XYBRID_API_KEY` |
 | `--agent <NAME>` | Self-reported name of the agent actually in use, separate from the entrypoint. Detected from `CLAUDECODE=1` when possible |
-| `--via <ENTRYPOINT>` | When supported, `web-copy`, `setup-prompt`, `llms-txt`, `skill`, `mcp`, or `docs`. Sent only when collection is enabled on the platform after the notice period. Retries preserve the original value or omission; reused workspaces are unchanged |
+| `--via <ENTRYPOINT>` | When supported, `web-copy`, `setup-prompt`, `llms-txt`, `skill`, `mcp`, or `docs`. Sent only when the platform challenge permits collection after the notice period. Retries keep the original value or omission, but remove the value if a replacement challenge does not permit collection. Reused workspaces are unchanged |
 | `--project-name <NAME>` | Name for a new workspace or project. Default: the repository's directory name |
 | `--new` | Create a new workspace even if this project has saved credentials. Never replaces a key already in the project file |
 | `--allow-ci` | Connect even when a CI environment is detected. Privacy opt-outs still apply |

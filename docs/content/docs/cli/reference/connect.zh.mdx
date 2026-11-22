@@ -39,7 +39,7 @@ fi
 | `--write-env <PATH>` | 把密钥写入这个未被 Git 跟踪的项目文件，并将其加入 gitignore |
 | `--env-name <VAR>` | 在 `--write-env` 文件中设置的变量。默认为 `XYBRID_API_KEY`，在 `.properties` 文件中为 `xybrid.apiKey`。Expo 项目请传入 `EXPO_PUBLIC_XYBRID_API_KEY` |
 | `--agent <NAME>` | 实际使用的代理自行上报的名称，与设置入口无关。条件允许时从 `CLAUDECODE=1` 检测 |
-| `--via <ENTRYPOINT>` | 仅在支持时使用：`web-copy`、`setup-prompt`、`llms-txt`、`skill`、`mcp` 或 `docs`。仅在通知期结束且平台启用采集后发送；重试保留原值或省略状态，复用工作区不受影响 |
+| `--via <ENTRYPOINT>` | 仅在支持时使用：`web-copy`、`setup-prompt`、`llms-txt`、`skill`、`mcp` 或 `docs`。仅在通知期结束且平台质询允许采集时发送。重试保留原值或省略状态，但如果新的质询不允许采集，则移除该值。复用工作区不受影响 |
 | `--project-name <NAME>` | 新工作区或新项目的名称。默认为代码仓库的目录名 |
 | `--new` | 即使该项目已有保存的凭据，也创建新的工作区。绝不替换项目文件中已有的密钥 |
 | `--allow-ci` | 即使检测到 CI 环境也进行连接。隐私退出设置仍然生效 |

@@ -42,11 +42,11 @@ export function DocsAnalytics({ paths }: { paths: string[] }) {
       };
       const domain = !sentInitialView.current ? referrerDomain(document.referrer) : undefined;
       sentInitialView.current = true;
-      send({ ...visit, event: '$pageview', referrerDomain: domain });
+      send({ ...visit, event: '$pageview', timestamp: new Date().toISOString(), referrerDomain: domain });
     }
     function leave() {
       if (!visit) return;
-      send({ ...visit, event: '$pageleave' });
+      send({ ...visit, event: '$pageleave', timestamp: new Date().toISOString() });
       visit = undefined;
     }
     function onLink(event: MouseEvent) {
@@ -55,7 +55,7 @@ export function DocsAnalytics({ paths }: { paths: string[] }) {
       if (!(link instanceof HTMLAnchorElement) || !link.href || link.hasAttribute('download')) return;
       try {
         const destination = outboundDestination(new URL(link.href), window.location.origin);
-        if (destination) send({ ...visit, event: 'outbound_navigation', destination });
+        if (destination) send({ ...visit, event: 'outbound_navigation', timestamp: new Date().toISOString(), destination });
       } catch {}
     }
 
