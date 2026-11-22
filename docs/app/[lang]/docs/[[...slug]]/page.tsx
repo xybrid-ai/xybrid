@@ -11,6 +11,7 @@ import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/mdx-components';
 import type { Metadata } from 'next';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
+import { SITE_NAME } from '@/lib/metadata';
 
 export default async function Page({
   params,
@@ -66,6 +67,7 @@ export async function generateMetadata({
     title: page.data.title,
     description: page.data.description,
     openGraph: {
+      siteName: SITE_NAME,
       images: getPageImage(page).url,
     },
     alternates: {

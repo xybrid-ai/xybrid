@@ -14,12 +14,13 @@ export const source = loader({
   i18n,
 });
 
+/** The share image of a page, built by `app/[lang]/og/docs/[...slug]`. */
 export function getPageImage(page: InferPageType<typeof source>) {
   const segments = [...page.slugs, 'image.png'];
 
   return {
     segments,
-    url: `/og/docs/${segments.join('/')}`,
+    url: '/' + [page.locale, 'og', 'docs', ...segments].filter(Boolean).join('/'),
   };
 }
 
