@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'fumadocs-core/framework';
 import { fetchClient } from 'fumadocs-core/search/client/fetch';
 import { useI18n } from 'fumadocs-ui/contexts/i18n';
+import { i18n } from '@/lib/i18n';
 
 interface ModelContextTool<Input> {
   name: string;
@@ -23,6 +24,22 @@ declare global {
   }
 }
 
+function docsDestination(input: string) {
+  const origin = window.location.origin;
+  const url = new URL(input, origin);
+  const path = url.pathname.replace(/\/+$/, '');
+  const isDocs = i18n.languages.some((lang) =>
+    path === `/${lang}/docs` || path.startsWith(`/${lang}/docs/`),
+  );
+
+  if (url.origin !== origin || !/^https?:$/.test(url.protocol) || url.username || url.password ||
+      !isDocs || /%(?:2f|5c|25)/i.test(path)) {
+    throw new Error('Expected a same-origin documentation page URL');
+  }
+
+  return { path, search: url.search, hash: url.hash };
+}
+
 /** expose the docs to AI agents in the browser */
 export function WebMCP() {
   const router = useRouter();
@@ -32,10 +49,20 @@ export function WebMCP() {
     const context = document.modelContext;
     if (!context) return;
     const controller = new AbortController();
-    const options = { signal: controller.signal };
+    const { signal } = controller;
     const client = fetchClient({ locale });
 
-    void context.registerTool(
+    async function registerTool<Input>(tool: ModelContextTool<Input>) {
+      try {
+        await context?.registerTool(tool, { signal });
+      } catch (error) {
+        if (!signal.aborted || error !== signal.reason) {
+          console.error(`WebMCP registration failed for ${tool.name}:`, error);
+        }
+      }
+    }
+
+    void registerTool(
       {
         name: 'search_docs',
         description: 'Search the docs, returns matching pages and headings with their URLs',
@@ -48,9 +75,8 @@ export function WebMCP() {
           return client.search(query);
         },
       },
-      options,
     );
-    void context.registerTool(
+    void registerTool(
       {
         name: 'read_page',
         description: 'Read a docs page as Markdown by its URL',
@@ -60,16 +86,14 @@ export function WebMCP() {
           required: ['url'],
         },
         async execute({ url }: { url: string }) {
-          // not in the CLI template: `search_docs` returns headings as `/page#id`, and
-          // `.md` must go before the `#`, as `get_page` of fumadocs-core/mcp does
-          const res = await fetch(`${url.replace(/[?#].*$/, '')}.md`);
+          const { path } = docsDestination(url);
+          const res = await fetch(`${path}.md`, { signal, redirect: 'error' });
           if (!res.ok) throw new Error(`page not found: ${url}`);
           return res.text();
         },
       },
-      options,
     );
-    void context.registerTool(
+    void registerTool(
       {
         name: 'open_page',
         description: 'Navigate to a docs page by its URL',
@@ -79,11 +103,12 @@ export function WebMCP() {
           required: ['url'],
         },
         async execute({ url }: { url: string }) {
-          await router.push(url);
-          return `opened ${url}`;
+          const { path, search, hash } = docsDestination(url);
+          const destination = `${path}${search}${hash}`;
+          await router.push(destination);
+          return `opened ${destination}`;
         },
       },
-      options,
     );
 
     return () => controller.abort();
