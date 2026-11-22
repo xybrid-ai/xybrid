@@ -121,7 +121,7 @@ Each badge links to its platform setup. See the full
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.19.0
+  xybrid_flutter: ^0.20.0
 ```
 
 The plugin needs iOS 16.0, macOS 14.0 and Android 9 (API 28) or later; the [Flutter guide](https://docs.xybrid.dev/en/docs/sdks/flutter#requirements) shows how to raise your app's minimums.
@@ -140,7 +140,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.19.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.20.0")
 }
 ```
 
@@ -162,7 +162,7 @@ val result = model.runAsync(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.19.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.20.0")
 ]
 ```
 
@@ -179,7 +179,7 @@ let result = try await model.runAsync(envelope: Envelope.text("Hello world"))
 **Install** in a React Native 0.76+ app with the New Architecture (or an Expo SDK 52+ development build):
 
 ```sh
-npm install @xybrid/react-native@0.19.0
+npm install @xybrid/react-native@0.20.0
 ```
 
 For bare React Native, run `cd ios && pod install`. For Expo, run `npx expo prebuild`; Expo Go cannot load the native module.
@@ -238,7 +238,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.19.0"
+xybrid = "0.20.0"
 ```
 
 **Run a model:**
@@ -278,7 +278,8 @@ Chain models together into a single multi-model inference pipeline (MMP) — bui
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny-ggml  # Speech → text
+  - id: asr
+    model: whisper-tiny-ggml  # Speech → text
   - model: qwen2.5-0.5b       # Process with LLM
   - model: kokoro-82m         # Text → speech
 ```
@@ -410,7 +411,7 @@ The installer also adds `/xybrid-connect`, which connects your project to the Xy
 }
 ```
 
-See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or look at existing examples in [`integration-tests/fixtures/models/`](integration-tests/fixtures/models/).
+See the [model metadata docs](docs/sdk/MODEL_METADATA.md) for the full schema, or look at existing examples in [`integration-tests/fixtures/models/`](integration-tests/fixtures/models/).
 
 </details>
 
@@ -428,7 +429,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Embeddings | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | Multi-Model Pipelines (MMP) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Hardware Acceleration | Metal, ANE on devices; CPU llama.cpp on Simulator | CPU | Metal, ANE | CPU, opt-in Vulkan | CPU |
+| Hardware Acceleration | Metal (llama.cpp) on devices; CPU on Simulator | CPU | Metal | CPU, opt-in Vulkan | CPU |
 
 **SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin ✅ · Swift ✅ · React Native ✅ · Unity ✅
 
@@ -458,7 +459,7 @@ Registry models are coming.
   ([docs](https://docs.xybrid.dev/en/docs/concepts/hybrid-execution)).
 - **Telemetry you control** — opt-in behind an API key
   ([docs](docs/telemetry/registry.md)).
-- **Hardware acceleration** — Metal and the Apple Neural Engine on Apple, opt-in
+- **Hardware acceleration** — Metal on Apple, opt-in
   Vulkan on Linux; Android and Windows are CPU today
   ([docs](docs/INSTALLATION.md#platform-features)).
 

@@ -89,7 +89,8 @@ build:linux-vulkan --platforms=@rules_rs//rs/platforms:x86_64-unknown-linux-gnu
 build:linux-vulkan --//:vulkan=true
 
 # --- Apple Gate 1: iOS device staticlib, built LOCALLY on a Mac (Xcode iphoneos
-# SDK via apple_support). CPU-only, Metal OFF. Mac-bound end-to-end — NEVER
+# SDK via apple_support). llama.cpp builds with Metal ON (G2: _IOS_LLAMA in the
+# root BUILD.bazel); iOS needs no --//:metal flag. Mac-bound end-to-end — NEVER
 # combine with --config=remote (no Mac RBE; the iOS closure needs an iphoneos
 # sysroot Linux can't provide). //:llama's iOS arm sets PATH so rfcc's sanitized
 # PATH finds the host tools.

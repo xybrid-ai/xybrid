@@ -223,6 +223,8 @@ class XybridModelLoader {
   factory XybridModelLoader.fromRegistry(String modelId);
   factory XybridModelLoader.fromBundle(String path);
   factory XybridModelLoader.fromDirectory(String path);
+  // Raw llama.cpp GGUF; load() writes model_metadata.json beside it if absent
+  factory XybridModelLoader.fromModelFile(String path);
 
   // Serve from the cloud gateway while the weights download in the background
   factory XybridModelLoader.fromRegistrySpeculative(String modelId);
@@ -283,12 +285,14 @@ public enum ModelSource {
   case directory(URL)
   case huggingFace(String)
   case registrySpeculative(String)
+  case modelFile(URL)  // raw GGUF; load() writes model_metadata.json beside it if absent
 }
 
 public struct ModelLoader {
   let source: ModelSource
 
   static func fromRegistrySpeculative(_ id: String) -> Self
+  static func fromModelFile(_ url: URL) -> Self
   var willSpeculate: Bool { get }
 
   func load() async throws -> XybridModel
@@ -410,6 +414,7 @@ var result = model.Run(Envelope.Text("Hello!"));
 | `fromDirectory()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingFace()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingfaceWithRevision()` | — | ✅ | ✅ | ✅ |
+| `fromModelFile()` | ✅ | — | ✅ | ✅ |
 | `load()` | ✅ | ✅ | ✅ | ✅ |
 | `loadWithProgress()` | ✅ | — | — | — |
 | `download()` / `StartDownload()` | — | ✅ | ✅ | ✅ |
@@ -712,7 +717,9 @@ class XybridModel {
   Future<void> warmup();
   Future<void> unload();
 
-  // Hardware info
+  // Hardware info (planned; Rust only today, as ExecutionProviderInfo::current()).
+  // Describes ONNX Runtime: name is always "cpu"; coremlAvailable means the
+  // Core ML execution provider is linked into the build, not in use.
   ExecutionProviderInfo executionProviderInfo();
 }
 ```
@@ -840,15 +847,15 @@ println!("{} {:.3}", best.id, best.score);
 | `defaultGenerationConfig()` | — | ✅ | ✅ | ✅ |
 | `voice()` | — | ✅ | ✅ | ✅ |
 | `run()` | ✅ | ✅ | ✅ | ✅ |
-| `runWithOptions()` / `run_with_options()` | Rust ✅ | planned | planned | planned |
-| `runWithContext()` | ✅ | — | — | ✅ |
-| `runWithContextOptions()` / `run_with_context_options()` | Rust ✅ | planned | planned | planned |
-| `runStreaming()` | ✅ | — | — | ✅ |
-| `runStreamingWithOptions()` / `run_streaming_with_options()` | Rust ✅ | planned | planned | planned |
+| `runWithOptions()` / `run_with_options()` | Rust ✅ | 🚧 `run(envelope, options)` | 🚧 `run(envelope:options:)` | planned |
+| `runWithContext()` | ✅ | ✅ | ✅ | ✅ |
+| `runWithContextOptions()` / `run_with_context_options()` | Rust ✅ | 🚧 `runWithContext(envelope, context, options)` | 🚧 `runWithContext(envelope:context:options:)` | planned |
+| `runStreaming()` | ✅ | 🚧 `streamTokens` | 🚧 `streamTokens` | ✅ |
+| `runStreamingWithOptions()` / `run_streaming_with_options()` | Rust ✅ | 🚧 `streamTokens` | 🚧 `streamTokens` | planned |
 | `runTtsStreaming()` / `run_tts_streaming()` | ✅ | — | — | — |
 | `runStreamingWithFallback()` | ✅ | planned | planned | planned |
-| `runStreamingWithContext()` | ✅ | — | — | ✅ |
-| `runStreamingWithContextOptions()` / `run_streaming_with_context_options()` | Rust ✅ | planned | planned | planned |
+| `runStreamingWithContext()` | ✅ | 🚧 pull API `runStreamWithContext` | 🚧 pull API `runStreamWithContext` | ✅ |
+| `runStreamingWithContextOptions()` / `run_streaming_with_context_options()` | Rust ✅ | 🚧 pull API `runStreamWithContext` | 🚧 pull API `runStreamWithContext` | planned |
 | `benchmark()` | — | — | — | — |
 | `warmup()` | ✅ | ✅ | ✅ | — |
 | `unload()` | ✅ | ✅ | ✅ | — |
@@ -856,7 +863,7 @@ println!("{} {:.3}", best.id, best.score);
 | `downloadStatus()` | ✅ | ✅ | ✅ | ✅ |
 | `awaitDownload()` | — | ✅ | ✅ | ✅ |
 | `downloadProgress()` | ✅ | ✅ | ✅ | ✅ |
-| `executionProviderInfo()` | — | — | — | — |
+| `executionProviderInfo()` / `ExecutionProviderInfo::current()` | Rust ✅ | planned | planned | planned |
 
 While a speculative load is still downloading, `isCloudServing()` is true and
 `downloadStatus()` returns a consistent read of the state (`downloading` /
@@ -1859,7 +1866,7 @@ cancellation primitive to it.
 | Binding | Cancel a run by |
 |---------|-----------------|
 | Dart | passing a `CancellationToken`, or unsubscribing the stream |
-| Swift | cancelling the `Task` around `runAsync`, or passing a token to `run(envelope:options:cancel:)` |
+| Swift | cancelling the `Task` around `runAsync` / `streamTokens` (or breaking out of the `for try await` loop), or passing a token to `run(envelope:options:cancel:)` |
 | Kotlin | cancelling the coroutine around `runAsync` / `streamTokens`, or passing a token to the generated `run` |
 | C# (Unity) | passing a `System.Threading.CancellationToken` to `Run` / `RunStreaming` |
 
@@ -1873,8 +1880,12 @@ cancellation primitive to it.
 > `Cancelled` (see [decisions](decisions.md)).
 
 ```swift
-// Swift — structured concurrency drives the native stop button
-let task = Task { try await model.runAsync(envelope: .text("Tell me a long story")) }
+// Swift — cancelling the consuming task stops native generation
+let task = Task {
+    for try await token in model.streamTokens(envelope: .text("Tell me a long story")) {
+        render(token)
+    }
+}
 task.cancel()   // generation stops at the next token
 ```
 
@@ -2207,7 +2218,7 @@ format.
 ### Swift-specific
 
 - Uses hand-written Swift facades over BoltFFI-generated types
-- Uses `URL` for local bundle and directory model sources
+- Uses `URL` for local bundle, directory, and GGUF file model sources
 - Uses `async throws` for model loading; `loadSync()` is the explicit blocking form
 
 ### Unity/C#-specific

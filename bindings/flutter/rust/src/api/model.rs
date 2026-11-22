@@ -467,6 +467,14 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
     })
 }
 
+/// The cloud leg's model when the app sets no `cloudModel`.
+///
+/// The fallback always goes through a Xybrid gateway (`backend: gateway`, and
+/// [`validate_cloud_gateway_url`] admits only Xybrid hosts in release builds),
+/// which names frontier models by their canonical OpenRouter id. It answers
+/// `404 model_not_found` for a short id such as `gpt-4o-mini`.
+const DEFAULT_CLOUD_FALLBACK_MODEL: &str = "openai/gpt-4o-mini";
+
 fn apply_cloud_fallback_metadata(
     envelope: &mut xybrid_sdk::ir::Envelope,
     options: &FfiRunOptions,
@@ -479,7 +487,7 @@ fn apply_cloud_fallback_metadata(
         .to_string());
     }
     let provider = non_empty(options.cloud_provider.as_deref()).unwrap_or("openai");
-    let model = non_empty(options.cloud_model.as_deref()).unwrap_or("gpt-4o-mini");
+    let model = non_empty(options.cloud_model.as_deref()).unwrap_or(DEFAULT_CLOUD_FALLBACK_MODEL);
     envelope
         .metadata
         .insert("provider".to_string(), provider.to_string());
@@ -793,7 +801,61 @@ impl FfiDownloadStatus {
 
 /// FFI wrapper for ModelLoader (preparatory step before loading).
 #[frb(opaque)]
-pub struct FfiModelLoader(ModelLoader);
+pub struct FfiModelLoader(LoaderSource);
+
+/// What a loader loads. The SDK cannot build a directory loader before the
+/// directory has a `model_metadata.json`, so a raw GGUF file waits here, with
+/// any observation controls, until a load writes that sidecar.
+#[derive(Clone)]
+enum LoaderSource {
+    Sdk(ModelLoader),
+    ModelFile {
+        path: String,
+        observation: Option<xybrid_sdk::ObservationOptions>,
+    },
+}
+
+impl LoaderSource {
+    /// The SDK loader for this source. A model file reads the GGUF header and
+    /// may write the sidecar, so call this off the Dart thread.
+    fn resolve(&self) -> Result<ModelLoader, String> {
+        match self {
+            Self::Sdk(loader) => Ok(loader.clone()),
+            Self::ModelFile { path, observation } => {
+                let directory = facade::prepare_model_file(path).map_err(|e| e.to_string())?;
+                let loader = ModelLoader::from_directory(directory).map_err(sdk_error_message)?;
+                Ok(match observation {
+                    Some(observation) => loader.observation(observation.clone()),
+                    None => loader,
+                })
+            }
+        }
+    }
+}
+
+/// The work of `FfiModelLoader::load_with_progress`, which runs it on a worker
+/// thread: resolve the source, load it with download progress, then end with
+/// exactly one `Complete` or `Error`. A model file downloads nothing, so it
+/// emits no `Progress`.
+fn load_reporting_progress(source: &LoaderSource, emit: impl Fn(FfiLoadEvent)) {
+    let result = source
+        .resolve()
+        .and_then(|loader| {
+            loader
+                .load_with_progress(|status| {
+                    emit(FfiLoadEvent::Progress(FfiDownloadStatus::from_sdk(status)));
+                })
+                .map_err(sdk_error_message)
+        })
+        // Flutter loads through the SDK, not the facade's loader, so it
+        // applies the facade's FFI refusal itself.
+        .and_then(|model| facade::ensure_ffi_supported(&model).map_err(|e| e.to_string()));
+    emit(match result {
+        // The model is now cached; `load()` returns it at once.
+        Ok(()) => FfiLoadEvent::Complete,
+        Err(message) => FfiLoadEvent::Error(message),
+    });
+}
 
 /// FFI wrapper for a loaded XybridModel ready for inference.
 #[frb(opaque)]
@@ -843,15 +905,20 @@ impl FfiModelLoader {
         &self,
         options: super::observability::FfiObservationOptions,
     ) -> Result<Self, String> {
-        let mut loader = self.0.clone();
-        if let Some(options) = options.to_sdk()? {
-            loader = loader.observation(options);
-        }
-        Ok(Self(loader))
+        let Some(options) = options.to_sdk()? else {
+            return Ok(Self(self.0.clone()));
+        };
+        Ok(Self(match &self.0 {
+            LoaderSource::Sdk(loader) => LoaderSource::Sdk(loader.clone().observation(options)),
+            LoaderSource::ModelFile { path, .. } => LoaderSource::ModelFile {
+                path: path.clone(),
+                observation: Some(options),
+            },
+        }))
     }
     #[frb(sync)]
     pub fn from_registry(model_id: String) -> FfiModelLoader {
-        FfiModelLoader(ModelLoader::from_registry(&model_id))
+        FfiModelLoader(LoaderSource::Sdk(ModelLoader::from_registry(&model_id)))
     }
 
     /// Loader that serves from the cloud gateway while the registry weights
@@ -866,7 +933,9 @@ impl FfiModelLoader {
     /// `FfiModel::is_cloud_serving` reports the outcome.
     #[frb(sync)]
     pub fn from_registry_speculative(model_id: String) -> FfiModelLoader {
-        FfiModelLoader(ModelLoader::from_registry(&model_id).with_speculative_cloud(true))
+        FfiModelLoader(LoaderSource::Sdk(
+            ModelLoader::from_registry(&model_id).with_speculative_cloud(true),
+        ))
     }
 
     /// Whether `load()` may speculate: enabled, an API key resolves, and the
@@ -875,20 +944,23 @@ impl FfiModelLoader {
     /// chat model.
     #[frb(sync)]
     pub fn will_speculate(&self) -> bool {
-        self.0.will_speculate()
+        match &self.0 {
+            LoaderSource::Sdk(loader) => loader.will_speculate(),
+            LoaderSource::ModelFile { .. } => false,
+        }
     }
 
     #[frb(sync)]
     pub fn from_bundle(path: String) -> Result<FfiModelLoader, String> {
         ModelLoader::from_bundle(&path)
-            .map(FfiModelLoader)
+            .map(|loader| FfiModelLoader(LoaderSource::Sdk(loader)))
             .map_err(sdk_error_message)
     }
 
     #[frb(sync)]
     pub fn from_directory(path: String) -> Result<FfiModelLoader, String> {
         ModelLoader::from_directory(&path)
-            .map(FfiModelLoader)
+            .map(|loader| FfiModelLoader(LoaderSource::Sdk(loader)))
             .map_err(sdk_error_message)
     }
 
@@ -898,12 +970,39 @@ impl FfiModelLoader {
     /// Requires the `huggingface` feature flag to be enabled.
     #[frb(sync)]
     pub fn from_huggingface(repo: String) -> FfiModelLoader {
-        FfiModelLoader(ModelLoader::from_huggingface(&repo))
+        FfiModelLoader(LoaderSource::Sdk(ModelLoader::from_huggingface(&repo)))
+    }
+
+    /// Loader for a raw llama.cpp GGUF file. Creating it touches no disk:
+    /// `load()` and `load_with_progress()` write a generated
+    /// `model_metadata.json` beside the file if absent, then load its
+    /// directory. Nothing is downloaded, so `load_with_progress()` emits only
+    /// `Complete` or `Error`.
+    #[frb(sync)]
+    pub fn from_model_file(path: String) -> FfiModelLoader {
+        FfiModelLoader(LoaderSource::ModelFile {
+            path,
+            observation: None,
+        })
     }
 
     /// Load the model without progress updates.
     pub async fn load(&self) -> Result<FfiModel, String> {
-        let model = self.0.load_async().await.map_err(sdk_error_message)?;
+        let loader = match &self.0 {
+            LoaderSource::Sdk(loader) => loader.clone(),
+            source @ LoaderSource::ModelFile { .. } => {
+                let source = source.clone();
+                tokio::task::spawn_blocking(move || source.resolve())
+                    .await
+                    .map_err(|e| {
+                        facade::Error::LoadError {
+                            message: format!("Task join error: {e}"),
+                        }
+                        .to_string()
+                    })??
+            }
+        };
+        let model = loader.load_async().await.map_err(sdk_error_message)?;
         // Flutter loads through the SDK, not the facade's loader, so it
         // applies the facade's FFI refusal itself.
         facade::ensure_ffi_supported(&model).map_err(|e| e.to_string())?;
@@ -920,27 +1019,14 @@ impl FfiModelLoader {
     ///
     /// After receiving `Complete`, call `load()` to get the cached model instantly.
     pub fn load_with_progress(&self, sink: StreamSink<FfiLoadEvent>) {
-        let loader = self.0.clone();
+        let source = self.0.clone();
 
         // Run loading in a background thread to not block
         let panic_sink = sink.clone();
         let work = move || {
-            let result = loader.load_with_progress(|status| {
-                let _ = sink.add(FfiLoadEvent::Progress(FfiDownloadStatus::from_sdk(status)));
+            load_reporting_progress(&source, |event| {
+                let _ = sink.add(event);
             });
-
-            match result
-                .map_err(sdk_error_message)
-                .and_then(|model| facade::ensure_ffi_supported(&model).map_err(|e| e.to_string()))
-            {
-                Ok(()) => {
-                    // Model is now cached, send complete event
-                    let _ = sink.add(FfiLoadEvent::Complete);
-                }
-                Err(message) => {
-                    let _ = sink.add(FfiLoadEvent::Error(message));
-                }
-            }
         };
         spawn_reporting_panics(work, move |message| {
             let _ = panic_sink.add(FfiLoadEvent::Error(message));
@@ -1620,6 +1706,166 @@ mod tests {
         assert_eq!(message.matches("Inference failed:").count(), 1);
     }
 
+    /// A scratch directory, removed on drop. Not `tempfile`: this crate has no
+    /// dev-dependencies, and adding one changes `Cargo.lock`, which makes four
+    /// more CI lanes (three of them macOS) run on every push.
+    struct ScratchDir(std::path::PathBuf);
+
+    impl ScratchDir {
+        fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "xybrid-flutter-model-file-{}-{n}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        fn path(&self, name: &str) -> String {
+            self.0.join(name).to_string_lossy().into_owned()
+        }
+    }
+
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A header-only GGUF: an `lfm3` model declaring a 262,144-token context,
+    /// the same bytes as the SDK's metadata-generation test.
+    fn write_gguf_header(path: &str) {
+        const GGUF_TYPE_UINT32: u32 = 4;
+        const GGUF_TYPE_STRING: u32 = 8;
+        fn string(bytes: &mut Vec<u8>, value: &str) {
+            bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(value.as_bytes());
+        }
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3u32.to_le_bytes()); // version
+        bytes.extend_from_slice(&0u64.to_le_bytes()); // tensor count
+        bytes.extend_from_slice(&2u64.to_le_bytes()); // key-value count
+        string(&mut bytes, "general.architecture");
+        bytes.extend_from_slice(&GGUF_TYPE_STRING.to_le_bytes());
+        string(&mut bytes, "lfm3");
+        string(&mut bytes, "lfm3.context_length");
+        bytes.extend_from_slice(&GGUF_TYPE_UINT32.to_le_bytes());
+        bytes.extend_from_slice(&262_144u32.to_le_bytes());
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    fn conversation_options(id: &str) -> super::super::observability::FfiObservationOptions {
+        super::super::observability::FfiObservationOptions {
+            conversation_id: Some(id.into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_model_file_loader_touches_no_disk_until_load() {
+        let dir = ScratchDir::new();
+        let gguf = dir.path("model.gguf");
+        write_gguf_header(&gguf);
+
+        let loader = FfiModelLoader::from_model_file(gguf)
+            .with_observation(conversation_options("conversation-1"))
+            .unwrap()
+            // Default options keep the stored controls, as on other sources.
+            .with_observation(Default::default())
+            .unwrap();
+
+        assert!(!std::path::Path::new(&dir.path("model_metadata.json")).exists());
+        assert!(!loader.will_speculate());
+        assert!(matches!(
+            &loader.0,
+            LoaderSource::ModelFile {
+                observation: Some(observation),
+                ..
+            } if observation.conversation_id.as_deref() == Some("conversation-1")
+        ));
+        // Controls are still validated when they are set, not at load.
+        let invalid = super::super::observability::FfiObservationOptions {
+            traceparent: Some("invalid".into()),
+            ..Default::default()
+        };
+        assert!(loader.with_observation(invalid).is_err());
+    }
+
+    #[test]
+    fn a_model_file_load_writes_the_sidecar_and_loads_its_directory() {
+        let dir = ScratchDir::new();
+        let gguf = dir.path("Model-File.gguf");
+        write_gguf_header(&gguf);
+
+        let model = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(FfiModelLoader::from_model_file(gguf).load())
+            .unwrap_or_else(|message| panic!("model file load failed: {message}"));
+
+        assert!(std::path::Path::new(&dir.path("model_metadata.json")).exists());
+        assert_eq!(model.0.model_id(), "model-file");
+    }
+
+    #[test]
+    fn a_model_file_load_applies_the_stored_observation() {
+        let dir = ScratchDir::new();
+        let gguf = dir.path("model.gguf");
+        write_gguf_header(&gguf);
+
+        let traced = FfiModelLoader::from_model_file(gguf.clone())
+            .with_observation(conversation_options("conversation-1"))
+            .unwrap();
+        let resolved = traced.0.resolve().unwrap();
+        assert!(format!("{resolved:?}").contains("conversation-1"));
+
+        let plain = FfiModelLoader::from_model_file(gguf).0.resolve().unwrap();
+        assert!(!format!("{plain:?}").contains("conversation-1"));
+    }
+
+    #[test]
+    fn a_missing_model_file_fails_at_load_with_the_facade_message() {
+        let dir = ScratchDir::new();
+        let missing = dir.path("missing.gguf");
+
+        let loader = FfiModelLoader::from_model_file(missing.clone());
+        let error = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(loader.load())
+            .err()
+            .expect("a missing GGUF must not load");
+
+        assert_eq!(
+            error,
+            format!("Invalid configuration: GGUF file not found: {missing}")
+        );
+    }
+
+    #[test]
+    fn a_model_file_progress_load_reports_only_complete_or_error() {
+        let dir = ScratchDir::new();
+        let gguf = dir.path("model.gguf");
+        write_gguf_header(&gguf);
+        let events_for = |path: String| {
+            let events = std::sync::Mutex::new(Vec::new());
+            load_reporting_progress(&FfiModelLoader::from_model_file(path).0, |event| {
+                events.lock().unwrap().push(event)
+            });
+            events.into_inner().unwrap()
+        };
+
+        assert!(matches!(
+            events_for(gguf).as_slice(),
+            [FfiLoadEvent::Complete]
+        ));
+        assert!(matches!(
+            events_for(dir.path("missing.gguf")).as_slice(),
+            [FfiLoadEvent::Error(message)] if message.contains("GGUF file not found")
+        ));
+    }
+
     fn sample_options() -> FfiRunOptions {
         FfiRunOptions {
             cloud_provider: None,
@@ -1716,6 +1962,51 @@ mod tests {
         assert!(error.starts_with("Unsupported model capability:"));
         assert!(error.contains("local-only"));
         assert_eq!(nested.metadata, before);
+    }
+
+    /// The managed gateway takes frontier models by canonical id only: the
+    /// short `gpt-4o-mini` this default used to be answers 404 there.
+    #[test]
+    fn cloud_fallback_defaults_to_a_canonical_gateway_model() {
+        use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+
+        let mut envelope = Envelope::new(EnvelopeKind::Text("hello".into()));
+        let gateway_url =
+            apply_cloud_fallback_metadata(&mut envelope, &sample_options(), None).unwrap();
+
+        assert_eq!(gateway_url, None);
+        assert_eq!(
+            envelope.metadata.get("model").map(String::as_str),
+            Some("openai/gpt-4o-mini")
+        );
+        assert_eq!(
+            envelope.metadata.get("provider").map(String::as_str),
+            Some("openai")
+        );
+        assert_eq!(
+            envelope.metadata.get("backend").map(String::as_str),
+            Some("gateway")
+        );
+    }
+
+    #[test]
+    fn cloud_fallback_sends_the_app_model_unchanged() {
+        use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+
+        let mut options = sample_options();
+        options.cloud_provider = Some("anthropic".to_string());
+        options.cloud_model = Some(" anthropic/claude-haiku-4.5 ".to_string());
+        let mut envelope = Envelope::new(EnvelopeKind::Text("hello".into()));
+        apply_cloud_fallback_metadata(&mut envelope, &options, None).unwrap();
+
+        assert_eq!(
+            envelope.metadata.get("model").map(String::as_str),
+            Some("anthropic/claude-haiku-4.5")
+        );
+        assert_eq!(
+            envelope.metadata.get("provider").map(String::as_str),
+            Some("anthropic")
+        );
     }
 
     #[test]

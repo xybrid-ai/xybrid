@@ -123,6 +123,6 @@
     "tts_stop_after_chunks": 1,
     "asr_model": "whisper-tiny-ggml",
     "tts_model": "kitten-tts-nano-0.8",
-    "cloud_model": "gpt-4o-mini"
+    "cloud_model": "openai/gpt-4o-mini"
   }
 }

@@ -40,6 +40,11 @@ class RunOptions {
   final AbortPolicy abortPolicy;
   final ObservationOptions? observation;
   final String? cloudProvider;
+
+  /// The model the cloud leg asks the Xybrid gateway for; unset sends
+  /// `openai/gpt-4o-mini`. The gateway takes frontier models by their
+  /// canonical OpenRouter id (`vendor/model`) and answers 404
+  /// `model_not_found` for a short id such as `gpt-4o-mini`.
   final String? cloudModel;
   final String? cloudGatewayUrl;
   final String? correlationId;

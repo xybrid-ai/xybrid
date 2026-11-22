@@ -41,12 +41,12 @@ not set them either. A command that cannot forward environment variables
 placeholders `{endpoint}`, `{port}`, `{expectations}`, `{workdir}`, `{binding}`
 and `{out_dir}` in its arguments instead.
 
-- Android emulator: `--endpoint-host 10.0.2.2`. The app needs cleartext HTTP
-  to that host (a debug network security config) and the `INTERNET`
-  permission.
-- Physical Android device: `adb reverse tcp:{port} tcp:{port}` inside the
-  command and `--endpoint-host 127.0.0.1` (the consumer's debug network
-  security config allows cleartext to 127.0.0.1 as well as 10.0.2.2).
+- Android emulator or physical device: use the default `--endpoint-host
+  127.0.0.1` with `observability-scenario.sh`. The script sets up `adb reverse`,
+  probes the receiver from the device before instrumentation, and removes the
+  forward afterward. This route does not wait for emulator Wi-Fi. The app needs
+  `INTERNET` and cleartext HTTP to loopback; the consumer's debug network
+  security config allows that and still permits the emulator alias `10.0.2.2`.
 - iOS simulator: `127.0.0.1` reaches the host.
 - Physical iPhone: a package test cannot run on a device, so
   `bindings/apple/scripts/observability-scenario-ios-device.sh` runs the same

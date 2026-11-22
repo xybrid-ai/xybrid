@@ -136,10 +136,10 @@ jobs:
       # ios/xybrid_natives.rb picks the monorepo's bazel-bin zip on its own;
       # naming it keeps the job honest if that lookup ever changes.
       - name: pod install
-        working-directory: bindings/react-native/example/ios
+        working-directory: bindings/react-native
         env:
           XYBRID_XCFRAMEWORK_PATH: ${{ github.workspace }}/bazel-bin/bindings/apple/XybridFFI.xcframework.zip
-        run: pod install
+        run: bash scripts/pod-install.sh
 
       - name: Build the example (iOS Simulator)
         working-directory: bindings/react-native/example/ios

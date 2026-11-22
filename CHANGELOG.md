@@ -7,6 +7,197 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Flutter: load a local GGUF file.** `XybridModelLoader.fromModelFile(path)`
+  loads a raw llama.cpp GGUF with no `model_metadata.json`, as Swift's
+  `ModelLoader.fromModelFile`, React Native's `fromModelFile` and Unity's
+  `FromModelFile` already do: `load()` generates the metadata from the GGUF
+  header and writes it next to the file unless one is there, with the context
+  capped at 4,096 tokens. Creating the loader does no disk I/O, and
+  `loadWithProgress()` reports only `LoadComplete` or `LoadError`. The
+  facade's sidecar step is now the public `prepare_model_file`, shared by the
+  bolt bindings and Flutter (#813).
+- **CLI: `xybrid connect --via <entrypoint>`** names the setup entrypoint that
+  led to a new workspace: `web-copy`, `setup-prompt`, `llms-txt`, `skill`,
+  `mcp` or `docs`; any other value is dropped. It is sent as `client_info.via`
+  only when the platform's challenge allows collection. A saved request
+  retries with the same value unless a replacement challenge no longer allows
+  it, and reusing a saved key or adding a project sends nothing new. The
+  `xybrid-connect` skill and the `connect` docs pass `--via` only when
+  `xybrid connect --help` lists it, so an older CLI keeps working. The skill's
+  reference script, `xybrid_agent_connect.py`, takes the same option, so its
+  published SHA-256 changed (#831).
+
+### Changed
+
+- **Apple: the SDKs no longer link MetalPerformanceShaders.** `Package.swift`,
+  the `swift` branch manifest, the React Native pod and the Flutter iOS and
+  macOS pods dropped `MetalPerformanceShaders`, and the first three also
+  dropped `MetalPerformanceShadersGraph`. They were added in 0.1.0-beta4 for
+  Candle's Metal backend, whose `metal` dependency references
+  `MPSSupportsMTLDevice`; Candle left the platform presets in #476, and no
+  library shipped in v0.20.0 references either framework. CI now fails if the
+  XCFramework or the Flutter Apple libraries reference an MPS symbol, and links
+  the XCFramework's device slice. An app whose own code uses
+  MetalPerformanceShaders, or a custom build with `candle-metal`, must link the
+  framework itself (#807).
+
+### Fixed
+
+- **The trusted SDK source checker accepts normal release bumps.** It checks
+  only registered install pins in docs, accepts the observability JS and web
+  version pins, and recognizes the exact changelog heading and llama.cpp release
+  stamp written by the release tools without allowing unrelated edits (#811).
+- **The Swift samples on the iOS page and in the Swift README compile.** Error
+  Handling catches the generated `XybridError` cases (`modelNotFound(id:)`,
+  `inferenceError(message:)`, `ioError(message:)`), Result Handling switches on
+  `XybridOutputType` instead of strings and no longer reads a `result.error`
+  that does not exist, and the README's audio envelope uses
+  `audio(pcmData:sampleRate:channels:)`. A failed run throws, so the samples no
+  longer check `result.success` (#804).
+- **The Swift README describes the current build.** Its Structure tree points
+  at the repo-root `Package.swift`, the local XCFramework steps include the
+  `set-natives-mode.sh` toggle, Troubleshooting covers the Bazel and SwiftPM
+  flow, and the dead "Full Plan" links are gone from the Swift, Kotlin and tools
+  READMEs, along with the two placeholder build scripts they described (#805).
+- **The docs stop claiming ONNX models run on Core ML or NNAPI.** The pipeline
+  `execution_provider` key is documented as parsed but not applied yet (every
+  ONNX session runs on the CPU), and the Flutter platform tables say what each
+  model format runs on (#806).
+- **Apple build comments describe the build.** `ort-coreml` is described as
+  linking ONNX Runtime's Core ML execution provider (not Neural Engine
+  acceleration), including in the error shown when it is enabled off Apple.
+  The iOS `.bazelrc` config no longer calls the iOS build CPU-only with Metal
+  off, and the XCFramework and Flutter pod comments no longer list Candle among
+  what the iOS library links (#807).
+- **The streaming docs list the real `finishReason` values** (`stop`,
+  `length`, `tool_calls`), say how each SDK reports a failed stream, and
+  document `tokenId`, `toolCalls` and `rawText` (#808).
+- **The Unity examples target iOS 16**, the floor the Unity iOS library is
+  built for, and the starter README's iOS, Windows and platform notes are
+  current (#809).
+- **Stale docs claims from #646.** The custom-models guide's Rust, Flutter and
+  Kotlin snippets match the SDKs, every page agrees that the platform presets
+  include the vision path, the cache docs say cached models do not expire, and
+  the feature matrix names `xybrid-llama-sys`, lists no CLI default features
+  and shows `candle-hub` on rustls (#646).
+- **Rust: `ExecutionProviderInfo::current()` reports what ONNX Runtime runs
+  on.** `name` is `cpu` on every build: it was `coreml-ane` or `coreml` when
+  xybrid-sdk's `ort-coreml` feature was on, although every ONNX session is
+  built on the CPU execution provider. `coreml_available` is true whenever
+  ONNX Runtime's Core ML execution provider is linked, including under the
+  `platform-ios` and `platform-macos` presets, where it was false; it means
+  linked, not in use. Loading a pipeline whose stage sets `execution_provider`
+  to anything but `cpu` logs a warning, and `xybrid run`, `xybrid repl` and
+  `xybrid prepare` print one (#806).
+- **Flutter: `runStreamingWithContext` ends a turn on one final token.** It
+  emitted the native terminal token and then a second final token for the
+  metrics. On a tool-call turn that second token reported `finishReason:
+  'stop'`, no `toolCalls`, and a `cumulativeText` that included the raw
+  tool-call block; a turn cut off by `maxTokens` also ended on `'stop'`
+  instead of `'length'`. The stream now merges the two, as `runStreaming` and
+  `runStreamingWithFallback` do: the last token keeps the native index, text,
+  finish reason, `toolCalls` and `rawText`, and carries `metrics` and
+  `observation`. Code that expected two `isFinal` tokens per turn sees one.
+  When a tool-call block is suppressed but does not parse, the stream no
+  longer carries the raw output; `runWithContext` returns it in
+  `XybridResult.text` (#820).
+- **`fromModelFile` accepts a bare file name.** A GGUF named without a
+  directory, such as `model.gguf` in the working directory, now loads. The
+  shared facade step wrote its `model_metadata.json` and then failed with
+  `Directory not found` (#813).
+- **Two first loads of the same GGUF no longer race.** `fromModelFile` wrote
+  `model_metadata.json` in place, so a load starting at the same moment could
+  read the file half written and fail to parse it. The sidecar is now written
+  to a temporary file and linked into place, and an existing one is never
+  replaced. Publishing it needs hard links: on a filesystem without them, such
+  as FAT32 or exFAT, a first load with no `model_metadata.json` beside the
+  GGUF now fails with an I/O error instead of writing the file in place. A
+  GGUF whose sidecar is already there still loads (#813).
+
+## [0.20.0] - 2026-11-17
+
+### Added
+
+- **Registry telemetry:** CI runs now label their registry calls. When the
+  `CI` environment variable is set (GitHub Actions, GitLab CI, CircleCI,
+  Buildkite and most other CI services set it) to anything but empty, `0` or
+  `false`, the `X-Xybrid-Client` header ends with `; ci=1`, so registry
+  analytics can leave test traffic, such as suites resolving fake model ids,
+  out of real usage. `XYBRID_CI=1` (or `true`) labels a run where `CI` is
+  unset, such as a coding-agent sandbox or a development machine, and
+  `XYBRID_CI=0` (or `false`) keeps a CI run unlabelled. `ci=0` is never sent,
+  registries that predate the key ignore it, and `XYBRID_TELEMETRY_OPTOUT`
+  still drops the whole header. Every SDK built on the Rust core sends it; the
+  browser SDK (`@xybrid/web`) can't read environment variables and doesn't.
+  See [Registry call telemetry](docs/telemetry/registry.md#labelling-ci-runs).
+- **Swift: load a local GGUF file.** `ModelLoader.fromModelFile(_:)` and
+  `Xybrid.model(.modelFile(url))` load a raw GGUF with no `model_metadata.json`,
+  as React Native's `fromModelFile` and Unity's `FromModelFile` already do:
+  `load()` generates the metadata from the GGUF header and writes it next to the
+  file unless one is there. `ModelSource` gains a `.modelFile(URL)` case, so a
+  `switch` over it without a `default` needs one more arm.
+
+### Fixed
+
+- **SDK:** loading a pipeline no longer asks the model registry about its
+  cloud and provider stages. `PipelineRef::load`, which every binding's
+  pipeline constructor goes through, checked whether each stage's model was
+  cached by resolving it in the registry, including stages that name a
+  provider or `target: cloud`, `server` or `integration`. Their models
+  (`gpt-4o-mini`) are not registry ids, so each load spent a registry round
+  trip per such stage and got a 404 back. Only device and auto stages are
+  checked now; what a stage reports (`Pipeline::stages`) is unchanged.
+- **Flutter:** the cloud fallback (`runStreamingWithFallback`) asks the Xybrid
+  gateway for `openai/gpt-4o-mini` when the app sets no `cloudModel`. It sent
+  `gpt-4o-mini`, a short id the managed gateway (`api.xybrid.dev`) no longer
+  accepts: it names frontier models by their canonical OpenRouter id
+  (`vendor/model`), so every such fallback failed with `404 model_not_found`.
+  A `cloudModel` the app sets is sent unchanged, so it needs a canonical id
+  too (`anthropic/claude-haiku-4.5`, not `claude-haiku-4.5`).
+- **Rust:** `LlmClientConfig::default()` and
+  `xybrid_core::gateway::GatewayConfig::default()`, which target the Xybrid
+  gateway, default to `openai/gpt-4o-mini` instead of `gpt-4o-mini`. An
+  `LlmClientConfig` with `backend: Direct` that relied on the default must now
+  set `default_model` to the provider's own id.
+- **Docs and examples:** the pipeline, hybrid execution and `xybrid run`
+  pages (English and Chinese), the CLI's `hybrid-platform.yaml` and
+  `hiiipe.yaml`, the `cloud_fallback_demo` and `voice_assistant_gateway_demo`
+  examples and the staging acceptance tooling name the gateway's cloud model
+  by its canonical id. A cloud stage written from them on the default
+  `backend: gateway` sent `gpt-4o-mini` (or `deepseek-flash`) and got
+  `404 model_not_found`. With `backend: direct`, a stage still uses the
+  provider's own model id.
+- **The Swift README no longer calls the SDK "Coming Soon".** Its opening banner
+  told production users to pick Flutter or Kotlin, while the same README
+  documents the SwiftPM install of the shipped package. The Chinese and
+  Japanese READMEs and the pipelines page also stop listing Swift, Kotlin and
+  Unity pipelines as coming soon or planned, matching the English README.
+- **The iOS docs match the Swift package.** The iOS page, the Swift README and
+  the pages that repeat them drop the "early access" label and the iOS 13 /
+  macOS 10.15 minimums: the package supports iOS 16.0 and later, on devices and
+  the arm64 Simulator, and ships no macOS slice. The accelerator tables (the
+  iOS page, the READMEs, the installation guide and the feature matrix) no
+  longer claim the Apple Neural Engine: GGUF models run on llama.cpp's Metal
+  backend on devices and on the CPU in the Simulator, and ONNX models run on the
+  CPU. The Simulator known issue
+  ([#179](https://github.com/xybrid-ai/xybrid/issues/179), fixed in 0.4.0-alpha)
+  is gone, and building needs Xcode 15.3 (Swift 5.10).
+- **The iOS example README is current.** It targets iOS 16.0, loads models
+  with `Xybrid.model(...).load()` instead of the blocking `Model(fromRegistry:)`,
+  and no longer says Swift lacks token streaming: `streamTokens` has shipped,
+  and the iOS page, the Swift README, the streaming docs and the API reference
+  now document it (Kotlin's `streamTokens` too), and the streaming page no
+  longer calls live transcription planned. What Swift still lacks for live
+  vision is named instead: Flutter's `preempt` flag and raw-frame `imageRaw`
+  envelopes.
+- **`Package.swift` points external users at the current release.** Its
+  install comment said `exact: "0.1.0-beta13"`; it now uses `from:` with the
+  current version, and `just bump-version` rewrites it with the other SwiftPM
+  install snippets. The trusted zzz SDK source policy accepts that line moving
+  with the version in a release bump.
+
 ## [0.19.0] - 2026-11-14
 
 ### Added

@@ -185,6 +185,9 @@ jobs:
           # Floor of the SDK: boltffi's generated package needs >= 3.10.
           python-version: '3.12'
       - uses: ./.github/actions/install-boltffi
+      # The suite runs the SDK in-process: keep it off the production model
+      # registry.
+      - uses: ./.github/actions/empty-registry
       - name: Check the committed bindings match the crate
         run: python3 tools/scripts/gen_python_bolt.py --check
       - name: Build and stage the native artifacts
@@ -261,7 +264,11 @@ jobs:
       - name: Check platform-macos
         run: cargo check -p xybrid-sdk --features platform-macos
       - name: Test native Core ML bundle ownership
-        run: cargo test -p xybrid-core --features coreml,ort-download --lib runtime_adapter::coreml::native::tests
+        # ort-coreml as well, so features::tests runs where ONNX Runtime's Core
+        # ML provider is linked: ExecutionProviderInfo reports that list as
+        # coreml_available (#806), and no other job compiles core's lib tests
+        # with it.
+        run: cargo test -p xybrid-core --features coreml,ort-coreml,ort-download --lib -- runtime_adapter::coreml::native::tests features::tests
       - name: Test native Core ML fixture
         run: cargo test -p integration-tests --features coreml --test coreml_native
 
@@ -399,6 +406,10 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           cache-key: ubuntu-latest-ort-download
+
+      # No test may reach the production model registry: point the SDK at a
+      # local one that lists no model.
+      - uses: ./.github/actions/empty-registry
 
       # Skip examples — they statically link llama.cpp + ort and exhaust
       # runner disk during link. `clippy --all-targets` already verifies

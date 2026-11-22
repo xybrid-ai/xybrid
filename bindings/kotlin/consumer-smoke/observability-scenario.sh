@@ -8,13 +8,13 @@
 #
 # The first form runs ObservabilityScenarioTest, the shared observability
 # scenario (tools/scripts/observability_capture/scenario.md). <endpoint> is the
-# capture receiver as the device reaches it (http://10.0.2.2:<port> from an
-# emulator). Both arguments default to the XYBRID_SCENARIO_ENDPOINT /
+# capture receiver as the device reaches it (http://127.0.0.1:<port> routed
+# through adb reverse). Both arguments default to the XYBRID_SCENARIO_ENDPOINT /
 # _EXPECTATIONS variables run_scenario.py sets, which fills the placeholders
 # below and then runs check_capture.py:
 #
 #   python3 tools/scripts/observability_capture/run_scenario.py --binding kotlin \
-#     --endpoint-host 10.0.2.2 --out-dir out/kotlin -- \
+#     --out-dir out/kotlin -- \
 #     bash bindings/kotlin/consumer-smoke/observability-scenario.sh {endpoint} {expectations}
 #
 # The second form runs ObservabilityStagingScenarioTest, the step 6 staging
@@ -45,6 +45,24 @@ usage() {
     echo "usage: $0 <endpoint> <expectations-out>" >&2
     echo "       $0 staging <config> <expectations-out>" >&2
     exit 2
+}
+
+check_loopback_receiver() {
+    local port="$1" attempt reply request
+    # Toybox nc half-closes on stdin EOF, which adb treats as a full close.
+    # Keep the writer open past nc's read timeout so the reply can reach it.
+    request="{ printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n'; sleep 3; } | nc -w 2 -W 2 127.0.0.1 $port"
+    for ((attempt = 1; attempt <= 10; attempt++)); do
+        if reply="$("$ADB" shell -T "$request" 2>/dev/null)" \
+            && [[ "$reply" == *'{"status":"ok"}'* ]]; then
+            echo "==> The device reaches the receiver"
+            return 0
+        fi
+        if ((attempt < 10)); then
+            sleep 1
+        fi
+    done
+    return 1
 }
 
 ADB="${ADB:-adb}"
@@ -137,6 +155,21 @@ if [ -n "$STAGING" ]; then
     status=0
     "$ADB" shell am instrument -w -r -e class "$TEST_CLASS" "$RUNNER" | tee "$RESULTS" || status=$?
 else
+    if [[ "$ENDPOINT" =~ ^http://127\.0\.0\.1:([0-9]+)(/|$) ]]; then
+        PORT="${BASH_REMATCH[1]}"
+        echo "==> Forwarding the device's 127.0.0.1:$PORT to the host's receiver"
+        if ! "$ADB" reverse --no-rebind "tcp:$PORT" "tcp:$PORT"; then
+            "$ADB" logcat -d > "$OUT_DIR/logcat.txt" || true
+            echo "error: could not forward the receiver port $PORT to the device" >&2
+            exit 3
+        fi
+        trap '"$ADB" reverse --remove "tcp:$PORT" || true' EXIT
+        if ! check_loopback_receiver "$PORT"; then
+            "$ADB" logcat -d > "$OUT_DIR/logcat.txt" || true
+            echo "error: the receiver at $ENDPOINT is unreachable from the device" >&2
+            exit 3
+        fi
+    fi
     echo "==> Running $TEST_CLASS against $ENDPOINT"
     status=0
     "$ADB" shell am instrument -w -r -e class "$TEST_CLASS" -e xybridScenarioEndpoint "$ENDPOINT" "$RUNNER" \

@@ -56,7 +56,8 @@ const ASR_MODEL: &str = "whisper-tiny-ggml";
 const TTS_MODEL: &str = "kitten-tts-nano-0.8";
 const FRAMES: usize = 5;
 const FRAME_INTERVAL: Duration = Duration::from_secs(600);
-const CLOUD_MODEL: &str = "gpt-4o-mini";
+/// The staging gateway takes frontier models by canonical id only.
+const CLOUD_MODEL: &str = "openai/gpt-4o-mini";
 const FALLBACK_MAX_TOKENS: usize = 256;
 const TTS_TEXT: &str = "The lighthouse keeper climbed the spiral stairs every evening at dusk. \
     He wiped the great lens until it shone, then lit the lamp and watched its beam sweep across \

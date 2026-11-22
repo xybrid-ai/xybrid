@@ -4,11 +4,14 @@ import {
   DocsDescription,
   DocsPage,
   DocsTitle,
+  MarkdownCopyButton,
+  ViewOptionsPopover,
 } from 'fumadocs-ui/layouts/docs/page';
 import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/mdx-components';
 import type { Metadata } from 'next';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
+import { SITE_NAME } from '@/lib/metadata';
 
 export default async function Page({
   params,
@@ -20,11 +23,21 @@ export default async function Page({
   if (!page) notFound();
 
   const MDX = page.data.body;
+  // the Markdown of the page, served by `app/[lang]/llms.mdx`
+  const markdownUrl = `${page.url}.md`;
 
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
       <DocsTitle>{page.data.title}</DocsTitle>
-      <DocsDescription>{page.data.description}</DocsDescription>
+      <DocsDescription className="mb-0">{page.data.description}</DocsDescription>
+      <div className="flex flex-row gap-2 items-center border-b pb-6">
+        <MarkdownCopyButton markdownUrl={markdownUrl} />
+        <ViewOptionsPopover
+          markdownUrl={markdownUrl}
+          // the source file, `<page>.zh.mdx` for a translated page
+          githubUrl={`https://github.com/xybrid-ai/xybrid/blob/master/docs/content/docs/${encodeURI(page.path)}`}
+        />
+      </div>
       <DocsBody>
         <MDX
           components={getMDXComponents({
@@ -54,7 +67,12 @@ export async function generateMetadata({
     title: page.data.title,
     description: page.data.description,
     openGraph: {
+      siteName: SITE_NAME,
       images: getPageImage(page).url,
+    },
+    alternates: {
+      // agents reading the HTML find the Markdown of the page here
+      types: { 'text/markdown': `${page.url}.md` },
     },
   };
 }

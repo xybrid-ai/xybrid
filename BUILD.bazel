@@ -25,7 +25,7 @@ config_setting(
 )
 
 # The macOS GPU lane toggle (Flip 2). Both darwin lanes share the SAME Rust
-# feature set (candle-metal/CoreML/vision are bindings — pure Rust, cross-
+# feature set (CoreML/vision are bindings — pure Rust, cross-
 # compilable, so keeping features identical maximizes rlib cache overlap
 # between the RBE CPU lane and the Mac Metal lane). The flag flips only what
 # physically differs: llama.cpp's GGML_METAL/ACCELERATE, which need Xcode —
@@ -885,8 +885,9 @@ objc_library(
     ],
     copts = [
         "-std=c++17",
-        # Consumers may target older iOS than the bridge needs (the Flutter pod
-        # declares 13.0); every newer API must sit behind @available.
+        # Every shipped iOS config builds for 16.0 (--ios_minimum_os), but a
+        # cargo build of the same source can target an older iOS through
+        # IPHONEOS_DEPLOYMENT_TARGET; every newer API must sit behind @available.
         "-Werror=unguarded-availability-new",
     ],
     # The bridge includes upstream's ABI header as "coreml/whisper-encoder.h".

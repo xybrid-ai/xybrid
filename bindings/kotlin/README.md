@@ -12,7 +12,7 @@ Add to your `build.gradle.kts`:
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.19.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.20.0")
 }
 ```
 
@@ -558,7 +558,3 @@ for armeabi-v7a and x86_64.
 ## Telemetry
 
 The Android binding reports `binding=kotlin` in a small `X-Xybrid-Client` header attached to registry metadata calls. See [docs/telemetry/registry.md](../../docs/telemetry/registry.md) for the exact wire format and the opt-out switch (`XYBRID_TELEMETRY_OPTOUT=1`).
-
-## Full Plan
-
-See [DRAFT-PLATFORM-SDK-RESTRUCTURE.md](../../docs/architecture/DRAFT-PLATFORM-SDK-RESTRUCTURE.md) for the complete restructuring plan.

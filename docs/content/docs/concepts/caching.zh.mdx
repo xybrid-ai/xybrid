@@ -115,14 +115,9 @@ flowchart LR
 
 解压操作是一次性的——如果 `extracted/{model_id}/` 目录已存在，SDK 会跳过重新解压。因此新模型的首次运行稍慢（下载 + 解压），后续运行均可立即启动。
 
-### TTL 与清理
+### 清理
 
-| 来源 | TTL |
-|--------|-----|
-| **本地模型** | 永久保留 |
-| **云端模型** | 24 小时（可配置） |
-
-云端模型在 TTL 到期后会自动清理，本地模型（从磁盘加载）永不自动删除。
+缓存模型不会过期。已下载的 Bundle 及其解压文件会一直保留在磁盘上，直到你将其删除：运行 `xybrid cache clear <model-id>`，或使用[管理缓存](#管理缓存)中的调用。
 
 ## 管理缓存
 
@@ -144,19 +139,24 @@ xybrid cache clear
 ```rust
 use xybrid_sdk::CacheManager;
 
-let cache = CacheManager::new()?;
+let mut cache = CacheManager::new()?;
 
 // 检查模型是否已缓存
 if cache.is_cached("kokoro-82m") {
     println!("Model path: {:?}", cache.get_cached_path("kokoro-82m"));
 }
 
-// 获取缓存统计信息
+// 获取旧版注册表 Bundle 的统计信息
 let status = cache.status()?;
-println!("Models: {}, Size: {} MB", status.model_count, status.size_bytes / 1_000_000);
+println!("Models: {}, Size: {} MB", status.total_models, status.total_size_bytes / 1_000_000);
 
-// 删除过期的云端模型
-cache.clean_expired()?;
+// 查看每个受管的物理缓存条目
+for entry in cache.cache_entries()? {
+    println!("{}: {} bytes", entry.model_id, entry.size_bytes);
+}
+
+// 从所有受管缓存位置删除一个模型
+cache.clear_model("kokoro-82m")?;
 
 // 清除所有内容
 cache.clear()?;
@@ -197,8 +197,8 @@ xybrid cache status    # 查看总大小
 xybrid cache clear     # 删除所有内容
 ```
 
-或通过代码仅删除过期的云端模型：
+或通过代码删除单个模型：
 
 ```rust
-CacheManager::new()?.clean_expired()?;
+CacheManager::new()?.clear_model("kokoro-82m")?;
 ```

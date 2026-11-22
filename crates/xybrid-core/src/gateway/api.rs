@@ -164,7 +164,7 @@ pub struct FunctionDefinition {
 /// ## Example
 /// ```json
 /// {
-///   "model": "gpt-4o-mini",
+///   "model": "openai/gpt-4o-mini",
 ///   "messages": [
 ///     {"role": "system", "content": "You are a helpful assistant."},
 ///     {"role": "user", "content": "Hello!"}
@@ -176,7 +176,9 @@ pub struct FunctionDefinition {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatCompletionRequest {
     /// Model ID to use for completion.
-    /// Examples: "gpt-4o-mini", "claude-3-sonnet", "llama-3.1-70b"
+    /// Frontier models use canonical OpenRouter ids, such as
+    /// "openai/gpt-4o-mini" or "anthropic/claude-haiku-4.5"; the gateway
+    /// answers `404 model_not_found` for a short id such as "gpt-4o-mini".
     pub model: String,
 
     /// Messages in the conversation.

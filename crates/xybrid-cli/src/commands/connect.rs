@@ -28,8 +28,8 @@ use clap::Args;
 use uuid::Uuid;
 
 use crate::platform::client::{
-    safe_link, safe_name, ApiFailure, ClientInfo, ConnectBody, PlatformClient, Provision,
-    WorkspaceStatus,
+    connect_via, safe_link, safe_name, ApiFailure, ClientInfo, ConnectBody, PlatformClient,
+    Provision, WorkspaceStatus,
 };
 use crate::platform::credentials::{
     Credential, CredentialsFile, EnvFileRecord, NamedRef, PendingKind, PendingRequest, Secret,
@@ -60,6 +60,10 @@ pub(crate) struct ConnectArgs {
     /// Self-reported agent name, e.g. claude-code (detected from CLAUDECODE=1 when possible)
     #[arg(long, value_name = "NAME")]
     pub agent: Option<String>,
+
+    /// Setup entrypoint: web-copy, setup-prompt, llms-txt, skill, mcp, or docs; sent only when the platform enables collection
+    #[arg(long, value_name = "ENTRYPOINT")]
+    pub via: Option<String>,
 
     /// Write the key to this untracked project file (.env, .env.local,
     /// local.properties, Secrets.xcconfig, ...) and gitignore it
@@ -1321,6 +1325,7 @@ impl Session<'_> {
             claim_token: None,
             project_name: self.project_name(),
             source: detect_source(self.args.agent.as_deref()),
+            client_info: None,
             started_at: Utc::now(),
         }
     }
@@ -1328,6 +1333,17 @@ impl Session<'_> {
     /// Fetch and solve a challenge into `pending`, then persist it.
     fn solve_into(&mut self, pending: &mut PendingRequest) -> Result<(), Failed> {
         let challenge = self.client.challenge()?;
+        if challenge.collect_via.as_bool() != Some(true)
+            && pending
+                .client_info
+                .as_mut()
+                .and_then(|info| info.via.take())
+                .is_some()
+            && pending.challenge.is_some()
+        {
+            self.file.set_pending(pending.clone());
+            self.save()?;
+        }
         if let Some(algorithm) = &challenge.algorithm {
             if algorithm != pow::ALGORITHM {
                 return Err(CliError::new(
@@ -1369,6 +1385,7 @@ impl Session<'_> {
             Some(pending) => pending,
             None => {
                 let mut pending = self.new_pending(PendingKind::Connect);
+                pending.client_info = Some(ClientInfo::current(self.args.via.as_deref()));
                 self.solve_into(&mut pending)?;
                 pending
             }
@@ -1376,11 +1393,17 @@ impl Session<'_> {
         let install_id = install_id::get();
         let (mut refreshed, mut restarted, mut busy) = (false, false, 0);
         loop {
+            let client_info = pending
+                .client_info
+                .get_or_insert_with(|| ClientInfo::current(None));
+            if connect_via(client_info.via.as_deref()).is_none() {
+                client_info.via = None;
+            }
             let body = ConnectBody {
                 source: pending.source.as_deref(),
                 project_name: pending.project_name.as_deref(),
                 install_id: Some(&install_id),
-                client_info: ClientInfo::current(),
+                client_info: client_info.clone(),
                 challenge: pending.challenge.as_deref().unwrap_or_default(),
                 nonce: pending.nonce.as_deref().unwrap_or_default(),
             };
@@ -1402,7 +1425,9 @@ impl Session<'_> {
                     | "workspace_unavailable",
                 ) if !restarted => {
                     restarted = true;
+                    let info = pending.client_info.take();
                     pending = self.new_pending(PendingKind::Connect);
+                    pending.client_info = info;
                     self.solve_into(&mut pending)?;
                 }
                 Some("agent_signup_busy") if busy < MAX_BUSY_RETRIES => {
@@ -1813,6 +1838,9 @@ fn connect_command(
     if repeat_new && args.new {
         command.push_str(" --new");
     }
+    if let Some(via) = connect_via(args.via.as_deref()).filter(|_| repeat_new) {
+        push_flag(&mut command, "--via", via)?;
+    }
     if let Some(path) = write_env {
         // A path that isn't Unicode can't be shown without changing it.
         let path = path.to_str().ok_or(Unquotable("--write-env"))?;
@@ -2008,6 +2036,7 @@ mod tests {
         let host = PlatformHost::parse("http://127.0.0.1:8080").unwrap();
         let args = ConnectArgs {
             agent: Some("claude-code".into()),
+            via: None,
             write_env: Some(PathBuf::from("config/.env")),
             env_name: Some("EXPO_PUBLIC_XYBRID_API_KEY".into()),
             project_name: Some("demo".into()),

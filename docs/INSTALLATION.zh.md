@@ -47,7 +47,7 @@ cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli
 默认情况下，`cargo install` 构建时不包含硬件加速。为获得最佳性能，请添加平台特性：
 
 ```bash
-# macOS — Metal GPU + Apple Neural Engine + llama.cpp
+# macOS — Metal GPU + llama.cpp + whisper.cpp
 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-macos
 
 # Linux / Windows — ONNX + llama.cpp
@@ -69,7 +69,7 @@ cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features pl
 | **独立标志** | |
 | `ort-download` | 下载预编译的 ONNX Runtime 二进制文件 |
 | `ort-dynamic` | 在运行时加载 ONNX Runtime 的 .so |
-| `ort-coreml` | Apple Neural Engine 加速 |
+| `ort-coreml` | 链接 ONNX Runtime 的 Core ML 执行提供程序（SDK 目前尚未选用） |
 | `candle` | Candle ML 后端（Whisper 模型） |
 | `candle-metal` | Candle 的 Metal 显卡加速 |
 | `candle-cuda` | Candle 的 CUDA 显卡加速 |
@@ -191,12 +191,10 @@ xybrid run --model smollm2-360m --input-text "What is the capital of France?"
 
 ### 视觉模型输入
 
-视觉语言模型需要启用 `vision` 或 `llm-llamacpp-vision` 编译的版本，
-以及包含视觉编码器构件的模型Bundle。仅使用平台预设时仅支持纯文本输入；
-如需本地 VLM 生成，请将预设与 `llm-llamacpp-vision` 组合。
+视觉语言模型需要启用 `llm-llamacpp-vision` 编译的版本，以及包含视觉编码器构件的模型Bundle。每个平台预设都已启用 `llm-llamacpp-vision`，因此直接用预设构建即可运行 VLM，无需额外特性：
 
 ```bash
-cargo build --release -p xybrid-cli --features platform-macos,llm-llamacpp-vision
+cargo build --release -p xybrid-cli --features platform-macos
 ```
 
 ```bash

@@ -175,7 +175,7 @@ stopped stream is already the token callback returning an error (delivery
 | `case-tts` | `kitten-tts-nano-0.8`, a three-chunk text streamed to completion, then stopped by the chunk callback after one | `case.tts_streaming`: two `text_to_speech` requests, completed with the delivered chunk count, stopped `cancelled` after one |
 | `case-asr` | `whisper-tiny-ggml`: `integration-tests/fixtures/input/jfk.wav` as one batch run, then fed second by second to a live stream and flushed | `case.asr_batch_and_live`: a `speech_to_text` request, and one `invoke_workflow asr_session` with decoder runs, all without error |
 | `case-frames` | five runs of one frame session with a 10-minute live trace interval | `case.frame_session`: one traced run (the only returned reference), five `gen_ai.client.inference.duration` measurements in the sink |
-| `case-fallback` | a local stream aborted by a staged memory-pressure signal and finished by the staging gateway (`gpt-4o-mini`) | `case.cloud_fallback`: one counted request whose `attempt 0` is local and ended `aborted_for_cloud_fallback`, whose `attempt 1` is remote with reason `fallback`, and a gateway span under that remote attempt |
+| `case-fallback` | a local stream aborted by a staged memory-pressure signal and finished by the staging gateway (`openai/gpt-4o-mini`) | `case.cloud_fallback`: one counted request whose `attempt 0` is local and ended `aborted_for_cloud_fallback`, whose `attempt 1` is remote with reason `fallback`, and a gateway span under that remote attempt |
 
 ### CLI lanes
 

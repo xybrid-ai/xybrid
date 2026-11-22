@@ -87,6 +87,9 @@ fn print_stage_details(config: &PipelineConfig) {
         if let Some(provider) = stage.provider() {
             println!("     Provider: {}", provider);
         }
+        if let Some(message) = stage.unapplied_execution_provider_warning() {
+            crate::ui::warning(&message);
+        }
     }
 }
 

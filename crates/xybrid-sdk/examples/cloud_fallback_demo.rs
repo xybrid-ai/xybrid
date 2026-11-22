@@ -20,12 +20,12 @@
 //! 2. Have a Xybrid gateway reachable on the OpenAI-compatible
 //!    `/v1/chat/completions` endpoint. By default the demo points at
 //!    `http://localhost:3001/v1`, which is the local-dev port the Xybrid
-//!    gateway listens on. The gateway dispatches to whichever upstream
-//!    provider it has credentials for (e.g. DeepSeek, OpenAI, Anthropic);
-//!    the demo sends `model = "deepseek-flash"` to match a gateway
-//!    configured with `DEEPSEEK_API_KEY`. Pick a different `model` (and
-//!    matching `provider` metadata) below if your gateway exposes
-//!    different upstream keys.
+//!    gateway listens on. The gateway routes on `model` alone: frontier
+//!    models by their canonical OpenRouter id (a local platform serves them
+//!    only with `OPENROUTER_API_KEY` set), Xybrid-hosted models by their
+//!    xycloud id. A short id such as `gpt-4o-mini` or `deepseek-chat` is
+//!    `404 model_not_found`. The demo sends `model = "openai/gpt-4o-mini"`;
+//!    pick another id from the gateway's `GET /v1/models` below if you like.
 //!
 //!    Authenticate to the gateway with a Xybrid API key — mint one in
 //!    your Xybrid account and export it:
@@ -166,16 +166,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    `CloudRuntimeAdapter::execute_streaming` will read on the retry leg.
     //    The local leg ignores the cloud-only keys.
     let mut envelope = Envelope::new(EnvelopeKind::Text(PROMPT.to_string()));
-    // The local platform backend resolves the upstream provider from the
-    //    `model` name (`deepseek-flash` → DeepSeek), so the `provider` field is
-    //    SDK-side bookkeeping only and never crosses the wire to the gateway.
-    //    Match it to the model so traces stay honest.
+    // The gateway routes on the canonical `model` id alone (a short id
+    //    such as `gpt-4o-mini` is `404 model_not_found`), so the `provider`
+    //    field is SDK-side bookkeeping only and never crosses the wire to the
+    //    gateway. Match it to the model's vendor so traces stay honest.
     envelope
         .metadata
-        .insert("provider".to_string(), "deepseek".to_string());
+        .insert("provider".to_string(), "openai".to_string());
     envelope
         .metadata
-        .insert("model".to_string(), "deepseek-flash".to_string());
+        .insert("model".to_string(), "openai/gpt-4o-mini".to_string());
     envelope
         .metadata
         .insert("max_tokens".to_string(), "200".to_string());

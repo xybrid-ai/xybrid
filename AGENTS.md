@@ -294,6 +294,8 @@ pipeline and ships nothing. Never commit `Package.swift useLocalNatives = true`
 (local-dev only; breaks remote SPM — run `bindings/apple/scripts/set-natives-mode.sh
 --set-remote`). Full ritual + gotchas: **§ Releases** below.
 
+If a release tool starts writing new metadata, update the exact trusted rendering in `tools/scripts/zzz_source_policy.py` and its real-bump regression test.
+
 ---
 
 # Section 0 — xybrid project decisions
@@ -398,6 +400,12 @@ registers, `xybrid-bolt` reports a fallback: `swift` on Apple platforms,
 so a new binding there reports theirs only until it registers. Add a new name
 to the facade's `resolve_binding`; a test fails until you do. The table is in
 `docs/telemetry/registry.md`.
+
+Under CI the same header ends with `ci=1` (`crates/xybrid-sdk/src/ci.rs`:
+`XYBRID_CI` decides when it is `1`/`true` or `0`/`false`, else `CI`), and
+registry analytics can leave those requests out. Coding-agent sandboxes don't set
+`CI`: export `XYBRID_CI=1` before running tests or examples that can reach the
+registry, or point `XYBRID_REGISTRY_URL` at a local stub.
 
 The browser package (`bindings/web`, npm `@xybrid/web`) is a GGUF text-generation
 preview over the existing Rust/llama.cpp path. `pnpm build` invokes Bazel for CPU
@@ -604,7 +612,8 @@ Pushing `release/v*` triggers `release-prep.yml`, which:
   not committed). Run `bindings/apple/scripts/set-natives-mode.sh --set-remote`
   before committing — remote (`false`) is the canonical committed state.
 
-Install snippets in the READMEs and docs pages that name a release are pins in
+Install snippets in the READMEs and docs pages that name a release, and the
+root `Package.swift`'s comment for external users, are pins in
 `PINS` (`tools/scripts/install_pins.py`). A new snippet shape, or a new page
 carrying one, gets an entry there or no bump rewrites it. CI's `Repo checks`
 job runs `version-sync.sh --check` and `test_install_pins.py` on every PR,

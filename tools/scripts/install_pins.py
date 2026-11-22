@@ -23,6 +23,7 @@ docs.xybrid.dev name the rc until the final release moves them on.
 A new install snippet goes into PINS. tests/test_install_pins.py fails while a
 tracked doc carries a snippet its pin does not list, or names a package with a
 version that no pin owns; CI's Repo checks job runs it on every pull request.
+The trusted release source policy also uses this table to constrain release bumps.
 Standard library only, and Python 3.9 compatible: version-sync.sh runs it on
 bare CI runners and laptops.
 
@@ -97,7 +98,10 @@ PINS: Tuple[Pin, ...] = (
         r'\.package\(\s*(?:name:\s*"[^"\n]*"\s*,\s*)?url:\s*"https://github\.com/xybrid-ai/xybrid(?:\.git)?"\s*,\s*'
         r'(?:(?:from|exact):\s*|\.(?:upToNextMajor|upToNextMinor)\(\s*from:\s*|\.exact\(\s*)?"{version}"',
         (_README, _README_ZH, _README_JA, "bindings/apple/README.md",
-         _SDKS + "ios.mdx", _SDKS + "ios.zh.mdx", _QUICKSTART, _QUICKSTART_ZH),
+         _SDKS + "ios.mdx", _SDKS + "ios.zh.mdx", _QUICKSTART, _QUICKSTART_ZH,
+         # The manifest's comment for external users. Not a doc, so the
+         # repo-wide snippet scan in the test never reaches it.
+         "Package.swift"),
     ),
     Pin(
         "Xcode dependency rule",

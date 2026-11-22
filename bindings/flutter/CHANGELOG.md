@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+* Added: `XybridModelLoader.fromModelFile(path)` loads a raw llama.cpp GGUF
+  with no `model_metadata.json`. Creating the loader touches no disk; `load()`
+  writes the generated metadata next to the file unless one is already there,
+  with the context capped at 4,096 tokens, so the directory must be writable
+  and support hard links (FAT32 and exFAT do not): copy assets and bundled
+  files under `getApplicationSupportDirectory()` first.
+  `loadWithProgress()` emits only `LoadComplete` or `LoadError`.
+* Fixed: `runStreamingWithContext` ends a successful turn on one final token,
+  as `runStreaming` and `runStreamingWithFallback` do. It used to emit the
+  native terminal token and then a second final token (`token: ''`,
+  `index: 0`) for the metrics. On a tool-call turn that second token reported
+  `finishReason: 'stop'`, empty `toolCalls` and a `cumulativeText` containing
+  the raw tool-call block, and a turn cut off by `maxTokens` ended on
+  `'stop'` instead of `'length'`. The single final token keeps the terminal
+  token's `index`, `cumulativeText`, `finishReason`, `toolCalls` and
+  `rawText`, and carries `metrics` and `observation`. Code that expected two
+  `isFinal` tokens per turn sees one. When a tool-call block is suppressed but
+  does not parse, the stream no longer carries the raw output; `runWithContext`
+  returns it in `XybridResult.text`.
+* Changed: the iOS and macOS pods no longer link MetalPerformanceShaders.
+  Nothing in the native library references it; a custom build with
+  `candle-metal` must add the framework itself.
+
+## 0.20.0
+
+* Added: registry calls made under CI (`CI` set to anything but empty, `0` or
+  `false`, or `XYBRID_CI=1`) end the `X-Xybrid-Client` header with `ci=1`, so
+  registry analytics can leave test traffic out of real usage. `XYBRID_CI=0`
+  keeps a CI run unlabelled, and `XYBRID_TELEMETRY_OPTOUT` still drops the
+  header.
+* Fixed: `runStreamingWithFallback` asks the Xybrid gateway for
+  `openai/gpt-4o-mini` when `RunOptions.cloudModel` is unset. It sent
+  `gpt-4o-mini`, which the managed gateway answers with 404
+  `model_not_found`: it takes frontier models by their canonical OpenRouter id
+  only. A `cloudModel` you set is sent unchanged, so use a canonical id there
+  too (for example `anthropic/claude-haiku-4.5`).
+
 ## 0.19.0
 
 * Fixed: pipeline stages with no explicit target or cloud provider now download
