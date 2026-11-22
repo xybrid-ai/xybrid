@@ -17,11 +17,25 @@ newer.
 ```bash
 xybrid connect --write-env .env
 xybrid connect --write-env local.properties
-xybrid connect --agent claude-code --write-env .env --json
+xybrid connect --write-env .env --json
 ```
 
 Run it from the project's repository. Credentials are kept per repository and
 platform host.
+
+For agent-driven setup, carry forward the first **Xybrid setup entrypoint**
+from the instructions that led you here. Only default to `docs` if you
+started here. In Bash, set `XYBRID_SETUP_VIA` to the earlier value if there is
+one. On other shells, check `xybrid connect --help` for `--via` and skip the
+option if it isn't listed:
+
+```bash
+if xybrid connect --help | grep -q -- '--via'; then
+  xybrid connect --via "${XYBRID_SETUP_VIA:-docs}" --write-env .env --json
+else
+  xybrid connect --write-env .env --json
+fi
+```
 
 ## Options
 
@@ -29,7 +43,8 @@ platform host.
 |--------|-------------|
 | `--write-env <PATH>` | Write the key to this untracked project file and gitignore it |
 | `--env-name <VAR>` | Variable to set in `--write-env`. Default `XYBRID_API_KEY`, or `xybrid.apiKey` in a `.properties` file. For Expo, pass `EXPO_PUBLIC_XYBRID_API_KEY` |
-| `--agent <NAME>` | Self-reported agent name, for example `claude-code`. Detected from `CLAUDECODE=1` when possible |
+| `--agent <NAME>` | Self-reported name of the agent actually in use, separate from the entrypoint. Detected from `CLAUDECODE=1` when possible |
+| `--via <ENTRYPOINT>` | When supported, `web-copy`, `setup-prompt`, `llms-txt`, `skill`, `mcp`, or `docs`. Sent only when the platform challenge permits collection after the notice period. Retries keep the original value or omission, but remove the value if a replacement challenge does not permit collection. Reused workspaces are unchanged |
 | `--project-name <NAME>` | Name for a new workspace or project. Default: the repository's directory name |
 | `--new` | Create a new workspace even if this project has saved credentials. Never replaces a key already in the project file |
 | `--allow-ci` | Connect even when a CI environment is detected. Privacy opt-outs still apply |

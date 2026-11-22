@@ -27,7 +27,7 @@ This document provides a comprehensive reference for all feature flags, platform
 | **ort-coreml** | Links ONNX Runtime's Core ML execution provider (the SDK does not select it yet) | `ort/coreml` |
 | **candle** | Pure Rust ML framework — the SafeTensors Whisper path. **Opt-in only**: no `platform-*` preset enables it (`asr-whispercpp` / whisper.cpp is the shipped ASR backend). Android-compatible | `candle-core`, `candle-nn`, `candle-transformers`, `safetensors`, `byteorder`, `num-traits`, `rayon` |
 | **candle-hub** | Candle + HuggingFace Hub download support | `candle`, `hf-hub` (on rustls, no OpenSSL) |
-| **candle-metal** | Candle with Metal GPU acceleration | `candle`, `candle-core/metal`, `candle-nn/metal` |
+| **candle-metal** | Candle with Metal GPU acceleration. Its `metal` dependency references MetalPerformanceShaders, which no SDK manifest links: a cdylib or binary links it automatically, an app that links a static library built with this feature must add the framework itself | `candle`, `candle-core/metal`, `candle-nn/metal` |
 | **candle-cuda** | Candle with CUDA GPU acceleration | `candle`, `candle-core/cuda` |
 | **llm-mistral** | mistral.rs LLM backend (CPU) | `mistralrs` |
 | **llm-mistral-metal** | mistral.rs with Metal acceleration | `llm-mistral`, `mistralrs/metal` |

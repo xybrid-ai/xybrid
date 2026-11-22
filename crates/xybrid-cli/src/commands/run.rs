@@ -207,6 +207,9 @@ fn resolve_pipeline_stages(
         // The stage keeps its YAML id; the model id travels separately so a
         // hybrid stage can name a local bundle and a cloud model.
         let mut desc = StageDescriptor::new(stage_config.stage_id()).with_model(model_id.clone());
+        if let Some(message) = stage_config.unapplied_execution_provider_warning() {
+            ui::warning(&message);
+        }
 
         match classify_stage(stage_config)? {
             StageShape::CloudOnly { provider } => {

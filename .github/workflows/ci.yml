@@ -264,7 +264,11 @@ jobs:
       - name: Check platform-macos
         run: cargo check -p xybrid-sdk --features platform-macos
       - name: Test native Core ML bundle ownership
-        run: cargo test -p xybrid-core --features coreml,ort-download --lib runtime_adapter::coreml::native::tests
+        # ort-coreml as well, so features::tests runs where ONNX Runtime's Core
+        # ML provider is linked: ExecutionProviderInfo reports that list as
+        # coreml_available (#806), and no other job compiles core's lib tests
+        # with it.
+        run: cargo test -p xybrid-core --features coreml,ort-coreml,ort-download --lib -- runtime_adapter::coreml::native::tests features::tests
       - name: Test native Core ML fixture
         run: cargo test -p integration-tests --features coreml --test coreml_native
 

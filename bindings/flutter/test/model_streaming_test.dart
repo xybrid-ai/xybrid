@@ -198,26 +198,25 @@ void main() {
           XybridEnvelope.text('Hi'),
           options: const RunOptions(),
         ),
+    'runStreamingWithContext': () => model.runStreamingWithContext(
+          XybridEnvelope.text('Hi'),
+          ConversationContext(),
+        ),
   };
 
-  test('each stream reports a recovered cloud error only on completion',
+  test('each stream reports a recovered cloud error on its one final token',
       () async {
     const error = '502 Upstream provider error (xycloud)';
-    for (final run in [
-      ...runs.values,
-      () => model.runStreamingWithContext(
-          XybridEnvelope.text('Hi'), ConversationContext()),
-    ]) {
+    for (final run in runs.values) {
       api.events = [
         _finalToken('answer'),
         _complete('answer', cloudError: error),
       ];
       final tokens = await run().toList();
+      expect(tokens.where((token) => token.isFinal), hasLength(1));
       expect(tokens.last.cumulativeText, 'answer');
       expect(tokens.last.isError, isFalse);
       expect(tokens.last.speculativeCloudError, error);
-      expect(tokens.where((token) => token.speculativeCloudError != null),
-          hasLength(1));
     }
   });
 
@@ -244,8 +243,10 @@ void main() {
 
         final tokens = await run().toList();
 
+        expect(tokens.single.isFinal, isTrue);
         expect(tokens.single.finishReason, 'stop');
         expect(tokens.single.cumulativeText, 'Hello');
+        expect(tokens.single.metrics!.totalMs, 10);
       });
 
       test('traced completion retains its reference after a native final token',
@@ -269,6 +270,44 @@ void main() {
         expect(tokens.single.finishReason, 'tool_calls');
         expect(tokens.last.observation, reference);
         expect(tokens.last.metrics, isNotNull);
+        expect(tokens.expand((token) => token.toolCalls), hasLength(1));
+      });
+
+      test('a tool-call turn ends on one final token without the call block',
+          () async {
+        const call = FfiToolCall(
+            id: 'call-1', name: 'weather', argumentsJson: '{"city":"Paris"}');
+        const visible = 'Let me check.';
+        const raw = '$visible<tool_call>{"name":"weather",'
+            '"arguments":{"city":"Paris"}}</tool_call>';
+        api.events = [
+          const FfiStreamEvent.token(FfiStreamToken(
+              token: visible,
+              index: 0,
+              cumulativeText: visible,
+              toolCalls: [])),
+          const FfiStreamEvent.token(FfiStreamToken(
+              token: '',
+              index: 1,
+              cumulativeText: visible,
+              finishReason: 'tool_calls',
+              toolCalls: [call],
+              rawText: raw)),
+          _complete(raw, toolCalls: [call]),
+        ];
+
+        final tokens = await run().toList();
+
+        expect(tokens, hasLength(2));
+        expect(tokens.where((token) => token.isFinal), hasLength(1));
+        final last = tokens.last;
+        expect(last.finishReason, 'tool_calls');
+        expect(last.index, 1);
+        expect(last.cumulativeText, visible);
+        expect(last.rawText, raw);
+        expect(last.toolCalls.single.id, 'call-1');
+        expect(last.toolCalls.single.name, 'weather');
+        expect(last.metrics!.totalMs, 10);
         expect(tokens.expand((token) => token.toolCalls), hasLength(1));
       });
 
@@ -373,38 +412,5 @@ void main() {
             options: options)
         .toList();
     expect(api.options!.conversationId, 'conversation-1');
-  });
-
-  group('runStreamingWithContext', () {
-    Stream<StreamToken> run() => model.runStreamingWithContext(
-          XybridEnvelope.text('Hi'),
-          ConversationContext(),
-        );
-
-    test('an error after the final token still ends the stream', () async {
-      api.events = [
-        _finalToken('Hello'),
-        const FfiStreamEvent.error(_unsupported),
-      ];
-
-      final tokens = await run().toList();
-
-      expect(
-        tokens.map((token) => token.finishReason),
-        ['stop', 'error: $_unsupported'],
-      );
-      expect(tokens.last.isError, isTrue);
-      expect(tokens.last.errorMessage, _unsupported);
-    });
-
-    test('bridge stream errors become error tokens', () async {
-      api.streamError = _unsupported;
-
-      final tokens = await run().toList();
-
-      expect(tokens.single.isFinal, isTrue);
-      expect(tokens.single.isError, isTrue);
-      expect(tokens.single.errorMessage, _unsupported);
-    });
   });
 }

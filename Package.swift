@@ -67,11 +67,15 @@ let package = Package(
             name: "Xybrid",
             dependencies: ["XybridFFI"],
             path: "bindings/apple/Sources/Xybrid",
+            // System frameworks the XybridFFI archive references. The swift
+            // branch manifest (release-publish.yml) and the React Native
+            // podspec copy this list; test_apple_linked_frameworks.py keeps
+            // them equal. MetalPerformanceShaders is not linked: only Candle's
+            // Metal backend references it, no preset enables Candle, and
+            // build-apple.yml fails if the archive references an MPS symbol.
             linkerSettings: [
                 .linkedLibrary("c++"),
                 .linkedFramework("Metal"),
-                .linkedFramework("MetalPerformanceShaders"),
-                .linkedFramework("MetalPerformanceShadersGraph"),
                 .linkedFramework("CoreML"),
                 .linkedFramework("Accelerate"),
                 .linkedFramework("Security"),

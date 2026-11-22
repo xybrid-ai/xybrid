@@ -32,7 +32,7 @@ class StreamToken {
   /// Trace reference supplied by native completion.
   final ObservationRef? observation;
 
-  /// Cloud error on the completion token when this run recovered on-device.
+  /// Cloud error on the final token when this run recovered on-device.
   final String? speculativeCloudError;
 
   /// Tool calls the model asked for this turn — final token only.

@@ -17,9 +17,9 @@ import 'result.dart';
 import 'streaming.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `completion`, `decision_io_refusal`, `from_sdk`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `resolved_streaming_run_options`, `sdk_error_message`, `should_cancel_on_sink_close`, `sink_token_callback`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `completion`, `decision_io_refusal`, `from_sdk`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `load_reporting_progress`, `non_empty`, `normalize_gateway_url`, `resolve`, `resolved_streaming_run_options`, `sdk_error_message`, `should_cancel_on_sink_close`, `sink_token_callback`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`, `LoaderSource`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 /// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
 /// [`FfiGenerationConfig::grammar`].
@@ -272,6 +272,15 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
   static FfiModelLoader fromHuggingface({required String repo}) =>
       XybridRustLib.instance.api
           .crateApiModelFfiModelLoaderFromHuggingface(repo: repo);
+
+  /// Loader for a raw llama.cpp GGUF file. Creating it touches no disk:
+  /// `load()` and `load_with_progress()` write a generated
+  /// `model_metadata.json` beside the file if absent, then load its
+  /// directory. Nothing is downloaded, so `load_with_progress()` emits only
+  /// `Complete` or `Error`.
+  static FfiModelLoader fromModelFile({required String path}) =>
+      XybridRustLib.instance.api
+          .crateApiModelFfiModelLoaderFromModelFile(path: path);
 
   static FfiModelLoader fromRegistry({required String modelId}) =>
       XybridRustLib.instance.api

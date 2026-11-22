@@ -586,6 +586,9 @@ fn load_stages(
         let name = config.name.as_deref().unwrap_or("unnamed");
         ui::kv("Pipeline", name);
         for stage_config in &config.stages {
+            if let Some(message) = stage_config.unapplied_execution_provider_warning() {
+                ui::warning(&message);
+            }
             let model_id = stage_config.model_id();
             let mut desc = StageDescriptor::new(&model_id);
             let configured_target = parse_stage_config_target(stage_config);

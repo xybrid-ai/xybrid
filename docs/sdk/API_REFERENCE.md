@@ -223,6 +223,8 @@ class XybridModelLoader {
   factory XybridModelLoader.fromRegistry(String modelId);
   factory XybridModelLoader.fromBundle(String path);
   factory XybridModelLoader.fromDirectory(String path);
+  // Raw llama.cpp GGUF; load() writes model_metadata.json beside it if absent
+  factory XybridModelLoader.fromModelFile(String path);
 
   // Try the registry id at the gateway while the weights download
   factory XybridModelLoader.fromRegistrySpeculative(String modelId);
@@ -412,7 +414,7 @@ var result = model.Run(Envelope.Text("Hello!"));
 | `fromDirectory()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingFace()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingfaceWithRevision()` | — | ✅ | ✅ | ✅ |
-| `fromModelFile()` | — | — | ✅ | ✅ |
+| `fromModelFile()` | ✅ | — | ✅ | ✅ |
 | `load()` | ✅ | ✅ | ✅ | ✅ |
 | `loadWithProgress()` | ✅ | — | — | — |
 | `download()` / `StartDownload()` | — | ✅ | ✅ | ✅ |
@@ -433,7 +435,7 @@ unknown, or refuse the workspace or its quota. If no token reached the caller,
 the run waits for the download and tries locally. A successful local result
 includes the cloud attempt's error message:
 `result.speculative_cloud_error()` in Rust, `result.speculativeCloudError` in
-Flutter (also on its stream completion token), `result.SpeculativeCloudError`
+Flutter (also on its final stream token), `result.SpeculativeCloudError`
 in Unity, or `speculative_cloud_error` in Bolt result envelope metadata.
 If the download fails or the stream already delivered output, the cloud error
 is returned instead; partial output is never replayed.
@@ -721,7 +723,9 @@ class XybridModel {
   Future<void> warmup();
   Future<void> unload();
 
-  // Hardware info
+  // Hardware info (planned; Rust only today, as ExecutionProviderInfo::current()).
+  // Describes ONNX Runtime: name is always "cpu"; coremlAvailable means the
+  // Core ML execution provider is linked into the build, not in use.
   ExecutionProviderInfo executionProviderInfo();
 }
 ```
@@ -865,7 +869,7 @@ println!("{} {:.3}", best.id, best.score);
 | `downloadStatus()` | ✅ | ✅ | ✅ | ✅ |
 | `awaitDownload()` | — | ✅ | ✅ | ✅ |
 | `downloadProgress()` | ✅ | ✅ | ✅ | ✅ |
-| `executionProviderInfo()` | — | — | — | — |
+| `executionProviderInfo()` / `ExecutionProviderInfo::current()` | Rust ✅ | planned | planned | planned |
 
 While a speculative load is still downloading, `isCloudServing()` is true and
 `downloadStatus()` returns a consistent read of the state (`downloading` /

@@ -752,6 +752,9 @@ impl Pipeline {
             .stages
             .iter()
             .map(|stage_config| {
+                if let Some(message) = stage_config.unapplied_execution_provider_warning() {
+                    log::warn!(target: "xybrid_sdk", "{message}");
+                }
                 let mut desc = StageDescriptor::new(stage_config.stage_id());
 
                 if let Some(target_str) = stage_config.target() {

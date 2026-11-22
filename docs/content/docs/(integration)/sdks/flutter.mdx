@@ -157,6 +157,32 @@ file nor rewinds when a download retries. `totalBytes` is `null` when the source
 publishes no size (a Hugging Face repo); `downloadedBytes` is exact either way,
 which is what you need for megabytes, speed, and time remaining.
 
+## Loading a Local GGUF File
+
+```dart
+import 'package:path_provider/path_provider.dart';
+
+// One directory per GGUF: a file the user picked, or an asset copied out of
+// the app bundle.
+final support = await getApplicationSupportDirectory();
+final path = '${support.path}/models/my-model/my-model.gguf';
+final model = await XybridModelLoader.fromModelFile(path).load();
+```
+
+A raw llama.cpp GGUF needs no `model_metadata.json`. Creating the loader touches
+no disk; `load()` generates the metadata from the GGUF header and writes it next
+to the file, with the context capped at 4,096 tokens (raise its `context_length`
+for longer chats). Put each GGUF in its own writable directory, such as one under
+`getApplicationSupportDirectory()`: assets declared in `pubspec.yaml` are not
+files on disk and the iOS app bundle is read-only, so `model_metadata.json`
+cannot be written next to either. A `model_metadata.json` already in the
+directory is used as is: a second GGUF in the same directory would load the
+first one's model. The generated metadata has no vision projector, so a vision
+GGUF with an mmproj still needs `fromDirectory`. A missing file makes `load()`
+throw an `XybridException` whose message contains `GGUF file not found: <path>`.
+With nothing to download, `loadWithProgress()` emits only `LoadComplete` or
+`LoadError`.
+
 ---
 
 ## API Reference
@@ -191,7 +217,11 @@ Creates and loads models from different sources.
 ```dart
 class XybridModelLoader {
   factory XybridModelLoader.fromRegistry(String modelId);
+  factory XybridModelLoader.fromRegistrySpeculative(String modelId);
   factory XybridModelLoader.fromBundle(String path);
+  factory XybridModelLoader.fromDirectory(String path);
+  factory XybridModelLoader.fromHuggingFace(String repo);
+  factory XybridModelLoader.fromModelFile(String path);
 
   Future<XybridModel> load();
   Stream<LoadEvent> loadWithProgress();
