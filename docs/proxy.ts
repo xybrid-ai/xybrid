@@ -55,6 +55,6 @@ export const config = {
   // `/llms-full.txt` must be served as is: the i18n proxy would redirect them
   // to `/en/llms.txt`.
   matcher: [
-    '/((?!api/|_next/|favicon\\.ico$|og/|llms\\.txt$|llms-full\\.txt$|robots\\.txt$|sitemap\\.xml$|\\.well-known(?:/|$)).*)',
+    '/((?!api/|_next/|favicon\\.ico$|og/|llms\\.txt$|llms-full\\.txt$|robots\\.txt$|sitemap\\.xml$|relay$|\\.well-known(?:/|$)).*)',
   ],
 };

@@ -13,6 +13,13 @@ export const source = loader({
   i18n,
 });
 
+export function localizedPagePaths() {
+  return i18n.languages.flatMap((language) => [
+    `/${language}`,
+    ...source.getPages(language).map((page) => page.url),
+  ]);
+}
+
 /** The share image of a page, built by `app/[lang]/og/docs/[...slug]`. */
 export function getPageImage(page: InferPageType<typeof source>) {
   const segments = [...page.slugs, 'image.png'];

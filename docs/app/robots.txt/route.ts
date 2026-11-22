@@ -6,6 +6,7 @@ export function GET() {
   return new Response(`User-agent: *
 Allow: /
 Disallow: /api/
+Disallow: /relay
 Allow: /api/mcp/server-card
 Content-Signal: ai-train=no, search=yes, ai-input=yes
 
@@ -14,6 +15,7 @@ User-agent: Claude-SearchBot
 User-agent: PerplexityBot
 Allow: /
 Disallow: /api/
+Disallow: /relay
 Allow: /api/mcp/server-card
 
 User-agent: GPTBot

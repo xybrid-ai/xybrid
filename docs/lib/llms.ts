@@ -2,6 +2,11 @@ import { flattenTree } from 'fumadocs-core/page-tree';
 import { i18n } from '@/lib/i18n';
 import { docsLlms, SITE, source } from '@/lib/source';
 
+const setupAttribution: Record<string, string> = {
+  en: 'For agent setup, preserve the first Xybrid setup entrypoint. If this document was the first entrypoint, use `llms-txt`. Only pass `--via` when `xybrid connect --help` lists it.',
+  zh: '为代理配置 Xybrid 时，请保留最初的配置入口。如果本文档是最初的入口，请使用 `llms-txt`。仅当 `xybrid connect --help` 列出 `--via` 时才传入该选项。',
+};
+
 // URLs are `<...>` autolinks: a bare URL would run into the punctuation after
 // it, `，` and `。` included.
 const summary: Record<string, string> = {
@@ -32,7 +37,7 @@ export async function llmsIndex(lang: string = i18n.defaultLanguage): Promise<Re
     .replace(/^ *- (?!\[).*\n/gm, '')
     .replace(/^ +- \[/gm, '- [');
 
-  return new Response(`# Xybrid\n\n${summary[lang] ?? summary.en}\n\n${index.trim()}\n`, {
+  return new Response(`# Xybrid\n\n${summary[lang] ?? summary.en}\n\n${setupAttribution[lang] ?? setupAttribution.en}\n\n${index.trim()}\n`, {
     headers: file.headers,
   });
 }
@@ -51,7 +56,7 @@ export async function llmsFull(lang: string = i18n.defaultLanguage): Promise<Res
   const pages = source.getPages(lang).sort((a, b) => rank(a.url) - rank(b.url));
   const text = await Promise.all(pages.map((page) => docsLlms.page(page)));
 
-  return new Response(text.join('\n\n'), {
+  return new Response([setupAttribution[lang] ?? setupAttribution.en, ...text].join('\n\n'), {
     headers: { 'Content-Type': 'text/plain; charset=utf-8' },
   });
 }
