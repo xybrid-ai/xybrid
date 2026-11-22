@@ -20,19 +20,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `loadWithProgress()` reports only `LoadComplete` or `LoadError`. The
   facade's sidecar step is now the public `prepare_model_file`, shared by the
   bolt bindings and Flutter (#813).
+- **CLI: `xybrid connect --via <entrypoint>`** names the setup entrypoint that
+  led to a new workspace: `web-copy`, `setup-prompt`, `llms-txt`, `skill`,
+  `mcp` or `docs`; any other value is dropped. It is sent as `client_info.via`
+  only when the platform's challenge allows collection. A saved request
+  retries with the same value unless a replacement challenge no longer allows
+  it, and reusing a saved key or adding a project sends nothing new. The
+  `xybrid-connect` skill and the `connect` docs pass `--via` only when
+  `xybrid connect --help` lists it, so an older CLI keeps working. The skill's
+  reference script, `xybrid_agent_connect.py`, takes the same option, so its
+  published SHA-256 changed (#831).
 
 ### Changed
 
 - **Apple: the SDKs no longer link MetalPerformanceShaders.** `Package.swift`,
   the `swift` branch manifest, the React Native pod and the Flutter iOS and
-  macOS pods dropped `MetalPerformanceShaders` (and
-  `MetalPerformanceShadersGraph`). They were added in 0.1.0-beta4 for Candle's
-  Metal backend, whose `metal` dependency references `MPSSupportsMTLDevice`;
-  Candle left the platform presets in #476, and no library shipped in v0.20.0
-  references either framework. CI now fails if the XCFramework or the Flutter
-  Apple libraries reference an MPS symbol, and links the XCFramework's device
-  slice. An app whose own code uses MetalPerformanceShaders, or a custom build
-  with `candle-metal`, must link the framework itself (#807).
+  macOS pods dropped `MetalPerformanceShaders`, and the first three also
+  dropped `MetalPerformanceShadersGraph`. They were added in 0.1.0-beta4 for
+  Candle's Metal backend, whose `metal` dependency references
+  `MPSSupportsMTLDevice`; Candle left the platform presets in #476, and no
+  library shipped in v0.20.0 references either framework. CI now fails if the
+  XCFramework or the Flutter Apple libraries reference an MPS symbol, and links
+  the XCFramework's device slice. An app whose own code uses
+  MetalPerformanceShaders, or a custom build with `candle-metal`, must link the
+  framework itself (#807).
 
 ### Fixed
 
@@ -58,8 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   model format runs on (#806).
 - **Apple build comments describe the build.** `ort-coreml` is described as
   linking ONNX Runtime's Core ML execution provider (not Neural Engine
-  acceleration), including in the error shown when it is enabled off Apple, and
-  the iOS build comments no longer mention Candle or "Metal OFF" (#807).
+  acceleration), including in the error shown when it is enabled off Apple.
+  The iOS `.bazelrc` config no longer calls the iOS build CPU-only with Metal
+  off, and the XCFramework and Flutter pod comments no longer list Candle among
+  what the iOS library links (#807).
 - **The streaming docs list the real `finishReason` values** (`stop`,
   `length`, `tool_calls`), say how each SDK reports a failed stream, and
   document `tokenId`, `toolCalls` and `rawText` (#808).
@@ -69,7 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Stale docs claims from #646.** The custom-models guide's Rust, Flutter and
   Kotlin snippets match the SDKs, every page agrees that the platform presets
   include the vision path, the cache docs say cached models do not expire, and
-  the feature matrix matches the Cargo manifests (#646).
+  the feature matrix names `xybrid-llama-sys`, lists no CLI default features
+  and shows `candle-hub` on rustls (#646).
 - **Rust: `ExecutionProviderInfo::current()` reports what ONNX Runtime runs
   on.** `name` is `cpu` on every build: it was `coreml-ane` or `coreml` when
   xybrid-sdk's `ort-coreml` feature was on, although every ONNX session is
@@ -99,7 +113,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `model_metadata.json` in place, so a load starting at the same moment could
   read the file half written and fail to parse it. The sidecar is now written
   to a temporary file and linked into place, and an existing one is never
-  replaced (#813).
+  replaced. Publishing it needs hard links: on a filesystem without them, such
+  as FAT32 or exFAT, a first load with no `model_metadata.json` beside the
+  GGUF now fails with an I/O error instead of writing the file in place. A
+  GGUF whose sidecar is already there still loads (#813).
 
 ## [0.20.0] - 2026-11-17
 
