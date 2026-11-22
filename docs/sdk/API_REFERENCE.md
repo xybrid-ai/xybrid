@@ -223,6 +223,8 @@ class XybridModelLoader {
   factory XybridModelLoader.fromRegistry(String modelId);
   factory XybridModelLoader.fromBundle(String path);
   factory XybridModelLoader.fromDirectory(String path);
+  // Raw llama.cpp GGUF; load() writes model_metadata.json beside it if absent
+  factory XybridModelLoader.fromModelFile(String path);
 
   // Serve from the cloud gateway while the weights download in the background
   factory XybridModelLoader.fromRegistrySpeculative(String modelId);
@@ -412,7 +414,7 @@ var result = model.Run(Envelope.Text("Hello!"));
 | `fromDirectory()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingFace()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingfaceWithRevision()` | — | ✅ | ✅ | ✅ |
-| `fromModelFile()` | — | — | ✅ | ✅ |
+| `fromModelFile()` | ✅ | — | ✅ | ✅ |
 | `load()` | ✅ | ✅ | ✅ | ✅ |
 | `loadWithProgress()` | ✅ | — | — | — |
 | `download()` / `StartDownload()` | — | ✅ | ✅ | ✅ |

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Flutter: load a local GGUF file.** `XybridModelLoader.fromModelFile(path)`
+  loads a raw llama.cpp GGUF with no `model_metadata.json`, as Swift's
+  `ModelLoader.fromModelFile`, React Native's `fromModelFile` and Unity's
+  `FromModelFile` already do: `load()` generates the metadata from the GGUF
+  header and writes it next to the file unless one is there, with the context
+  capped at 4,096 tokens. Creating the loader does no disk I/O, and
+  `loadWithProgress()` reports only `LoadComplete` or `LoadError`. The
+  facade's sidecar step is now the public `prepare_model_file`, shared by the
+  bolt bindings and Flutter (#813).
+
 ### Changed
 
 - **Apple: the SDKs no longer link MetalPerformanceShaders.** `Package.swift`,
@@ -65,6 +77,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   linked, not in use. Loading a pipeline whose stage sets `execution_provider`
   to anything but `cpu` logs a warning, and `xybrid run`, `xybrid repl` and
   `xybrid prepare` print one (#806).
+- **Flutter: `runStreamingWithContext` ends a turn on one final token.** It
+  emitted the native terminal token and then a second final token for the
+  metrics. On a tool-call turn that second token reported `finishReason:
+  'stop'`, no `toolCalls`, and a `cumulativeText` that included the raw
+  tool-call block; a turn cut off by `maxTokens` also ended on `'stop'`
+  instead of `'length'`. The stream now merges the two, as `runStreaming` and
+  `runStreamingWithFallback` do: the last token keeps the native index, text,
+  finish reason, `toolCalls` and `rawText`, and carries `metrics` and
+  `observation`. Code that expected two `isFinal` tokens per turn sees one.
+  When a tool-call block is suppressed but does not parse, the stream no
+  longer carries the raw output; `runWithContext` returns it in
+  `XybridResult.text` (#820).
+- **`fromModelFile` accepts a bare file name.** A GGUF named without a
+  directory, such as `model.gguf` in the working directory, now loads. The
+  shared facade step wrote its `model_metadata.json` and then failed with
+  `Directory not found` (#813).
+- **Two first loads of the same GGUF no longer race.** `fromModelFile` wrote
+  `model_metadata.json` in place, so a load starting at the same moment could
+  read the file half written and fail to parse it. The sidecar is now written
+  to a temporary file and linked into place, and an existing one is never
+  replaced (#813).
 
 ## [0.20.0] - 2026-11-17
 
