@@ -350,6 +350,11 @@ class LaneTests(unittest.TestCase):
             ".github/workflows/build-android.yml": {"android"},
             ".github/workflows/unity-editor.yml": {"unity_editor"},
             "bindings/flutter/README.md": set(),
+            # Published-package Expo qualification stages FunctionGemma.
+            "integration-tests/fixtures/models/models.json": {"react_native"},
+            "integration-tests/fixtures/models/functiongemma-270m-it/model_metadata.json": {"react_native"},
+            "integration-tests/download.sh": {"react_native"},
+            "tools/scripts/rn_consumer_smoke/report.py": {"react_native"},
         }
         for path, expected in cases.items():
             with self.subTest(path=path):

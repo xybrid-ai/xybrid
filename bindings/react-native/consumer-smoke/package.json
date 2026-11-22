@@ -1,0 +1,25 @@
+{
+  "name": "xybrid-consumer-smoke",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.ts",
+  "dependencies": {
+    "@xybrid/react-native": "0.18.0",
+    "expo": "58.0.25",
+    "expo-build-properties": "~58.0.12",
+    "expo-file-system": "~58.0.13",
+    "expo-status-bar": "~58.0.5",
+    "react": "19.3.0",
+    "react-native": "0.88.1"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~5.9.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "prebuild": "expo prebuild --clean"
+  }
+}
