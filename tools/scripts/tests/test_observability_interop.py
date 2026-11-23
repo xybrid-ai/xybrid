@@ -1168,11 +1168,40 @@ def wait_until_gone(pid, limit=5.0):
             os.kill(pid, 0)
         except ProcessLookupError:
             return True
-        stat = Path(f"/proc/{pid}/stat")
-        if stat.exists() and stat.read_text().split(") ")[-1].startswith("Z"):
+        try:
+            state = Path(f"/proc/{pid}/stat").read_text().split(") ")[-1]
+        except (FileNotFoundError, ProcessLookupError):
+            # No /proc (macOS), or the pid was reaped after the kill probe:
+            # opening its stat then raises ENOENT, reading an already-open one
+            # ESRCH. Either way the next probe decides.
+            state = ""
+        if state.startswith("Z"):
             return True
         time.sleep(0.05)
     return False
+
+
+class WaitUntilGoneTest(unittest.TestCase):
+    def test_a_pid_reaped_between_the_probe_and_the_stat_read_counts_as_gone(self):
+        # The kill probe still sees the process; it is reaped before its stat
+        # is read, which raises ESRCH; the next probe finds it gone.
+        kill = mock.Mock(side_effect=[None, ProcessLookupError()])
+        with mock.patch("os.kill", kill), \
+                mock.patch.object(Path, "read_text", side_effect=ProcessLookupError()) as read:
+            self.assertTrue(wait_until_gone(4242))
+        self.assertEqual(kill.call_count, 2)
+        read.assert_called_once()
+
+    def test_a_live_pid_without_proc_is_not_gone(self):
+        # macOS has no /proc: a running process must not count as gone.
+        with mock.patch("os.kill", return_value=None), \
+                mock.patch.object(Path, "read_text", side_effect=FileNotFoundError()):
+            self.assertFalse(wait_until_gone(4242, limit=0.2))
+
+    def test_a_zombie_counts_as_gone(self):
+        with mock.patch("os.kill", return_value=None), \
+                mock.patch.object(Path, "read_text", return_value="4242 (sleep) Z 1 4242"):
+            self.assertTrue(wait_until_gone(4242))
 
 
 class ReportTest(unittest.TestCase):
