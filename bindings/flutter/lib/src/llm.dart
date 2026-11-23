@@ -32,6 +32,9 @@ class StreamToken {
   /// Trace reference supplied by native completion.
   final ObservationRef? observation;
 
+  /// Cloud error on the final token when this run recovered on-device.
+  final String? speculativeCloudError;
+
   /// Tool calls the model asked for this turn — final token only.
   ///
   /// Tool-call blocks are suppressed from the streamed text, so there is
@@ -60,6 +63,7 @@ class StreamToken {
     this.finishReason,
     this.metrics,
     this.observation,
+    this.speculativeCloudError,
     this.toolCalls = const [],
     this.rawText,
   });

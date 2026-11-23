@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A run that recovers on-device after a failed speculative cloud attempt
+  reports the gateway's error** in `speculative_cloud_error` result metadata:
+  `speculative_cloud_error()` in Rust, `speculativeCloudError` in Flutter and
+  `SpeculativeCloudError` in Unity.
 - **Flutter: load a local GGUF file.** `XybridModelLoader.fromModelFile(path)`
   loads a raw llama.cpp GGUF with no `model_metadata.json`, as Swift's
   `ModelLoader.fromModelFile`, React Native's `fromModelFile` and Unity's
@@ -51,6 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only registered install pins in docs, accepts the observability JS and web
   version pins, and recognizes the exact changelog heading and llama.cpp release
   stamp written by the release tools without allowing unrelated edits (#811).
+- **The speculative cloud docs stop claiming the gateway serves every registry
+  chat model.** A speculative run requests the registry id, and the gateway
+  answers only when its catalog lists it.
 - **The Swift samples on the iOS page and in the Swift README compile.** Error
   Handling catches the generated `XybridError` cases (`modelNotFound(id:)`,
   `inferenceError(message:)`, `ioError(message:)`), Result Handling switches on

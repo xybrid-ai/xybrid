@@ -1376,8 +1376,7 @@ pub struct InferenceResult {
     pub output_type: OutputType,
     pub model_id: String,
     pub latency_ms: u32,
-    /// Where this result actually came from. Cloud fallback keeps `model_id`
-    /// identical on both legs, so this is the only way to tell them apart.
+    /// Where this result actually came from, even when both legs requested the same model id.
     pub execution_target: ExecutionTarget,
     pub metrics: InferenceMetrics,
     /// Tool calls the model emitted this turn.
@@ -2232,8 +2231,8 @@ impl ModelLoader {
         })
     }
 
-    /// Registry load that serves from the cloud gateway while the weights
-    /// download in the background, instead of blocking on the download.
+    /// Try the registry id at the cloud gateway while the weights download.
+    /// Only ids also listed in the gateway catalog can be served remotely.
     ///
     /// Requires a resolvable API key, an uncached model, and a chat model the
     /// registry serves as a direct download (a GGUF or vision-language
@@ -2464,8 +2463,7 @@ impl XybridModel {
         self.inner.is_loaded()
     }
 
-    /// Whether runs are currently answered by the cloud because the local
-    /// weights are not ready yet. `false` for ordinary local models.
+    /// Whether a run would try the gateway because the local weights are not ready.
     pub fn is_cloud_serving(&self) -> bool {
         self.inner.is_cloud_serving()
     }
@@ -3561,8 +3559,8 @@ pub fn set_platform_url(url: String) {
     sdk::set_platform_url(&url);
 }
 
-/// Enable speculative cloud fallback globally: a registry chat model that
-/// isn't downloaded yet is served from the gateway while the weights download.
+/// Try the registry chat model's id at the gateway while its weights download.
+/// Only ids also listed in the gateway catalog can be served remotely.
 ///
 /// Only takes effect when an API key resolves. An uncached load asks the
 /// registry first, so other models (ASR, TTS, `.xyb` bundles) download and

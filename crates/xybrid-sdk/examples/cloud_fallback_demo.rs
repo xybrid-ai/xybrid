@@ -23,8 +23,8 @@
 //!    gateway listens on. The gateway routes on `model` alone: frontier
 //!    models by their canonical OpenRouter id (a local platform serves them
 //!    only with `OPENROUTER_API_KEY` set), Xybrid-hosted models by their
-//!    xycloud id. A short id such as `gpt-4o-mini` or `deepseek-chat` is
-//!    `404 model_not_found`. The demo sends `model = "openai/gpt-4o-mini"`;
+//!    xycloud id. An unlisted id gets `404 model_not_found` if the catalog
+//!    is known, or `502` if it is unavailable. The demo sends `model = "openai/gpt-4o-mini"`;
 //!    pick another id from the gateway's `GET /v1/models` below if you like.
 //!
 //!    Authenticate to the gateway with a Xybrid API key — mint one in
@@ -166,10 +166,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    `CloudRuntimeAdapter::execute_streaming` will read on the retry leg.
     //    The local leg ignores the cloud-only keys.
     let mut envelope = Envelope::new(EnvelopeKind::Text(PROMPT.to_string()));
-    // The gateway routes on the canonical `model` id alone (a short id
-    //    such as `gpt-4o-mini` is `404 model_not_found`), so the `provider`
-    //    field is SDK-side bookkeeping only and never crosses the wire to the
-    //    gateway. Match it to the model's vendor so traces stay honest.
+    // The gateway routes on `model` alone; `provider` labels the SDK trace.
     envelope
         .metadata
         .insert("provider".to_string(), "openai".to_string());

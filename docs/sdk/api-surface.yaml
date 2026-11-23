@@ -47,8 +47,8 @@ classes:
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       setSpeculativeCloud:
         params: [{ name: enabled, type: bool }]
-        # Process-wide DEFAULT for serving an undownloaded registry model from
-        # the cloud while its weights download. It applies only to loads that
+        # Process-wide default for trying a registry id at the gateway
+        # while its weights download. It applies only to loads that
         # do not opt in per-load: fromRegistrySpeculative sets the per-load
         # override itself and is unaffected by this toggle.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
@@ -205,9 +205,9 @@ classes:
         static: true
         params: [{ name: modelId, type: String }]
         return: XybridModelLoader
-        # Serves from the cloud gateway while the weights download, instead of
-        # blocking on the download. Sets the per-load override itself, so it
-        # does not depend on Xybrid.setSpeculativeCloud.
+        # Tries the same registry id at the gateway while its weights download.
+        # Sets the per-load override itself, so it does not depend on
+        # Xybrid.setSpeculativeCloud.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       willSpeculate:
         return: bool
@@ -417,7 +417,7 @@ classes:
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
       isCloudServing:
         return: bool
-        # True while the cloud answers because the local weights are not ready.
+        # True when a run would try the gateway because the local weights are not ready.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       supportsToolCalling:
         return: "bool?"
@@ -661,10 +661,12 @@ classes:
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       executionTarget:
         type: ExecutionTarget
-        # Whether the answer came from the device or the cloud gateway. Cloud
-        # fallback keeps modelId identical on both legs, so this is the only
-        # way to tell them apart.
+        # Whether the answer came from the device or the cloud gateway.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      speculativeCloudError:
+        type: "String?"
+        notes: "Error from a speculative cloud attempt that recovered locally. Also available in result envelope metadata under speculative_cloud_error."
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
       isFailure:
         type: bool
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
@@ -987,6 +989,10 @@ classes:
     # generated bolt type, the same way ToolCall/GenerationConfig work there.
     status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
     properties:
+      speculativeCloudError:
+        type: "String?"
+        notes: "Flutter carries the recovered cloud error on the final token; other bindings can inspect the completed inference result."
+        status: { dart: implemented, kotlin: na, swift: na, csharp: na }
       toolCalls:
         type: "List<ToolCall>"
         # Tool calls the model emitted, on the terminal token only. Tool-call
@@ -1253,7 +1259,7 @@ classes:
         status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
       cloudModel:
         type: "String?"
-        notes: "Model for the cloud fallback leg, sent to the Xybrid gateway unchanged; unset sends openai/gpt-4o-mini. Frontier models use canonical OpenRouter ids (vendor/model): the gateway answers 404 model_not_found for a short id such as gpt-4o-mini."
+        notes: "Model for the cloud fallback leg, sent to the Xybrid gateway unchanged; unset sends openai/gpt-4o-mini. Frontier models use canonical OpenRouter ids (vendor/model)."
         status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
       cloudGatewayUrl:
         type: "String?"

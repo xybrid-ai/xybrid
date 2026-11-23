@@ -171,16 +171,14 @@ pub struct InferenceResult {
 /// and carry `Auto`/`Server` variants, which are meaningless as an observed
 /// outcome. This is the two-state fact "who answered".
 ///
-/// It matters because cloud fallback — speculative or reactive — keeps
-/// `model_id` identical on both legs by design, so the model id cannot tell a
-/// caller which leg ran.
+/// Both legs can request the same model id, so the id alone does not say
+/// where a run succeeded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExecutionProvenance {
     /// Ran on-device.
     #[default]
     Local,
-    /// Answered by the platform gateway (which serves the same model via
-    /// xycloud).
+    /// Answered by the cloud rather than on-device.
     Cloud,
 }
 
@@ -197,6 +195,7 @@ impl ExecutionProvenance {
 
 /// Envelope metadata key carrying [`ExecutionProvenance`].
 pub(crate) const EXECUTION_TARGET_KEY: &str = "execution_target";
+const SPECULATIVE_CLOUD_ERROR_KEY: &str = "speculative_cloud_error";
 
 impl InferenceResult {
     /// Create a new inference result from an envelope.
@@ -220,6 +219,7 @@ impl InferenceResult {
         latency_ms: u32,
         provenance: ExecutionProvenance,
     ) -> Self {
+        envelope.metadata.remove(SPECULATIVE_CLOUD_ERROR_KEY);
         envelope.metadata.insert(
             EXECUTION_TARGET_KEY.to_string(),
             provenance.as_str().to_string(),
@@ -241,6 +241,23 @@ impl InferenceResult {
     /// Where this result was actually produced — local or cloud.
     pub fn provenance(&self) -> ExecutionProvenance {
         self.provenance
+    }
+
+    /// Why the speculative cloud attempt failed before this run succeeded
+    /// locally. Absent on ordinary local runs and successful cloud runs.
+    /// Bindings can also read `speculative_cloud_error` from the output metadata.
+    pub fn speculative_cloud_error(&self) -> Option<&str> {
+        self.envelope
+            .metadata
+            .get(SPECULATIVE_CLOUD_ERROR_KEY)
+            .map(String::as_str)
+    }
+
+    pub(crate) fn with_speculative_cloud_error(mut self, error: String) -> Self {
+        self.envelope
+            .metadata
+            .insert(SPECULATIVE_CLOUD_ERROR_KEY.into(), error);
+        self
     }
 
     /// Trace and span ids of this run's logical inference span, for linking
@@ -266,20 +283,9 @@ impl InferenceResult {
         model_id: impl Into<String>,
         latency_ms: u32,
     ) -> Self {
-        let mut envelope = envelope;
-        envelope.metadata.insert(
-            EXECUTION_TARGET_KEY.to_string(),
-            ExecutionProvenance::Local.as_str().to_string(),
-        );
-        let metrics = InferenceMetrics::from_metadata(&envelope.metadata, latency_ms);
         Self {
-            envelope,
             output_type,
-            latency_ms,
-            model_id: model_id.into(),
-            provenance: ExecutionProvenance::Local,
-            metrics,
-            observation: None,
+            ..Self::new(envelope, model_id, latency_ms)
         }
     }
 
@@ -507,6 +513,21 @@ pub(crate) fn output_type_for_envelope(envelope: &Envelope) -> OutputType {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn speculative_cloud_error_is_not_inherited_from_an_envelope() {
+        let mut envelope = Envelope::new(EnvelopeKind::Text("answer".into()));
+        envelope
+            .metadata
+            .insert(SPECULATIVE_CLOUD_ERROR_KEY.into(), "an earlier run".into());
+        for result in [
+            InferenceResult::new(envelope.clone(), "model", 1),
+            InferenceResult::new_cloud(envelope.clone(), "model", 1),
+            InferenceResult::with_output_type(envelope, OutputType::Text, "model", 1),
+        ] {
+            assert!(result.speculative_cloud_error().is_none());
+        }
+    }
 
     #[test]
     fn decisions_preserve_f64_answers_and_report_usage_without_generated_text() {

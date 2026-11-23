@@ -154,9 +154,9 @@ class Xybrid {
     XybridSdkClient.setPlatformUrl(url: url);
   }
 
-  /// Enable speculative cloud fallback globally: a registry chat model that
-  /// isn't downloaded yet is served from the gateway while the weights
-  /// download.
+  /// Try the registry chat model's id at the gateway while its weights
+  /// download. Only ids also listed in the gateway catalog can be served
+  /// remotely.
   ///
   /// Only takes effect when an API key resolves. An uncached load asks the
   /// registry first, so other models (ASR, TTS, `.xyb` bundles) download and

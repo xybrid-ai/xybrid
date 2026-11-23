@@ -161,18 +161,21 @@ FfiStreamEvent _finalToken(String text) => FfiStreamEvent.token(
 
 FfiStreamEvent _complete(String text,
         {ObservationRef? observation,
-        List<FfiToolCall> toolCalls = const []}) =>
-    FfiStreamEvent.complete(
-      FfiResult(
-        success: true,
-        observation: observation,
-        text: text,
-        latencyMs: 10,
-        executionTarget: FfiExecutionTarget.local,
-        metrics: const FfiInferenceMetrics(totalMs: 10, stageLatenciesMs: []),
-        toolCalls: toolCalls,
-      ),
-    );
+        String? cloudError,
+        List<FfiToolCall> toolCalls = const []}) {
+  final result = FfiResult(
+    success: true,
+    observation: observation,
+    text: text,
+    latencyMs: 10,
+    executionTarget: FfiExecutionTarget.local,
+    metrics: const FfiInferenceMetrics(totalMs: 10, stageLatenciesMs: []),
+    toolCalls: toolCalls,
+  );
+  return cloudError == null
+      ? FfiStreamEvent.complete(result)
+      : FfiStreamEvent.recovered(result, cloudError);
+}
 
 void main() {
   final api = _StreamApi();
@@ -200,6 +203,22 @@ void main() {
           ConversationContext(),
         ),
   };
+
+  test('each stream reports a recovered cloud error on its one final token',
+      () async {
+    const error = '502 Upstream provider error (xycloud)';
+    for (final run in runs.values) {
+      api.events = [
+        _finalToken('answer'),
+        _complete('answer', cloudError: error),
+      ];
+      final tokens = await run().toList();
+      expect(tokens.where((token) => token.isFinal), hasLength(1));
+      expect(tokens.last.cumulativeText, 'answer');
+      expect(tokens.last.isError, isFalse);
+      expect(tokens.last.speculativeCloudError, error);
+    }
+  });
 
   for (final MapEntry(key: method, value: run) in runs.entries) {
     group(method, () {

@@ -74,8 +74,7 @@ abstract class FfiModel implements RustOpaqueInterface {
   /// rather than polling.
   FfiDownloadStatus downloadStatus();
 
-  /// Whether runs are currently answered by the cloud because the local
-  /// weights are not ready yet. `false` for ordinary local models.
+  /// Whether a run would try the gateway because the local weights are not ready.
   ///
   /// This predicts the *next* run; `FfiResult.executionTarget` reports what a
   /// run that already happened actually did. They differ when a cloud leg
@@ -101,7 +100,7 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Returns a stream of events:
   /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-  /// - `FfiStreamEvent::Complete` when inference finishes
+  /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
   /// - `FfiStreamEvent::Error` if an error occurs
   ///
   /// For non-LLM models, a single Token event is emitted with the full result.
@@ -144,7 +143,7 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Returns a stream of events:
   /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-  /// - `FfiStreamEvent::Complete` when inference finishes
+  /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
   /// - `FfiStreamEvent::Error` if an error occurs
   ///
   /// Pass an optional `config` to control generation parameters.
@@ -287,8 +286,8 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
       XybridRustLib.instance.api
           .crateApiModelFfiModelLoaderFromRegistry(modelId: modelId);
 
-  /// Loader that serves from the cloud gateway while the registry weights
-  /// download in the background, instead of blocking on the download.
+  /// Try the registry id at the cloud gateway while the weights download.
+  /// Only ids also listed in the gateway catalog can be served remotely.
   ///
   /// `load()` then returns almost immediately with a cloud-backed model that
   /// switches to on-device by itself once the download lands. Requires a
@@ -327,16 +326,13 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
 
 /// Lifecycle of a model download.
 enum FfiDownloadState {
-  /// Bytes still in flight. For a speculative load, runs are served from
-  /// the cloud meanwhile.
+  /// Bytes still in flight. Speculative runs try the cloud meanwhile.
   downloading,
 
   /// Every artifact landed and the model is usable.
   ready,
 
-  /// Download failed — for a speculative load the cloud keeps serving and
-  /// the model never becomes local. Surfacing this is the only way the UI
-  /// can stop waiting.
+  /// Download failed; a speculative model never becomes local.
   failed,
 
   /// The download was cancelled by the caller.
@@ -594,6 +590,12 @@ sealed class FfiStreamEvent with _$FfiStreamEvent {
   const factory FfiStreamEvent.error(
     String field0,
   ) = FfiStreamEvent_Error;
+
+  /// Local completion and the preceding speculative cloud error.
+  const factory FfiStreamEvent.recovered(
+    FfiResult field0,
+    String field1,
+  ) = FfiStreamEvent_Recovered;
 }
 
 /// Token received during streaming inference.

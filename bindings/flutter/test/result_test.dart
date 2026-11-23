@@ -9,20 +9,36 @@ FfiRunResult _ffiResult({
   ObservationRef? observation,
   String? text,
   String? reasoningContent,
+  String? speculativeCloudError,
   List<FfiToolCall> toolCalls = const [],
-}) =>
-    FfiRunResult.legacy(FfiResult(
-      success: true,
-      observation: observation,
-      text: text,
-      reasoningContent: reasoningContent,
-      latencyMs: 10,
-      executionTarget: FfiExecutionTarget.local,
-      metrics: _metrics,
-      toolCalls: toolCalls,
-    ));
+}) {
+  final result = FfiResult(
+    success: true,
+    observation: observation,
+    text: text,
+    reasoningContent: reasoningContent,
+    latencyMs: 10,
+    executionTarget: FfiExecutionTarget.local,
+    metrics: _metrics,
+    toolCalls: toolCalls,
+  );
+  return speculativeCloudError == null
+      ? FfiRunResult.legacy(result)
+      : FfiRunResult.recovered(result, speculativeCloudError);
+}
 
 void main() {
+  test('local recovery preserves both the answer and the cloud error', () {
+    const error = '404 model_not_found';
+    final result = XybridResult.fromFfi(
+      _ffiResult(text: 'local answer', speculativeCloudError: error),
+    );
+    expect(result.text, 'local answer');
+    expect(result.executionTarget, FfiExecutionTarget.local);
+    expect(result.speculativeCloudError, error);
+    expect(XybridResult.fromFfi(_ffiResult()).speculativeCloudError, isNull);
+  });
+
   test('result exposes its observation reference for feedback', () {
     const reference = ObservationRef(
         traceId: '0af7651916cd43dd8448eb211c80319c',

@@ -557,18 +557,21 @@ mixin _$FfiRunResult {
   TResult when<TResult extends Object?>({
     required TResult Function(FfiResult field0) legacy,
     required TResult Function(FfiDecisionResult field0) decision,
+    required TResult Function(FfiResult field0, String field1) recovered,
   }) =>
       throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult? whenOrNull<TResult extends Object?>({
     TResult? Function(FfiResult field0)? legacy,
     TResult? Function(FfiDecisionResult field0)? decision,
+    TResult? Function(FfiResult field0, String field1)? recovered,
   }) =>
       throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult maybeWhen<TResult extends Object?>({
     TResult Function(FfiResult field0)? legacy,
     TResult Function(FfiDecisionResult field0)? decision,
+    TResult Function(FfiResult field0, String field1)? recovered,
     required TResult orElse(),
   }) =>
       throw _privateConstructorUsedError;
@@ -576,18 +579,21 @@ mixin _$FfiRunResult {
   TResult map<TResult extends Object?>({
     required TResult Function(FfiRunResult_Legacy value) legacy,
     required TResult Function(FfiRunResult_Decision value) decision,
+    required TResult Function(FfiRunResult_Recovered value) recovered,
   }) =>
       throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult? mapOrNull<TResult extends Object?>({
     TResult? Function(FfiRunResult_Legacy value)? legacy,
     TResult? Function(FfiRunResult_Decision value)? decision,
+    TResult? Function(FfiRunResult_Recovered value)? recovered,
   }) =>
       throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult maybeMap<TResult extends Object?>({
     TResult Function(FfiRunResult_Legacy value)? legacy,
     TResult Function(FfiRunResult_Decision value)? decision,
+    TResult Function(FfiRunResult_Recovered value)? recovered,
     required TResult orElse(),
   }) =>
       throw _privateConstructorUsedError;
@@ -685,6 +691,7 @@ class _$FfiRunResult_LegacyImpl extends FfiRunResult_Legacy {
   TResult when<TResult extends Object?>({
     required TResult Function(FfiResult field0) legacy,
     required TResult Function(FfiDecisionResult field0) decision,
+    required TResult Function(FfiResult field0, String field1) recovered,
   }) {
     return legacy(field0);
   }
@@ -694,6 +701,7 @@ class _$FfiRunResult_LegacyImpl extends FfiRunResult_Legacy {
   TResult? whenOrNull<TResult extends Object?>({
     TResult? Function(FfiResult field0)? legacy,
     TResult? Function(FfiDecisionResult field0)? decision,
+    TResult? Function(FfiResult field0, String field1)? recovered,
   }) {
     return legacy?.call(field0);
   }
@@ -703,6 +711,7 @@ class _$FfiRunResult_LegacyImpl extends FfiRunResult_Legacy {
   TResult maybeWhen<TResult extends Object?>({
     TResult Function(FfiResult field0)? legacy,
     TResult Function(FfiDecisionResult field0)? decision,
+    TResult Function(FfiResult field0, String field1)? recovered,
     required TResult orElse(),
   }) {
     if (legacy != null) {
@@ -716,6 +725,7 @@ class _$FfiRunResult_LegacyImpl extends FfiRunResult_Legacy {
   TResult map<TResult extends Object?>({
     required TResult Function(FfiRunResult_Legacy value) legacy,
     required TResult Function(FfiRunResult_Decision value) decision,
+    required TResult Function(FfiRunResult_Recovered value) recovered,
   }) {
     return legacy(this);
   }
@@ -725,6 +735,7 @@ class _$FfiRunResult_LegacyImpl extends FfiRunResult_Legacy {
   TResult? mapOrNull<TResult extends Object?>({
     TResult? Function(FfiRunResult_Legacy value)? legacy,
     TResult? Function(FfiRunResult_Decision value)? decision,
+    TResult? Function(FfiRunResult_Recovered value)? recovered,
   }) {
     return legacy?.call(this);
   }
@@ -734,6 +745,7 @@ class _$FfiRunResult_LegacyImpl extends FfiRunResult_Legacy {
   TResult maybeMap<TResult extends Object?>({
     TResult Function(FfiRunResult_Legacy value)? legacy,
     TResult Function(FfiRunResult_Decision value)? decision,
+    TResult Function(FfiRunResult_Recovered value)? recovered,
     required TResult orElse(),
   }) {
     if (legacy != null) {
@@ -830,6 +842,7 @@ class _$FfiRunResult_DecisionImpl extends FfiRunResult_Decision {
   TResult when<TResult extends Object?>({
     required TResult Function(FfiResult field0) legacy,
     required TResult Function(FfiDecisionResult field0) decision,
+    required TResult Function(FfiResult field0, String field1) recovered,
   }) {
     return decision(field0);
   }
@@ -839,6 +852,7 @@ class _$FfiRunResult_DecisionImpl extends FfiRunResult_Decision {
   TResult? whenOrNull<TResult extends Object?>({
     TResult? Function(FfiResult field0)? legacy,
     TResult? Function(FfiDecisionResult field0)? decision,
+    TResult? Function(FfiResult field0, String field1)? recovered,
   }) {
     return decision?.call(field0);
   }
@@ -848,6 +862,7 @@ class _$FfiRunResult_DecisionImpl extends FfiRunResult_Decision {
   TResult maybeWhen<TResult extends Object?>({
     TResult Function(FfiResult field0)? legacy,
     TResult Function(FfiDecisionResult field0)? decision,
+    TResult Function(FfiResult field0, String field1)? recovered,
     required TResult orElse(),
   }) {
     if (decision != null) {
@@ -861,6 +876,7 @@ class _$FfiRunResult_DecisionImpl extends FfiRunResult_Decision {
   TResult map<TResult extends Object?>({
     required TResult Function(FfiRunResult_Legacy value) legacy,
     required TResult Function(FfiRunResult_Decision value) decision,
+    required TResult Function(FfiRunResult_Recovered value) recovered,
   }) {
     return decision(this);
   }
@@ -870,6 +886,7 @@ class _$FfiRunResult_DecisionImpl extends FfiRunResult_Decision {
   TResult? mapOrNull<TResult extends Object?>({
     TResult? Function(FfiRunResult_Legacy value)? legacy,
     TResult? Function(FfiRunResult_Decision value)? decision,
+    TResult? Function(FfiRunResult_Recovered value)? recovered,
   }) {
     return decision?.call(this);
   }
@@ -879,6 +896,7 @@ class _$FfiRunResult_DecisionImpl extends FfiRunResult_Decision {
   TResult maybeMap<TResult extends Object?>({
     TResult Function(FfiRunResult_Legacy value)? legacy,
     TResult Function(FfiRunResult_Decision value)? decision,
+    TResult Function(FfiRunResult_Recovered value)? recovered,
     required TResult orElse(),
   }) {
     if (decision != null) {
@@ -900,5 +918,167 @@ abstract class FfiRunResult_Decision extends FfiRunResult {
   /// with the given fields replaced by the non-null parameter values.
   @JsonKey(includeFromJson: false, includeToJson: false)
   _$$FfiRunResult_DecisionImplCopyWith<_$FfiRunResult_DecisionImpl>
+      get copyWith => throw _privateConstructorUsedError;
+}
+
+/// @nodoc
+abstract class _$$FfiRunResult_RecoveredImplCopyWith<$Res> {
+  factory _$$FfiRunResult_RecoveredImplCopyWith(
+          _$FfiRunResult_RecoveredImpl value,
+          $Res Function(_$FfiRunResult_RecoveredImpl) then) =
+      __$$FfiRunResult_RecoveredImplCopyWithImpl<$Res>;
+  @useResult
+  $Res call({FfiResult field0, String field1});
+}
+
+/// @nodoc
+class __$$FfiRunResult_RecoveredImplCopyWithImpl<$Res>
+    extends _$FfiRunResultCopyWithImpl<$Res, _$FfiRunResult_RecoveredImpl>
+    implements _$$FfiRunResult_RecoveredImplCopyWith<$Res> {
+  __$$FfiRunResult_RecoveredImplCopyWithImpl(
+      _$FfiRunResult_RecoveredImpl _value,
+      $Res Function(_$FfiRunResult_RecoveredImpl) _then)
+      : super(_value, _then);
+
+  /// Create a copy of FfiRunResult
+  /// with the given fields replaced by the non-null parameter values.
+  @pragma('vm:prefer-inline')
+  @override
+  $Res call({
+    Object? field0 = null,
+    Object? field1 = null,
+  }) {
+    return _then(_$FfiRunResult_RecoveredImpl(
+      null == field0
+          ? _value.field0
+          : field0 // ignore: cast_nullable_to_non_nullable
+              as FfiResult,
+      null == field1
+          ? _value.field1
+          : field1 // ignore: cast_nullable_to_non_nullable
+              as String,
+    ));
+  }
+}
+
+/// @nodoc
+
+class _$FfiRunResult_RecoveredImpl extends FfiRunResult_Recovered {
+  const _$FfiRunResult_RecoveredImpl(this.field0, this.field1) : super._();
+
+  @override
+  final FfiResult field0;
+  @override
+  final String field1;
+
+  @override
+  String toString() {
+    return 'FfiRunResult.recovered(field0: $field0, field1: $field1)';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        (other.runtimeType == runtimeType &&
+            other is _$FfiRunResult_RecoveredImpl &&
+            (identical(other.field0, field0) || other.field0 == field0) &&
+            (identical(other.field1, field1) || other.field1 == field1));
+  }
+
+  @override
+  int get hashCode => Object.hash(runtimeType, field0, field1);
+
+  /// Create a copy of FfiRunResult
+  /// with the given fields replaced by the non-null parameter values.
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  @override
+  @pragma('vm:prefer-inline')
+  _$$FfiRunResult_RecoveredImplCopyWith<_$FfiRunResult_RecoveredImpl>
+      get copyWith => __$$FfiRunResult_RecoveredImplCopyWithImpl<
+          _$FfiRunResult_RecoveredImpl>(this, _$identity);
+
+  @override
+  @optionalTypeArgs
+  TResult when<TResult extends Object?>({
+    required TResult Function(FfiResult field0) legacy,
+    required TResult Function(FfiDecisionResult field0) decision,
+    required TResult Function(FfiResult field0, String field1) recovered,
+  }) {
+    return recovered(field0, field1);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult? whenOrNull<TResult extends Object?>({
+    TResult? Function(FfiResult field0)? legacy,
+    TResult? Function(FfiDecisionResult field0)? decision,
+    TResult? Function(FfiResult field0, String field1)? recovered,
+  }) {
+    return recovered?.call(field0, field1);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult maybeWhen<TResult extends Object?>({
+    TResult Function(FfiResult field0)? legacy,
+    TResult Function(FfiDecisionResult field0)? decision,
+    TResult Function(FfiResult field0, String field1)? recovered,
+    required TResult orElse(),
+  }) {
+    if (recovered != null) {
+      return recovered(field0, field1);
+    }
+    return orElse();
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult map<TResult extends Object?>({
+    required TResult Function(FfiRunResult_Legacy value) legacy,
+    required TResult Function(FfiRunResult_Decision value) decision,
+    required TResult Function(FfiRunResult_Recovered value) recovered,
+  }) {
+    return recovered(this);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult? mapOrNull<TResult extends Object?>({
+    TResult? Function(FfiRunResult_Legacy value)? legacy,
+    TResult? Function(FfiRunResult_Decision value)? decision,
+    TResult? Function(FfiRunResult_Recovered value)? recovered,
+  }) {
+    return recovered?.call(this);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult maybeMap<TResult extends Object?>({
+    TResult Function(FfiRunResult_Legacy value)? legacy,
+    TResult Function(FfiRunResult_Decision value)? decision,
+    TResult Function(FfiRunResult_Recovered value)? recovered,
+    required TResult orElse(),
+  }) {
+    if (recovered != null) {
+      return recovered(this);
+    }
+    return orElse();
+  }
+}
+
+abstract class FfiRunResult_Recovered extends FfiRunResult {
+  const factory FfiRunResult_Recovered(
+          final FfiResult field0, final String field1) =
+      _$FfiRunResult_RecoveredImpl;
+  const FfiRunResult_Recovered._() : super._();
+
+  @override
+  FfiResult get field0;
+  String get field1;
+
+  /// Create a copy of FfiRunResult
+  /// with the given fields replaced by the non-null parameter values.
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  _$$FfiRunResult_RecoveredImplCopyWith<_$FfiRunResult_RecoveredImpl>
       get copyWith => throw _privateConstructorUsedError;
 }
