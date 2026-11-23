@@ -117,7 +117,7 @@ export class ModelLoader {
   }
 
   /**
-   * Serve from the cloud gateway while the registry weights download in the
+   * Try the same id at the cloud gateway while the registry weights download in the
    * background, instead of blocking on the download. `load()` then resolves
    * almost immediately with a model that switches to on-device by itself.
    * Needs an API key, an uncached model ({@link willSpeculate} checks both up
@@ -334,8 +334,7 @@ export class Model {
   }
 
   /**
-   * Whether runs are currently answered by the cloud because the local
-   * weights aren't ready (speculative loads). Predicts the next run;
+   * Whether a run would try the gateway because the local weights aren't ready.
    * `InferenceResult.executionTarget` reports what a finished run did.
    */
   isCloudServing(): Promise<boolean> {

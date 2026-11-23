@@ -1969,8 +1969,7 @@ data class XybridResult(
     val modelId: String,
     val latencyMs: UInt,
     /**
-     * Where the answer actually came from. Cloud fallback keeps `model_id`
-     * identical on both legs, so this is the only way to tell them apart.
+     * Where the answer actually came from, even when both legs requested the same model id.
      */
     val executionTarget: XybridExecutionTarget,
     val metrics: XybridInferenceMetrics,
@@ -4024,8 +4023,7 @@ enum class XybridDownloadState(val value: Int) {
     DOWNLOADING(0),
     READY(1),
     /**
-     * Download failed; for a speculative load the cloud keeps serving and
-     * `isLoaded` never flips.
+     * Download failed; a speculative model never becomes local.
      */
     FAILED(2),
     /**
@@ -4560,15 +4558,15 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
             }
         }
         /**
-         * Load from the registry, serving from the cloud gateway while the weights
-         * download in the background.
+         * Try the registry id at the cloud gateway while the weights download.
+         * Only ids also listed in the gateway catalog can be served remotely.
          *
          * Returns almost immediately instead of blocking on the download. Requires
          * a resolvable API key, an uncached model, and a chat model the registry
          * serves as a direct download (GGUF or vision-language, not a `.xyb`
          * bundle); otherwise it behaves exactly like `from_registry`. Poll
-         * `download_status` for progress and `is_cloud_serving` to know which leg
-         * is answering.
+         * `download_status` for progress and `is_cloud_serving` to see whether a
+         * run would try the gateway.
          */
         fun fromRegistrySpeculative(id: String): XybridModel {
             val __boltffi_id_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(id))
@@ -4682,8 +4680,7 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
     }
 
     /**
-     * Whether runs are currently answered by the cloud because the local
-     * weights are not ready yet. `false` for ordinary local models.
+     * Whether a run would try the gateway because the local weights are not ready.
      */
     fun isCloudServing(): Boolean {
         return Native.boltffi_method_class_xybrid_bolt_xybrid_model_is_cloud_serving(this.boltffiHandle())
@@ -6423,8 +6420,8 @@ fun setPlatformUrl(url: String) {
 }
 
 /**
- * Enable speculative cloud fallback globally: a registry chat model that
- * isn't downloaded yet is served from the gateway while the weights download.
+ * Try the registry chat model's id at the gateway while its weights download.
+ * Only ids also listed in the gateway catalog can be served remotely.
  *
  * An uncached load asks the registry first, so other models (ASR, TTS,
  * `.xyb` bundles) download and load as usual.

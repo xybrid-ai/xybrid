@@ -166,8 +166,9 @@ object Xybrid {
     /**
      * Set the process-wide default for speculative cloud serving.
      *
-     * Speculation answers from the cloud gateway while a registry model's
-     * weights download in the background, instead of blocking on the download.
+     * Speculation tries the registry id at the gateway while its weights
+     * download. Only ids also listed in the gateway catalog can be served
+     * remotely.
      *
      * This is the *default* for loads that do not opt in per-load;
      * [XybridModelLoader.fromRegistrySpeculative] opts in explicitly and is
@@ -583,8 +584,7 @@ sealed interface ModelSource {
     data class HuggingFace(val repo: String) : ModelSource
 
     /**
-     * A registry model served from the cloud gateway while its weights
-     * download in the background. See
+     * Try the registry id at the gateway while its weights download. See
      * [XybridModelLoader.fromRegistrySpeculative].
      */
     data class RegistrySpeculative(val id: String) : ModelSource
@@ -606,7 +606,7 @@ sealed interface ModelSource {
         @JvmStatic
         fun huggingFace(repo: String): ModelSource = HuggingFace(repo)
 
-        /** Describe a registry model to be served from the cloud while it downloads. */
+        /** Try the registry model at the gateway while it downloads. */
         @JvmStatic
         fun registrySpeculative(id: String): ModelSource = RegistrySpeculative(id)
     }
@@ -694,9 +694,8 @@ class XybridModelLoader private constructor(
         fun fromRegistry(id: String): XybridModelLoader = from(ModelSource.registry(id))
 
         /**
-         * Create a loader that answers from the cloud gateway while the
-         * registry weights download in the background, instead of blocking on
-         * the download.
+         * Try the registry id at the cloud gateway while the weights download.
+         * Only ids also listed in the gateway catalog can be served remotely.
          *
          * [load] returns almost immediately with a cloud-backed model that
          * switches to on-device by itself once the download lands. Requires an

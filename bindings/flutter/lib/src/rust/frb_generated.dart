@@ -5868,6 +5868,11 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         return FfiRunResult_Decision(
           dco_decode_box_autoadd_ffi_decision_result(raw[1]),
         );
+      case 2:
+        return FfiRunResult_Recovered(
+          dco_decode_box_autoadd_ffi_result(raw[1]),
+          dco_decode_String(raw[2]),
+        );
       default:
         throw Exception("unreachable");
     }
@@ -5922,6 +5927,11 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       case 2:
         return FfiStreamEvent_Error(
           dco_decode_String(raw[1]),
+        );
+      case 3:
+        return FfiStreamEvent_Recovered(
+          dco_decode_box_autoadd_ffi_result(raw[1]),
+          dco_decode_String(raw[2]),
         );
       default:
         throw Exception("unreachable");
@@ -7523,6 +7533,10 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         var var_field0 =
             sse_decode_box_autoadd_ffi_decision_result(deserializer);
         return FfiRunResult_Decision(var_field0);
+      case 2:
+        var var_field0 = sse_decode_box_autoadd_ffi_result(deserializer);
+        var var_field1 = sse_decode_String(deserializer);
+        return FfiRunResult_Recovered(var_field0, var_field1);
       default:
         throw UnimplementedError('');
     }
@@ -7580,6 +7594,10 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       case 2:
         var var_field0 = sse_decode_String(deserializer);
         return FfiStreamEvent_Error(var_field0);
+      case 3:
+        var var_field0 = sse_decode_box_autoadd_ffi_result(deserializer);
+        var var_field1 = sse_decode_String(deserializer);
+        return FfiStreamEvent_Recovered(var_field0, var_field1);
       default:
         throw UnimplementedError('');
     }
@@ -9272,6 +9290,10 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       case FfiRunResult_Decision(field0: final field0):
         sse_encode_i_32(1, serializer);
         sse_encode_box_autoadd_ffi_decision_result(field0, serializer);
+      case FfiRunResult_Recovered(field0: final field0, field1: final field1):
+        sse_encode_i_32(2, serializer);
+        sse_encode_box_autoadd_ffi_result(field0, serializer);
+        sse_encode_String(field1, serializer);
     }
   }
 
@@ -9317,6 +9339,10 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       case FfiStreamEvent_Error(field0: final field0):
         sse_encode_i_32(2, serializer);
         sse_encode_String(field0, serializer);
+      case FfiStreamEvent_Recovered(field0: final field0, field1: final field1):
+        sse_encode_i_32(3, serializer);
+        sse_encode_box_autoadd_ffi_result(field0, serializer);
+        sse_encode_String(field1, serializer);
     }
   }
 
@@ -10229,8 +10255,7 @@ class FfiModelImpl extends RustOpaque implements FfiModel {
         that: this,
       );
 
-  /// Whether runs are currently answered by the cloud because the local
-  /// weights are not ready yet. `false` for ordinary local models.
+  /// Whether a run would try the gateway because the local weights are not ready.
   ///
   /// This predicts the *next* run; `FfiResult.executionTarget` reports what a
   /// run that already happened actually did. They differ when a cloud leg
@@ -10268,7 +10293,7 @@ class FfiModelImpl extends RustOpaque implements FfiModel {
   ///
   /// Returns a stream of events:
   /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-  /// - `FfiStreamEvent::Complete` when inference finishes
+  /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
   /// - `FfiStreamEvent::Error` if an error occurs
   ///
   /// For non-LLM models, a single Token event is emitted with the full result.
@@ -10319,7 +10344,7 @@ class FfiModelImpl extends RustOpaque implements FfiModel {
   ///
   /// Returns a stream of events:
   /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-  /// - `FfiStreamEvent::Complete` when inference finishes
+  /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
   /// - `FfiStreamEvent::Error` if an error occurs
   ///
   /// Pass an optional `config` to control generation parameters.

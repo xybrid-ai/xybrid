@@ -113,8 +113,8 @@ namespace Xybrid
         }
 
         /// <summary>
-        /// Creates a loader that serves from the cloud gateway while the model's
-        /// weights download in the background, instead of blocking on the download.
+        /// Tries the registry id at the gateway while the weights download.
+        /// Only ids also listed in the gateway catalog can be served remotely.
         /// </summary>
         /// <remarks>
         /// Opts this load into speculation explicitly, so it does not depend on

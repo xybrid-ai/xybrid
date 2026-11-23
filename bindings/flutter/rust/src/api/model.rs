@@ -15,7 +15,7 @@ use crate::frb_generated::StreamSink;
 
 use super::context::FfiConversationContext;
 use super::device;
-use super::result::{FfiResult, FfiRunResult};
+use super::result::{map_completion, FfiResult, FfiRunResult};
 use super::spawn_reporting_panics;
 
 // Use the canonical SDK-to-FFI conversion to retain the source chain when
@@ -636,6 +636,8 @@ pub enum FfiStreamEvent {
     Complete(FfiResult),
     /// An error occurred
     Error(String),
+    /// Local completion and the preceding speculative cloud error.
+    Recovered(FfiResult, String),
 }
 
 /// Event emitted during streaming TTS. Audio rides the stream as raw 16-bit LE
@@ -750,14 +752,11 @@ impl FfiStreamToken {
 /// Lifecycle of a model download.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FfiDownloadState {
-    /// Bytes still in flight. For a speculative load, runs are served from
-    /// the cloud meanwhile.
+    /// Bytes still in flight. Speculative runs try the cloud meanwhile.
     Downloading,
     /// Every artifact landed and the model is usable.
     Ready,
-    /// Download failed — for a speculative load the cloud keeps serving and
-    /// the model never becomes local. Surfacing this is the only way the UI
-    /// can stop waiting.
+    /// Download failed; a speculative model never becomes local.
     Failed,
     /// The download was cancelled by the caller.
     Cancelled,
@@ -865,10 +864,7 @@ impl FfiStreamEvent {
     /// The event that ends a successful run: `Complete` only when the result
     /// converts, so a stream never completes with its output dropped.
     fn completion(result: &InferenceResult) -> Self {
-        match FfiResult::try_from_inference_result(result) {
-            Ok(result) => FfiStreamEvent::Complete(result),
-            Err(error) => FfiStreamEvent::Error(error),
-        }
+        map_completion(result, Self::Complete, Self::Recovered).unwrap_or_else(Self::Error)
     }
 }
 
@@ -921,8 +917,8 @@ impl FfiModelLoader {
         FfiModelLoader(LoaderSource::Sdk(ModelLoader::from_registry(&model_id)))
     }
 
-    /// Loader that serves from the cloud gateway while the registry weights
-    /// download in the background, instead of blocking on the download.
+    /// Try the registry id at the cloud gateway while the weights download.
+    /// Only ids also listed in the gateway catalog can be served remotely.
     ///
     /// `load()` then returns almost immediately with a cloud-backed model that
     /// switches to on-device by itself once the download lands. Requires a
@@ -1043,8 +1039,7 @@ impl FfiModel {
             .map(super::observability::FfiObservationRef::from_sdk)
     }
 
-    /// Whether runs are currently answered by the cloud because the local
-    /// weights are not ready yet. `false` for ordinary local models.
+    /// Whether a run would try the gateway because the local weights are not ready.
     ///
     /// This predicts the *next* run; `FfiResult.executionTarget` reports what a
     /// run that already happened actually did. They differ when a cloud leg
@@ -1109,7 +1104,7 @@ impl FfiModel {
                     }
                     xybrid_sdk::DownloadState::Failed => {
                         let _ = sink.add(FfiLoadEvent::Error(
-                            "speculative model download failed; still serving from cloud"
+                            "speculative model download failed; local inference unavailable"
                                 .to_string(),
                         ));
                         break;
@@ -1119,7 +1114,7 @@ impl FfiModel {
                         // download — but the state exists, so report it rather
                         // than leaving the stream hanging if that changes.
                         let _ = sink.add(FfiLoadEvent::Error(
-                            "model download cancelled; still serving from cloud".to_string(),
+                            "model download cancelled; local inference unavailable".to_string(),
                         ));
                         break;
                     }
@@ -1166,7 +1161,7 @@ impl FfiModel {
     ///
     /// Returns a stream of events:
     /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-    /// - `FfiStreamEvent::Complete` when inference finishes
+    /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
     /// - `FfiStreamEvent::Error` if an error occurs
     ///
     /// For non-LLM models, a single Token event is emitted with the full result.
@@ -1418,7 +1413,7 @@ impl FfiModel {
             .run_with_context_options(&envelope.into_envelope(), &ctx_guard, &options)
             .map_err(sdk_error_message)?;
 
-        FfiResult::try_from_inference_result(&result).map(FfiRunResult::Legacy)
+        map_completion(&result, FfiRunResult::Legacy, FfiRunResult::Recovered)
     }
 
     /// Run inference with streaming output and conversation context.
@@ -1428,7 +1423,7 @@ impl FfiModel {
     ///
     /// Returns a stream of events:
     /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-    /// - `FfiStreamEvent::Complete` when inference finishes
+    /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
     /// - `FfiStreamEvent::Error` if an error occurs
     ///
     /// Pass an optional `config` to control generation parameters.

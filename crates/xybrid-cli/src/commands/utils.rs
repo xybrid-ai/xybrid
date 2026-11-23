@@ -73,15 +73,15 @@ pub fn display_stage_name(name: &str) -> &str {
 ///
 /// [`ModelLoader::will_speculate`] only checks local preconditions; the
 /// registry decides during the load, and [`XybridModel::is_speculative`]
-/// reports the outcome. A load that downloads before returning (a model
-/// xycloud cannot serve, or no API key) draws a download bar.
+/// reports the outcome. A load that downloads before returning draws a
+/// download bar.
 pub(crate) fn load_speculative_model(model_id: &str) -> anyhow::Result<XybridModel> {
     use anyhow::Context;
 
     let loader = ModelLoader::from_registry(model_id).with_speculative_cloud(true);
     let may_speculate = loader.will_speculate();
     if may_speculate {
-        ui::hint("Asking the registry whether this model can be served via xycloud");
+        ui::hint("Checking whether the registry variant is eligible for speculative chat");
     } else if xybrid_sdk::cache::CacheManager::new()
         .map(|c| c.is_extracted(model_id))
         .unwrap_or(false)
@@ -109,13 +109,21 @@ pub(crate) fn load_speculative_model(model_id: &str) -> anyhow::Result<XybridMod
     let model = loaded.context("Failed to load speculative cloud model")?;
 
     if model.is_speculative() {
-        ui::ok(&format!(
-            "Serving '{model_id}' via xycloud while it downloads in the background"
+        ui::hint(&format!(
+            "Runs will try '{model_id}' at the gateway until the local weights are ready"
         ));
     } else if may_speculate {
-        ui::hint("Not a chat model xycloud can serve — downloaded, running locally");
+        ui::hint("Model loaded locally; no speculative gateway request needed");
     }
     Ok(model)
+}
+
+pub(crate) fn report_speculative_recovery(result: &xybrid_sdk::InferenceResult) {
+    if let Some(error) = result.speculative_cloud_error() {
+        ui::warning_stderr(&format!(
+            "Ran locally after the speculative cloud attempt failed: {error}"
+        ));
+    }
 }
 
 /// Why `--speculative-cloud` refuses a choice scorer, as the `mode` of

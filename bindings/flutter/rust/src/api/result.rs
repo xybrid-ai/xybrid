@@ -99,6 +99,8 @@ pub struct FfiResult {
 pub enum FfiRunResult {
     Legacy(FfiResult),
     Decision(FfiDecisionResult),
+    /// Local answer and the preceding speculative cloud error.
+    Recovered(FfiResult, String),
 }
 
 /// Ordered decision answers and execution metadata for a completed request.
@@ -215,8 +217,23 @@ impl FfiRunResult {
                 observation: result.observation_ref().map(FfiObservationRef::from_sdk),
             }));
         }
-        FfiResult::try_from_inference_result(result).map(Self::Legacy)
+        map_completion(result, Self::Legacy, Self::Recovered)
     }
+}
+
+/// Wraps a converted result as `complete`, or as `recovered` with the error of
+/// the speculative cloud attempt this run recovered from. Keeps the legacy
+/// record's layout unchanged, so an older native library still decodes.
+pub(crate) fn map_completion<T>(
+    result: &InferenceResult,
+    complete: impl FnOnce(FfiResult) -> T,
+    recovered: impl FnOnce(FfiResult, String) -> T,
+) -> Result<T, String> {
+    let output = FfiResult::try_from_inference_result(result)?;
+    Ok(match result.speculative_cloud_error() {
+        Some(error) => recovered(output, error.to_owned()),
+        None => complete(output),
+    })
 }
 
 /// Check that `FfiResult` has a field for an output of this kind.
@@ -271,9 +288,6 @@ impl FfiResult {
 }
 
 /// Where a result was produced — the observed fact, not a routing preference.
-///
-/// Cloud fallback (speculative or reactive) keeps the model id identical on
-/// both legs by design, so this is the only way to tell them apart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FfiExecutionTarget {
     Local,

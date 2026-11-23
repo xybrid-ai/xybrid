@@ -88,15 +88,15 @@ namespace XybridBolt
 
 
         /// <summary>
-        /// Load from the registry, serving from the cloud gateway while the weights
-        /// download in the background.
+        /// Try the registry id at the cloud gateway while the weights download.
+        /// Only ids also listed in the gateway catalog can be served remotely.
         ///
         /// Returns almost immediately instead of blocking on the download. Requires
         /// a resolvable API key, an uncached model, and a chat model the registry
         /// serves as a direct download (GGUF or vision-language, not a `.xyb`
         /// bundle); otherwise it behaves exactly like `from_registry`. Poll
-        /// `download_status` for progress and `is_cloud_serving` to know which leg
-        /// is answering.
+        /// `download_status` for progress and `is_cloud_serving` to see whether a
+        /// run would try the gateway.
         /// </summary>
         public static XybridModel FromRegistrySpeculative(string id)
         {
@@ -334,8 +334,7 @@ namespace XybridBolt
 
 
         /// <summary>
-        /// Whether runs are currently answered by the cloud because the local
-        /// weights are not ready yet. `false` for ordinary local models.
+        /// Whether a run would try the gateway because the local weights are not ready.
         /// </summary>
         public bool IsCloudServing()
         {

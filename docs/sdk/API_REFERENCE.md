@@ -226,7 +226,7 @@ class XybridModelLoader {
   // Raw llama.cpp GGUF; load() writes model_metadata.json beside it if absent
   factory XybridModelLoader.fromModelFile(String path);
 
-  // Serve from the cloud gateway while the weights download in the background
+  // Try the registry id at the gateway while the weights download
   factory XybridModelLoader.fromRegistrySpeculative(String modelId);
 
   // May load() speculate? (enabled + API key + not cached; the registry
@@ -421,18 +421,24 @@ var result = model.Run(Envelope.Text("Hello!"));
 | `fromRegistrySpeculative()` | ✅ | ✅ | ✅ | ✅ |
 | `willSpeculate` | ✅ | ✅ | ✅ | ✅ |
 
-`fromRegistrySpeculative()` answers from the cloud gateway while the registry
-weights download in the background, then switches to on-device by itself. It
-needs an API key, an uncached model, and a chat model the registry serves as a
-direct download (a GGUF or vision-language variant, not a `.xyb` bundle) —
-otherwise it behaves exactly like `fromRegistry()`. `willSpeculate` checks the
-first two before loading and never touches the network; the load asks the
-registry for the third, and `isCloudServing()` on the loaded model reports the
-outcome.
+`fromRegistrySpeculative()` lets runs try the **same registry id** at the gateway
+while its weights download, then switches to on-device. This needs an API key,
+an uncached model, and a direct-download chat variant (GGUF or vision-language,
+not a `.xyb` bundle); otherwise it behaves like `fromRegistry()`. `willSpeculate`
+checks local preconditions; the load checks the variant with the registry.
+Neither checks the gateway catalog. `isCloudServing()` predicts that a run will
+try the gateway, not that the gateway will accept the id.
+The per-load opt-in is independent of the `setSpeculativeCloud()` default.
 
-It sets the per-load override itself, so it does **not** depend on
-`setSpeculativeCloud()` — that toggle is the default for loads which do not opt
-in per-load.
+The gateway can reject an unlisted id (404), return 502 when its catalog is
+unknown, or refuse the workspace or its quota. If no token reached the caller,
+the run waits for the download and tries locally. A successful local result
+includes the cloud attempt's error message:
+`result.speculative_cloud_error()` in Rust, `result.speculativeCloudError` in
+Flutter (also on its final stream token), `result.SpeculativeCloudError`
+in Unity, or `speculative_cloud_error` in Bolt result envelope metadata.
+If the download fails or the stream already delivered output, the cloud error
+is returned instead; partial output is never replayed.
 
 ---
 
@@ -879,9 +885,8 @@ UI thread. `downloadProgress()` is the pushed form on every SDK: a
 flutter_rust_bridge stream sink on Dart, and a BoltFFI stream elsewhere, which
 carries items Rust → host only so no closure crosses the FFI boundary.
 
-`XybridResult.executionTarget` reports whether an answer that already ran came
-from the device or the cloud; cloud fallback keeps the model id identical on
-both legs, so it is the only way to tell them apart.
+`XybridResult.executionTarget` reports whether the device or the cloud produced
+the answer, even when both legs requested the same model id.
 
 ---
 
@@ -1983,6 +1988,11 @@ does not opt into cloud retry. The Flutter FFI adapter maps that policy to the
 Rust SDK abort policy, including the selected memory/thermal stop signals,
 `fallbackToCloud`, and grace-token budget, and uses
 `runStreamingWithFallback(...)` for the continuous token stream.
+
+For a resource-triggered retry, Rust's `run_streaming_with_fallback` requests
+the on-device id unless the envelope explicitly names a cloud `model`.
+Flutter's `runStreamingWithFallback` uses `cloudModel` or its existing default,
+`openai/gpt-4o-mini`.
 
 `cloudGatewayUrl` is an optional override for the Xybrid cloud gateway base URL.
 Customer builds accept HTTPS Xybrid gateway hosts with a `/v1` base path. Debug
