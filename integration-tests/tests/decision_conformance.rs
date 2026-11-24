@@ -520,7 +520,7 @@ mod native {
         );
         assert_eq!(
             receipt["build"]["llama_cpp"]["commit"],
-            "8642541b255bfb5dc39cd351a178be09013a55d6"
+            "cd959bae99ff4bed22bef2604f45241c09bbb8c8"
         );
         assert_eq!(receipt["corpus"]["selected"], 63);
         let settings = &receipt["settings"]["cpu-t4-fa-off"];
