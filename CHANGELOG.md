@@ -7,9 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Inkling chat protocol on llama.cpp.** Thinking Machines' Inkling 2 models
+  write each part of a turn as its own message block. xybrid now splits their
+  turns by block on every chat, streaming and tool-continuation path: `text`
+  holds the answer, `reasoningContent` the thinking blocks, and text inside a
+  block (a literal `<think>`, or another model's tool-call notation) stays
+  text. Tool calls come only from Inkling's call blocks (JSON in
+  `<|content_invoke_tool_json|>`): they are parsed, suppressed from streams and
+  continued with their results, and the backend reports them on the new
+  `GenerationOutput::tool_calls`. Prompts render through the model's own
+  template, where `reasoning: false` sets the thinking effort to `"none"` and
+  the new optional `reasoning_effort` model metadata (a level such as `"low"`,
+  or a number) sets it for a reasoning model. The template engine now accepts
+  `tojson(sort_keys=…, separators=…)` and `raise_exception`, which Inkling's
+  template uses. Loading an Inkling GGUF also needs a llama.cpp with the
+  `inkling2` / `inkling2_loop` architectures, which the pinned v0.9.0
+  predates.
+
 ### Changed
 
 - **llama.cpp:** update to [v0.9.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.9.0) (commit `cd959bae99ff4bed22bef2604f45241c09bbb8c8`).
+
+### Fixed
+
+- **Changing a model's `reasoning` (or new `reasoning_effort`) metadata
+  reloads its cached LLM adapter.** The executor reused an adapter loaded for
+  the same GGUF under other thinking settings, so prompts kept rendering with
+  the first ones.
 
 ## [0.21.0] - 2026-11-22
 

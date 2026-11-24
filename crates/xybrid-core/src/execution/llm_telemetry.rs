@@ -395,6 +395,7 @@ mod tests {
             prefill_tps: None,
             image_preprocess_ms: None,
             reasoning_content: None,
+            tool_calls: None,
         }
     }
 

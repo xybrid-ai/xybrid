@@ -118,11 +118,17 @@ fn unsupported_vision_input_error(backend_name: &str) -> AdapterError {
 /// Parsing runs only for requests that actually offered tools, mirroring
 /// `build_llm_response_envelope`'s gate — so the terminal token and the
 /// response envelope can never disagree about whether a turn called a tool.
-fn parsed_tool_calls(text: &str, config: &GenerationConfig) -> Vec<crate::gateway::ToolCall> {
+/// Calls the backend already parsed ([`GenerationOutput::tool_calls`]) win.
+fn parsed_tool_calls(
+    output: &GenerationOutput,
+    config: &GenerationConfig,
+) -> Vec<crate::gateway::ToolCall> {
     if config.tools.is_empty() {
         return Vec::new();
     }
-    crate::runtime_adapter::tool_call::parse_tool_calls_with_tools(text, &config.tools)
+    output.tool_calls.clone().unwrap_or_else(|| {
+        crate::runtime_adapter::tool_call::parse_tool_calls_with_tools(&output.text, &config.tools)
+    })
 }
 
 // =============================================================================
@@ -167,6 +173,12 @@ pub struct GenerationOutput {
     /// always excludes it. `None` when the model produced no reasoning block
     /// or the backend doesn't surface one. vLLM-style `reasoning_content`.
     pub reasoning_content: Option<String>,
+    /// Tool calls the backend already read from its own output framing.
+    /// Inkling marks its calls with message blocks that `text` no longer
+    /// carries, so only the backend can tell them from call notation an
+    /// answer quotes. `None` means parse `text`: every other model writes
+    /// its calls inline.
+    pub tool_calls: Option<Vec<crate::gateway::ToolCall>>,
 }
 
 // =============================================================================
@@ -273,7 +285,7 @@ pub trait LlmBackend: Send + Sync {
             tool_calls: Vec::new(),
             raw_text: None,
         }
-        .with_tool_calls(parsed_tool_calls(&output.text, config), &output.text);
+        .with_tool_calls(parsed_tool_calls(&output, config), &output.text);
 
         let mut callback = on_token;
         callback(partial).map_err(AdapterError::from_streaming_callback_error)?;
@@ -309,7 +321,7 @@ pub trait LlmBackend: Send + Sync {
             tool_calls: Vec::new(),
             raw_text: None,
         }
-        .with_tool_calls(parsed_tool_calls(&output.text, config), &output.text);
+        .with_tool_calls(parsed_tool_calls(&output, config), &output.text);
 
         let mut callback = on_token;
         callback(partial).map_err(AdapterError::from_streaming_callback_error)?;
@@ -896,6 +908,7 @@ mod tests {
             prefill_tps: None,
             image_preprocess_ms: None,
             reasoning_content: None,
+            tool_calls: None,
         };
         assert_eq!(output.text, "Hello world");
         assert_eq!(output.tokens_generated, 3);
@@ -946,6 +959,7 @@ mod tests {
                     prefill_tps: None,
                     image_preprocess_ms: None,
                     reasoning_content: None,
+                    tool_calls: None,
                 })
             }
             fn generate_raw(
@@ -1032,6 +1046,7 @@ mod tests {
                     prefill_tps: None,
                     image_preprocess_ms: None,
                     reasoning_content: None,
+                    tool_calls: None,
                 })
             }
             fn generate_raw(
@@ -1131,6 +1146,7 @@ mod tests {
                     prefill_tps: None,
                     image_preprocess_ms: None,
                     reasoning_content: None,
+                    tool_calls: None,
                 })
             }
             fn generate_raw(

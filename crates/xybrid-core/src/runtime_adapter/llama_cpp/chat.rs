@@ -6,7 +6,9 @@
 //! non-Jinja matcher rejects it. LFM3's template skips the native path: the
 //! matcher reads it as plain ChatML and drops the thinking state the model
 //! needs at the start of its turn, so it always renders through minijinja.
-//! Tool-bearing prompts skip the native path entirely —
+//! Inkling's skips it too: its thinking switch is a template variable
+//! (`reasoning_effort`) the native path cannot pass. Tool-bearing prompts skip
+//! the native path entirely —
 //! `llama_chat_apply_template` takes only role/content pairs and cannot carry
 //! tool definitions — and render the embedded template directly with the
 //! definitions in the Jinja context. In every case the policy is the same:
@@ -18,8 +20,10 @@ use super::jinja_template::{JinjaChatTemplate, JinjaTemplateError, RenderOptions
 use crate::gateway::Tool;
 use crate::runtime_adapter::llm::LlmResult;
 use crate::runtime_adapter::streaming_postprocess::is_reasoning_primed;
-use crate::runtime_adapter::tool_call::{is_lfm3_template, ToolCallProtocol};
-use crate::runtime_adapter::{AdapterError, ChatMessage};
+use crate::runtime_adapter::tool_call::{
+    is_inkling_prompt, is_inkling_template, is_lfm3_template, ToolCallProtocol,
+};
+use crate::runtime_adapter::{AdapterError, ChatMessage, ReasoningEffort};
 use xybrid_llama::LlamaError;
 
 /// The reasoning-channel opener primed onto the assistant turn for
@@ -31,24 +35,38 @@ use xybrid_llama::LlamaError;
 /// the standard `<think>...</think>` capture path applies.
 pub(super) const THINK_PRIME: &str = "<think>\n";
 
+/// The loaded model's thinking settings, from its metadata.
+#[derive(Debug, Clone, Default)]
+pub(super) struct Thinking {
+    /// Whether the model reasons before it answers (metadata `reasoning`).
+    pub(super) enabled: bool,
+    /// How long it reasons, for templates that take a `reasoning_effort`
+    /// (metadata `reasoning_effort`). `None` leaves the template's default.
+    pub(super) effort: Option<ReasoningEffort>,
+}
+
 /// Format `messages` (plus any tool definitions) into the raw prompt string
 /// this model expects.
 ///
 /// Tool-less requests take the native-template → ChatML → minijinja-fallback
-/// chain, except LFM3, which renders through [`render_template_only`].
-/// Tool-bearing requests render through [`render_with_tools`] instead,
-/// because the native path physically cannot carry tool definitions. Every
-/// branch shares the `<think>` priming post-processing for reasoning models.
+/// chain, except LFM3 and Inkling, which render through
+/// [`render_template_only`]. Tool-bearing requests render through
+/// [`render_with_tools`] instead, because the native path physically cannot
+/// carry tool definitions. Every branch shares the `<think>` priming
+/// post-processing for reasoning models.
 pub(super) fn format_chat_prompt(
     model: &xybrid_llama::LlamaModel,
     messages: &[ChatMessage],
-    reasoning: bool,
+    thinking: &Thinking,
     tools: &[Tool],
 ) -> LlmResult<String> {
     let mut prompt = if !tools.is_empty() {
-        render_with_tools(model, messages, tools, reasoning)?
-    } else if let Some(template) = model.chat_template().filter(|t| is_lfm3_template(t)) {
-        render_template_only(model, &template, messages, reasoning)?
+        render_with_tools(model, messages, tools, thinking)?
+    } else if let Some(template) = model
+        .chat_template()
+        .filter(|t| is_lfm3_template(t) || is_inkling_template(t))
+    {
+        render_template_only(model, &template, messages, thinking)?
     } else {
         let roles: Vec<&str> = messages.iter().map(|m| m.role.as_str()).collect();
         let contents: Vec<&str> = messages.iter().map(|m| m.content.as_str()).collect();
@@ -61,26 +79,36 @@ pub(super) fn format_chat_prompt(
             Ok(Some(prompt)) => prompt,
             Ok(None) => format_chat_chatml(messages),
             Err(err @ LlamaError::ChatTemplateFailed { .. }) => {
-                render_embedded_fallback(model, messages, err, reasoning)?
+                render_embedded_fallback(model, messages, err, thinking)?
             }
             Err(err) => return Err(err.into()),
         }
     };
 
-    // Thinking models (metadata `reasoning: true`) gate their `<think>` block
-    // behind the chat template's thinking flag, which llama.cpp's legacy
-    // `llama_chat_apply_template` does not render. Prime the channel ourselves so
-    // the model emits its chain-of-thought; the backend reconstructs the opening
-    // tag for capture. See `.context/reasoning-content-surfacing.md`.
-    //
-    // Guard against a doubled tag: a minijinja render with thinking on already
-    // ends in an opening `<think>` for templates that open the channel
-    // themselves (LFM3, Qwen3.5), so don't prime a second one.
-    if reasoning && !is_reasoning_primed(&prompt) {
+    if primes_think_channel(&prompt, thinking) {
         prompt.push_str(THINK_PRIME);
     }
 
     Ok(prompt)
+}
+
+/// Whether [`THINK_PRIME`] goes onto `prompt`, rendered for a model with
+/// these thinking settings.
+///
+/// Thinking models (metadata `reasoning: true`) gate their `<think>` block
+/// behind the chat template's thinking flag, which llama.cpp's legacy
+/// `llama_chat_apply_template` does not render. Prime the channel ourselves so
+/// the model emits its chain-of-thought; the backend reconstructs the opening
+/// tag for capture. See `.context/reasoning-content-surfacing.md`.
+///
+/// Guard against a doubled tag: a minijinja render with thinking on already
+/// ends in an opening `<think>` for templates that open the channel
+/// themselves (LFM3, Qwen3.5), so don't prime a second one. Inkling is never
+/// primed: it opens a thinking block of its own after the prompt, and the
+/// backend decodes that block into `<think>` (see
+/// [`decode_inkling_blocks`](crate::runtime_adapter::tool_call::decode_inkling_blocks)).
+fn primes_think_channel(prompt: &str, thinking: &Thinking) -> bool {
+    thinking.enabled && !is_reasoning_primed(prompt) && !is_inkling_prompt(prompt)
 }
 
 /// Render the model's own embedded chat template through minijinja and return
@@ -101,13 +129,13 @@ fn render_embedded_fallback(
     model: &xybrid_llama::LlamaModel,
     messages: &[ChatMessage],
     err: LlamaError,
-    reasoning: bool,
+    thinking: &Thinking,
 ) -> LlmResult<String> {
     let Some(template) = model.chat_template() else {
         return Err(err.into());
     };
 
-    match render_embedded(model, &template, messages, None, reasoning) {
+    match render_embedded(model, &template, messages, None, thinking) {
         Ok(prompt) => Ok(prompt),
         Err(render_err) => {
             tracing::warn!(
@@ -122,22 +150,26 @@ fn render_embedded_fallback(
 }
 
 /// Render a tool-less prompt through the model's own embedded chat template,
-/// for templates the native path would mangle (see [`is_lfm3_template`]).
+/// for templates the native path would mangle (see [`is_lfm3_template`] and
+/// [`is_inkling_template`]).
 ///
 /// llama.cpp's non-Jinja matcher accepts LFM3's template as plain ChatML, so
 /// the native path "succeeds" but drops the thinking state the template puts
 /// after `<|im_start|>assistant\n` (`<think>` to reason, `<think></think>` to
 /// answer directly). Without one the model writes reasoning with no opener
-/// and can answer a question nobody asked. Same no-substitution policy as
+/// and can answer a question nobody asked. Inkling's thinking switch is its
+/// `reasoning_effort` variable, which only a template render can pass; the
+/// pinned matcher does not know Inkling, so this also keeps the prompt from
+/// depending on whether a future one does. Same no-substitution policy as
 /// [`render_embedded_fallback`]: a render failure surfaces as an error rather
 /// than a native ChatML prompt.
 fn render_template_only(
     model: &xybrid_llama::LlamaModel,
     template: &str,
     messages: &[ChatMessage],
-    reasoning: bool,
+    thinking: &Thinking,
 ) -> LlmResult<String> {
-    render_embedded(model, template, messages, None, reasoning).map_err(|render_err| {
+    render_embedded(model, template, messages, None, thinking).map_err(|render_err| {
         AdapterError::RuntimeError(format!(
             "embedded chat template failed to render ({render_err})"
         ))
@@ -157,7 +189,7 @@ fn render_with_tools(
     model: &xybrid_llama::LlamaModel,
     messages: &[ChatMessage],
     tools: &[Tool],
-    reasoning: bool,
+    thinking: &Thinking,
 ) -> LlmResult<String> {
     let Some(template) = model.chat_template() else {
         return Err(AdapterError::InvalidInput(
@@ -181,12 +213,17 @@ fn render_with_tools(
     //   against the LFM2.5-230M/350M GGUF templates).
     // - LFM3's template unwraps `tool.function` when present and lists the
     //   function object either way, so it takes the bare shape too.
+    // - Inkling's template also unwraps `tool.function`, reading the `type`
+    //   from the wrapper, so it gets the wrapper: the shape Hugging Face and
+    //   llama.cpp hand it.
     let protocol = ToolCallProtocol::detect_from_template(&template);
     let entries = match protocol {
-        ToolCallProtocol::Gemma | ToolCallProtocol::FunctionGemma => tools
-            .iter()
-            .map(serde_json::to_value)
-            .collect::<Result<Vec<_>, _>>(),
+        ToolCallProtocol::Gemma | ToolCallProtocol::FunctionGemma | ToolCallProtocol::Inkling => {
+            tools
+                .iter()
+                .map(serde_json::to_value)
+                .collect::<Result<Vec<_>, _>>()
+        }
         ToolCallProtocol::Lfm2 | ToolCallProtocol::Lfm3 => tools
             .iter()
             .map(|tool| serde_json::to_value(&tool.function))
@@ -202,7 +239,7 @@ fn render_with_tools(
         &template,
         messages.as_ref(),
         Some(serde_json::Value::Array(entries)),
-        reasoning,
+        thinking,
     )
     .map_err(|render_err| {
         AdapterError::RuntimeError(format!(
@@ -258,13 +295,13 @@ fn ensure_tool_names_rendered(prompt: &str, tools: &[Tool]) -> LlmResult<()> {
 /// `enable_thinking` comes from [`template_thinking`] and is always passed
 /// explicitly, never omitted (`None`): templates such as Qwen3's close the
 /// think block only for an explicit `false`, and treat a missing flag as
-/// thinking on.
+/// thinking on. `reasoning_effort` comes from [`template_reasoning_effort`].
 fn render_embedded(
     model: &xybrid_llama::LlamaModel,
     template: &str,
     messages: &[ChatMessage],
     tools: Option<serde_json::Value>,
-    reasoning: bool,
+    thinking: &Thinking,
 ) -> Result<String, JinjaTemplateError> {
     let bos_token = if model.adds_bos() {
         None
@@ -278,7 +315,8 @@ fn render_embedded(
         eos_token,
         messages,
         tools,
-        template_thinking(template, reasoning),
+        template_thinking(template, thinking.enabled),
+        template_reasoning_effort(template, thinking),
     )
 }
 
@@ -305,6 +343,24 @@ fn template_thinking(template: &str, reasoning: bool) -> bool {
         )
 }
 
+/// The `reasoning_effort` a template render passes for a model with these
+/// thinking settings.
+///
+/// Inkling's template has no `enable_thinking`: its effort level is the
+/// switch, so a model that does not reason gets `"none"` (effort zero). A
+/// reasoning model passes its configured effort, or nothing so the template
+/// applies its default (Inkling's is `"high"`). Other templates get an effort
+/// only when one is configured and the model reasons.
+fn template_reasoning_effort(template: &str, thinking: &Thinking) -> Option<ReasoningEffort> {
+    if thinking.enabled {
+        thinking.effort.clone()
+    } else if is_inkling_template(template) {
+        Some(ReasoningEffort::Level("none".to_string()))
+    } else {
+        None
+    }
+}
+
 /// The model-free half of [`render_embedded`]: renders with its BOS, EOS and
 /// thinking choices already made. Kept separate so tests can pin the exact
 /// output without loading a GGUF.
@@ -315,12 +371,14 @@ fn render_embedded_template(
     messages: &[ChatMessage],
     tools: Option<serde_json::Value>,
     enable_thinking: bool,
+    reasoning_effort: Option<ReasoningEffort>,
 ) -> Result<String, JinjaTemplateError> {
     let tpl = JinjaChatTemplate::new(template, bos_token, eos_token);
     let options = RenderOptions {
         add_generation_prompt: true,
         enable_thinking: Some(enable_thinking),
         tools,
+        reasoning_effort,
     };
     tpl.render(messages, &options)
 }
@@ -395,6 +453,9 @@ mod tests {
         /// The thinking flag the render requests; off unless set.
         #[serde(default)]
         enable_thinking: bool,
+        /// The `reasoning_effort` the render passes; omitted unless set.
+        #[serde(default)]
+        reasoning_effort: Option<ReasoningEffort>,
         rendered: String,
     }
 
@@ -442,6 +503,7 @@ mod tests {
                 &case.messages,
                 case.tools.clone(),
                 case.enable_thinking,
+                case.reasoning_effort.clone(),
             )
             .unwrap_or_else(|e| panic!("{}: {e}", case.id));
             assert_eq!(rendered, case.rendered, "{}: render changed", case.id);
@@ -450,6 +512,8 @@ mod tests {
 
     const LFM3_TEMPLATE: &str = "integration-tests/fixtures/chat_render/templates/lfm3.jinja";
     const QWEN3_5_TEMPLATE: &str = "integration-tests/fixtures/choice/templates/qwen3.5.jinja";
+    const INKLING2_TEMPLATE: &str =
+        "integration-tests/fixtures/chat_render/templates/inkling2.jinja";
 
     /// LFM3 renders through its template because the native matcher would
     /// drop its thinking state. Qwen3.5 shares LFM3's call notation but keeps
@@ -474,6 +538,7 @@ mod tests {
                 &messages,
                 None,
                 template_thinking(&template, reasoning),
+                None,
             )
             .expect("LFM3 template renders")
         };
@@ -500,6 +565,139 @@ mod tests {
         assert!(!template_thinking(&qwen3_5, false));
         assert!(!template_thinking(gemma4, true));
         assert!(!template_thinking(gemma4, false));
+    }
+
+    fn thinking(enabled: bool, effort: Option<&str>) -> Thinking {
+        Thinking {
+            enabled,
+            effort: effort.map(|level| ReasoningEffort::Level(level.to_string())),
+        }
+    }
+
+    /// Inkling renders through its template (its thinking switch is a
+    /// template variable), and no other fixture template reads as Inkling's.
+    #[test]
+    fn inkling_fingerprint_matches_inkling_only() {
+        let inkling = read_workspace_file(INKLING2_TEMPLATE);
+
+        assert!(is_inkling_template(&inkling));
+        assert_eq!(
+            ToolCallProtocol::detect_from_template(&inkling),
+            ToolCallProtocol::Inkling
+        );
+        for other in [LFM3_TEMPLATE, QWEN3_5_TEMPLATE] {
+            assert!(!is_inkling_template(&read_workspace_file(other)), "{other}");
+        }
+    }
+
+    /// Inkling's effort level is its thinking switch: off is `"none"`, on is
+    /// the configured level or the template's default. Other templates get
+    /// an effort only when the model reasons and one is configured.
+    #[test]
+    fn reasoning_effort_follows_the_thinking_settings() {
+        let inkling = read_workspace_file(INKLING2_TEMPLATE);
+        let qwen3_5 = read_workspace_file(QWEN3_5_TEMPLATE);
+        let level = |effort: Option<ReasoningEffort>| match effort {
+            Some(ReasoningEffort::Level(level)) => Some(level),
+            Some(ReasoningEffort::Value(value)) => Some(value.to_string()),
+            None => None,
+        };
+
+        assert_eq!(
+            level(template_reasoning_effort(
+                &inkling,
+                &thinking(false, Some("high"))
+            )),
+            Some("none".to_string())
+        );
+        assert_eq!(
+            level(template_reasoning_effort(&inkling, &thinking(true, None))),
+            None
+        );
+        assert_eq!(
+            level(template_reasoning_effort(
+                &inkling,
+                &thinking(true, Some("low"))
+            )),
+            Some("low".to_string())
+        );
+        assert_eq!(
+            level(template_reasoning_effort(
+                &qwen3_5,
+                &thinking(false, Some("low"))
+            )),
+            None
+        );
+        assert_eq!(
+            level(template_reasoning_effort(
+                &qwen3_5,
+                &thinking(true, Some("low"))
+            )),
+            Some("low".to_string())
+        );
+    }
+
+    /// Inkling's thinking-off render says effort 0, and its rendered prompt
+    /// is never primed with `<think>`: the model opens its own block.
+    #[test]
+    fn inkling_prompts_are_never_primed() {
+        let template = read_workspace_file(INKLING2_TEMPLATE);
+        let messages = [ChatMessage::user("Hi")];
+        let render = |settings: &Thinking| {
+            render_embedded_template(
+                &template,
+                None,
+                Some("<|content_model_end_sampling|>".to_string()),
+                &messages,
+                None,
+                template_thinking(&template, settings.enabled),
+                template_reasoning_effort(&template, settings),
+            )
+            .expect("Inkling template renders")
+        };
+
+        let off = render(&thinking(false, None));
+        assert_eq!(
+            off,
+            "<|message_system|><|content_text|>Thinking effort level: 0<|end_message|><|message_user|><|content_text|>Hi<|end_message|>"
+        );
+        assert!(!primes_think_channel(&off, &thinking(false, None)));
+
+        let on = render(&thinking(true, Some("low")));
+        assert_eq!(
+            on,
+            "<|message_system|><|content_text|>Thinking effort level: 0.2<|end_message|><|message_user|><|content_text|>Hi<|end_message|>"
+        );
+        assert!(!primes_think_channel(&on, &thinking(true, Some("low"))));
+
+        // A ChatML prompt for a reasoning model still is.
+        let chatml = "<|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\n";
+        assert!(primes_think_channel(chatml, &thinking(true, None)));
+        assert!(!primes_think_channel(chatml, &thinking(false, None)));
+    }
+
+    /// An effort the template does not accept fails with the template's own
+    /// message, which `raise_exception` now surfaces.
+    #[test]
+    fn inkling_rejects_an_unknown_effort_with_its_own_message() {
+        let template = read_workspace_file(INKLING2_TEMPLATE);
+
+        let err = render_embedded_template(
+            &template,
+            None,
+            None,
+            &[ChatMessage::user("Hi")],
+            None,
+            true,
+            Some(ReasoningEffort::Level("extreme".to_string())),
+        )
+        .expect_err("an unknown level must fail the render");
+
+        assert!(
+            err.to_string()
+                .contains("Unknown reasoning_effort: extreme"),
+            "{err}"
+        );
     }
 
     fn tool(name: &str) -> Tool {

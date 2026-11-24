@@ -17,8 +17,18 @@
 //!
 //! Engines that strip these internally (e.g. mistralrs) don't use
 //! this module.
+//!
+//! Output framed differently (Inkling writes every part of its turn as a
+//! message block) is split by its own blocks instead; see [`OutputFraming`].
 
-use crate::runtime_adapter::tool_call::{parse_tool_calls, TOOL_BLOCK_MARKERS};
+use std::borrow::Cow;
+
+use crate::gateway::{Tool, ToolCall};
+use crate::runtime_adapter::tool_call::{
+    decode_inkling_blocks, is_inkling_prompt, parse_tool_calls, parse_tool_calls_in,
+    parse_tool_calls_with_tools, InklingBlockDecoder, ToolCallProtocol, INKLING_TOOL_BLOCK_MARKERS,
+    INKLING_TURN_END_MARKERS, TOOL_BLOCK_MARKERS,
+};
 
 /// Stop markers emitted by common chat templates:
 /// - `<|im_end|>` / `<|im_start|>` / `<|endoftext|>`: ChatML (Qwen, Phi)
@@ -37,7 +47,8 @@ use crate::runtime_adapter::tool_call::{parse_tool_calls, TOOL_BLOCK_MARKERS};
 ///   EOT token, so Xybrid must filter the decoded literal as well.
 ///
 /// Always check for these in addition to user-supplied stop sequences —
-/// they're emitted by the chat template, not by the user.
+/// they're emitted by the chat template, not by the user. A framing adds its
+/// own ([`OutputFraming::stop_patterns`]).
 pub(crate) const CHAT_STOP_PATTERNS: &[&str] = &[
     "<|im_end|>",
     "<|im_start|>",
@@ -67,6 +78,150 @@ pub(crate) const CHAT_STOP_PATTERNS: &[&str] = &[
 /// below for the regression guard.
 pub(crate) const CHAT_STOP_PATTERNS_BROKEN: &[&str] =
     &["|im_end|>", "|im_start|>", "|endoftext|>", "end_of_turn>"];
+
+/// How a chat turn's raw output is framed, read off the prompt it follows.
+///
+/// Every family but Inkling writes its turn as answer text, with reasoning in
+/// a [`REASONING_BLOCK_MARKERS`] block and tool calls inline in any supported
+/// notation. Inkling writes each part as its own message block: its turn is
+/// split by those blocks ([`InklingBlockDecoder`]), so `<think>` or another
+/// family's call notation inside a block is plain text, and only its own call
+/// blocks are calls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OutputFraming {
+    /// Answer text with inline reasoning and tool-call blocks.
+    Plain,
+    /// Inkling message blocks.
+    Inkling,
+}
+
+impl OutputFraming {
+    /// The framing of the output generated after `prompt`.
+    pub(crate) fn of_prompt(prompt: &str) -> Self {
+        if is_inkling_prompt(prompt) {
+            Self::Inkling
+        } else {
+            Self::Plain
+        }
+    }
+
+    /// Whether output in this framing can start inside a primed `<think>`.
+    /// Inkling opens its own thinking blocks and is never primed.
+    pub(crate) fn allows_think_priming(self) -> bool {
+        self == Self::Plain
+    }
+
+    /// Stop patterns this framing adds to [`CHAT_STOP_PATTERNS`]: Inkling's
+    /// end-of-turn markers, which other families' output may quote.
+    pub(crate) fn stop_patterns(self) -> &'static [&'static str] {
+        match self {
+            Self::Plain => &[],
+            Self::Inkling => INKLING_TURN_END_MARKERS,
+        }
+    }
+
+    /// The streaming filter for a turn in this framing. Feed it the output of
+    /// [`Self::decoder`].
+    ///
+    /// Plain output is filtered for every recognized reasoning block,
+    /// starting inside one when `primed`, and, with `suppress_tools`, for
+    /// every family's tool-call blocks. Inkling's reasoning never reaches the
+    /// filter (the decoder keeps it apart), and only its own call blocks are
+    /// suppressed.
+    pub(crate) fn streaming_filter(
+        self,
+        stop_patterns: Vec<String>,
+        primed: bool,
+        suppress_tools: bool,
+    ) -> StreamingTextFilter {
+        let filter = match self {
+            Self::Plain if primed => StreamingTextFilter::new_reasoning_primed(stop_patterns),
+            Self::Plain => StreamingTextFilter::new(stop_patterns),
+            Self::Inkling => StreamingTextFilter::new(stop_patterns).for_inkling_blocks(),
+        };
+        if suppress_tools {
+            filter.with_tool_call_suppression()
+        } else {
+            filter
+        }
+    }
+
+    /// Split a finished turn, already cut at its stop patterns, into the
+    /// answer and the reasoning.
+    ///
+    /// Plain output goes through [`strip_and_capture_thinking_tags_primed`].
+    /// Inkling output is split by its blocks: the answer is its text and
+    /// tool-call blocks, the reasoning its thinking blocks.
+    pub(crate) fn split_reasoning(
+        self,
+        text: &str,
+        primed: bool,
+        truncated_by_budget: bool,
+    ) -> (String, Option<String>) {
+        match self {
+            Self::Plain => {
+                strip_and_capture_thinking_tags_primed(text, primed, truncated_by_budget)
+            }
+            Self::Inkling => {
+                let turn = decode_inkling_blocks(text);
+                let reasoning = turn.reasoning.trim();
+                let reasoning = (!reasoning.is_empty()).then(|| reasoning.to_string());
+                (turn.visible, reasoning)
+            }
+        }
+    }
+
+    /// The tool calls in an answer from [`Self::split_reasoning`]: every
+    /// family's for plain output, only Inkling's call blocks for Inkling's.
+    pub(crate) fn parse_tool_calls(self, text: &str, tools: &[Tool]) -> Vec<ToolCall> {
+        match self {
+            Self::Plain => parse_tool_calls_with_tools(text, tools),
+            Self::Inkling => parse_tool_calls_in(ToolCallProtocol::Inkling, text, tools),
+        }
+    }
+
+    /// The calls to record on the turn's output for callers that only see
+    /// its text (`GenerationOutput::tool_calls`). `None` for plain output,
+    /// whose text any caller can parse; Inkling's are parsed here, where the
+    /// framing is known.
+    pub(crate) fn output_tool_calls(self, text: &str, tools: &[Tool]) -> Option<Vec<ToolCall>> {
+        match self {
+            Self::Plain => None,
+            Self::Inkling => Some(self.parse_tool_calls(text, tools)),
+        }
+    }
+
+    /// A decoder for one streamed turn.
+    pub(crate) fn decoder(self) -> FramingDecoder {
+        FramingDecoder(match self {
+            Self::Plain => None,
+            Self::Inkling => Some(InklingBlockDecoder::new()),
+        })
+    }
+}
+
+/// Turns a streamed turn's raw chunks into the text its
+/// [`OutputFraming::streaming_filter`] reads: plain output unchanged, an
+/// Inkling turn's visible text (its reasoning is kept apart).
+pub(crate) struct FramingDecoder(Option<InklingBlockDecoder>);
+
+impl FramingDecoder {
+    /// Decode the next raw chunk.
+    pub(crate) fn push<'a>(&mut self, chunk: &'a str) -> Cow<'a, str> {
+        match &mut self.0 {
+            None => Cow::Borrowed(chunk),
+            Some(decoder) => Cow::Owned(decoder.push(chunk).visible),
+        }
+    }
+
+    /// The text still held back once the turn has ended.
+    pub(crate) fn finish(&mut self) -> String {
+        self.0
+            .as_mut()
+            .map(|decoder| decoder.finish().visible)
+            .unwrap_or_default()
+    }
+}
 
 /// Merge caller-supplied patterns with defaults, de-duplicated while
 /// preserving caller order first.
@@ -313,6 +468,14 @@ pub(crate) struct StreamingTextFilter {
     reasoning: String,
     suppress_tool_call_blocks: bool,
     saw_tool_call_block: bool,
+    /// The reasoning delimiters recognized in the text:
+    /// [`REASONING_BLOCK_MARKERS`], or none for Inkling, whose reasoning
+    /// never reaches the filter.
+    reasoning_markers: &'static [(&'static str, &'static str)],
+    /// The tool-call blocks suppressed, and the one protocol whose calls they
+    /// must parse as (`None`: every family's).
+    tool_block_markers: &'static [(&'static str, &'static str, bool)],
+    tool_protocol: Option<ToolCallProtocol>,
 }
 
 impl StreamingTextFilter {
@@ -330,6 +493,9 @@ impl StreamingTextFilter {
             reasoning: String::new(),
             suppress_tool_call_blocks: false,
             saw_tool_call_block: false,
+            reasoning_markers: REASONING_BLOCK_MARKERS,
+            tool_block_markers: TOOL_BLOCK_MARKERS,
+            tool_protocol: None,
         }
     }
 
@@ -353,6 +519,16 @@ impl StreamingTextFilter {
     /// that offered tools.
     pub fn with_tool_call_suppression(mut self) -> Self {
         self.suppress_tool_call_blocks = true;
+        self
+    }
+
+    /// Filter an Inkling turn's visible text: recognize no reasoning
+    /// delimiters (`<think>` there is answer text) and, with tool
+    /// suppression, only Inkling's own call blocks.
+    pub fn for_inkling_blocks(mut self) -> Self {
+        self.reasoning_markers = &[];
+        self.tool_block_markers = INKLING_TOOL_BLOCK_MARKERS;
+        self.tool_protocol = Some(ToolCallProtocol::Inkling);
         self
     }
 
@@ -403,7 +579,8 @@ impl StreamingTextFilter {
         // recognized marker forms and remember its matching close.
         if self.active_reasoning_close.is_none() {
             let scan_start = self.last_emitted_len;
-            if let Some((pos, close)) = REASONING_BLOCK_MARKERS
+            if let Some((pos, close)) = self
+                .reasoning_markers
                 .iter()
                 .filter_map(|&(open, close)| {
                     self.cumulative_text[scan_start..]
@@ -459,13 +636,17 @@ impl StreamingTextFilter {
             if let Some(start) = self.open_tool_block_start() {
                 safe_end = safe_end.min(start);
             }
-            if let Some(start) = find_potential_tool_start(&self.cumulative_text) {
+            if let Some(start) =
+                find_potential_tool_start(&self.cumulative_text, self.tool_block_markers)
+            {
                 safe_end = safe_end.min(start);
             }
         }
         // Hold back a partial reasoning-opener prefix at the tail so a marker
         // split across chunks isn't emitted before the block is recognized.
-        if let Some(start) = find_potential_reasoning_start(&self.cumulative_text) {
+        if let Some(start) =
+            find_potential_reasoning_start(&self.cumulative_text, self.reasoning_markers)
+        {
             safe_end = safe_end.min(start);
         }
 
@@ -482,7 +663,8 @@ impl StreamingTextFilter {
         let mut scan_start = self.last_emitted_len;
         loop {
             let search = &self.cumulative_text[scan_start..];
-            let Some((relative_start, start, end, is_call_block)) = find_next_tool_block(search)
+            let Some((relative_start, start, end, is_call_block)) =
+                find_next_tool_block(search, self.tool_block_markers)
             else {
                 break;
             };
@@ -493,8 +675,7 @@ impl StreamingTextFilter {
             };
             let remove_end = after_start_index + relative_end + end.len();
 
-            if is_call_block
-                && parse_tool_calls(&self.cumulative_text[start_index..remove_end]).is_empty()
+            if is_call_block && !self.parses_as_call(&self.cumulative_text[start_index..remove_end])
             {
                 scan_start = remove_end;
                 continue;
@@ -514,11 +695,20 @@ impl StreamingTextFilter {
         }
     }
 
+    /// Whether a complete call block holds a call this filter suppresses.
+    fn parses_as_call(&self, block: &str) -> bool {
+        match self.tool_protocol {
+            Some(protocol) => !parse_tool_calls_in(protocol, block, &[]).is_empty(),
+            None => !parse_tool_calls(block).is_empty(),
+        }
+    }
+
     fn open_tool_block_start(&self) -> Option<usize> {
         let mut scan_start = self.last_emitted_len;
         loop {
             let search = &self.cumulative_text[scan_start..];
-            let (relative_start, start, end, _) = find_next_tool_block(search)?;
+            let (relative_start, start, end, _) =
+                find_next_tool_block(search, self.tool_block_markers)?;
             let start_index = scan_start + relative_start;
             let after_start_index = start_index + start.len();
             let Some(relative_end) = self.cumulative_text[after_start_index..].find(end) else {
@@ -561,8 +751,11 @@ fn find_potential_stop_start(text: &str, patterns: &[String]) -> Option<usize> {
         })
 }
 
-fn find_next_tool_block(text: &str) -> Option<(usize, &'static str, &'static str, bool)> {
-    TOOL_BLOCK_MARKERS
+fn find_next_tool_block(
+    text: &str,
+    markers: &'static [(&'static str, &'static str, bool)],
+) -> Option<(usize, &'static str, &'static str, bool)> {
+    markers
         .iter()
         .filter_map(|(start, end, is_call_block)| {
             text.find(start)
@@ -571,8 +764,8 @@ fn find_next_tool_block(text: &str) -> Option<(usize, &'static str, &'static str
         .min_by_key(|(position, _, _, _)| *position)
 }
 
-fn find_potential_tool_start(text: &str) -> Option<usize> {
-    TOOL_BLOCK_MARKERS
+fn find_potential_tool_start(text: &str, markers: &[(&str, &str, bool)]) -> Option<usize> {
+    markers
         .iter()
         .filter_map(|(start, _, _)| potential_suffix_start(text, start))
         .min()
@@ -581,8 +774,8 @@ fn find_potential_tool_start(text: &str) -> Option<usize> {
 /// Position where a partial reasoning-opener prefix begins at the tail of
 /// `text`, if any — so a reasoning marker split across chunks is held back
 /// rather than leaked to the emit stream. Mirrors [`find_potential_tool_start`].
-fn find_potential_reasoning_start(text: &str) -> Option<usize> {
-    REASONING_BLOCK_MARKERS
+fn find_potential_reasoning_start(text: &str, markers: &[(&str, &str)]) -> Option<usize> {
+    markers
         .iter()
         .filter_map(|(open, _)| potential_suffix_start(text, open))
         .min()
@@ -1316,6 +1509,427 @@ mod tests {
             );
             assert_eq!(f.cumulative_emitted(), "A concise image description.");
         }
+    }
+
+    /// Inkling's raw turn, the way the native loop streams it: one special
+    /// token per chunk, text in pieces.
+    const INKLING_TURN: &[&str] = &[
+        "<|message_model|>",
+        "<|content_thinking|>",
+        "84 * 3 = 252",
+        ", halved: 126.",
+        "<|end_message|>",
+        "<|message_model|>",
+        "<|content_text|>",
+        "The answer",
+        " is 126.",
+        "<|end_message|>",
+    ];
+
+    /// LFM3's call notation, which an Inkling answer may quote.
+    const LFM3_EXAMPLE: &str = "<tool_call>\n<function=get_weather>\n<parameter=city>\nParis\n</parameter>\n</function>\n</tool_call>";
+
+    /// The stop patterns a chat turn in `framing` runs with.
+    fn chat_stops(framing: OutputFraming) -> Vec<String> {
+        CHAT_STOP_PATTERNS
+            .iter()
+            .chain(framing.stop_patterns())
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    /// Stream `chunks` through `framing`'s decoder and filter, the way the
+    /// llama.cpp backend's streaming paths do, returning the emitted deltas
+    /// and the filter.
+    fn stream(
+        framing: OutputFraming,
+        suppress_tools: bool,
+        chunks: &[&str],
+    ) -> (Vec<String>, StreamingTextFilter) {
+        let mut filter = framing.streaming_filter(chat_stops(framing), false, suppress_tools);
+        let mut decoder = framing.decoder();
+        let mut emitted: Vec<String> = chunks
+            .iter()
+            .filter_map(|chunk| filter.push(&decoder.push(chunk)))
+            .collect();
+        emitted.extend(filter.push(&decoder.finish()));
+        (emitted, filter)
+    }
+
+    /// Finish a raw Inkling turn the way the backend does: cut it at its
+    /// stops, then split it by its blocks.
+    fn finish_inkling(raw: &str, truncated_by_budget: bool) -> (String, Option<String>) {
+        let mut text = raw.to_string();
+        truncate_at_first_stop(&mut text, &chat_stops(OutputFraming::Inkling));
+        OutputFraming::Inkling.split_reasoning(&text, false, truncated_by_budget)
+    }
+
+    #[test]
+    fn output_framing_is_read_off_the_prompt() {
+        let inkling = "<|message_system|><|content_text|>Thinking effort level: 0.9<|end_message|><|message_user|><|content_text|>Hi<|end_message|>";
+        let chatml = "<|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\n";
+
+        assert_eq!(OutputFraming::of_prompt(inkling), OutputFraming::Inkling);
+        assert!(!OutputFraming::Inkling.allows_think_priming());
+        assert_eq!(
+            OutputFraming::Inkling.stop_patterns(),
+            INKLING_TURN_END_MARKERS
+        );
+        assert_eq!(OutputFraming::of_prompt(chatml), OutputFraming::Plain);
+        assert!(OutputFraming::Plain.allows_think_priming());
+        assert!(OutputFraming::Plain.stop_patterns().is_empty());
+        assert_eq!(
+            OutputFraming::Plain.split_reasoning("<think>a</think>b", false, false),
+            ("b".to_string(), Some("a".to_string()))
+        );
+        assert_eq!(
+            OutputFraming::Plain
+                .output_tool_calls(LFM3_EXAMPLE, &[])
+                .map(|calls| calls.len()),
+            None,
+            "plain output is parsed by whoever reads its text"
+        );
+    }
+
+    /// Other families' output may quote Inkling's role markers as plain
+    /// text; only an Inkling turn stops on them.
+    #[test]
+    fn inkling_role_markers_stop_only_inkling_turns() {
+        for marker in INKLING_TURN_END_MARKERS {
+            assert!(!CHAT_STOP_PATTERNS.contains(marker), "{marker}");
+        }
+        let quoted = "The placeholder is <|message_user|> in this example.";
+
+        let (emitted, filter) = stream(OutputFraming::Plain, false, &[quoted]);
+        assert_eq!(emitted.concat(), quoted);
+        assert!(!filter.is_stopped());
+        let mut text = quoted.to_string();
+        assert!(!truncate_at_first_stop(&mut text, CHAT_STOP_PATTERNS));
+    }
+
+    #[test]
+    fn inkling_stream_hides_the_thought_and_emits_only_the_answer() {
+        let (emitted, filter) = stream(OutputFraming::Inkling, false, INKLING_TURN);
+
+        assert_eq!(emitted.concat(), "The answer is 126.");
+        assert!(!filter.is_stopped());
+        assert_eq!(
+            finish_inkling(&INKLING_TURN.concat(), false),
+            (
+                "The answer is 126.".to_string(),
+                Some("84 * 3 = 252, halved: 126.".to_string())
+            )
+        );
+    }
+
+    /// `<think>` and `</think>` inside Inkling blocks are payload: a literal
+    /// close in the thought does not leak it, and a literal opener in the
+    /// answer does not hide it.
+    #[test]
+    fn inkling_think_tags_are_payload_in_the_stream_and_the_final_text() {
+        let chunks = [
+            "<|message_model|>",
+            "<|content_thinking|>",
+            "Mention the ",
+            "</think>",
+            " tag, then more.",
+            "<|end_message|>",
+            "<|message_model|>",
+            "<|content_text|>",
+            "Print ",
+            "<think>",
+            " exactly.",
+            "<|end_message|>",
+        ];
+
+        let (emitted, _) = stream(OutputFraming::Inkling, false, &chunks);
+        assert_eq!(emitted.concat(), "Print <think> exactly.");
+        assert_eq!(
+            finish_inkling(&chunks.concat(), false),
+            (
+                "Print <think> exactly.".to_string(),
+                Some("Mention the </think> tag, then more.".to_string())
+            )
+        );
+    }
+
+    /// An Inkling answer that quotes another family's call notation is
+    /// answer text: not suppressed from the stream, and not a call.
+    #[test]
+    fn inkling_quoted_call_notation_is_answer_text_not_a_call() {
+        let chunks = [
+            "<|message_model|>",
+            "<|content_text|>",
+            "LFM3 writes ",
+            LFM3_EXAMPLE,
+            "<|end_message|>",
+        ];
+
+        let (emitted, filter) = stream(OutputFraming::Inkling, true, &chunks);
+        assert_eq!(emitted.concat(), format!("LFM3 writes {LFM3_EXAMPLE}"));
+        assert!(!filter.saw_tool_call_block());
+        let (answer, _) = finish_inkling(&chunks.concat(), false);
+        assert!(OutputFraming::Inkling
+            .parse_tool_calls(&answer, &[])
+            .is_empty());
+        assert_eq!(
+            OutputFraming::Inkling
+                .output_tool_calls(&answer, &[])
+                .map(|calls| calls.len()),
+            Some(0)
+        );
+        // The cross-family scan reads it as a call; Inkling's must not.
+        assert_eq!(OutputFraming::Plain.parse_tool_calls(&answer, &[]).len(), 1);
+    }
+
+    #[test]
+    fn inkling_stream_suppresses_its_own_tool_call_block() {
+        let chunks = [
+            "<|message_model|>",
+            "<|content_text|>",
+            "Let me check.",
+            "<|end_message|>",
+            "<|message_model|>",
+            "get",
+            "_weather",
+            "<|content_invoke_tool_json|>",
+            "{\"name\":\"get_weather\",",
+            "\"args\":{\"city\":\"Paris\"}}",
+            "<|end_message|>",
+        ];
+
+        let (emitted, filter) = stream(OutputFraming::Inkling, true, &chunks);
+
+        assert_eq!(emitted.concat(), "Let me check.");
+        assert!(filter.saw_tool_call_block());
+        let (answer, _) = finish_inkling(&chunks.concat(), false);
+        let calls = OutputFraming::Inkling.parse_tool_calls(&answer, &[]);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function.arguments, r#"{"city":"Paris"}"#);
+    }
+
+    #[test]
+    fn inkling_turn_end_markers_stop_the_stream() {
+        let chunks = [
+            "<|message_model|>",
+            "<|content_text|>",
+            "Hi.",
+            "<|end_message|>",
+            "<|message_user|>",
+            "<|content_text|>",
+            "and another question",
+        ];
+
+        let (emitted, filter) = stream(OutputFraming::Inkling, false, &chunks);
+
+        assert_eq!(emitted.concat(), "Hi.");
+        assert!(filter.is_stopped());
+        assert_eq!(
+            finish_inkling(&chunks.concat(), false),
+            ("Hi.".to_string(), None)
+        );
+    }
+
+    /// Split raw Inkling output the way the native loop streams it: every
+    /// special token alone, text in three-char pieces.
+    fn inkling_chunks(raw: &str) -> Vec<String> {
+        const SPECIALS: &[&str] = &[
+            "<|message_model|>",
+            "<|content_thinking|>",
+            "<|content_text|>",
+            "<|content_invoke_tool_json|>",
+            "<|end_message|>",
+        ];
+        let mut chunks = Vec::new();
+        let mut rest = raw;
+        while !rest.is_empty() {
+            let next = SPECIALS
+                .iter()
+                .filter_map(|special| rest.find(special).map(|at| (at, *special)))
+                .min_by_key(|(at, _)| *at);
+            let text_end = next.map_or(rest.len(), |(at, _)| at);
+            let text: Vec<char> = rest[..text_end].chars().collect();
+            chunks.extend(text.chunks(3).map(|piece| piece.iter().collect::<String>()));
+            match next {
+                Some((at, special)) => {
+                    chunks.push(special.to_string());
+                    rest = &rest[at + special.len()..];
+                }
+                None => rest = "",
+            }
+        }
+        chunks
+    }
+
+    /// llama.cpp's own Inkling 2 parser cases (`tests/test-chat.cpp` at
+    /// master, 2026-11-23): a finished turn must split into the same answer,
+    /// reasoning and tool calls, and the stream must show the same answer.
+    /// llama.cpp keeps a call's argument text as written; xybrid re-encodes
+    /// it compactly, so arguments compare as JSON.
+    #[test]
+    fn inkling_output_splits_like_llama_cpp_parser() {
+        use crate::runtime_adapter::tool_call::strip_tool_calls;
+
+        const H: &str = "<|message_model|>";
+        const E: &str = "<|end_message|>";
+        let call = format!(
+            "special_function<|content_invoke_tool_json|>{{\"name\":\"special_function\",\"args\":{{\"arg1\":1}}}}{E}"
+        );
+        struct Case {
+            name: &'static str,
+            raw: String,
+            content: &'static str,
+            reasoning: Option<&'static str>,
+            calls: Vec<(&'static str, serde_json::Value)>,
+        }
+        let case = |name, raw, content, reasoning, calls| Case {
+            name,
+            raw,
+            content,
+            reasoning,
+            calls,
+        };
+        let special = |args: serde_json::Value| ("special_function", args);
+        let cases = vec![
+            case(
+                "content only",
+                format!("{H}<|content_text|>Hello, world!\nWhat's up?{E}"),
+                "Hello, world!\nWhat's up?",
+                None,
+                vec![],
+            ),
+            case(
+                "thinking, then content",
+                format!("{H}<|content_thinking|>I'm thinking{E}{H}<|content_text|>Hello, world!\nWhat's up?{E}"),
+                "Hello, world!\nWhat's up?",
+                Some("I'm thinking"),
+                vec![],
+            ),
+            case(
+                "cut off in thinking",
+                format!("{H}<|content_thinking|>I was still thinking"),
+                "",
+                Some("I was still thinking"),
+                vec![],
+            ),
+            case(
+                "cut off in content",
+                format!("{H}<|content_thinking|>I'm thinking{E}{H}<|content_text|>Hello, wor"),
+                "Hello, wor",
+                Some("I'm thinking"),
+                vec![],
+            ),
+            case(
+                "single tool call",
+                format!("{H}{call}"),
+                "",
+                None,
+                vec![special(serde_json::json!({"arg1": 1}))],
+            ),
+            case(
+                "thinking, content, then a tool call",
+                format!("{H}<|content_thinking|>I should call it{E}{H}<|content_text|>On it.{E}{H}{call}"),
+                "On it.",
+                Some("I should call it"),
+                vec![special(serde_json::json!({"arg1": 1}))],
+            ),
+            case(
+                "parallel tool calls",
+                format!(
+                    "{H}{call}{H}special_function_with_opt<|content_invoke_tool_json|>{{\"name\":\"special_function_with_opt\",\"args\":{{\"arg1\":1,\"arg2\":2}}}}{E}"
+                ),
+                "",
+                None,
+                vec![
+                    special(serde_json::json!({"arg1": 1})),
+                    ("special_function_with_opt", serde_json::json!({"arg1": 1, "arg2": 2})),
+                ],
+            ),
+            case(
+                "no name before the tool token",
+                format!(
+                    "{H}<|content_invoke_tool_json|>{{\"name\":\"special_function\",\"args\":{{\"arg1\":1}}}}{E}"
+                ),
+                "",
+                None,
+                vec![special(serde_json::json!({"arg1": 1}))],
+            ),
+            case(
+                "unknown tool, spaces in the JSON",
+                format!(
+                    "{H}unknown_tool<|content_invoke_tool_json|>{{\"name\": \"unknown_tool\", \"args\": {{\"arg1\": 1}}}}{E}"
+                ),
+                "",
+                None,
+                vec![("unknown_tool", serde_json::json!({"arg1": 1}))],
+            ),
+            case(
+                "the JSON names the tool, not the hint",
+                format!(
+                    "{H}special<|content_invoke_tool_json|>{{\"name\":\"special_function\",\"args\":{{\"arg1\":1}}}}{E}"
+                ),
+                "",
+                None,
+                vec![special(serde_json::json!({"arg1": 1}))],
+            ),
+            case(
+                "response format",
+                format!("{H}<|content_thinking|>I'm thinking{E}{H}<|content_text|>{{\"amount\": 123.45}}{E}"),
+                "{\"amount\": 123.45}",
+                Some("I'm thinking"),
+                vec![],
+            ),
+        ];
+
+        for Case {
+            name,
+            raw,
+            content,
+            reasoning,
+            calls,
+        } in cases
+        {
+            let (answer, captured) = finish_inkling(&raw, false);
+            assert_eq!(strip_tool_calls(&answer), content, "{name}: answer");
+            assert_eq!(captured.as_deref(), reasoning, "{name}: reasoning");
+            let parsed: Vec<(String, serde_json::Value)> = OutputFraming::Inkling
+                .parse_tool_calls(&answer, &[])
+                .into_iter()
+                .map(|call| {
+                    let arguments = serde_json::from_str(&call.function.arguments)
+                        .unwrap_or_else(|e| panic!("{name}: arguments: {e}"));
+                    (call.function.name, arguments)
+                })
+                .collect();
+            let expected: Vec<(String, serde_json::Value)> = calls
+                .into_iter()
+                .map(|(tool, arguments)| (tool.to_string(), arguments))
+                .collect();
+            assert_eq!(parsed, expected, "{name}: tool calls");
+
+            let chunks = inkling_chunks(&raw);
+            let chunks: Vec<&str> = chunks.iter().map(String::as_str).collect();
+            let (emitted, _) = stream(OutputFraming::Inkling, true, &chunks);
+            assert_eq!(emitted.concat(), content, "{name}: streamed answer");
+        }
+    }
+
+    /// A budget that runs out mid-thought leaves the reasoning and no answer.
+    #[test]
+    fn inkling_thought_cut_off_by_the_budget_is_reasoning() {
+        let chunks = [
+            "<|message_model|>",
+            "<|content_thinking|>",
+            "Let me work through",
+        ];
+
+        let (emitted, _) = stream(OutputFraming::Inkling, false, &chunks);
+
+        assert!(emitted.concat().is_empty());
+        assert_eq!(
+            finish_inkling(&chunks.concat(), true),
+            (String::new(), Some("Let me work through".to_string()))
+        );
     }
 
     /// The chat paths clean their final text with every pattern, the broken

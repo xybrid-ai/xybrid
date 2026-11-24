@@ -130,8 +130,8 @@ fn build_client_header_with(binding: &str, opted_out: bool, ci: bool) -> Option<
 ///
 /// `llamacpp-lfm3-d1-text-v1` (Liquid d1 decisions) is deliberately absent,
 /// as it is from `xybrid_core::features`: no build asks the registry for a
-/// decision artifact until the open reference comparison closes (P02 in
-/// docs/development/decision-conformance.md).
+/// decision artifact until the open comparison against the independent
+/// Hugging Face reference closes.
 const ARTIFACT_BACKENDS: &[&str] = &[
     "asr-whispercpp-coreml",
     "llamacpp-lfm3",

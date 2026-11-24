@@ -5,15 +5,10 @@ returns typed answers without generating text. It accepts text or ordered JSON
 state and 1–16 named questions: one choice among 1–255 options, yes/no (`noul`),
 or an ordinal score with 2–10 levels.
 
-The [protocol contract](../development/liquid-decision-protocol.md) specifies
-exact wire, preparation, answer and compatibility semantics.
-
 This is an implementation profile, not a claim that every packaged SDK, device,
-quantization or accelerator has been qualified. See
-[decision conformance](../development/decision-conformance.md) for the evidence
-gates and outstanding reference/device qualification. Image, video, audio,
-browser execution, additional question types and legacy decision models remain
-separate profiles. The registry capability for this profile is
+quantization or accelerator has been qualified. Image, video, audio, browser
+execution, additional question types and legacy decision models remain separate
+profiles. The registry capability for this profile is
 `llamacpp-lfm3-d1-text-v1`. No SDK build reports it yet, so the registry does
 not serve decision models: load a local artifact, as below.
 

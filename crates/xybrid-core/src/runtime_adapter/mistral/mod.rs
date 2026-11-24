@@ -568,6 +568,7 @@ impl LlmBackend for MistralBackend {
             prefill_tps: prefill_tps_reported.or(fields.prefill_tps),
             image_preprocess_ms: None,
             reasoning_content,
+            tool_calls: None,
         })
     }
 
@@ -648,6 +649,7 @@ impl LlmBackend for MistralBackend {
             prefill_tps: prefill_tps_reported.or(fields.prefill_tps),
             image_preprocess_ms: None,
             reasoning_content,
+            tool_calls: None,
         })
     }
 

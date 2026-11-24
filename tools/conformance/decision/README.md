@@ -1,8 +1,5 @@
 # Upstream decision oracle (llama.cpp, LFM3 d1)
 
-The runtime conformance suite, independent HF collector and qualification
-boundaries are documented in
-[`decision-conformance.md`](../../../docs/development/decision-conformance.md).
 `check.py` verifies immutable fixture inputs and source digests;
 `hf_reference.py` collects actual pinned HF observations, and
 `compare_reference.py` reports differences without turning observed maxima

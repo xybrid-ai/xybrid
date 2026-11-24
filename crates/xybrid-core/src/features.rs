@@ -32,10 +32,10 @@ const ALL_FEATURES: &[(&str, bool)] = &[
     ("llamacpp-lfm3", cfg!(feature = "llm-llamacpp")),
     // `llamacpp-lfm3-d1-text-v1`, the registry capability for Liquid d1
     // decisions, is deliberately absent. The registry serves a decision
-    // artifact to every client that lists it, and the reference comparison is
-    // still open (P02 in docs/development/decision-conformance.md). Add it
-    // here and to the SDK's `ARTIFACT_BACKENDS` when that closes. A local
-    // load needs no capability.
+    // artifact to every client that lists it, and the comparison against the
+    // independent Hugging Face reference is still open. Add it here and to the
+    // SDK's `ARTIFACT_BACKENDS` when that closes. A local load needs no
+    // capability.
     ("llamacpp-lfm3vl", cfg!(feature = "llm-llamacpp-vision")),
     ("llm-llamacpp", cfg!(feature = "llm-llamacpp")),
     ("llm-llamacpp-vision", cfg!(feature = "llm-llamacpp-vision")),

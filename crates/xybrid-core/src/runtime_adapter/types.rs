@@ -596,6 +596,35 @@ impl GenerationConfig {
 // LLM Configuration
 // =============================================================================
 
+/// How long a reasoning model thinks before it answers, for chat templates
+/// that take a `reasoning_effort`. Inkling's accepts a named level (`"none"`,
+/// `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`) or a
+/// number in `[0.0, 0.99]`.
+///
+/// Sourced from the model metadata's `reasoning_effort` (a string or a
+/// number). The template validates it: a value it does not accept fails the
+/// render with the template's own message.
+///
+/// # Examples
+///
+/// ```
+/// use xybrid_core::runtime_adapter::ReasoningEffort;
+///
+/// let level: ReasoningEffort = serde_json::from_str(r#""low""#).unwrap();
+/// assert_eq!(level, ReasoningEffort::Level("low".to_string()));
+///
+/// let value: ReasoningEffort = serde_json::from_str("0.5").unwrap();
+/// assert_eq!(value, ReasoningEffort::Value(0.5));
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ReasoningEffort {
+    /// A named level, passed to the template as a string.
+    Level(String),
+    /// A numeric level, passed to the template as a number.
+    Value(f64),
+}
+
 /// Configuration for loading a local LLM.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
@@ -661,8 +690,17 @@ pub struct LlmConfig {
     /// `reasoning` flag. When set, the chat-prompt builder primes the
     /// `<think>` channel so the model produces its reasoning, which the backend
     /// captures into `reasoning_content`. Default: false.
+    ///
+    /// Templates that frame reasoning themselves (Inkling) are not primed:
+    /// the flag turns their thinking on or off instead.
     #[serde(default)]
     pub reasoning: bool,
+
+    /// How long the model thinks when [`Self::reasoning`] is set, for chat
+    /// templates that take a `reasoning_effort`. Sourced from the model
+    /// metadata's `reasoning_effort`. `None` leaves the template's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<ReasoningEffort>,
 }
 
 fn default_context_length() -> usize {
@@ -730,6 +768,7 @@ impl Default for LlmConfig {
             n_batch: default_n_batch(),
             flash_attn: default_flash_attn(),
             reasoning: false,
+            reasoning_effort: None,
         }
     }
 }
@@ -772,6 +811,13 @@ impl LlmConfig {
     /// channel during chat-prompt construction. See [`Self::reasoning`].
     pub fn with_reasoning(mut self, reasoning: bool) -> Self {
         self.reasoning = reasoning;
+        self
+    }
+
+    /// Set how long a reasoning model thinks. See
+    /// [`Self::reasoning_effort`].
+    pub fn with_reasoning_effort(mut self, effort: Option<ReasoningEffort>) -> Self {
+        self.reasoning_effort = effort;
         self
     }
 

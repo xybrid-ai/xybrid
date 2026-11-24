@@ -23,9 +23,8 @@ how to rebuild them.
 The xybrid implementation now has a separate stage-isolated runner in
 [`decision_conformance.rs`](../../tests/decision_conformance.rs). Its required
 CPU lane evaluates supplied upstream token arrays against a freshly collected,
-matched-build reference. See
-[`decision-conformance.md`](../../../docs/development/decision-conformance.md)
-for commands and the remaining independent-reference/device promotion gates.
+matched-build reference. `just integration-tests decision-native` runs it
+with real weights and a freshly collected reference.
 
 ## A case
 
