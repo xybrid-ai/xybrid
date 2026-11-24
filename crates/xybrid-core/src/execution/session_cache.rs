@@ -83,7 +83,10 @@ impl<S> OnnxSessionCache<S> {
 
         let weight_files = external_weight_files(model_path);
         let identity = fingerprint(model_path, &weight_files);
-        let session = Arc::new(build(model_path)?);
+        let session = {
+            let _load = crate::tracing::model_load_stage("ort");
+            Arc::new(build(model_path).inspect_err(|_| crate::tracing::mark_stage_failed())?)
+        };
         // An unreadable identity serves this build but is never trusted later.
         self.slot = identity.map(|identity| CachedSession {
             model_path: model_path.to_path_buf(),

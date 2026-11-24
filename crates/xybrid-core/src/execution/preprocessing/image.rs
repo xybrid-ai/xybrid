@@ -1691,14 +1691,12 @@ mod tests {
 
     #[test]
     fn raw_image_ingress_trace_preserves_one_pixel_buffer_copy() {
-        let _trace_lock = crate::tracing::test_lock();
         let (raw_pixels, raw_planes) = gradient_rgba_raw(4, 4);
         let raw =
             Envelope::image_raw(raw_pixels, PixelFormat::Rgba8, 4, 4, raw_planes, None).unwrap();
         let envelope_pixel_ptr = raw.as_raw_image().unwrap().pixels.as_ptr();
 
-        crate::tracing::init_tracing(true);
-        crate::tracing::reset_tracing();
+        let stage_trace = crate::tracing::capture();
         {
             let _span = crate::tracing::SpanGuard::new("raw_image_copy_budget");
             let data = PreprocessedData::from_envelope(&raw).unwrap();
@@ -1714,8 +1712,7 @@ mod tests {
             image_ingress_step(data, 3, ImageTensorLayout::Nchw).unwrap();
         }
 
-        let trace = crate::tracing::get_stages_json();
-        crate::tracing::reset_tracing();
+        let trace = stage_trace.stages_json();
         let span = trace["spans"]
             .as_array()
             .unwrap()
@@ -1731,20 +1728,17 @@ mod tests {
 
     #[test]
     fn raw_yuv_image_ingress_trace_reports_conversion_buffer_allocation() {
-        let _trace_lock = crate::tracing::test_lock();
         for format in [PixelFormat::Nv12, PixelFormat::Nv21, PixelFormat::I420] {
             let raw = yuv420_envelope(format);
 
-            crate::tracing::init_tracing(true);
-            crate::tracing::reset_tracing();
+            let stage_trace = crate::tracing::capture();
             {
                 let _span = crate::tracing::SpanGuard::new("raw_yuv_image_copy_budget");
                 let data = PreprocessedData::from_envelope(&raw).unwrap();
                 image_ingress_step(data, 3, ImageTensorLayout::Nchw).unwrap();
             }
 
-            let trace = crate::tracing::get_stages_json();
-            crate::tracing::reset_tracing();
+            let trace = stage_trace.stages_json();
             let span = trace["spans"]
                 .as_array()
                 .unwrap()

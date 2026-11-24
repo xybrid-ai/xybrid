@@ -1,0 +1,218 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "Valid unsampled spans keep observation references; explicit suppression has none. Evaluations and feedback link to unsampled spans, literal snake_case references are accepted, and malformed or camelCase references are rejected. Metrics are recorded for every operation.",
+  "expect": {
+    "logs": [
+      {
+        "attributes": {
+          "gen_ai.evaluation.name": "relevance",
+          "gen_ai.evaluation.score.value": 1
+        },
+        "event_name": "gen_ai.evaluation.result",
+        "severity_number": 9,
+        "span": "chat"
+      },
+      {
+        "attributes": {
+          "gen_ai.evaluation.name": "user_feedback",
+          "gen_ai.evaluation.score.label": "thumbs_up",
+          "gen_ai.evaluation.score.value": 1
+        },
+        "event_name": "gen_ai.evaluation.result",
+        "severity_number": 9,
+        "span": "00f067aa0ba902b7"
+      }
+    ],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.01
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.operation.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "predict",
+              "gen_ai.provider.name": "onnxruntime",
+              "gen_ai.request.model": "yolo",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.01
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.execute_tool.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "execute_tool",
+              "gen_ai.tool.name": "noop",
+              "gen_ai.tool.type": "function"
+            },
+            "count": 1,
+            "sum": 0.001
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": []
+  },
+  "name": "refs_unsampled_parent",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "start_inference",
+      "parent_traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00",
+      "request": {
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp"
+      }
+    },
+    {
+      "at_ms": 0,
+      "op": "assert_ref",
+      "present": true,
+      "target": "chat",
+      "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+    },
+    {
+      "at_ms": 0,
+      "op": "assert_context",
+      "present": true,
+      "sampled": false,
+      "target": "chat",
+      "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+    },
+    {
+      "at_ms": 5,
+      "id": "tool",
+      "name": "noop",
+      "op": "start_tool",
+      "parent": "chat",
+      "tool_type": "function"
+    },
+    {
+      "at_ms": 5,
+      "op": "assert_ref",
+      "present": true,
+      "target": "tool",
+      "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+    },
+    {
+      "at_ms": 6,
+      "id": "tool",
+      "op": "end"
+    },
+    {
+      "at_ms": 10,
+      "id": "chat",
+      "op": "end"
+    },
+    {
+      "at_ms": 11,
+      "expect_result": true,
+      "name": "relevance",
+      "op": "evaluation",
+      "score_value": 1,
+      "target": "chat"
+    },
+    {
+      "at_ms": 12,
+      "expect_result": true,
+      "label": "thumbs_up",
+      "op": "feedback",
+      "score": 1,
+      "target_ref": {
+        "span_id": "00f067aa0ba902b7",
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+      }
+    },
+    {
+      "at_ms": 13,
+      "expect_result": false,
+      "op": "feedback",
+      "score": 1,
+      "target_ref": {
+        "span_id": "00f067aa0ba902b7",
+        "trace_id": "4BF92F3577B34DA6A3CE929D0E0E4736"
+      }
+    },
+    {
+      "at_ms": 14,
+      "expect_result": false,
+      "op": "feedback",
+      "score": 1,
+      "target_ref": {
+        "spanId": "00f067aa0ba902b7",
+        "traceId": "4bf92f3577b34da6a3ce929d0e0e4736"
+      }
+    },
+    {
+      "at_ms": 15,
+      "expect_result": false,
+      "name": "relevance",
+      "op": "evaluation",
+      "target_ref": {
+        "span_id": "00f067aa0ba902b7",
+        "trace_id": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "at_ms": 20,
+      "id": "frame",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "yolo",
+        "operation": "predict",
+        "provider": "onnxruntime",
+        "runtime": "onnxruntime",
+        "task": "object_detection"
+      },
+      "trace": "suppress"
+    },
+    {
+      "at_ms": 20,
+      "op": "assert_ref",
+      "present": false,
+      "target": "frame"
+    },
+    {
+      "at_ms": 20,
+      "op": "assert_context",
+      "present": false,
+      "target": "frame"
+    },
+    {
+      "at_ms": 30,
+      "id": "frame",
+      "op": "end"
+    }
+  ]
+}

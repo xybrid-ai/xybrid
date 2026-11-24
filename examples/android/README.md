@@ -55,16 +55,16 @@ Or build from the command line:
 
 ### 3. Set your API key (optional)
 
-The app reads `XYBRID_API_KEY` (and optionally `XYBRID_PLATFORM_URL`, the
-telemetry ingest endpoint) through `BuildConfig`, wired in
+The app reads `XYBRID_API_KEY` (and optionally `XYBRID_TRACES_ENDPOINT`, a
+full OTLP trace URL) through `BuildConfig`, wired in
 `app/build.gradle.kts` from one of three sources (first one wins) — so neither
 lands in the repo:
 
 | Source | Best for | How |
 |--------|----------|-----|
-| `local.properties` | Android Studio (just press Run) | `xybrid.apiKey=sk_test_...` / `xybrid.platformUrl=https://...` |
-| Gradle property | one-liner / CI | `-PXYBRID_API_KEY=sk_test_...` / `-PXYBRID_PLATFORM_URL=https://...` |
-| Env variable | shells / CI | `export XYBRID_API_KEY=sk_test_...` / `export XYBRID_PLATFORM_URL=https://...` |
+| `local.properties` | Android Studio (just press Run) | `xybrid.apiKey=sk_test_...` / `xybrid.tracesEndpoint=https://...` |
+| Gradle property | one-liner / CI | `-PXYBRID_API_KEY=sk_test_...` / `-PXYBRID_TRACES_ENDPOINT=https://...` |
+| Env variable | shells / CI | `export XYBRID_API_KEY=sk_test_...` / `export XYBRID_TRACES_ENDPOINT=https://...` |
 
 The Gradle-property form is the Android analog of Flutter's
 `flutter run --dart-define=...`:
@@ -72,16 +72,18 @@ The Gradle-property form is the Android analog of Flutter's
 ```bash
 ./gradlew installDebug \
   -PXYBRID_API_KEY=sk_test_... \
-  -PXYBRID_PLATFORM_URL=https://your-platform.example.com
+  -PXYBRID_TRACES_ENDPOINT=https://your-platform.example.com/v1/traces
 ```
 
 For Android Studio, copy
 [`local.properties.example`](local.properties.example) to `local.properties`
 (already gitignored) and fill in your values. Both are optional: without a key
-the app runs anonymously (on-device inference, telemetry disabled); without a
-platform URL it uses the default Xybrid endpoint (`XYBRID_PLATFORM_URL` is
-handy for pointing a debug build at a self-hosted or tunneled platform). Get a
-free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+the app runs anonymously (on-device inference, no trace export). With a key,
+`MainActivity` passes it to `Xybrid.init` and also starts trace export with
+`Xybrid.Observability.xybrid(apiKey).start()` — the SDK never exports on the
+key alone. `XYBRID_TRACES_ENDPOINT` points those traces at a self-hosted or
+tunneled endpoint instead of Xybrid. Get a key at
+[console.xybrid.dev](https://console.xybrid.dev).
 
 ### 4. Obtain Model Files
 
@@ -276,7 +278,7 @@ adb shell ls -la /data/local/tmp/models/kokoro-82m/
 
 - **[SDK API Reference](../../docs/sdk/API_REFERENCE.md)** - Complete API specification
 - **[Kotlin SDK Docs](../../docs/sdk/kotlin.md)** - Kotlin-specific documentation
-- **[Online Documentation](https://docs.xybrid.dev/sdk/kotlin)** - Full guides and tutorials
+- **[Online Documentation](https://docs.xybrid.dev/docs/sdks/android)** - Full guides and tutorials
 
 ## Related
 

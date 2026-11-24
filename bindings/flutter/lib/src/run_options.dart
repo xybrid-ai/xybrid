@@ -2,6 +2,7 @@ library;
 
 import 'rust/api/model.dart';
 import 'runtime_config.dart';
+import 'observability.dart';
 
 /// Resource or cancellation signals that can stop a local run.
 enum AbortSignal {
@@ -33,10 +34,17 @@ class AbortPolicy {
   }) : fallbackToCloud = true;
 }
 
-/// Per-run controls for SDK execution.
+/// Per-run execution and observation controls. Cloud provider/model/gateway
+/// overrides and fallback permission apply to `runStreamingWithFallback`.
 class RunOptions {
   final AbortPolicy abortPolicy;
+  final ObservationOptions? observation;
   final String? cloudProvider;
+
+  /// The model the cloud leg asks the Xybrid gateway for; unset sends
+  /// `openai/gpt-4o-mini`. The gateway takes frontier models by their
+  /// canonical OpenRouter id (`vendor/model`) and answers 404
+  /// `model_not_found` for a short id such as `gpt-4o-mini`.
   final String? cloudModel;
   final String? cloudGatewayUrl;
   final String? correlationId;
@@ -44,6 +52,7 @@ class RunOptions {
 
   const RunOptions({
     this.abortPolicy = const AbortPolicy(),
+    this.observation,
     this.cloudProvider,
     this.cloudModel,
     this.cloudGatewayUrl,
@@ -54,6 +63,7 @@ class RunOptions {
   /// Enable local streaming abort with authenticated cloud fallback.
   const RunOptions.cloudFallback({
     this.abortPolicy = const AbortPolicy.cloudFallback(),
+    this.observation,
     this.cloudProvider,
     this.cloudModel,
     this.cloudGatewayUrl,
@@ -64,6 +74,10 @@ class RunOptions {
   FfiRunOptions toFfi() {
     final graceTokens = abortPolicy.maxGraceTokens ?? maxGraceTokens;
     return FfiRunOptions(
+      traceparent: observation?.traceparent,
+      tracestate: observation?.tracestate,
+      conversationId: observation?.conversationId,
+      suppressTrace: observation?.suppressTrace ?? false,
       cloudProvider: cloudProvider,
       cloudModel: cloudModel,
       cloudGatewayUrl: cloudGatewayUrl ?? XybridRuntimeConfig.gatewayUrl,

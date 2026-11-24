@@ -10,15 +10,16 @@
 import '../frb_generated.dart';
 import 'context.dart';
 import 'envelope.dart';
+import 'observability.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'result.dart';
 import 'streaming.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `completion`, `from_sdk`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `sdk_error_message`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_over`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
+// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `completion`, `decision_io_refusal`, `from_sdk`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `load_reporting_progress`, `non_empty`, `normalize_gateway_url`, `resolve`, `resolved_streaming_run_options`, `sdk_error_message`, `should_cancel_on_sink_close`, `sink_token_callback`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`, `LoaderSource`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 /// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
 /// [`FfiGenerationConfig::grammar`].
@@ -39,6 +40,12 @@ abstract class FfiCancellationToken implements RustOpaqueInterface {
 
   static Future<FfiCancellationToken> default_() =>
       XybridRustLib.instance.api.crateApiModelFfiCancellationTokenDefault();
+
+  /// Create a separate FFI handle sharing this token's cancellation flag.
+  ///
+  /// Runs consume their opaque argument. Dart retains the original handle
+  /// and transfers this fork so cancellation remains callable while running.
+  FfiCancellationToken fork();
 
   /// Whether cancellation has been requested on this token.
   bool isCancelled();
@@ -67,26 +74,33 @@ abstract class FfiModel implements RustOpaqueInterface {
   /// rather than polling.
   FfiDownloadStatus downloadStatus();
 
-  /// Whether runs are currently answered by the cloud because the local
-  /// weights are not ready yet. `false` for ordinary local models.
+  /// Whether a run would try the gateway because the local weights are not ready.
   ///
   /// This predicts the *next* run; `FfiResult.executionTarget` reports what a
   /// run that already happened actually did. They differ when a cloud leg
   /// fails and degrades to local mid-call.
   bool isCloudServing();
 
+  /// Immutable reference for the load that created this model.
+  FfiObservationRef? loadObservationRef();
+
   /// Run batch inference (non-streaming).
   ///
   /// Pass an optional `config` to control generation parameters.
   /// When `None`, the model's default parameters are used.
-  Future<FfiResult> run(
-      {required FfiEnvelope envelope, FfiGenerationConfig? config});
+  /// Decision requests reject explicit generation parameters. Cancellation
+  /// is checked before preparation, between passes, and by the native engine.
+  Future<FfiRunResult> run(
+      {required FfiEnvelope envelope,
+      FfiGenerationConfig? config,
+      FfiCancellationToken? cancellationToken,
+      FfiRunOptions? options});
 
   /// Run inference with streaming output.
   ///
   /// Returns a stream of events:
   /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-  /// - `FfiStreamEvent::Complete` when inference finishes
+  /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
   /// - `FfiStreamEvent::Error` if an error occurs
   ///
   /// For non-LLM models, a single Token event is emitted with the full result.
@@ -119,7 +133,8 @@ abstract class FfiModel implements RustOpaqueInterface {
       FfiGenerationConfig? config,
       FfiCancellationToken? cancellationToken,
       required bool preempt,
-      String? frameSessionId});
+      String? frameSessionId,
+      FfiRunOptions? options});
 
   /// Run inference with streaming output and conversation context.
   ///
@@ -128,7 +143,7 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Returns a stream of events:
   /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-  /// - `FfiStreamEvent::Complete` when inference finishes
+  /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
   /// - `FfiStreamEvent::Error` if an error occurs
   ///
   /// Pass an optional `config` to control generation parameters.
@@ -154,7 +169,8 @@ abstract class FfiModel implements RustOpaqueInterface {
       FfiGenerationConfig? config,
       FfiCancellationToken? cancellationToken,
       required bool preempt,
-      String? frameSessionId});
+      String? frameSessionId,
+      FfiRunOptions? options});
 
   /// Run streaming inference with local abort and Xybrid cloud fallback.
   ///
@@ -180,7 +196,8 @@ abstract class FfiModel implements RustOpaqueInterface {
   Stream<FfiTtsStreamEvent> runTtsStream(
       {required FfiEnvelope envelope,
       FfiGenerationConfig? config,
-      FfiCancellationToken? cancellationToken});
+      FfiCancellationToken? cancellationToken,
+      FfiRunOptions? options});
 
   /// Run inference with conversation context.
   ///
@@ -192,10 +209,11 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Pass an optional `config` to control generation parameters.
   /// When `None`, the model's default parameters are used.
-  Future<FfiResult> runWithContext(
+  Future<FfiRunResult> runWithContext(
       {required FfiEnvelope envelope,
       required FfiConversationContext context,
-      FfiGenerationConfig? config});
+      FfiGenerationConfig? config,
+      FfiRunOptions? options});
 
   /// Open a live (rolling-window) ASR streaming session for this model.
   ///
@@ -255,12 +273,21 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
       XybridRustLib.instance.api
           .crateApiModelFfiModelLoaderFromHuggingface(repo: repo);
 
+  /// Loader for a raw llama.cpp GGUF file. Creating it touches no disk:
+  /// `load()` and `load_with_progress()` write a generated
+  /// `model_metadata.json` beside the file if absent, then load its
+  /// directory. Nothing is downloaded, so `load_with_progress()` emits only
+  /// `Complete` or `Error`.
+  static FfiModelLoader fromModelFile({required String path}) =>
+      XybridRustLib.instance.api
+          .crateApiModelFfiModelLoaderFromModelFile(path: path);
+
   static FfiModelLoader fromRegistry({required String modelId}) =>
       XybridRustLib.instance.api
           .crateApiModelFfiModelLoaderFromRegistry(modelId: modelId);
 
-  /// Loader that serves from the cloud gateway while the registry weights
-  /// download in the background, instead of blocking on the download.
+  /// Try the registry id at the cloud gateway while the weights download.
+  /// Only ids also listed in the gateway catalog can be served remotely.
   ///
   /// `load()` then returns almost immediately with a cloud-backed model that
   /// switches to on-device by itself once the download lands. Requires a
@@ -292,20 +319,20 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
   /// the model type: the load asks the registry and speculates only for a
   /// chat model.
   bool willSpeculate();
+
+  /// Clone this loader with validated observation controls.
+  FfiModelLoader withObservation({required FfiObservationOptions options});
 }
 
 /// Lifecycle of a model download.
 enum FfiDownloadState {
-  /// Bytes still in flight. For a speculative load, runs are served from
-  /// the cloud meanwhile.
+  /// Bytes still in flight. Speculative runs try the cloud meanwhile.
   downloading,
 
   /// Every artifact landed and the model is usable.
   ready,
 
-  /// Download failed — for a speculative load the cloud keeps serving and
-  /// the model never becomes local. Surfacing this is the only way the UI
-  /// can stop waiting.
+  /// Download failed; a speculative model never becomes local.
   failed,
 
   /// The download was cancelled by the caller.
@@ -469,6 +496,10 @@ sealed class FfiLoadEvent with _$FfiLoadEvent {
 /// This mirrors the customer-facing Dart `RunOptions` wrapper and maps into
 /// `xybrid_sdk::RunOptions` at the FFI boundary.
 class FfiRunOptions {
+  final String? traceparent;
+  final String? tracestate;
+  final String? conversationId;
+  final bool suppressTrace;
   final String? cloudProvider;
   final String? cloudModel;
   final String? cloudGatewayUrl;
@@ -486,6 +517,10 @@ class FfiRunOptions {
   final String? frameSessionId;
 
   const FfiRunOptions({
+    this.traceparent,
+    this.tracestate,
+    this.conversationId,
+    this.suppressTrace = false,
     this.cloudProvider,
     this.cloudModel,
     this.cloudGatewayUrl,
@@ -497,8 +532,15 @@ class FfiRunOptions {
     this.frameSessionId,
   });
 
+  static Future<FfiRunOptions> default_() =>
+      XybridRustLib.instance.api.crateApiModelFfiRunOptionsDefault();
+
   @override
   int get hashCode =>
+      traceparent.hashCode ^
+      tracestate.hashCode ^
+      conversationId.hashCode ^
+      suppressTrace.hashCode ^
       cloudProvider.hashCode ^
       cloudModel.hashCode ^
       cloudGatewayUrl.hashCode ^
@@ -514,6 +556,10 @@ class FfiRunOptions {
       identical(this, other) ||
       other is FfiRunOptions &&
           runtimeType == other.runtimeType &&
+          traceparent == other.traceparent &&
+          tracestate == other.tracestate &&
+          conversationId == other.conversationId &&
+          suppressTrace == other.suppressTrace &&
           cloudProvider == other.cloudProvider &&
           cloudModel == other.cloudModel &&
           cloudGatewayUrl == other.cloudGatewayUrl &&
@@ -544,6 +590,12 @@ sealed class FfiStreamEvent with _$FfiStreamEvent {
   const factory FfiStreamEvent.error(
     String field0,
   ) = FfiStreamEvent_Error;
+
+  /// Local completion and the preceding speculative cloud error.
+  const factory FfiStreamEvent.recovered(
+    FfiResult field0,
+    String field1,
+  ) = FfiStreamEvent_Recovered;
 }
 
 /// Token received during streaming inference.
@@ -710,6 +762,13 @@ class FfiToolResult {
           contentJson == other.contentJson;
 }
 
+enum FfiTtsStatus {
+  completed,
+  cancelled,
+  limited,
+  ;
+}
+
 @freezed
 sealed class FfiTtsStreamEvent with _$FfiTtsStreamEvent {
   const FfiTtsStreamEvent._();
@@ -721,10 +780,56 @@ sealed class FfiTtsStreamEvent with _$FfiTtsStreamEvent {
   }) = FfiTtsStreamEvent_AudioChunk;
 
   /// Synthesis completed.
-  const factory FfiTtsStreamEvent.complete() = FfiTtsStreamEvent_Complete;
+  const factory FfiTtsStreamEvent.complete(
+    FfiTtsStreamResult field0,
+  ) = FfiTtsStreamEvent_Complete;
 
   /// An error occurred during synthesis.
   const factory FfiTtsStreamEvent.error(
     String field0,
   ) = FfiTtsStreamEvent_Error;
+}
+
+/// Terminal synthesis status and counters, including partial cancellation.
+class FfiTtsStreamResult {
+  final FfiTtsStatus status;
+  final int sampleRate;
+  final int channels;
+  final BigInt samples;
+  final int chunks;
+  final int limitedChunks;
+  final FfiObservationRef? observation;
+
+  const FfiTtsStreamResult({
+    required this.status,
+    required this.sampleRate,
+    required this.channels,
+    required this.samples,
+    required this.chunks,
+    required this.limitedChunks,
+    this.observation,
+  });
+
+  @override
+  int get hashCode =>
+      status.hashCode ^
+      sampleRate.hashCode ^
+      channels.hashCode ^
+      samples.hashCode ^
+      chunks.hashCode ^
+      limitedChunks.hashCode ^
+      observation.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiTtsStreamResult &&
+          runtimeType == other.runtimeType &&
+          status == other.status &&
+          sampleRate == other.sampleRate &&
+          channels == other.channels &&
+          samples == other.samples &&
+          chunks == other.chunks &&
+          limitedChunks == other.limitedChunks &&
+          observation == other.observation;
 }

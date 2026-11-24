@@ -1,10 +1,8 @@
-import { getLLMText, source } from '@/lib/source';
+import { llmsFull } from '@/lib/llms';
 
 export const revalidate = false;
 
-export async function GET() {
-  const scan = source.getPages().map(getLLMText);
-  const scanned = await Promise.all(scan);
-
-  return new Response(scanned.join('\n\n'));
+// Every page of the default language, `/zh/llms-full.txt` has the Chinese ones.
+export function GET() {
+  return llmsFull();
 }

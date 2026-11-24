@@ -1,0 +1,113 @@
+# xybrid-observability
+
+Portable OpenTelemetry instrumentation for AI workloads: inference and streaming,
+retries and fallbacks, workflows, tool calls, model loading, feedback and
+evaluations. It follows the OpenTelemetry GenAI semantic conventions and is
+independent of the model runtime.
+
+```sh
+cargo add xybrid-observability
+```
+
+The crate never installs global providers. Supply tracer, meter and logger
+providers through `Observer::builder()`, or create and own an OTLP pipeline
+through `xybrid_observability::otlp` (enabled by the default `otlp` feature).
+An observer without configured providers records nothing. Applications own
+flushing and shutdown. Disable default features for instrumentation without
+the bundled HTTP exporter.
+
+```rust
+use xybrid_observability::{InferenceRequest, Observer, StartOptions, Usage};
+
+let observer = Observer::disabled(); // Supply providers to record telemetry.
+let operation = observer.start_inference(
+    InferenceRequest::new("chat", "llama.cpp").with_model("my-model"),
+    StartOptions::default(),
+);
+operation.record_usage(&Usage::tokens(Some(20), Some(42)));
+operation.end();
+```
+
+Content capture defaults to span attributes when recording is enabled; a
+`ContentPolicy` without an explicit mode honours
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT`. Use `ContentPolicy` to select
+metadata-only capture, a redaction hook, declarative `RedactionRule`s (ordered
+literal replacements and exact attribute omission), and size budgets. Content
+that cannot be processed safely (too deep, over budget, a failing hook) is
+omitted and listed in `xybrid.genai.content.truncated_attributes`.
+
+Rust only: `ContentPolicy::capped_by(&ceiling)` combines two policies so the
+result never captures more than either (destinations both capture, the smaller
+budgets, the ceiling's hooks and rules first, each hook once however often
+policies are combined), and
+`Observer::content_capped_by(&ceiling)` derives an observer over the same
+providers with that policy. Hosts that let one operation pick its own
+observer use them so the pick can lower capture but not raise it (the Xybrid
+SDK does, for per-run sessions and observers). They add no wire behaviour; JS
+applications choose an observer per operation directly.
+
+`examples/standalone.rs` instruments a fake streaming model end to end without
+any Xybrid dependency. It prints what it recorded, or exports over OTLP/HTTP
+when `OTEL_EXPORTER_OTLP_ENDPOINT` is set:
+
+```sh
+cargo run -p xybrid-observability --example standalone
+```
+
+To own a pipeline directly, build `otlp::ObservabilityPipeline` from an
+`otlp::OtlpConfig`, instrument through `pipeline.observer()`, and call
+`force_flush` or `shutdown` at an application boundary. The collector preset
+configures traces, metrics and logs; `OtlpConfig::xybrid_traces` configures traces only.
+Transport uses a private Tokio runtime, so synchronous lifecycle calls also
+work inside an application's runtime. Enable export explicitly; credentials
+alone never create a pipeline.
+
+Applications that already own providers can use `otlp::exporters(&config)`
+and supply the returned span, log and metric exporters to those providers.
+Build `Observer::builder()` over the same providers. Each exporter belongs
+to one provider and must be its final transport stage; its export timeout
+must fit within the calling processor's or reader's timeout. The paired
+exporters preserve catalog integer/double wire types and structured nulls.
+Before the paired Rust log exporter, processors see null as
+`AnyValue::Bytes(empty)` in this package's scope and must preserve it. A
+different exporter encodes that carrier as empty bytes rather than null.
+
+Each export shares one absolute deadline across split requests, retries and
+response reads. Redirects are disabled. Content retained per operation defaults
+to 416 KiB and traversal to 480 KiB, queues plus in-flight data to 32 MiB per
+signal, and JSON depth to 128. These budgets describe library-owned data, not
+process RSS. The content budgets are clamped so one span's content fits the
+request bound (`max_request_body_bytes`, 480 KiB; see `ContentPolicy`) with
+64 KiB left for the span's other data, an allowance that is reserved, not
+enforced (CONTRACT.md "Content pipeline", budgets). How much fits depends on
+how the exporter writes content: OTLP/protobuf, the default protocol, sends
+it as retained, so the default request carries the full 416 KiB; OTLP/JSON
+can double it, so the same request carries 208 KiB. The packaged pipeline
+applies its own protocols: protobuf only when traces, and logs if configured,
+both use it. A policy used with providers the application owns
+is fitted as JSON until `ContentPolicy::with_span_content_encoding` names
+protobuf. Content for a span that is
+not recording is not processed, and a redaction hook that panics fails closed
+like one that returns an error. `stats()` reports `accepted`,
+`exported`, `dropped`, `failed`, `pending` and `buffered_bytes` (the bytes
+held against the 32 MiB budget) for each signal. A missing acknowledgement leaves delivery unknown; retries
+do not multiply item outcomes. Flush covers its acceptance barrier; shutdown
+closes admission, drains, cancels remaining requests and remembers its result.
+An application-owned OpenTelemetry metrics provider retains the SDK reader's
+own shutdown timeout; see `otlp::OtlpMetricExporter` for that limitation.
+
+A destination may carry an `otlp::ResponseHook`
+(`SignalEndpoint::with_response_hook`). It sees every HTTP response of that
+destination once, including retries and the shutdown drain, and may disable
+that destination alone: later items are dropped and counted, never reported as
+exported, and a rebuilt pipeline starts enabled. The package reads no vendor
+header itself; `SignalEndpoint::is_xybrid_preset` tells an adapter which
+destination the Xybrid preset built.
+
+See the [API documentation](https://docs.rs/xybrid-observability) for provider
+configuration and the [shared contract](CONTRACT.md) for behavioral details.
+The JavaScript package `@xybrid/observability` implements the same contract.
+[Collector profiles](collector/) adapt canonical telemetry to supported backends.
+
+The crate version follows the Cargo workspace. The branch-driven release
+pipeline publishes this crate before `xybrid-core` and `xybrid-sdk`.

@@ -56,6 +56,8 @@ xybrid models list
 | `xybrid pack` | 从模型目录创建 `.xyb` Bundle |
 | `xybrid bundle` | 拉取注册表模型并生成 `.xyb` Bundle |
 | `xybrid telemetry` | 管理注册表遥测设置 |
+| [`xybrid connect`](/zh/docs/cli/reference/connect) | 无需注册，把项目连接到一个可认领的 Xybrid 工作区并保存其密钥 |
+| [`xybrid auth`](/zh/docs/cli/reference/auth) | 查看、找回或移除项目已保存的凭据：`status`、`claim`、`logout` |
 
 ## 常用工作流
 
@@ -80,8 +82,17 @@ xybrid fetch --model kokoro-82m
 
 | 选项 | 环境变量 | 说明 |
 |------|----------|------|
-| `--api-key` | `XYBRID_API_KEY` | Xybrid 平台 API Key（可选 — 不提供则匿名运行） |
-| `--platform-url` | — | 平台/注册表 URL（默认 `https://api.xybrid.dev`） |
+| `--api-key` | `XYBRID_API_KEY` | 云端 API Key；仅配置密钥不会启用可观测性导出。两者都未设置时，使用 [`xybrid connect`](/zh/docs/cli/reference/connect) 保存的密钥 |
+| `--platform-url` | `XYBRID_PLATFORM_URL` | 云端网关 URL（默认 `https://api.xybrid.dev`） |
+| `--observability` | — | 显式启用 Xybrid 链路导出；需要 API Key |
+| `--traces-endpoint` | — | `--observability` 使用的完整链路 URL（默认 `https://ingest.xybrid.dev/v1/traces`） |
 | `--device-id` | `XYBRID_DEVICE_ID` | 用于遥测的稳定设备标识 |
 | `-v`、`-vv` | — | 详细输出（`-vv` 包含库日志） |
 | `-q` | — | 安静模式（仅输出错误） |
+
+如需使用 OpenTelemetry Collector，可配置 `OTEL_EXPORTER_OTLP_ENDPOINT` 或各信号的
+`OTEL_EXPORTER_OTLP_*_ENDPOINT` 环境变量，无需 Xybrid API Key。
+`OTEL_SDK_DISABLED=true` 会禁用上述两种模式的导出。命令结束时，CLI 会刷新并关闭导出器。
+启用可观测性后，默认会采集提示词和输出。设置
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT=no_content` 可仅记录元数据。
+密钥作用域与导出内容参见 [API 密钥](/zh/docs/concepts/api-keys)。

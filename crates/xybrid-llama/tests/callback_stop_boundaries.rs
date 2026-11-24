@@ -111,6 +111,7 @@ fn callback_stop_surfaces_as_callback_error_on_every_token() {
             1.0,
             &[],
             None,
+            &[],
             |_token_id, _text| {
                 calls += 1;
                 if calls == stop_at {

@@ -2,6 +2,116 @@
 
 ## Unreleased
 
+## 0.21.0
+
+* Added: `XybridModelLoader.fromModelFile(path)` loads a raw llama.cpp GGUF
+  with no `model_metadata.json`. Creating the loader touches no disk; `load()`
+  writes the generated metadata next to the file unless one is already there,
+  with the context capped at 4,096 tokens, so the directory must be writable
+  and support hard links (FAT32 and exFAT do not): copy assets and bundled
+  files under `getApplicationSupportDirectory()` first.
+  `loadWithProgress()` emits only `LoadComplete` or `LoadError`.
+* Fixed: `runStreamingWithContext` ends a successful turn on one final token,
+  as `runStreaming` and `runStreamingWithFallback` do. It used to emit the
+  native terminal token and then a second final token (`token: ''`,
+  `index: 0`) for the metrics. On a tool-call turn that second token reported
+  `finishReason: 'stop'`, empty `toolCalls` and a `cumulativeText` containing
+  the raw tool-call block, and a turn cut off by `maxTokens` ended on
+  `'stop'` instead of `'length'`. The single final token keeps the terminal
+  token's `index`, `cumulativeText`, `finishReason`, `toolCalls` and
+  `rawText`, and carries `metrics` and `observation`. Code that expected two
+  `isFinal` tokens per turn sees one. When a tool-call block is suppressed but
+  does not parse, the stream no longer carries the raw output; `runWithContext`
+  returns it in `XybridResult.text`.
+* Changed: the iOS and macOS pods no longer link MetalPerformanceShaders.
+  Nothing in the native library references it; a custom build with
+  `candle-metal` must add the framework itself.
+
+## 0.20.0
+
+* Added: registry calls made under CI (`CI` set to anything but empty, `0` or
+  `false`, or `XYBRID_CI=1`) end the `X-Xybrid-Client` header with `ci=1`, so
+  registry analytics can leave test traffic out of real usage. `XYBRID_CI=0`
+  keeps a CI run unlabelled, and `XYBRID_TELEMETRY_OPTOUT` still drops the
+  header.
+* Fixed: `runStreamingWithFallback` asks the Xybrid gateway for
+  `openai/gpt-4o-mini` when `RunOptions.cloudModel` is unset. It sent
+  `gpt-4o-mini`, which the managed gateway answers with 404
+  `model_not_found`: it takes frontier models by their canonical OpenRouter id
+  only. A `cloudModel` you set is sent unchanged, so use a canonical id there
+  too (for example `anthropic/claude-haiku-4.5`).
+
+## 0.19.0
+
+* Fixed: pipeline stages with no explicit target or cloud provider now download
+  and load their local model, including passthrough GGUFs. A model downloaded by
+  `loadModels` is recognized as ready on later runs.
+* Fixed: LFM3 with thinking disabled no longer repeats its answer or emits stray
+  think tags when a system prompt, conversation history or tool continuation is
+  present. Streamed text agrees with the final result.
+* Changed: refreshed the native libraries and regenerated FRB binding comments
+  for Rust 1.100.
+
+## 0.18.0
+
+* Liquid d1 decision models (`lfm3-d1/text/v1`). `XybridEnvelope.decisionRequest`
+  and `XybridEnvelope.decisionRequestJson` build a request for a local d1 model
+  from a state and 1 to 16 questions (`DecisionQuestion.choice`, `.yesNo`,
+  `.score`), and `XybridResult.decisions` holds one typed answer per question
+  with its probabilities. Pass structured state with `DecisionContent.jsonText`
+  to keep key order and integers above 2^53. Decision models run on the device
+  CPU through the existing `run`; streaming, conversation context, pipelines
+  and cloud fallback refuse them. Not qualified on devices yet: see the README.
+  Generated FRB glue updated for these types.
+* Observation controls for loading and live ASR; decoder/session, pipeline and
+  streamed-TTS references. Typed manual workflow/tool/inference/load handles
+  support explicit completion, failure and cancellation.
+* Caller-owned device IDs, ordered native redaction rules and explicit provider
+  propagation origins. Generated FRB glue updated for these fields.
+* Added explicit OpenTelemetry export configuration, exporter stats, bounded
+  flush/shutdown, and feedback/evaluation APIs through `XybridObservability`.
+  `RunOptions.observation` forwards W3C context, conversation IDs and trace
+  suppression on batch and token-streaming runs. Results and stream completion
+  tokens expose observation references; streamed tool calls remain single-use.
+  Normal/fallback streams retain one successful terminal token and its native
+  finish reason/index while attaching completion metrics and observation data.
+* Changed: an API key alone configures authentication without enabling export.
+  Pass `observability:` to `Xybrid.init` to opt in. Explicit legacy `ingestUrl`
+  and `initTelemetry` configure OTLP traces (bare URLs gain `/v1/traces`) and
+  replace previous configuration. Legacy receivers must accept OTLP. Native
+  legacy calls preserve metadata-only export (no prompt/output content).
+  Exporter state now reflects shutdown; invalid configurations can be corrected/retried.
+  Invalid resource modes/intervals fail before export is enabled or replaced.
+  Resource sampling remains independent of export. See README for migration.
+* Breaking: `XybridStreamSession.flush()` returns an `FfiTranscriptionResult`
+  instead of a `String`. Read `.text` for the transcript; the record also
+  carries `durationMs`, `chunksProcessed` and the session's `observation`.
+* Breaking: `FfiTtsStreamEvent.complete` carries an `FfiTtsStreamResult`
+  (status, sample rate, channels, sample and chunk counts, `observation`).
+  Code that constructs the event (mocks, fakes) must pass one. `runTtsStreaming`
+  hands it to the new `onComplete` callback, and fails the stream with a
+  `StateError` after the partial audio when the status is `limited`.
+* Changed: an explicit `traceparent` that is not valid W3C now fails the call
+  (`XybridException`, an error token, or a thrown error for sessions, loaders
+  and manual handles) instead of being ignored.
+* `XybridPipeline.run` accepts `observation:`; pipeline results now carry the
+  workflow reference and each stage's reference in `metrics.stageLatenciesMs`.
+* Fixed: unsubscribing a token stream (`runStreaming`,
+  `runStreamingWithContext`, `runStreamingWithFallback`) that was started
+  without a `CancellationToken` now halts generation at the next token and
+  releases the model write lock, as the docs already said; the run used to
+  continue to the end. Observability records the run as cancelled.
+* Changed: a token callback that fails for any reason now ends its run as
+  cancelled in observability, as a streaming pipeline already did; an untyped
+  failure used to be recorded as an inference error. What the stream reports
+  to its listener is unchanged.
+* Changed: the default budget of captured content per run is 416 KiB when
+  traces are sent as OTLP/protobuf (the default) and 208 KiB as OTLP/JSON,
+  instead of 208 KiB for both.
+
+
+## 0.17.0
+
 * Breaking: the plugin declares the platform minimums its precompiled libraries
   are built for: iOS 16.0 (was 13.0), macOS 14.0 (was 10.15) and Android 9,
   API 28 (`minSdkVersion` was 21). An app that targets an older version now
@@ -12,6 +122,23 @@
   `platform :ios, '16.0'` in `ios/Podfile` and an iOS Deployment Target of 16.0
   for the Runner target; `platform :osx, '14.0'` in `macos/Podfile` and a macOS
   Deployment Target of 14.0. The libraries themselves are unchanged.
+* Added: LFM3 1.7B text and LFM3-VL 2B vision support through the existing
+  model APIs, including reasoning, tool calls and tool-result continuations.
+  Vision metadata can cap image tokens, and Hugging Face loading of
+  `LiquidAI/LFM3-VL-2B-GGUF` includes its projector with a 1,024-token image
+  cap. LFM3-Audio and LFM3-Omni are not supported.
+* Fixed: newly generated GGUF metadata caps the default context at 4,096
+  tokens to avoid allocating the model's full native KV cache. Increase
+  `execution_template.context_length` in the generated metadata for longer
+  conversations; previously generated files retain their configured context.
+* Fixed: llama.cpp results and streams preserve Unicode characters split
+  across tokens and trailing text, emit text before an in-token stop sequence,
+  report correct finish reasons, and deliver the terminal event even when
+  reasoning filtering suppresses every text delta.
+* Changed: precompiled libraries continue to use llama.cpp v0.8.0. Release
+  checks reject stale precompiled libraries and verify Apple deployment floors.
+  The new Rust decision data types and ONNX phoneme-timing metadata are not
+  exposed in Dart.
 
 ## 0.16.0
 

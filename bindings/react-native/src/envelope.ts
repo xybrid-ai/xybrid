@@ -1,5 +1,7 @@
 import NativeXybrid from './NativeXybrid';
 import type {
+  DecisionRequest,
+  DecisionRequestEnvelope,
   AudioEnvelope,
   EmbeddingEnvelope,
   Envelope as EnvelopeType,
@@ -26,6 +28,17 @@ export type Envelope = EnvelopeType;
  * save typing and apply the same defaults.
  */
 export const Envelope = {
+  /** Ordered typed decision input for the existing Model.run method. */
+  decisionRequest(request: DecisionRequest): DecisionRequestEnvelope {
+    return { kind: 'decisionRequest', request };
+  },
+
+  /** Raw Liquid JSON; preserves key order, signed zero and integers above 2^53. */
+  decisionRequestJson(requestJson: string): DecisionRequestEnvelope {
+    if (typeof requestJson !== 'string') throw new TypeError('decision request JSON must be a string');
+    return { kind: 'decisionRequest', requestJson };
+  },
+
   /** A text prompt, or text to speak with an optional TTS voice and speed. */
   text(
     text: string,

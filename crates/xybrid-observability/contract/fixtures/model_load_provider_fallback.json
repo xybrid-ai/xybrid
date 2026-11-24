@@ -1,0 +1,114 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": false,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "A model load without a provider uses the runtime as gen_ai.provider.name; without either the attribute and dimension are absent (never 'unknown'). Without a logger, evaluations return false and record nothing.",
+  "expect": {
+    "logs": [],
+    "metrics": [
+      {
+        "name": "gen_ai.client.operation.duration",
+        "points": [
+          {
+            "attributes": {
+              "error.type": "not_found",
+              "gen_ai.operation.name": "load_model",
+              "gen_ai.request.model": "custom-model"
+            },
+            "count": 1,
+            "sum": 0.02
+          },
+          {
+            "attributes": {
+              "gen_ai.operation.name": "load_model",
+              "gen_ai.provider.name": "whisper.cpp",
+              "gen_ai.request.model": "whisper-tiny"
+            },
+            "count": 1,
+            "sum": 0.4
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "load_model",
+          "gen_ai.provider.name": "whisper.cpp",
+          "gen_ai.request.model": "whisper-tiny",
+          "xybrid.genai.model.format": "gguf",
+          "xybrid.genai.runtime.name": "whisper.cpp"
+        },
+        "end_ms": 400,
+        "id": "runtime_only",
+        "kind": "INTERNAL",
+        "name": "load_model whisper-tiny",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      },
+      {
+        "attributes": {
+          "error.type": "not_found",
+          "gen_ai.operation.name": "load_model",
+          "gen_ai.request.model": "custom-model"
+        },
+        "end_ms": 520,
+        "id": "anonymous",
+        "kind": "INTERNAL",
+        "name": "load_model custom-model",
+        "parent": null,
+        "start_ms": 500,
+        "status": {
+          "code": "ERROR",
+          "description": "missing file"
+        },
+        "trace": 1
+      }
+    ]
+  },
+  "name": "model_load_provider_fallback",
+  "steps": [
+    {
+      "at_ms": 0,
+      "format": "gguf",
+      "id": "runtime_only",
+      "model": "whisper-tiny",
+      "op": "start_model_load",
+      "runtime": "whisper.cpp"
+    },
+    {
+      "at_ms": 400,
+      "id": "runtime_only",
+      "op": "end"
+    },
+    {
+      "at_ms": 401,
+      "expect_result": false,
+      "name": "load_quality",
+      "op": "evaluation",
+      "score_value": 1,
+      "target": "runtime_only"
+    },
+    {
+      "at_ms": 500,
+      "id": "anonymous",
+      "model": "custom-model",
+      "op": "start_model_load"
+    },
+    {
+      "at_ms": 520,
+      "error_type": "not_found",
+      "id": "anonymous",
+      "message": "missing file",
+      "op": "end_with_error"
+    }
+  ]
+}

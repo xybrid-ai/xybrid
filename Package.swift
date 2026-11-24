@@ -10,7 +10,7 @@ import PackageDescription
 //
 // FOR EXTERNAL USERS (consuming via GitHub):
 //
-//   .package(url: "https://github.com/xybrid-ai/xybrid", exact: "0.1.0-beta13")
+//   .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.21.0")
 //
 // FOR LOCAL DEVELOPMENT:
 //
@@ -37,12 +37,12 @@ let useLocalNatives = false
 
 // Version for remote XybridFFI download (used when useLocalNatives = false).
 // Updated by the release workflow at tag time.
-let sdkVersion = "0.16.0"
+let sdkVersion = "0.21.0"
 
 // SHA-256 of XybridFFI-v<sdkVersion>.xcframework.zip on the GitHub release.
 // Updated by `bindings/apple/scripts/sync-spm-checksum.sh` (or the release
 // workflow) so the manifest at the tagged commit matches the published asset.
-let xybridFFIChecksum = "f9b3f4a8a6b6b4590e572227da559a5a90ba9824395fc0ee75fba24f5e16258b"
+let xybridFFIChecksum = "f5583e4a10ae1cd43b17de36765483eec541790e85207879b8fc85bba0df1299"
 
 let package = Package(
     name: "Xybrid",
@@ -67,11 +67,15 @@ let package = Package(
             name: "Xybrid",
             dependencies: ["XybridFFI"],
             path: "bindings/apple/Sources/Xybrid",
+            // System frameworks the XybridFFI archive references. The swift
+            // branch manifest (release-publish.yml) and the React Native
+            // podspec copy this list; test_apple_linked_frameworks.py keeps
+            // them equal. MetalPerformanceShaders is not linked: only Candle's
+            // Metal backend references it, no preset enables Candle, and
+            // build-apple.yml fails if the archive references an MPS symbol.
             linkerSettings: [
                 .linkedLibrary("c++"),
                 .linkedFramework("Metal"),
-                .linkedFramework("MetalPerformanceShaders"),
-                .linkedFramework("MetalPerformanceShadersGraph"),
                 .linkedFramework("CoreML"),
                 .linkedFramework("Accelerate"),
                 .linkedFramework("Security"),

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "id": "state-object-nested",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A nested object state, keys in request order (not sorted), rendered with tojson(indent=2)",
+  "covers": [
+    "state-object",
+    "json-order",
+    "json-literals",
+    "json-unicode"
+  ],
+  "request_text": "{\"state\": {\"zeta\": \"last letter first\", \"ticket\": {\"id\": 4471, \"items\": [{\"sku\": \"B-2\", \"qty\": 2, \"price\": 19.99}, {\"sku\": \"A-1\", \"qty\": 1, \"price\": 5.0}], \"customer\": {\"name\": \"Zoë Ångström\", \"tier\": \"pro\"}}, \"alpha\": [true, false, null], \"empty_object\": {}, \"empty_array\": [], \"note\": \"Charged twice.\"}, \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}}",
+  "artifact": "d1-2b-hf"
+}

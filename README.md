@@ -40,7 +40,7 @@
 [![Swift Package Manager][spm-shield]][spm-url]
 <br>
 [![Ask DeepWiki][deepwiki-shield]][deepwiki-url]
-[![Stars][stars-shield]][stars-url]
+[![Greptile: The War on Bugs][greptile-shield]][greptile-url]
 [![Visitors][visitors-shield]][visitors-url]
 
 </p>
@@ -78,10 +78,12 @@
 [spm-url]: https://github.com/xybrid-ai/xybrid
 
 <!-- Community — flat-square -->
-[deepwiki-shield]: https://deepwiki.com/badge.svg
+<!-- DeepWiki's own badge.svg sits behind a bot checkpoint that GitHub's image
+     proxy can't pass; this is the same badge rendered by shields.io. -->
+[deepwiki-shield]: https://img.shields.io/badge/Ask_DeepWiki-007EC6?labelColor=black&logo=data%3Aimage%2Fpng%3Bbase64%2CiVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAAsVBMVEVHcEwmWMYZy38Akt0gwZoSaFIbYssUmr4gwJkBlN4WbNE4acofwZkBj9k4aMkBk94WgM0bsIM4aMkewJc2ZMM3Z8cbvIwYpHsewJYAftgBkt0fvpgBkt0cv44cv5wzYckAjtsCk90pasUboXsgwJkfwpYfwJg4aMoct44yXswAkd0BkN84Z8cBktwduZIjcO85lM4hwZo5acoBleA6a88iyaABmOQ8b9QhxZ0CnOoizaOW4DOvAAAAMHRSTlMAKCfW%2FAgWA%2F7%2FDfvMc9j7MU%2Frj3XBcRW%2FJMbe7kUxjI%2FlUzzz6tPQkJ%2BjVmW1oeulmmslAAAByUlEQVQ4y32Tia6jIBSGUVFcqliXtlq73rm3d50ERNC%2B%2F4PNQetoptMeE0PgC%2F9%2FFhCaBSH9Hz2J%2BONgPDl2DolSUWY%2FPL8oEQRCfPxHpFc3Ah5wHoiI6I05NXgjAOgQF3Jn1Dlo4XMPDDes09UE2d%2BREvl3lijBg4CrHNmrbcM2u9u5nwsRcAFfFHFY5sZ607Yua3GqpQiKE6G9cZHZThblZ4T2mLnMxde3ATASMUj72o0Pbs1fADDcLHqAjEDugJ3lC%2BztMGYTADcoLaFyH%2B02DP9%2BWS4ahrXE4laALFKcq8vZfscNY8312mxfr27bLJZjnsYhSDIHmUxLu9h9N%2Fep%2B7pazwoZQw%2B1Nwi33epu7c2p8RooeqCdAHMGoOJIq3CUwIMEniRIaHVe3ZVnO2Vgsh1MstEkQUXVUc%2BjXfk3zbemxS6%2BpQmlPtUeALJ8VKj4JHvAelBqFFdSS3h1SPzQKr%2F%2BaRa0%2B0cCIWtJLauG5U%2FfbgyG01uiNqQhyzA8ddKj1OvK28AsZyN3DKE4X6AEWrU1jJx9N7RFpdPxpHU%2FtMOQG9SjfTp3Yz8KgRVKpfx88Dqhpseq606h%2F%2Bzxfh6LJ8eEDKWbxx9XEDwqzP1SVgAAAABJRU5ErkJggg%3D%3D
 [deepwiki-url]: https://deepwiki.com/xybrid-ai/xybrid
-[stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat-square
-[stars-url]: https://github.com/xybrid-ai/xybrid#star-history
+[greptile-shield]: https://www.greptile.com/badge.svg
+[greptile-url]: https://www.greptile.com/?utm_source=oss_badge&utm_medium=readme&utm_campaign=greptile_for_open_source
 [twitter-shield]: https://img.shields.io/badge/Follow-%40xybrid__ai-000000?style=for-the-badge&logo=x&logoColor=white
 [twitter-url]: https://x.com/xybrid_ai
 [visitors-shield]: https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid
@@ -119,7 +121,7 @@ Each badge links to its platform setup. See the full
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.16.0
+  xybrid_flutter: ^0.21.0
 ```
 
 The plugin needs iOS 16.0, macOS 14.0 and Android 9 (API 28) or later; the [Flutter guide](https://docs.xybrid.dev/en/docs/sdks/flutter#requirements) shows how to raise your app's minimums.
@@ -138,7 +140,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.16.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.21.0")
 }
 ```
 
@@ -160,7 +162,7 @@ val result = model.runAsync(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.16.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.21.0")
 ]
 ```
 
@@ -177,7 +179,7 @@ let result = try await model.runAsync(envelope: Envelope.text("Hello world"))
 **Install** in a React Native 0.76+ app with the New Architecture (or an Expo SDK 52+ development build):
 
 ```sh
-npm install @xybrid/react-native@0.16.0
+npm install @xybrid/react-native@0.21.0
 ```
 
 For bare React Native, run `cd ios && pod install`. For Expo, run `npx expo prebuild`; Expo Go cannot load the native module.
@@ -236,7 +238,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.16.0"
+xybrid = "0.21.0"
 ```
 
 **Run a model:**
@@ -276,7 +278,8 @@ Chain models together into a single multi-model inference pipeline (MMP) — bui
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny-ggml  # Speech → text
+  - id: asr
+    model: whisper-tiny-ggml  # Speech → text
   - model: qwen2.5-0.5b       # Process with LLM
   - model: kokoro-82m         # Text → speech
 ```
@@ -384,13 +387,15 @@ Xybrid works with **any** ONNX, GGUF, or SafeTensors model. You just need a `mod
 
 ```sh
 # Install xybrid skills into your project
-curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | sh
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | bash
 
 # Generate model_metadata.json from a HuggingFace model
 claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 ```
 
 Skills are agent-agnostic and live in [`agents/skills/`](agents/skills/). The installer symlinks them for Claude Code (`.claude/skills`) and Codex (`.codex/skills`).
+
+The installer also adds `/xybrid-connect`, which connects your project to the Xybrid console with no sign-up. It runs `xybrid connect` (CLI 0.18.0 or newer) to create a provisional workspace, keeps its restricted key in a gitignored file, and gives you a private link to claim the workspace with GitHub. Unclaimed, the key stops after 7 days and the workspace is deleted after 14. See [API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys#provisional-workspaces).
 
 **Manually** — create `model_metadata.json` in your model directory:
 
@@ -406,7 +411,7 @@ Skills are agent-agnostic and live in [`agents/skills/`](agents/skills/). The in
 }
 ```
 
-See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or look at existing examples in [`integration-tests/fixtures/models/`](integration-tests/fixtures/models/).
+See the [model metadata docs](docs/sdk/MODEL_METADATA.md) for the full schema, or look at existing examples in [`integration-tests/fixtures/models/`](integration-tests/fixtures/models/).
 
 </details>
 
@@ -424,7 +429,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Embeddings | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | Multi-Model Pipelines (MMP) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Hardware Acceleration | Metal, ANE on devices; CPU llama.cpp on Simulator | CPU | Metal, ANE | CPU, opt-in Vulkan | CPU |
+| Hardware Acceleration | Metal (llama.cpp) on devices; CPU on Simulator | CPU | Metal | CPU, opt-in Vulkan | CPU |
 
 **SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin ✅ · Swift ✅ · React Native ✅ · Unity ✅
 
@@ -454,7 +459,7 @@ Registry models are coming.
   ([docs](https://docs.xybrid.dev/en/docs/concepts/hybrid-execution)).
 - **Telemetry you control** — opt-in behind an API key
   ([docs](docs/telemetry/registry.md)).
-- **Hardware acceleration** — Metal and the Apple Neural Engine on Apple, opt-in
+- **Hardware acceleration** — Metal on Apple, opt-in
   Vulkan on Linux; Android and Windows are CPU today
   ([docs](docs/INSTALLATION.md#platform-features)).
 

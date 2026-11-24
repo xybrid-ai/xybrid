@@ -10,12 +10,12 @@
 //          → model.run(envelope:options:)  →  caption
 //
 //  Responsiveness model — drop-if-busy (not cancel-and-replace):
-//  The Swift bindings currently expose only the batch, synchronous `run`.
-//  Streaming tokens, cancel-and-replace, and raw-frame (`imageRaw`) envelopes —
-//  the realtime-vision primitives already in the Flutter SDK — are not yet bound
-//  for Swift. So while one frame is being answered, newly gated frames are
-//  *dropped* rather than preempting the in-flight run. When the streaming/
-//  cancellation surface lands for Swift this loop can move to latest-frame-wins.
+//  Each accepted frame is answered by one batch `run`, and while it is in
+//  flight, newly gated frames are *dropped* rather than preempting it. That is
+//  this demo's choice: Swift can stream tokens (`streamTokens`) and stop a run by
+//  cancelling its task. What Swift lacks next to Flutter is the `preempt` flag
+//  (cancel-and-replace) and raw-frame (`imageRaw`) envelopes, so frames go in
+//  as JPEG.
 //
 
 import AVFoundation
@@ -301,7 +301,7 @@ final class LiveVisionViewModel: ObservableObject {
             droppedGateFrames += 1
             return
         }
-        // Drop-if-busy (no streaming/cancel binding for Swift yet — see header).
+        // Drop-if-busy: one frame in flight at a time (see header).
         guard !isBusy else { droppedBusyFrames += 1; return }
 
         if let last = lastAcceptedAt, frame.capturedAt.timeIntervalSince(last) < minInferenceInterval {
@@ -346,7 +346,7 @@ final class LiveVisionViewModel: ObservableObject {
             let model = try await ensureModel()
             let image = try XybridEnvelope.image(frame.jpegData, format: "jpeg")
             let envelope = try XybridEnvelope.userMessage(prompt, images: [image])
-            let options = XybridRunOptions(
+            let options = XybridRunOptions.make(
                 generationConfig: .make(
                     maxTokens: 96,
                     temperature: 0.0,
@@ -354,11 +354,7 @@ final class LiveVisionViewModel: ObservableObject {
                     minP: 0.05,
                     topK: 40,
                     repetitionPenalty: 1.05
-                ),
-                abortOn: [],
-                fallbackToCloud: false,
-                maxGraceTokens: 0,
-                correlationId: nil
+                )
             )
             // bolt's `run` is synchronous + blocking; execute it OFF the main
             // actor so the camera feed and UI stay responsive (the realtime gate

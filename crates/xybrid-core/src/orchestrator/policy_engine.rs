@@ -515,6 +515,8 @@ fn kind_name(kind: &EnvelopeKind) -> &'static str {
         EnvelopeKind::MultiPart(_) => "multipart",
         EnvelopeKind::ChoiceRequest(_) => "choice_request",
         EnvelopeKind::ChoiceScores(_) => "choice_scores",
+        EnvelopeKind::DecisionRequest(_) => "decision_request",
+        EnvelopeKind::Decisions(_) => "decisions",
     }
 }
 

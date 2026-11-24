@@ -287,13 +287,7 @@ struct ExtractionView: View {
                     maxTokens: 200,
                     grammar: grammar
                 )
-                let options = XybridRunOptions(
-                    generationConfig: config,
-                    abortOn: [],
-                    fallbackToCloud: false,
-                    maxGraceTokens: 0,
-                    correlationId: nil
-                )
+                let options = XybridRunOptions.make(generationConfig: config)
 
                 let envelope = XybridEnvelope(
                     kind: .text(text: "Extract the fields from this text:\n" + inputText),

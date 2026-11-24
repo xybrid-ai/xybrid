@@ -1,6 +1,6 @@
 [package]
 name = "xybrid_flutter"
-version = "0.16.0"  # Hardcoded (not workspace) — cargokit hashes this file to detect changes
+version = "0.21.0"  # Hardcoded (not workspace) — cargokit hashes this file to detect changes
 # That hash covers only this directory, not the workspace crates or the
 # vendored llama.cpp this library links. If native code changes on a release
 # branch after the version bump, or the branch is rebased or re-cut after
@@ -47,14 +47,14 @@ ort = { version = "2.0.0-rc.11", default-features = false, features = ["load-dyn
 
 [target.'cfg(target_os = "ios")'.dependencies]
 oslog = "0.2"
-# SDK preset handles: ort-download, ort-coreml, candle-metal, llm-llamacpp;
+# SDK preset handles: ort-download, ort-coreml, llm-llamacpp;
 # Studio additionally needs llama.cpp VisionLanguage support for image input.
 xybrid-sdk = { path = "../../../crates/xybrid-sdk", default-features = false, features = ["platform-ios", "llm-llamacpp-vision"] }
 # Direct ort dependency - links against custom xcframework with CoreML
 ort = { version = "2.0.0-rc.11", default-features = false, features = ["ndarray", "std", "coreml"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# SDK preset handles: ort-download, ort-coreml, candle-metal, llm-llamacpp-vision
+# SDK preset handles: ort-download, ort-coreml, llm-llamacpp-vision
 xybrid-sdk = { path = "../../../crates/xybrid-sdk", features = ["platform-macos"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

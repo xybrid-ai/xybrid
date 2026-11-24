@@ -105,7 +105,7 @@ namespace XybridBolt
         /// Execute every stage, downloading any missing models first, and return
         /// each stage's output alongside the final one.
         ///
-        /// Of `options`, only `correlation_id` applies to a pipeline run. Setting
+        /// Observation controls and `correlation_id` apply to a pipeline run. Setting
         /// `generation_config` or `abort_on` fails with `ConfigError` rather than
         /// being ignored; per-stage generation settings belong in the YAML.
         /// </summary>

@@ -4,7 +4,7 @@ description: Real-time token streaming for LLM and audio transcription
 ---
 
 
-Xybrid supports two types of streaming inference: **LLM token streaming** (available now) and **real-time audio streaming** (planned).
+Xybrid supports two types of streaming inference: **LLM token streaming** and **real-time audio streaming** (live transcription).
 
 ## LLM Token Streaming
 
@@ -49,6 +49,23 @@ await for (final token in stream) {
 }
 ```
 
+### Swift
+
+```swift
+let model = try await Xybrid.model("gemma-3-1b").load()
+
+for try await token in model.streamTokens(envelope: .text("Tell me a joke")) {
+    print(token.token, terminator: "") // Print each token as it arrives
+}
+```
+
+`streamTokens` returns an `AsyncSequence`. Cancelling the task that consumes it,
+or breaking out of the loop, stops generation at the next token. Pass
+`options: .make(generationConfig: config)` for generation settings. With a
+conversation context, use the pull API: `runStreamWithContext(envelope:context:options:)`
+returns a stream id to drain with `streamNext(streamId:)` and close with
+`streamClose(streamId:)`.
+
 ### Unity (C#)
 
 ```csharp
@@ -74,18 +91,29 @@ string response = model.RunStreamingText("Tell me a story.", token =>
 | Property | Type | Description |
 |----------|------|-------------|
 | `token` | `String` | Generated token text |
-| `index` | `int` | Token position in sequence |
-| `cumulativeText` | `String` | All text generated so far |
-| `isFinal` | `bool` | Whether this is the last token |
-| `finishReason` | `String?` | `"stop"`, `"length"`, or `"error"` |
+| `tokenId` | integer or null | Raw token ID, when the backend exposes one. Swift `Int64?`, Kotlin `Long?`, Unity `long?`. Dart has no such field |
+| `index` | non-negative integer | Zero-based token position in the sequence. Dart `int`, Swift `UInt64`, Kotlin `ULong`, Unity `uint` |
+| `cumulativeText` | `String` | The text emitted so far. Tool-call blocks are left out, so this can differ from the model's raw output (see `rawText`) |
+| `isFinal` | `bool` | Whether this is the last token. Dart always ends the stream with one. Unity's `IsFinal`, and a non-null `finishReason` in Swift and Kotlin, mark the terminal token, but a run that generates no text ends without one: treat the end of the loop as the end of the stream |
+| `finishReason` | `String?` | Set on the terminal token: `"stop"` (end of sequence or a stop sequence), `"length"` (hit `max_tokens`) or `"tool_calls"` (the turn ended on a tool call; see `toolCalls`). Cloud-routed runs pass the gateway's reason through unchanged, so other values can appear. In Dart, a failed run reports `"error: <message>"` here; see [Failures](#failures) |
+| `toolCalls` | list | Tool calls the model asked for. Terminal token only: empty on every other token and on turns that call no tool. See [Streaming Chat With Tools](/docs/guides/tool-calling#streaming-chat-with-tools) |
+| `rawText` | `String?` | The turn's raw output, tool-call block included. Pass it as `priorAssistantText` to continue the turn. Terminal token only, and only when `toolCalls` is not empty |
+
+### Failures
+
+No SDK reports a failure as a bare `"error"` finish reason. Each SDK reports it differently:
+
+- **Flutter**: the stream ends with a token whose `finishReason` starts with `"error: "` and carries the message. Check `token.isError` and read `token.errorMessage`. This token can follow a normal final token.
+- **Swift and Kotlin**: `streamTokens` throws `XybridError`, so the `for try await` loop (Swift) or the `collect` call (Kotlin) throws. In the pull API, `streamNext` throws.
+- **Unity**: `RunStreaming` returns an `InferenceResult` with `Success` set to false. Call `result.ThrowIfFailed()` to throw. `RunStreamingText` calls it for you.
 
 ## SDK Support
 
 | Feature | Flutter | Unity | Kotlin | Swift |
 |---------|---------|-------|--------|-------|
-| `runStreaming()` | Supported | Supported | Planned | Planned |
-| `runStreamingWithContext()` | Supported | Supported | Planned | Planned |
-| Generation config | Supported | Supported | Planned | Planned |
+| `runStreaming()` | Supported | Supported | Supported (`streamTokens`; no `preempt`) | Supported (`streamTokens`; no `preempt`) |
+| `runStreamingWithContext()` | Supported | Supported | Pull API only (`runStreamWithContext`) | Pull API only (`runStreamWithContext`) |
+| Generation config | Supported | Supported | Supported | Supported |
 
 ---
 
@@ -111,15 +139,10 @@ XYBRID_LLAMACPP_VERBOSITY=4 ./my-xybrid-app
 
 Use `4` when investigating model load failures: it surfaces the underlying llama.cpp diagnostic that the Rust-side error wraps. The variable is read once when the llama.cpp backend is initialized, so set it before launching the process. Available since `v0.1.0-beta5`.
 
+Two kinds of native call print nothing at any level, on the thread that makes them: tokenization, and the load and passes of a decision model. Their diagnostics can quote the prompt, so xybrid drops them. Logs from other threads, such as another model loading at the same time, are unaffected.
+
 ---
 
-## Real-Time Audio Streaming (Planned)
+## Real-Time Audio Streaming
 
-Real-time audio transcription with partial results (chunked Whisper inference) is planned for a future release. This will enable:
-
-- Continuous microphone input with chunked processing
-- Partial transcription results as audio is received
-- Voice Activity Detection (VAD) for automatic segmentation
-- Configurable chunk sizes and overlap
-
-This feature will be available across all SDKs when implemented.
+Live transcription sessions take microphone audio as the app feeds it in and return partial transcripts as speech arrives, with optional voice-activity detection to cut chunks on speech boundaries. See Live Transcription for [iOS](/docs/sdks/ios#live-transcription), [Android](/docs/sdks/android#live-transcription) and [Unity](/docs/sdks/unity#live-transcription), and Speech-to-Text for [Flutter](/docs/sdks/flutter#speech-to-text). React Native opens a session with `model.stream()` ([guide](/docs/sdks/react-native#more-capabilities)).

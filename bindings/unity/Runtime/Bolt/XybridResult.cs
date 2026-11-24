@@ -12,10 +12,7 @@ namespace XybridBolt
     /// to match the existing uniffi-generated Kotlin/Swift name — the iOS
     /// example references `XybridResult` directly.
     /// </summary>
-    /// <param name="ExecutionTarget">
-    /// Where the answer actually came from. Cloud fallback keeps `model_id`
-    /// identical on both legs, so this is the only way to tell them apart.
-    /// </param>
+    /// <param name="ExecutionTarget">Where the answer actually came from, even when both legs requested the same model id.</param>
     /// <param name="ToolCalls">
     /// Tool calls the model emitted this turn. Empty unless the request
     /// offered tools via [`XybridGenerationConfig::tools`].
@@ -25,9 +22,10 @@ namespace XybridBolt
     /// Model reasoning emitted separately from the final answer text.
     /// Appended last because `#[data]` fields serialize in declaration order.
     /// </param>
+    /// <param name="Observation">The run's trace reference, when it was traced.</param>
     public readonly struct XybridResult
     {
-        public XybridResult(XybridEnvelope Envelope, XybridOutputType OutputType, string ModelId, uint LatencyMs, XybridExecutionTarget ExecutionTarget, XybridInferenceMetrics Metrics, XybridToolCall[] ToolCalls, string? ReasoningContent = null) { this.Envelope = Envelope; this.OutputType = OutputType; this.ModelId = ModelId; this.LatencyMs = LatencyMs; this.ExecutionTarget = ExecutionTarget; this.Metrics = Metrics; this.ToolCalls = ToolCalls; this.ReasoningContent = ReasoningContent; }
+        public XybridResult(XybridEnvelope Envelope, XybridOutputType OutputType, string ModelId, uint LatencyMs, XybridExecutionTarget ExecutionTarget, XybridInferenceMetrics Metrics, XybridToolCall[] ToolCalls, string? ReasoningContent = null, XybridObservationRef? Observation = null) { this.Envelope = Envelope; this.OutputType = OutputType; this.ModelId = ModelId; this.LatencyMs = LatencyMs; this.ExecutionTarget = ExecutionTarget; this.Metrics = Metrics; this.ToolCalls = ToolCalls; this.ReasoningContent = ReasoningContent; this.Observation = Observation; }
         public XybridEnvelope Envelope { get; }
         public XybridOutputType OutputType { get; }
         public string ModelId { get; }
@@ -36,6 +34,7 @@ namespace XybridBolt
         public XybridInferenceMetrics Metrics { get; }
         public XybridToolCall[] ToolCalls { get; }
         public string? ReasoningContent { get; }
+        public XybridObservationRef? Observation { get; }
 
         internal static XybridResult Decode(WireReader reader)
         {
@@ -49,6 +48,9 @@ namespace XybridBolt
             string? reasoningContent = reader.HasRemaining
                 ? reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
                 : ReasoningFromMetadata(envelope);
+            XybridObservationRef? observation = reader.HasRemaining
+                ? reader.ReadU8() == 0 ? default(XybridObservationRef?) : XybridObservationRef.Decode(reader)
+                : null;
             return new XybridResult(
                 envelope,
                 outputType,
@@ -57,7 +59,8 @@ namespace XybridBolt
                 executionTarget,
                 metrics,
                 toolCalls,
-                reasoningContent
+                reasoningContent,
+                observation
             );
         }
 
@@ -102,6 +105,17 @@ namespace XybridBolt
                 {
                     writer.WriteU8(1);
                     writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.Observation is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    boltffiValue0.Encode(writer);
                 }
                 else
                 {

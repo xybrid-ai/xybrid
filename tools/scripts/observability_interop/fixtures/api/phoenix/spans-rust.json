@@ -1,0 +1,306 @@
+{
+ "data": [
+  {
+   "attributes": {
+    "gen_ai": {
+     "operation": {
+      "name": "load_model"
+     },
+     "provider": {
+      "name": "fake-runtime"
+     },
+     "request": {
+      "model": "tiny-chat"
+     }
+    },
+    "openinference": {
+     "span": {
+      "kind": "CHAIN"
+     }
+    },
+    "xybrid": {
+     "genai": {
+      "model": {
+       "cache_hit": true,
+       "format": "gguf",
+       "size_bytes": 1048576
+      },
+      "runtime": {
+       "name": "fake-runtime"
+      }
+     }
+    }
+   },
+   "context": {
+    "span_id": "967de46ca9d304c8",
+    "trace_id": "e65def71db67b57b768f59d149f76bbd"
+   },
+   "end_time": "2026-11-09T16:46:40.307+00:00",
+   "events": [],
+   "id": "U3BhbjoxMDA0",
+   "name": "load_model tiny-chat",
+   "parent_id": "f17460911705c1a5",
+   "span_kind": "CHAIN",
+   "start_time": "2026-11-09T16:46:40.307+00:00",
+   "status_code": "UNSET",
+   "status_message": ""
+  },
+  {
+   "attributes": {
+    "gen_ai": {
+     "operation": {
+      "name": "execute_tool"
+     },
+     "tool": {
+      "call": {
+       "arguments": "{\"city\":\"Paris\",\"unit\":null}",
+       "id": "call_1",
+       "result": "{\"conditions\":\"cloudy\",\"temperature_c\":18}"
+      },
+      "name": "get_weather",
+      "type": "function"
+     }
+    },
+    "input": {
+     "mime_type": "application/json",
+     "value": "{\"city\":\"Paris\",\"unit\":null}"
+    },
+    "openinference": {
+     "span": {
+      "kind": "TOOL"
+     }
+    },
+    "output": {
+     "mime_type": "application/json",
+     "value": "{\"conditions\":\"cloudy\",\"temperature_c\":18}"
+    },
+    "tool": {
+     "name": "get_weather"
+    }
+   },
+   "context": {
+    "span_id": "a2019d2d18afc332",
+    "trace_id": "e65def71db67b57b768f59d149f76bbd"
+   },
+   "end_time": "2026-11-09T16:46:40.307+00:00",
+   "events": [],
+   "id": "U3BhbjoxMDA1",
+   "name": "execute_tool get_weather",
+   "parent_id": "f17460911705c1a5",
+   "span_kind": "TOOL",
+   "start_time": "2026-11-09T16:46:40.307+00:00",
+   "status_code": "UNSET",
+   "status_message": ""
+  },
+  {
+   "attributes": {
+    "error": {
+     "type": "timeout"
+    },
+    "gen_ai": {
+     "provider": {
+      "name": "fake-runtime"
+     },
+     "request": {
+      "model": "tiny-chat"
+     }
+    },
+    "openinference": {
+     "span": {
+      "kind": "CHAIN"
+     }
+    },
+    "xybrid": {
+     "genai": {
+      "attempt": {
+       "index": 0,
+       "reason": "initial"
+      },
+      "execution": {
+       "location": "local"
+      },
+      "runtime": {
+       "name": "fake-runtime"
+      }
+     }
+    }
+   },
+   "context": {
+    "span_id": "57da3250cc8cd77e",
+    "trace_id": "e65def71db67b57b768f59d149f76bbd"
+   },
+   "end_time": "2026-11-09T16:46:40.307+00:00",
+   "events": [],
+   "id": "U3BhbjoxMDA2",
+   "name": "attempt 0",
+   "parent_id": "80878d0eb62dd7da",
+   "span_kind": "CHAIN",
+   "start_time": "2026-11-09T16:46:40.307+00:00",
+   "status_code": "ERROR",
+   "status_message": "backend busy"
+  },
+  {
+   "attributes": {
+    "gen_ai": {
+     "provider": {
+      "name": "fake-runtime"
+     },
+     "request": {
+      "model": "tiny-chat"
+     },
+     "usage": {
+      "input_tokens": 24,
+      "output_tokens": 7
+     }
+    },
+    "openinference": {
+     "span": {
+      "kind": "CHAIN"
+     }
+    },
+    "xybrid": {
+     "genai": {
+      "attempt": {
+       "index": 1,
+       "reason": "retry"
+      },
+      "execution": {
+       "location": "local"
+      },
+      "runtime": {
+       "name": "fake-runtime"
+      }
+     }
+    }
+   },
+   "context": {
+    "span_id": "c8c741433d3ad279",
+    "trace_id": "e65def71db67b57b768f59d149f76bbd"
+   },
+   "end_time": "2026-11-09T16:46:40.328+00:00",
+   "events": [],
+   "id": "U3BhbjoxMDA3",
+   "name": "attempt 1",
+   "parent_id": "80878d0eb62dd7da",
+   "span_kind": "CHAIN",
+   "start_time": "2026-11-09T16:46:40.307+00:00",
+   "status_code": "UNSET",
+   "status_message": ""
+  },
+  {
+   "attributes": {
+    "gen_ai": {
+     "input": {
+      "messages": "[{\"parts\":[{\"content\":\"You are terse.\",\"type\":\"text\"}],\"role\":\"system\"},{\"parts\":[{\"content\":\"Weather in Paris? My key is [KEY].\",\"type\":\"text\"}],\"role\":\"user\"}]"
+     },
+     "operation": {
+      "name": "chat"
+     },
+     "output": {
+      "messages": "[{\"finish_reason\":\"stop\",\"parts\":[{\"content\":\"It is 18\u00b0C and cloudy.\",\"type\":\"text\"}],\"role\":\"assistant\"}]"
+     },
+     "provider": {
+      "name": "fake-runtime"
+     },
+     "request": {
+      "max_tokens": 64,
+      "model": "tiny-chat",
+      "stream": true,
+      "temperature": 0.0
+     },
+     "response": {
+      "id": "resp-1",
+      "model": "tiny-chat-q4",
+      "time_to_first_chunk": 0.006217478
+     },
+     "usage": {
+      "input_tokens": 24,
+      "output_tokens": 7
+     }
+    },
+    "input": {
+     "mime_type": "application/json",
+     "value": "[{\"parts\":[{\"content\":\"You are terse.\",\"type\":\"text\"}],\"role\":\"system\"},{\"parts\":[{\"content\":\"Weather in Paris? My key is [KEY].\",\"type\":\"text\"}],\"role\":\"user\"}]"
+    },
+    "llm": {
+     "model_name": "tiny-chat-q4",
+     "provider": "fake-runtime",
+     "token_count": {
+      "completion": 7,
+      "prompt": 24
+     }
+    },
+    "openinference": {
+     "span": {
+      "kind": "LLM"
+     }
+    },
+    "output": {
+     "mime_type": "application/json",
+     "value": "[{\"finish_reason\":\"stop\",\"parts\":[{\"content\":\"It is 18\u00b0C and cloudy.\",\"type\":\"text\"}],\"role\":\"assistant\"}]"
+    },
+    "xybrid": {
+     "genai": {
+      "attempt": {
+       "count": 2
+      },
+      "execution": {
+       "location": "local"
+      },
+      "response": {
+       "chunk_count": 4,
+       "time_to_first_token": 0.003142745
+      },
+      "runtime": {
+       "name": "fake-runtime"
+      }
+     }
+    }
+   },
+   "context": {
+    "span_id": "80878d0eb62dd7da",
+    "trace_id": "e65def71db67b57b768f59d149f76bbd"
+   },
+   "end_time": "2026-11-09T16:46:40.328+00:00",
+   "events": [],
+   "id": "U3BhbjoxMDA4",
+   "name": "chat tiny-chat",
+   "parent_id": "f17460911705c1a5",
+   "span_kind": "LLM",
+   "start_time": "2026-11-09T16:46:40.307+00:00",
+   "status_code": "UNSET",
+   "status_message": ""
+  },
+  {
+   "attributes": {
+    "gen_ai": {
+     "operation": {
+      "name": "invoke_workflow"
+     },
+     "workflow": {
+      "name": "answer_question"
+     }
+    },
+    "openinference": {
+     "span": {
+      "kind": "CHAIN"
+     }
+    }
+   },
+   "context": {
+    "span_id": "f17460911705c1a5",
+    "trace_id": "e65def71db67b57b768f59d149f76bbd"
+   },
+   "end_time": "2026-11-09T16:46:40.329+00:00",
+   "events": [],
+   "id": "U3BhbjoxMDA5",
+   "name": "invoke_workflow answer_question",
+   "parent_id": null,
+   "span_kind": "CHAIN",
+   "start_time": "2026-11-09T16:46:40.306+00:00",
+   "status_code": "UNSET",
+   "status_message": ""
+  }
+ ],
+ "next_cursor": null
+}

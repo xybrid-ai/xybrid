@@ -14,6 +14,10 @@ use crate::ffi;
 /// - `2`: Errors + Warnings
 /// - `3`: Errors + Warnings + Info
 /// - `4`: All logs including Debug
+///
+/// At every level, a thread prints nothing while it tokenizes or runs a
+/// decision load or pass: those diagnostics can quote caller text. Other
+/// threads keep their logs.
 pub fn set_verbosity(level: i32) {
     // SAFETY: `llama_log_set_verbosity_c` is callable from any thread at
     // any time. The C side guards its global state with an atomic.

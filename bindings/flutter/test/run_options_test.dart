@@ -2,6 +2,27 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:xybrid_flutter/xybrid_flutter.dart';
 
 void main() {
+  test('observation context survives both run option constructors', () {
+    const observation = ObservationOptions(
+      traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+      tracestate: 'vendor=value',
+      conversationId: 'conversation-1',
+      suppressTrace: true,
+    );
+    for (final options in [
+      const RunOptions(observation: observation),
+      const RunOptions.cloudFallback(observation: observation),
+    ]) {
+      final ffi = options.toFfi();
+      expect(ffi.traceparent, observation.traceparent);
+      expect(ffi.tracestate, observation.tracestate);
+      expect(ffi.conversationId, observation.conversationId);
+      expect(ffi.suppressTrace, isTrue);
+    }
+    expect(const RunOptions().toFfi().suppressTrace, isFalse);
+    expect(const RunOptions().toFfi().traceparent, isNull);
+  });
+
   test('default run options do not opt into cloud fallback', () {
     const options = RunOptions();
 

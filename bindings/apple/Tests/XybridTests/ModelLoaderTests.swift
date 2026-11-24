@@ -18,6 +18,34 @@ final class ModelLoaderTests: XCTestCase {
         XCTAssertEqual(loader.source, source)
     }
 
+    func testModelFileSourceCreatesUnloadedReferenceWithNothingToDownload() {
+        let url = URL(fileURLWithPath: "/models/qwen3-0.6b-q4_k_m.gguf")
+
+        let loader = ModelLoader.fromModelFile(url)
+
+        XCTAssertEqual(loader.source, .modelFile(url))
+        XCTAssertEqual(Xybrid.model(.modelFile(url)).source, loader.source)
+        XCTAssertNil(loader.download())
+        XCTAssertFalse(loader.willSpeculate)
+    }
+
+    /// Reaches the native model-file loader: a directory loader would fail
+    /// differently, and a `file://` URL string would show up in the message.
+    func testModelFileLoadReportsAMissingFileByPath() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("missing.gguf")
+
+        XCTAssertThrowsError(try ModelLoader.fromModelFile(url).loadSync()) { error in
+            guard case XybridError.configError(let message) = error else {
+                return XCTFail("expected configError, got \(error)")
+            }
+            XCTAssertTrue(message.contains("GGUF file not found"), message)
+            XCTAssertTrue(message.contains(url.path), message)
+            XCTAssertFalse(message.contains("file://"), message)
+        }
+    }
+
     func testResultDecodesToolCallingWireWithoutReasoningTail() {
         let envelope = XybridEnvelope(
             kind: .text(text: "answer"),
@@ -55,7 +83,64 @@ final class ModelLoaderTests: XCTestCase {
 
         XCTAssertEqual(result.reasoningContent, "thinking")
         XCTAssertNil(sourceCompatible.reasoningContent)
+        XCTAssertNil(result.observation)
+        XCTAssertNil(sourceCompatible.observation)
         XCTAssertEqual(reader.position, writer.data.count)
+    }
+
+    func testResultDecodesObservationTail() {
+        let observation = XybridObservationRef(
+            traceId: "0af7651916cd43dd8448eb211c80319c",
+            spanId: "b7ad6b7169203331"
+        )
+        let traced = XybridResult(
+            envelope: XybridEnvelope(kind: .text(text: "answer"), metadata: []),
+            outputType: .text,
+            modelId: "model",
+            latencyMs: 1,
+            executionTarget: .local,
+            metrics: XybridInferenceMetrics(
+                totalMs: 1,
+                ttftMs: nil,
+                tokensPerSecond: nil,
+                prefillTps: nil,
+                decodeTps: nil,
+                tokensOut: nil,
+                stageLatenciesMs: []
+            ),
+            toolCalls: [],
+            reasoningContent: "thinking",
+            observation: observation
+        )
+        var writer = WireWriter()
+        traced.encode(to: &writer)
+
+        var reader = WireReader(data: writer.data)
+        let decoded = XybridResult.decode(from: &reader)
+
+        XCTAssertEqual(decoded.observation, observation)
+        XCTAssertEqual(decoded.reasoningContent, "thinking")
+        XCTAssertEqual(reader.position, writer.data.count)
+    }
+
+    func testRunOptionsMakeDefaultsEveryUnsetField() {
+        let options = XybridRunOptions.make(conversationId: "conv-1", suppressTrace: true)
+
+        XCTAssertNil(options.generationConfig)
+        XCTAssertEqual(options.abortOn, [])
+        XCTAssertFalse(options.fallbackToCloud)
+        XCTAssertEqual(options.maxGraceTokens, 0)
+        XCTAssertNil(options.correlationId)
+        XCTAssertNil(options.traceparent)
+        XCTAssertNil(options.tracestate)
+        XCTAssertEqual(options.conversationId, "conv-1")
+        XCTAssertTrue(options.suppressTrace)
+        XCTAssertNil(options.frameSessionId)
+
+        // A live-capture loop names its session; nothing else changes.
+        let live = XybridRunOptions.make(frameSessionId: "camera-7")
+        XCTAssertEqual(live.frameSessionId, "camera-7")
+        XCTAssertFalse(live.suppressTrace)
     }
 
     /// Guards the `hasToolCalls` conveniences. They exist so the branch a

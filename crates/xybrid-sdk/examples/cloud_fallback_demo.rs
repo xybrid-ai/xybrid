@@ -20,12 +20,12 @@
 //! 2. Have a Xybrid gateway reachable on the OpenAI-compatible
 //!    `/v1/chat/completions` endpoint. By default the demo points at
 //!    `http://localhost:3001/v1`, which is the local-dev port the Xybrid
-//!    gateway listens on. The gateway dispatches to whichever upstream
-//!    provider it has credentials for (e.g. DeepSeek, OpenAI, Anthropic);
-//!    the demo sends `model = "deepseek-flash"` to match a gateway
-//!    configured with `DEEPSEEK_API_KEY`. Pick a different `model` (and
-//!    matching `provider` metadata) below if your gateway exposes
-//!    different upstream keys.
+//!    gateway listens on. The gateway routes on `model` alone: frontier
+//!    models by their canonical OpenRouter id (a local platform serves them
+//!    only with `OPENROUTER_API_KEY` set), Xybrid-hosted models by their
+//!    xycloud id. An unlisted id gets `404 model_not_found` if the catalog
+//!    is known, or `502` if it is unavailable. The demo sends `model = "openai/gpt-4o-mini"`;
+//!    pick another id from the gateway's `GET /v1/models` below if you like.
 //!
 //!    Authenticate to the gateway with a Xybrid API key — mint one in
 //!    your Xybrid account and export it:
@@ -90,8 +90,10 @@ use xybrid_core::orchestrator::authority::test_seams::StagedResourceProvider;
 use xybrid_core::runtime_adapter::types::PartialToken;
 use xybrid_core::runtime_adapter::CloudRuntimeAdapter;
 use xybrid_sdk::run_options::{AbortPolicy, AbortSignal, RunOptions};
-use xybrid_sdk::telemetry::{flush_platform_telemetry, init_platform_telemetry_from_env};
 use xybrid_sdk::{ModelLoader, SeamInfo};
+
+#[path = "support/observability.rs"]
+mod observability_support;
 
 const PROMPT: &str = "Write a short story about a lighthouse keeper who learns to brew tea.";
 const LOCAL_MODEL_ID: &str = "qwen2.5-0.5b-instruct";
@@ -113,27 +115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Prompt: {}", PROMPT);
     println!();
 
-    // 0. Wire the telemetry publisher so `LocalAborted` and `CloudRetry`
-    //    events from `run_streaming_with_fallback` actually make it to the
-    //    ingest service. Requires `XYBRID_API_KEY` to be set; for a local
-    //    backend also set `XYBRID_INGEST_URL=http://localhost:8081`. If
-    //    init returns false, the events drop silently and the trace will
-    //    never appear in the console — print a loud warning instead of
-    //    failing the run, since the SDK orchestration itself is independent
-    //    of telemetry.
-    if init_platform_telemetry_from_env() {
-        println!("  Telemetry: publisher initialized");
-        if let Ok(url) = env::var("XYBRID_INGEST_URL") {
-            println!("    ingest endpoint: {}", url);
-        } else {
-            println!("    ingest endpoint: https://ingest.xybrid.dev (default)");
-        }
-    } else {
-        eprintln!(
-            "  ⚠ Telemetry: XYBRID_API_KEY not set — events will be dropped, no trace will \
-             appear in the console. Mint a key in the platform console and export it."
-        );
-    }
+    let export = observability_support::configure("cloud-fallback-demo")?;
     println!();
 
     // 1. Load the local model. The user is expected to have run
@@ -184,16 +166,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    `CloudRuntimeAdapter::execute_streaming` will read on the retry leg.
     //    The local leg ignores the cloud-only keys.
     let mut envelope = Envelope::new(EnvelopeKind::Text(PROMPT.to_string()));
-    // The local platform backend resolves the upstream provider from the
-    //    `model` name (`deepseek-flash` → DeepSeek), so the `provider` field is
-    //    SDK-side bookkeeping only and never crosses the wire to the gateway.
-    //    Match it to the model so traces stay honest.
+    // The gateway routes on `model` alone; `provider` labels the SDK trace.
     envelope
         .metadata
-        .insert("provider".to_string(), "deepseek".to_string());
+        .insert("provider".to_string(), "openai".to_string());
     envelope
         .metadata
-        .insert("model".to_string(), "deepseek-flash".to_string());
+        .insert("model".to_string(), "openai/gpt-4o-mini".to_string());
     envelope
         .metadata
         .insert("max_tokens".to_string(), "200".to_string());
@@ -290,26 +269,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         result.text().unwrap_or("(non-text)")
     );
 
-    // Drain telemetry before exit. The SDK exporter is parked in a process-
-    // static (`PLATFORM_EXPORTER`) that never gets dropped, so its
-    // `Drop::stop` final-flush never runs. Without an explicit drain the
-    // CloudRetry event (published last, after the ~8s cloud round-trip)
-    // gets stuck in the exporter's mpsc channel / internal buffer when the
-    // demo exits before the periodic 15s flush thread fires next, which
-    // shows up in the console as a missing `target=cloud` row. Sleep
-    // briefly so the consumer thread can drain channel→buffer, then call
-    // `flush_platform_telemetry` to force a buffer→HTTP send.
-    println!();
-    println!("  Flushing telemetry (channel drain + buffer flush)…");
-    // Brief pause lets the exporter's mpsc-consumer thread drain pending
-    // events from the channel into the buffer (typically <50 ms in
-    // practice — 200 ms is generous). Then `flush_platform_telemetry` is
-    // synchronous-blocking on the HTTP send via ureq, so we don't need
-    // another long sleep after; the trailing 200 ms only covers the
-    // ingest service's `wait=false` async-queue acceptance path.
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    flush_platform_telemetry();
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    // The SDK records local and remote attempts under one inference trace.
+    if let Some(reference) = result.observation_ref() {
+        println!("  inference trace: {}", reference.trace_id);
+    }
+    export.finish()?;
 
     Ok(())
 }

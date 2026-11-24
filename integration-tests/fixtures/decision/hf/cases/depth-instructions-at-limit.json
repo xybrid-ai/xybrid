@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "depth-instructions-at-limit",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Instructions 127 levels deep (126 arrays around a value): the deepest upstream renders",
+  "covers": [
+    "json-depth",
+    "instructions-structured"
+  ],
+  "request_text": "{\"state\": null, \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}}}",
+  "artifact": "d1-2b-hf"
+}

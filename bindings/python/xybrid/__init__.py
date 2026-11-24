@@ -1,14 +1,15 @@
 """Python SDK for local-first xybrid inference.
 
 Xybrid runs models on-device by default with no account required. Passing an
-API key to :func:`init` enables optional platform features such as telemetry and
-cloud routing on top of the same local runtime. See https://docs.xybrid.dev.
+API key to :func:`init` configures cloud authentication. Observability export
+requires explicit configuration. See https://docs.xybrid.dev.
 """
 
 from __future__ import annotations
 
 import threading
 from typing import Final
+from urllib.parse import urlsplit, urlunsplit
 
 from . import _bolt, _errors, _sugar
 from ._bolt import *  # noqa: F403 -- re-export the generated surface; _bolt defines __all__
@@ -22,7 +23,7 @@ _sugar.install()
 # (plain data, not an exception); it stays reachable as `_bolt.XybridError`,
 # and each of its variants is still re-exported under its own name.
 from ._errors import *  # noqa: E402,F403 -- ordering is deliberate, see above
-from ._errors import XybridError  # noqa: E402
+from ._errors import ConfigError, XybridError  # noqa: E402
 
 # Attribute registry requests and telemetry to this SDK from the first call.
 # `init()` is optional (local inference needs none of it), so registering
@@ -39,18 +40,43 @@ def init(api_key: str | None = None, gateway_url: str | None = None, ingest_url:
     This function is idempotent and thread-safe. The first call applies runtime
     configuration; later calls are no-ops even if they pass different arguments.
 
-    Without ``api_key``, xybrid runs fully on-device and telemetry remains
-    disabled. Passing ``api_key`` starts the platform telemetry exporter;
-    ``gateway_url`` overrides the LLM gateway and ``ingest_url`` overrides the
-    telemetry ingest endpoint. Desktop battery and thermal observers are handled
-    inside Rust, so the Python SDK does not register host observers.
+    ``api_key`` configures cloud authentication and ``gateway_url`` overrides
+    the LLM gateway. Neither enables observability or changes an existing
+    exporter. Configure export separately with ``XybridObservabilityConfig``.
+
+    For legacy callers, a nonblank ``ingest_url`` explicitly enables
+    bearer-authenticated, metadata-only OTLP traces using ``api_key`` (required
+    in this form). A base URL maps to ``/v1/traces``; an explicit path is kept.
+    The destination must accept OTLP/HTTP protobuf, not the retired JSON event
+    format. Invalid configuration raises ``ConfigError``; failed initialization
+    may be retried. Desktop resource observers are handled inside Rust.
     """
 
     global _INITIALIZED
     with _INIT_LOCK:
         if _INITIALIZED:
             return
-        _bolt.configure_runtime(api_key=api_key, gateway_url=gateway_url, ingest_url=ingest_url)
+        endpoint = ingest_url.strip() if ingest_url is not None else ""
+        if endpoint:
+            key = api_key.strip() if api_key is not None else ""
+            if not key:
+                raise ConfigError("ingest_url requires a nonblank api_key")
+            try:
+                url = urlsplit(endpoint)
+                if url.scheme not in ("http", "https") or not url.hostname:
+                    raise ValueError("not an absolute HTTP(S) URL")
+                # Accessing port also validates malformed/out-of-range ports.
+                _ = url.port
+            except ValueError:
+                raise ConfigError("ingest_url must be an absolute HTTP(S) URL") from None
+            endpoint = urlunsplit(
+                url._replace(path=url.path if url.path not in ("", "/") else "/v1/traces")
+            )
+            config = _bolt.XybridObservabilityConfig.xybrid(key)
+            config.set_traces_endpoint(endpoint)
+            config.set_metadata_only(True)
+            config.init()
+        _bolt.configure_runtime(api_key=api_key, gateway_url=gateway_url)
         _INITIALIZED = True
 
 

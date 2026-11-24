@@ -8,8 +8,8 @@ namespace Xybrid
     /// </summary>
     /// <remarks>
     /// The generated <see cref="XybridBolt.XybridStreamingConfig"/> is a
-    /// positional record with no defaults, so every call site would otherwise
-    /// have to spell out all five fields — including the 16 kHz sample rate,
+    /// positional record, so every call site would otherwise have to spell out
+    /// its fields — including the 16 kHz sample rate,
     /// which is the only value the ASR backends accept.
     /// </remarks>
     public static class StreamingConfigs
@@ -45,11 +45,13 @@ namespace Xybrid
         /// </param>
         /// <param name="language">Language hint such as "en"; null uses the model default.</param>
         /// <param name="threshold">VAD sensitivity, 0.0-1.0. Lower catches quieter speech, and more background noise with it.</param>
+        /// <param name="observation">Optional trace controls for the session's workflow.</param>
         /// <exception cref="ArgumentNullException">Thrown if modelDir is null.</exception>
         public static XybridBolt.XybridStreamingConfig VoiceActivity(
             string modelDir,
             string language = null,
-            float threshold = 0.5f)
+            float threshold = 0.5f,
+            ObservationOptions observation = null)
         {
             if (modelDir == null)
             {
@@ -60,7 +62,29 @@ namespace Xybrid
                 new XybridBolt.XybridVadMode.Enabled(modelDir),
                 threshold,
                 language,
-                null);
+                null,
+                observation?.ToBolt());
+        }
+
+        /// <summary>
+        /// <paramref name="config"/> with its observation controls replaced by
+        /// <paramref name="observation"/>; unchanged when that is null.
+        /// </summary>
+        public static XybridBolt.XybridStreamingConfig WithObservation(
+            XybridBolt.XybridStreamingConfig config,
+            ObservationOptions observation)
+        {
+            if (observation == null)
+            {
+                return config;
+            }
+            return new XybridBolt.XybridStreamingConfig(
+                config.SampleRate,
+                config.Vad,
+                config.VadThreshold,
+                config.Language,
+                config.AudioCtx,
+                observation.ToBolt());
         }
     }
 }

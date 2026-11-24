@@ -56,6 +56,11 @@ impl CancellationToken {
         self.cancelled.load(Ordering::SeqCst)
     }
 
+    /// Borrow the flag while a synchronous native decision call owns the token.
+    pub(crate) fn flag(&self) -> &AtomicBool {
+        &self.cancelled
+    }
+
     /// Whether two tokens share the same underlying cancellation flag.
     ///
     /// Cloning a [`CancellationToken`] shares its inner `Arc<AtomicBool>`, so
@@ -146,11 +151,13 @@ pub struct RunOptions {
     /// emitting one row per frame. `None` for one-shot runs.
     pub frame_session_id: Option<String>,
     /// When `true`, marks the run as part of a continuous live-capture session.
-    /// Live-mode inferences carry `frame_session_id` + `live_mode` on the wire
-    /// and are rate-limited at the telemetry dispatch funnel rather than emitted
-    /// per frame. Defaults to `false` (per-run telemetry, byte-for-byte
-    /// unchanged from the non-live path).
+    /// Every frame is counted in metrics; detailed traces are sampled per
+    /// session (see `ObservabilityConfig::live_trace_interval`). Defaults to
+    /// `false`.
     pub live_mode: bool,
+    /// Observation controls for this run: explicit parent context,
+    /// conversation id, prompt metadata, trace suppression.
+    pub observation: Option<crate::observability::ObservationOptions>,
 }
 
 impl RunOptions {
@@ -200,14 +207,21 @@ impl RunOptions {
     /// Tag this run as part of a live-capture session.
     ///
     /// Sets `frame_session_id` to the caller-supplied UUID and flips
-    /// `live_mode = true`. Every inference sharing the same `frame_session_id`
-    /// is tagged on the wire; the telemetry dispatch funnel rate-limits these
-    /// to roughly one row per second per session (dropping the intervening
-    /// per-frame rows). Non-live runs leave both fields at their defaults and
-    /// their telemetry path is unchanged.
+    /// `live_mode = true`. Every frame of the session is counted in metrics;
+    /// detailed traces are kept for roughly one frame per interval per
+    /// session.
     pub fn with_frame_session(mut self, frame_session_id: impl Into<String>) -> Self {
         self.frame_session_id = Some(frame_session_id.into());
         self.live_mode = true;
+        self
+    }
+
+    /// Sets the observation controls for this run.
+    pub fn with_observation(
+        mut self,
+        observation: crate::observability::ObservationOptions,
+    ) -> Self {
+        self.observation = Some(observation);
         self
     }
 }
@@ -638,6 +652,7 @@ mod tests {
             .with_abort_policy(AbortPolicy::default().stop_on(AbortSignal::ThermalCritical));
         let reader = Arc::new(CountingResourceReader::new(ResourceSnapshot {
             thermal_state: ThermalState::Critical,
+            thermal_measured: true,
             ..Default::default()
         }));
         let mut state = AbortState::with_resource_reader(&options, reader);
@@ -1075,6 +1090,7 @@ mod tests {
     fn streaming_thermal_abort_check_stays_within_low_end_android_budget() {
         let snapshot = ResourceSnapshot {
             thermal_state: ThermalState::Critical,
+            thermal_measured: true,
             ..Default::default()
         };
         let reader = Arc::new(CountingResourceReader::new(snapshot));

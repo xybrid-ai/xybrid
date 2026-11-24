@@ -71,7 +71,13 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add stars.jsonl star-history.svg star-history-dark.svg
+          # Vercel builds the docs site from docs/ on every branch of this repo.
+          # This branch has no docs/, so each push failed ("Root Directory
+          # does not exist") and emailed the team. This file turns the
+          # branch's deployments off, and skips the build if one still starts.
+          mkdir -p docs
+          echo '{"git":{"deploymentEnabled":false},"ignoreCommand":"exit 0"}' > docs/vercel.json
+          git add stars.jsonl star-history.svg star-history-dark.svg docs/vercel.json
           if git diff --cached --quiet; then
             echo "No change today."
             exit 0

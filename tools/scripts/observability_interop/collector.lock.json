@@ -1,0 +1,12 @@
+{
+  "comment": "The otelcol-contrib release the harness runs, pinned like crates/xybrid-observability/collector/README.md (a test keeps the two equal). Checksums are the release's own .sha256 assets.",
+  "distribution": "otelcol-contrib",
+  "version": "0.165.0",
+  "url": "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{version}/otelcol-contrib_{version}_{platform}.tar.gz",
+  "sha256": {
+    "darwin_arm64": "f9a0ed310e9beeb0fabca9d9c24bd0d3467f6339e3207710dbd66a6adf1298f6",
+    "darwin_amd64": "7d14e5c14bcb930d55f2bd5d3fbb3734be5fd2889698488e65e488efda5473c9",
+    "linux_amd64": "bd6e73d94bf3359ad6fac25529a8ee308adb9b0b8a0e8af034ed3891fbe5aa33",
+    "linux_arm64": "376420729c862230807bc89811d07d10031eaeca3f6481fe371a2bdcefd2c8fa"
+  }
+}

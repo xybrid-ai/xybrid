@@ -118,8 +118,9 @@ public class XybridDemo : MonoBehaviour
 {
     async void Start()
     {
-        // Runs locally with no key. Pass an apiKey to light up the
-        // dashboard: XybridClient.Initialize(apiKey: "xy_live_...")
+        // Runs locally with no key. An apiKey adds cloud features:
+        // XybridClient.Initialize(apiKey: "sk_live_..."). Trace export is
+        // a separate opt-in (XybridClient.InitializeObservability).
         XybridClient.Initialize();
 
         // Load a model from the registry
@@ -173,7 +174,7 @@ public class XybridDemo : MonoBehaviour
 2. Select **iOS** platform
 3. Click **Switch Platform**
 4. Configure in **Player Settings > Other Settings**:
-   - Target minimum iOS Version: 15.0
+   - Target minimum iOS Version: 16.0
    - Architecture: ARM64
    - Scripting Backend: IL2CPP
 5. Click **Build** and select output folder
@@ -185,10 +186,7 @@ public class XybridDemo : MonoBehaviour
    - Select provisioning profile
 8. Build and run on device
 
-**Native Library Location:**
-```
-Assets/Plugins/iOS/libxybrid.a
-```
+**Native Library Location:** before an iOS player build, the SDK downloads the release library to `Assets/Xybrid/Plugins/iOS/libxybrid_bolt.a` in this project if it is not installed yet. A local build staged by `stage_unity_native.py` lands at `bindings/unity/Runtime/Plugins/iOS/libxybrid_bolt.a` (from the repository root).
 
 ### Android Build
 
@@ -241,12 +239,9 @@ For testing in the Unity Editor on macOS:
 Assets/Plugins/macOS/libxybrid.dylib
 ```
 
-### Windows Build (Future)
+### Windows Build
 
-Windows support is planned but not yet implemented. Native library builds for Windows will require:
-- Visual Studio with C++ workload
-- Windows SDK
-- Rust toolchain for Windows targets
+Windows x64 is supported. Before a Windows player build, the SDK downloads the Windows library and its ONNX Runtime DLL into `Assets/Xybrid/Plugins/`. To build the library yourself, see [Building Native Libraries](../../../bindings/unity/README.md#building-native-libraries) in the Unity SDK README.
 
 ## Troubleshooting
 
@@ -273,16 +268,20 @@ Make sure you're using Unity 2022.3 LTS or later. The project uses features that
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| iOS | Planned | Requires XCFramework build |
-| Android | Planned | Requires AAR/SO build |
-| macOS | Planned | Editor testing support |
-| Windows | Future | Not yet implemented |
+| iOS | Supported | arm64 devices, iOS 16+; no Simulator build |
+| Android | Supported | arm64-v8a, armeabi-v7a; x86_64 up to Unity 6.4 |
+| macOS | Supported | macOS 14+, Apple Silicon (arm64) only |
+| Windows | Supported | x64 |
+| Linux | Supported | x64 |
+
+The [Xybrid Unity SDK](../../../bindings/unity/README.md#supported-platforms)
+README has the details for each platform.
 
 ## API Reference
 
 - **[SDK API Reference](../../../docs/sdk/API_REFERENCE.md)** - Complete API specification
 - **[Unity SDK Docs](../../../docs/sdk/unity.md)** - Unity-specific documentation (planned)
-- **[Online Documentation](https://docs.xybrid.dev/sdk/unity)** - Full guides and tutorials
+- **[Online Documentation](https://docs.xybrid.dev/docs/sdks/unity)** - Full guides and tutorials
 
 ## Related
 

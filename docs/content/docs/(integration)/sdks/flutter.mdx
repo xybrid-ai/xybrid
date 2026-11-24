@@ -23,7 +23,7 @@ Add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.16.0
+  xybrid_flutter: ^0.21.0
 ```
 
 ## Initialization
@@ -40,15 +40,28 @@ void main() async {
 }
 ```
 
-Inference runs entirely on-device whether or not you authenticate. Pass an `apiKey` to light up the [dashboard](https://dashboard.xybrid.dev) — that single call starts the telemetry exporter, and your `model.run()` / `pipeline.run()` calls automatically emit execution traces:
+Local inference is available without authentication. An `apiKey` configures
+cloud access. To send execution traces to the [Xybrid console](https://console.xybrid.dev),
+also configure observability explicitly:
 
 ```dart
 await Xybrid.init(
   apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
+  observability: ObservabilityConfig.xybrid(
+    apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
+    metadataOnly: true,
+  ),
 );
 ```
 
-Without a key, telemetry is disabled and the first inference logs a one-shot hint pointing at the dashboard (suppress with the `XYBRID_QUIET=1` environment variable). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev). For a self-hosted dashboard, also pass `ingestUrl`; for CPU/memory sampling, pass `resourceTelemetry`.
+An API key alone does not enable export. The example selects metadata-only
+capture; otherwise enabled observability captures governed text by default.
+Use `ObservabilityConfig.otlp(endpoint: 'http://collector:4318')` for a Collector
+without Xybrid authentication. CPU/memory sampling is separately configured
+with `resourceTelemetry`. `ingestUrl` remains a legacy explicit opt-in to OTLP
+trace export; new integrations should use `observability`.
+
+Key prefixes and scopes, what gets exported, and provisional workspaces: see [API keys](/docs/concepts/api-keys).
 
 `Xybrid.init()` also subscribes to OS battery state on iOS and Android via `battery_plus` and forwards each reading to the routing engine.
 
@@ -87,6 +100,23 @@ final envelope = XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000);
 final result = await model.run(envelope);
 print(result.text); // "Hello, how are you?"
 ```
+
+For live transcription, open a session and feed PCM float32 mono 16 kHz as it
+arrives. `flush()` ends the session and returns an `FfiTranscriptionResult`:
+the transcript in `text`, plus `durationMs`, `chunksProcessed` and the
+session's `observation` reference.
+
+```dart
+final session = await XybridStreamSession.fromModel(model);
+session.partials.listen((partial) => caption = partial.text); // listen first
+session.feed(samples);
+final transcript = (await session.flush()).text;
+```
+
+<Callout type="warn">
+Earlier releases returned the transcript from `flush()` as a `String`. Read
+`.text` from the result instead.
+</Callout>
 
 ## LLM Chat with Streaming
 
@@ -127,6 +157,32 @@ file nor rewinds when a download retries. `totalBytes` is `null` when the source
 publishes no size (a Hugging Face repo); `downloadedBytes` is exact either way,
 which is what you need for megabytes, speed, and time remaining.
 
+## Loading a Local GGUF File
+
+```dart
+import 'package:path_provider/path_provider.dart';
+
+// One directory per GGUF: a file the user picked, or an asset copied out of
+// the app bundle.
+final support = await getApplicationSupportDirectory();
+final path = '${support.path}/models/my-model/my-model.gguf';
+final model = await XybridModelLoader.fromModelFile(path).load();
+```
+
+A raw llama.cpp GGUF needs no `model_metadata.json`. Creating the loader touches
+no disk; `load()` generates the metadata from the GGUF header and writes it next
+to the file, with the context capped at 4,096 tokens (raise its `context_length`
+for longer chats). Put each GGUF in its own writable directory, such as one under
+`getApplicationSupportDirectory()`: assets declared in `pubspec.yaml` are not
+files on disk and the iOS app bundle is read-only, so `model_metadata.json`
+cannot be written next to either. A `model_metadata.json` already in the
+directory is used as is: a second GGUF in the same directory would load the
+first one's model. The generated metadata has no vision projector, so a vision
+GGUF with an mmproj still needs `fromDirectory`. A missing file makes `load()`
+throw an `XybridException` whose message contains `GGUF file not found: <path>`.
+With nothing to download, `loadWithProgress()` emits only `LoadComplete` or
+`LoadError`.
+
 ---
 
 ## API Reference
@@ -138,10 +194,11 @@ Main entry point for the SDK.
 ```dart
 class Xybrid {
   static Future<void> init({
-    String? apiKey,            // authenticates telemetry; omit to run anonymously
+    String? apiKey,            // cloud authentication; does not enable export
     String? gatewayUrl,        // override the LLM gateway URL
     String? ingestUrl,         // override the telemetry ingest URL (self-hosting)
     String? resourceTelemetry, // enable CPU/memory sampling
+    ObservabilityConfig? observability, // explicit OTLP export configuration
   });
   static bool get isInitialized;
   static void setApiKey(String apiKey);
@@ -160,7 +217,11 @@ Creates and loads models from different sources.
 ```dart
 class XybridModelLoader {
   factory XybridModelLoader.fromRegistry(String modelId);
+  factory XybridModelLoader.fromRegistrySpeculative(String modelId);
   factory XybridModelLoader.fromBundle(String path);
+  factory XybridModelLoader.fromDirectory(String path);
+  factory XybridModelLoader.fromHuggingFace(String repo);
+  factory XybridModelLoader.fromModelFile(String path);
 
   Future<XybridModel> load();
   Stream<LoadEvent> loadWithProgress();
@@ -238,11 +299,19 @@ Token from streaming LLM inference.
 
 ```dart
 class StreamToken {
-  final String token;            // Generated token text
-  final int index;               // Token position
-  final String cumulativeText;   // All text so far
-  final bool isFinal;            // Last token in sequence
-  final String? finishReason;    // "stop", "length", "error"
+  final String token;                    // Generated token text
+  final int index;                       // Zero-based token position
+  final String cumulativeText;           // Text emitted so far, tool-call blocks left out
+  final bool isFinal;                    // Last token in sequence
+  final String? finishReason;            // "stop", "length", "tool_calls", or "error: <message>"
+  final XybridInferenceMetrics? metrics; // Final token only
+  final ObservationRef? observation;     // Trace reference, final token only
+  final List<ToolCall> toolCalls;        // Final token only; empty otherwise
+  final String? rawText;                 // Raw turn text with the tool-call block; null without tool calls
+
+  bool get hasToolCalls;                 // toolCalls is not empty
+  bool get isError;                      // finishReason starts with "error:"
+  String? get errorMessage;              // The message of an error token
 }
 ```
 
@@ -288,7 +357,7 @@ class XybridPipeline {
   int get stageCount;
   List<String> get stageNames;
 
-  Future<XybridResult> run(XybridEnvelope envelope);
+  Future<XybridResult> run(XybridEnvelope envelope, {ObservationOptions? observation});
 }
 ```
 
@@ -311,6 +380,10 @@ final result = await pipeline.run(
 final wav = result.audioAsWav();
 ```
 
+`observation:` takes the same `ObservationOptions` as `RunOptions.observation`.
+`result.observation` is the pipeline's workflow reference, and
+`result.metrics.stageLatenciesMs[i].observation` is each stage's inference reference.
+
 ---
 
 ### XybridException
@@ -321,16 +394,24 @@ class XybridException implements Exception {
 }
 ```
 
-All SDK errors throw `XybridException`. Loading errors are surfaced via `LoadError` events when using `loadWithProgress()`.
+All SDK errors throw `XybridException`, except in the token-streaming methods (`runStreaming`, `runStreamingWithContext`, `runStreamingWithFallback`): those end the stream with an error token instead (`StreamToken.isError`, `StreamToken.errorMessage`). Loading errors are surfaced via `LoadError` events when using `loadWithProgress()`.
 
 ---
 
 ## Platform Support
 
-| Platform | Status | Accelerators |
-|----------|--------|--------------|
-| macOS | Supported | Metal, CoreML |
-| iOS | Supported | Metal, CoreML |
-| Android | Supported | NNAPI |
-| Linux | Supported | CPU |
-| Windows | Planned | DirectML |
+Precompiled libraries ship for iOS (device and Simulator, arm64), macOS on
+Apple Silicon, Android (arm64-v8a, x86_64), Linux (x86_64) and Windows
+(x86_64). Where a model runs depends on its format:
+
+| Model format | iOS device | iOS Simulator | macOS | Android, Linux, Windows |
+|--------------|------------|---------------|-------|-------------------------|
+| GGUF (llama.cpp: LLMs, vision-language models) | Metal GPU | CPU | Metal GPU | CPU |
+| Whisper (whisper.cpp) | CPU; optional Core ML encoder | CPU; optional Core ML encoder | Metal GPU | CPU |
+| ONNX (ONNX Runtime) | CPU | CPU | CPU | CPU |
+
+On iOS, whisper.cpp runs the encoder on Core ML when a
+`<model>-encoder.mlmodelc` (e.g. `ggml-base.en-encoder.mlmodelc`) sits beside
+the model file. ONNX Runtime's Core ML execution provider is linked on iOS and
+macOS, but the SDK does not select it yet, so ONNX models run on the CPU. No
+path uses NNAPI or DirectML.

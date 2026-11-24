@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "choice-null-descriptions",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Null descriptions print the key, underscores as spaces",
+  "covers": [
+    "description-null"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"needs_human\": null, \"auto_reply\": null, \"spam\": null, \"two__underscores_\": null}}}}",
+  "artifact": "d1-2b-hf"
+}

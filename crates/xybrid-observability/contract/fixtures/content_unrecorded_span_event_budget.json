@@ -1,0 +1,159 @@
+{
+  "config": {
+    "content_capture": "span_and_event",
+    "logs": true,
+    "max_retained_operation_bytes": 300,
+    "redact_substrings": []
+  },
+  "description": "With span_and_event, content is charged against the retained-operation budget once per destination that receives it. A recording span takes both copies: the input messages cost 95 bytes on the span (16 + 21 + 58) and 243 on the details event (16 + 21 + preflight cost 206), 338 > 300, so they are omitted and listed on both. A suppressed operation has no recording span, so its span copy is never processed or charged: the event copy alone (243) fits and the details event carries it.",
+  "expect": {
+    "logs": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "chat",
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny",
+          "xybrid.genai.content.truncated_attributes": [
+            "gen_ai.input.messages"
+          ]
+        },
+        "event_name": "gen_ai.client.inference.operation.details",
+        "severity_number": 5,
+        "span": "recorded"
+      },
+      {
+        "attributes": {
+          "gen_ai.input.messages": [
+            {
+              "parts": [
+                {
+                  "content": "hi",
+                  "type": "text"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "gen_ai.operation.name": "chat",
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny"
+        },
+        "event_name": "gen_ai.client.inference.operation.details",
+        "severity_number": 5,
+        "span": null
+      }
+    ],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 2,
+            "sum": 0.02
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "chat",
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny",
+          "xybrid.genai.content.truncated_attributes": [
+            "gen_ai.input.messages"
+          ],
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 10,
+        "id": "recorded",
+        "kind": "INTERNAL",
+        "name": "chat tiny",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      }
+    ]
+  },
+  "name": "content_unrecorded_span_event_budget",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "recorded",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp"
+      }
+    },
+    {
+      "at_ms": 1,
+      "id": "recorded",
+      "op": "input_messages",
+      "value": [
+        {
+          "parts": [
+            {
+              "content": "hi",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        }
+      ]
+    },
+    {
+      "at_ms": 10,
+      "id": "recorded",
+      "op": "end"
+    },
+    {
+      "at_ms": 20,
+      "id": "suppressed",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp"
+      },
+      "trace": "suppress"
+    },
+    {
+      "at_ms": 21,
+      "id": "suppressed",
+      "op": "input_messages",
+      "value": [
+        {
+          "parts": [
+            {
+              "content": "hi",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        }
+      ]
+    },
+    {
+      "at_ms": 30,
+      "id": "suppressed",
+      "op": "end"
+    }
+  ]
+}

@@ -97,6 +97,11 @@ do {
     "fallbackToCloud": true,
     "maxGraceTokens": 8,
     "correlationId": "req",
+    "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+    "tracestate": "vendor=1",
+    "conversationId": "conv-1",
+    "suppressTrace": true,
+    "frameSessionId": "camera-7",
     "context": "context:1",
     "cancel": "cancel:1",
   ]))
@@ -110,7 +115,14 @@ do {
   check(options.abortOn == [.thermalHot, .memoryPressureCritical], "abort signals")
   check(options.fallbackToCloud && options.maxGraceTokens == 8, "platform knobs")
   check(options.correlationId == "req", "correlation id")
+  check(options.traceparent == "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01", "traceparent")
+  check(options.tracestate == "vendor=1" && options.conversationId == "conv-1", "trace context")
+  check(options.suppressTrace, "suppress trace")
   check(request.context == "context:1" && request.cancel == "cancel:1", "handles")
+  let untraced = try XybridCodec.decodeRunRequest(js([:]))
+  check(options.frameSessionId == "camera-7", "frame session")
+  check(untraced.options?.suppressTrace == false, "suppressTrace defaults off")
+  check(untraced.options?.frameSessionId == nil, "no frame session by default")
 
   let empty = try XybridCodec.decodeRunRequest(nil)
   check(empty.options == nil && empty.context == nil, "null options")
@@ -146,9 +158,15 @@ let result = XybridResult(
   envelope: XybridEnvelope(kind: .text(text: "hello"), metadata: [XybridMetadataEntry(key: "xybrid.role", value: "assistant")]),
   outputType: .text, modelId: "qwen", latencyMs: 120, executionTarget: .cloud, metrics: metrics,
   toolCalls: [XybridToolCall(id: "1", name: "f", argumentsJson: "{\"a\":1}")],
-  reasoningContent: "because"
+  reasoningContent: "because",
+  observation: XybridObservationRef(traceId: String(repeating: "a", count: 32), spanId: String(repeating: "b", count: 16))
 )
 let encodedResult = XybridCodec.encodeResult(result)
+check((encodedResult["observation"] as? [String: Any])?["span_id"] as? String == String(repeating: "b", count: 16),
+      "observation")
+check(XybridCodec.encodeResult(XybridResult(envelope: result.envelope, outputType: .text, modelId: "qwen", latencyMs: 1,
+                                            executionTarget: .local, metrics: metrics, toolCalls: []))["observation"] == nil,
+      "untraced run has no observation")
 check(encodedResult["outputType"] as? String == "text", "output type")
 check(encodedResult["executionTarget"] as? String == "cloud", "execution target")
 check(encodedResult["reasoningContent"] as? String == "because", "reasoning")
@@ -166,6 +184,54 @@ let unknownSize = XybridCodec.encodeDownloadStatus(
 check(unknownSize["totalBytes"] == nil, "unknown total is absent")
 check(unknownSize["downloadedBytes"] as? Double == 5_000_000_000, "u64 bytes as Double")
 check(unknownSize["state"] as? String == "downloading", "state tag")
+
+// MARK: - Observability
+
+do {
+  let ref = try XybridCodec.decodeObservationRef(js(["trace_id": "t", "span_id": "s"]))
+  check(ref == XybridObservationRef(traceId: "t", spanId: "s"), "observation ref")
+  let idle = XybridSignalStats(accepted: 0, exported: 0, dropped: 0, failed: 0, pending: 0)
+  let stats = XybridCodec.encodeObservabilityStats(XybridObservabilityStats(
+    enabled: true,
+    traces: XybridSignalStats(accepted: 5_000_000_001, exported: 5_000_000_000, dropped: 1, failed: 0, pending: 0),
+    logs: idle,
+    metrics: XybridSignalStats(accepted: 2, exported: 1, dropped: 0, failed: 1, pending: 0)))
+  let traces = stats["traces"] as? JSObject
+  check(stats["enabled"] as? Bool == true && traces?["exported"] as? Double == 5_000_000_000, "per-signal stats")
+  check(traces?["accepted"] as? Double == 5_000_000_001 && traces?["dropped"] as? Double == 1, "trace counters")
+  check((stats["metrics"] as? JSObject)?["failed"] as? Double == 1, "metric counters")
+  check((stats["logs"] as? JSObject)?["pending"] as? Double == 0, "log counters")
+  check(stats["spansExported"] == nil, "no legacy span counters")
+
+  let options = try XybridCodec.decodeObservation(js([
+    "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+    "conversationId": "chat-42",
+  ]))
+  check(options?.traceparent == "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01", "observation parent")
+  check(options?.conversationId == "chat-42" && options?.suppressTrace == false, "observation defaults")
+  let absent = try XybridCodec.decodeObservation(NSNull())
+  check(absent == nil, "absent observation")
+  let observedConfig = try XybridCodec.decodeStreamingConfig(js(["observation": ["suppressTrace": true]]))
+  check(observedConfig.observation?.suppressTrace == true, "ASR config observation")
+
+  let transcript = XybridCodec.encodeTranscription(XybridTranscriptionResult(
+    text: "hello", durationMs: 200, chunksProcessed: 2, observation: ref))
+  check(transcript["text"] as? String == "hello" && transcript["chunksProcessed"] as? Double == 2, "transcript")
+  check((transcript["observation"] as? JSObject)?["span_id"] as? String == "s", "transcript reference")
+  let partial = XybridCodec.encodePartial(XybridPartialResult(
+    text: "he", isStable: false, chunkSequence: 0, audioDurationMs: 100, decoderObservation: nil))
+  check(partial["decoderObservation"] is NSNull, "partial without a decoder run")
+  let headers = try XybridCodec.stringMap(js(["headers": ["b": "2", "a": "1"]]) as! JSObject, "headers", "config")
+  check(headers.map { $0.0 } == ["a", "b"] && headers.map { $0.1 } == ["1", "2"], "string map in key order")
+} catch {
+  check(false, "observability codec threw \(error)")
+}
+expectInvalidArgument("observation without a span id") {
+  _ = try XybridCodec.decodeObservationRef(js(["trace_id": "t"]))
+}
+expectInvalidArgument("non-string header") {
+  _ = try XybridCodec.stringMap(js(["headers": ["a": 1]]) as! JSObject, "headers", "config")
+}
 
 // MARK: - Live ASR
 
@@ -186,6 +252,32 @@ do {
   check(false, "streaming config threw \(error)")
 }
 expectInvalidArgument("partial float") { _ = try XybridCodec.float32Samples(Data([1, 2, 3]).base64EncodedString()) }
+
+// MARK: - Decisions (no native model required)
+
+do {
+  let raw = #"{"z":18446744073709551615,"a":9007199254740993,"zero":-0.0}"#
+  let request = try XybridCodec.decodeDecisionRequest(js([
+    "state": ["kind": "json", "jsonText": raw],
+    "questions": [["id": "q", "instructions": ["kind": "text", "text": "choose"],
+      "kind": ["kind": "choice", "options": [["key": "a"]]]]],
+  ]))
+  if case .json(let text)? = request.state { check(text == raw, "decision JSON is verbatim") }
+  else { check(false, "decision JSON content") }
+  let requestAgain = try XybridCodec.decodeDecisionRequest(js(XybridCodec.encodeDecisionRequest(request)))
+  check(requestAgain == request, "ordered decision request round trip")
+  let probability = 0.5000000018693014
+  let decisions = XybridDecisions(answers: [XybridDecisionAnswer(questionId: "q", distribution: [
+    XybridDecisionScore(key: "0", rawScore: 0, probability: 1 - probability, origin: .caller),
+    XybridDecisionScore(key: "1", rawScore: 0, probability: probability, origin: .caller),
+    XybridDecisionScore(key: "2", rawScore: -.infinity, probability: 0, origin: .caller),
+  ], value: .score(value: 1, statistic: .median), confidence: probability)], passes: 1, inputTokens: 512)
+  let encoded = js(XybridCodec.encodeDecisions(decisions)) as! [String: Any]
+  let answers = encoded["answers"] as! [[String: Any]]
+  let distribution = answers[0]["distribution"] as! [[String: Any]]
+  check((distribution[1]["probability"] as! NSNumber).doubleValue == probability, "decision f64 preserved")
+  check(distribution[2]["rawScore"] as? String == "-Infinity", "decision infinity is a string")
+} catch { check(false, "decision codec threw an error") }
 
 // MARK: - Errors
 

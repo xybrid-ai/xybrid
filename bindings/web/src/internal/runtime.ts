@@ -1,5 +1,5 @@
 import type { DownloadProgress, SelectedAccelerator } from "../types.ts";
-import type { LoadMetrics, Memory, RunMetrics } from "./protocol.ts";
+import type { GenerateObservationContext, LoadMetrics, Memory, RunMetrics } from "./protocol.ts";
 
 export class AcceleratorUnavailableError extends Error {}
 
@@ -15,11 +15,27 @@ export type LlmGeneration = {
   dispose(): Promise<void>;
 };
 
+/** Timing hooks of an observed generation; times are epoch milliseconds. */
+export type GenerationTelemetry = {
+  /** Propagated to the engine (the worker) with the request. */
+  readonly context: GenerateObservationContext;
+  /** One decoded token; `text` is empty while a multi-byte character is still incomplete. */
+  onToken(atMs: number, text: string): void;
+  onComplete(atMs: number): void;
+};
+
+export type EngineGenerateOptions = {
+  readonly maxOutputTokens?: number;
+  readonly telemetry?: GenerationTelemetry;
+};
+
 export type LlmEngine = {
   readonly loaded?: LoadMetrics | undefined;
   readonly lastRun?: RunMetrics | undefined;
   readonly releasedMemory?: Memory | undefined;
-  generate(prompt: string, options: { readonly maxOutputTokens?: number }): Promise<LlmGeneration>;
+  /** Whether `generate` calls the telemetry hooks with engine-measured times. */
+  readonly reportsTiming?: boolean;
+  generate(prompt: string, options: EngineGenerateOptions): Promise<LlmGeneration>;
   delete(): Promise<void>;
 };
 

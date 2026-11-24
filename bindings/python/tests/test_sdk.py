@@ -11,6 +11,7 @@ the failure lands here rather than in a user's code.
 from __future__ import annotations
 
 import inspect
+import threading
 
 import pytest
 
@@ -318,6 +319,128 @@ def test_model_supports_explicit_release() -> None:
     assert hasattr(xybrid.XybridModel, "__exit__")
 
 
+def test_active_native_borrow_delays_explicit_disposal() -> None:
+    started = threading.Event()
+    released = threading.Event()
+
+    class Handle:
+        def __init__(self):
+            self.alive = True
+
+        def __del__(self):
+            if self.alive:
+                self.alive = False
+                released.set()
+
+    xybrid._sugar._guard_handle_finalizer(Handle)
+    handle = Handle()
+
+    def dispose():
+        started.set()
+        handle.__del__()
+
+    with xybrid._sugar._handle_lifetime_lock(handle):
+        disposer = threading.Thread(target=dispose)
+        disposer.start()
+        assert started.wait(timeout=1)
+        assert not released.wait(timeout=0.02)
+        assert handle.alive
+    disposer.join(timeout=1)
+    assert released.is_set()
+    assert id(handle) not in xybrid._sugar._HANDLE_LOCKS
+
+
+def test_models_sharing_a_cancellation_token_run_at_the_same_time(monkeypatch) -> None:
+    """One stop button for several models must not run them one at a time."""
+
+    token = xybrid.XybridCancellationToken()
+    both_inside = threading.Barrier(2, timeout=2)
+    outcomes = []
+
+    def native_run(*_args):
+        # Returns only once the other model's run is inside the native call
+        # too; a run that waited for the shared token would break the barrier.
+        both_inside.wait()
+        raise RuntimeError("stop before a result is decoded")
+
+    monkeypatch.setattr(bolt._native, "_boltffi_xybrid_model_run", native_run)
+
+    def run_one() -> None:
+        model = xybrid.XybridModel.__new__(xybrid.XybridModel)
+        model._handle = None
+        try:
+            model.run(xybrid.XybridEnvelope.text("hi"), cancel=token)
+        except Exception as error:  # noqa: BLE001 - the kind is the assertion
+            outcomes.append(type(error))
+
+    runs = [threading.Thread(target=run_one) for _ in range(2)]
+    for run in runs:
+        run.start()
+    for run in runs:
+        run.join(timeout=5)
+
+    assert outcomes == [RuntimeError, RuntimeError]
+
+
+def test_a_cancellation_token_is_released_only_after_the_runs_that_borrow_it() -> None:
+    token = xybrid.XybridCancellationToken()
+    borrows = xybrid._sugar._handle_lifetime_lock(token)
+    released = threading.Event()
+
+    def dispose() -> None:
+        token.__del__()
+        released.set()
+
+    with borrows.shared(), borrows.shared():
+        disposer = threading.Thread(target=dispose)
+        disposer.start()
+        assert not released.wait(timeout=0.05)
+        # Still usable by the runs that hold it, and by the caller's stop.
+        token.cancel()
+        assert token.is_cancelled()
+    disposer.join(timeout=1)
+    assert released.is_set()
+    assert token._handle is None
+    assert id(token) not in xybrid._sugar._HANDLE_LOCKS
+
+
+def test_model_property_waiter_keeps_cancellation_live(monkeypatch) -> None:
+    model = xybrid.XybridModel.__new__(xybrid.XybridModel)
+    model._handle = None
+    token = xybrid.XybridCancellationToken()
+    getter_started = threading.Event()
+    native_getter_entered = threading.Event()
+    cancelled = threading.Event()
+    values = []
+
+    def native_getter(_handle):
+        native_getter_entered.set()
+        return True
+
+    monkeypatch.setattr(bolt._native, "_boltffi_xybrid_model_is_loaded", native_getter)
+
+    def read_property():
+        getter_started.set()
+        values.append(model.is_loaded)
+
+    def cancel():
+        token.cancel()
+        cancelled.set()
+
+    with xybrid._sugar._handle_lifetime_lock(model):
+        reader = threading.Thread(target=read_property)
+        reader.start()
+        assert getter_started.wait(timeout=1)
+        stopper = threading.Thread(target=cancel)
+        stopper.start()
+        assert cancelled.wait(timeout=1)
+        assert token.is_cancelled()
+        assert not native_getter_entered.is_set()
+    reader.join(timeout=1)
+    stopper.join(timeout=1)
+    assert values == [True]
+
+
 @pytest.mark.parametrize(
     "subscription",
     [bolt.XybridDownloadProgressSubscription, bolt.XybridModelDownloadProgressSubscription],
@@ -454,3 +577,115 @@ def test_every_generated_error_variant_maps_to_a_typed_exception() -> None:
     ]
 
     assert unmapped == [], f"add typed exceptions for {unmapped} in xybrid/_errors.py"
+
+
+def test_decision_json_factory_preserves_order_and_large_numbers():
+    raw = '{"state":{"z":9223372036854775807,"a":9007199254740993,"f":1.0,"zero":-0.0},"questions":{"q":{"type":"choice","instructions":"choose","criteria":{"a":null}}}}'
+    envelope = xybrid.XybridEnvelope.decision_request_json(raw)
+    assert isinstance(envelope.kind, bolt.XybridEnvelopeKindDecisionRequest)
+    assert envelope.kind.request.state.json_text == '{"z":9223372036854775807,"a":9007199254740993,"f":1.0,"zero":-0.0}'
+    assert envelope.kind.request.questions[0].kind.options[0].key == 'a'
+    typed = xybrid.XybridEnvelope.decision_request(envelope.kind.request)
+    assert typed.kind.request == envelope.kind.request
+
+
+def test_decision_result_accessor_preserves_double_precision_and_infinity():
+    probability = 0.5000000018693014
+    decisions = bolt.XybridDecisions(
+        answers=[bolt.XybridDecisionAnswer(question_id='q', distribution=[
+            bolt.XybridDecisionScore(key='0', raw_score=0.0, probability=1.0-probability, origin=bolt.XybridDecisionOrigin.CALLER),
+            bolt.XybridDecisionScore(key='1', raw_score=1e-8, probability=probability, origin=bolt.XybridDecisionOrigin.CALLER),
+            bolt.XybridDecisionScore(key='2', raw_score=float('-inf'), probability=0.0, origin=bolt.XybridDecisionOrigin.CALLER),
+        ], value=bolt.XybridDecisionValueScore(value=1.0, statistic=bolt.XybridScoreStatistic.MEDIAN), confidence=probability)],
+        passes=1, input_tokens=512,
+    )
+    envelope = bolt.XybridEnvelope(kind=bolt.XybridEnvelopeKindDecisions(decisions=decisions), metadata=[bolt.XybridMetadataEntry(key='tokens_in', value='512'), bolt.XybridMetadataEntry(key='tokens_out', value='0')])
+    result = _result(envelope, bolt.XybridOutputType.DECISIONS)
+    assert result.decisions is decisions
+    assert result.decisions.answers[0].distribution[1].probability == probability
+    assert result.decisions.answers[0].distribution[2].raw_score == float('-inf')
+    assert result.tokens_in == 512
+    assert result.tokens_out == 0
+    assert result.text is None
+
+
+def test_decision_json_factory_refuses_unsigned_overflow_without_content():
+    raw = '{"state":{"private":18446744073709551615},"questions":{"q":{"type":"choice","instructions":"private instructions","criteria":{"a":null}}}}'
+    with pytest.raises(xybrid.InferenceError) as raised:
+        xybrid.XybridEnvelope.decision_request_json(raw)
+    assert str(raised.value) == "Decision request refused: decision number_out_of_range"
+
+
+@pytest.mark.parametrize("exceptional", [False, True])
+def test_manual_observation_context_manager_releases_once(exceptional):
+    observation = bolt.XybridWorkflowObservation("python-test", None)
+    if exceptional:
+        with pytest.raises(RuntimeError):
+            with observation:
+                raise RuntimeError("private application error")
+    else:
+        with observation:
+            observation.complete()
+            observation.cancel()  # first terminal call wins
+    assert observation._handle is None
+    observation.close()  # explicit close and later GC are idempotent
+
+
+def _manual_observation(kind, options=None):
+    if kind == "workflow":
+        return bolt.XybridWorkflowObservation("python-test", options)
+    if kind == "tool":
+        call = bolt.XybridToolCallInfo("test-tool", None, None, None, None)
+        return bolt.XybridToolObservation(call, options)
+    if kind == "inference":
+        request = bolt.XybridInferenceRequest(
+            "chat", "test", "test-model", bolt.XybridExecutionLocation.LOCAL,
+            None, None, False, None, None, None, None, None,
+        )
+        return bolt.XybridInferenceObservation(request, options)
+    info = bolt.XybridModelLoadInfo("test-model", None, None, None, None)
+    return bolt.XybridModelLoadObservation(info, options)
+
+
+@pytest.mark.parametrize("kind", ["workflow", "tool", "inference", "load"])
+def test_manual_observation_rejects_invalid_parent(kind):
+    options = bolt.XybridObservationOptions(
+        traceparent="invalid", tracestate=None, conversation_id=None, suppress_trace=False
+    )
+    with pytest.raises(xybrid.ConfigError, match="invalid traceparent") as raised:
+        _manual_observation(kind, options)
+    assert isinstance(raised.value, xybrid.XybridError)
+    assert isinstance(raised.value.error, bolt.XybridErrorConfigError)
+
+
+@pytest.mark.parametrize("kind", ["workflow", "tool", "inference", "load"])
+def test_manual_observation_native_lifecycle(kind):
+    observation = _manual_observation(kind)
+    assert not observation.is_finished()
+    observation.complete()
+    observation.cancel()
+    assert observation.is_finished()
+    observation.close()
+    observation.close()
+    assert observation._handle is None
+
+
+@pytest.mark.parametrize("kind,method", [
+    ("tool", "record_result"),
+    ("inference", "record_system_instructions"),
+    ("inference", "record_input_messages"),
+    ("inference", "record_output_messages"),
+    ("inference", "record_tool_definitions"),
+])
+def test_manual_observation_rejects_invalid_content(kind, method):
+    with _manual_observation(kind) as observation:
+        with pytest.raises(xybrid.ConfigError):
+            getattr(observation, method)("invalid json")
+
+
+def test_manual_constructor_error_adaptation_preserves_python_errors():
+    constructor = bolt.XybridWorkflowObservation.__init__
+    xybrid._errors._install()
+    assert bolt.XybridWorkflowObservation.__init__ is constructor
+    with pytest.raises(TypeError):
+        bolt.XybridWorkflowObservation()

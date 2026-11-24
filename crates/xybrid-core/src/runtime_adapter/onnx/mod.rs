@@ -5,8 +5,9 @@
 //! - `OnnxRuntimeAdapter`: High-level adapter implementing `RuntimeAdapter` trait
 //! - `OnnxBackend`: Low-level backend implementing `InferenceBackend` trait
 //! - `ONNXSession`: ONNX Runtime session wrapper
-//! - `ONNXMobileRuntimeAdapter`: Mobile-optimized adapter with NNAPI support
-//! - `ExecutionProviderKind`: Execution provider selection (CPU, CoreML, etc.)
+//! - `ONNXMobileRuntimeAdapter`: Android adapter (detects NNAPI; runs on the CPU)
+//! - `ExecutionProviderKind`: Execution provider kinds (CPU, CoreML); every
+//!   session the runtime builds uses CPU
 
 mod adapter;
 mod backend;

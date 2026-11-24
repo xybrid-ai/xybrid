@@ -39,7 +39,7 @@
 [![Swift Package Manager][spm-shield]][spm-url]
 <br>
 [![Ask DeepWiki][deepwiki-shield]][deepwiki-url]
-[![Stars][stars-shield]][stars-url]
+[![Greptile: The War on Bugs][greptile-shield]][greptile-url]
 [![Visitors][visitors-shield]][visitors-url]
 
 </p>
@@ -75,10 +75,12 @@
 [spm-url]: https://github.com/xybrid-ai/xybrid
 
 <!-- Community — flat-square -->
-[deepwiki-shield]: https://deepwiki.com/badge.svg
+<!-- DeepWiki's own badge.svg sits behind a bot checkpoint that GitHub's image
+     proxy can't pass; this is the same badge rendered by shields.io. -->
+[deepwiki-shield]: https://img.shields.io/badge/Ask_DeepWiki-007EC6?labelColor=black&logo=data%3Aimage%2Fpng%3Bbase64%2CiVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAAsVBMVEVHcEwmWMYZy38Akt0gwZoSaFIbYssUmr4gwJkBlN4WbNE4acofwZkBj9k4aMkBk94WgM0bsIM4aMkewJc2ZMM3Z8cbvIwYpHsewJYAftgBkt0fvpgBkt0cv44cv5wzYckAjtsCk90pasUboXsgwJkfwpYfwJg4aMoct44yXswAkd0BkN84Z8cBktwduZIjcO85lM4hwZo5acoBleA6a88iyaABmOQ8b9QhxZ0CnOoizaOW4DOvAAAAMHRSTlMAKCfW%2FAgWA%2F7%2FDfvMc9j7MU%2Frj3XBcRW%2FJMbe7kUxjI%2FlUzzz6tPQkJ%2BjVmW1oeulmmslAAAByUlEQVQ4y32Tia6jIBSGUVFcqliXtlq73rm3d50ERNC%2B%2F4PNQetoptMeE0PgC%2F9%2FFhCaBSH9Hz2J%2BONgPDl2DolSUWY%2FPL8oEQRCfPxHpFc3Ah5wHoiI6I05NXgjAOgQF3Jn1Dlo4XMPDDes09UE2d%2BREvl3lijBg4CrHNmrbcM2u9u5nwsRcAFfFHFY5sZ607Yua3GqpQiKE6G9cZHZThblZ4T2mLnMxde3ATASMUj72o0Pbs1fADDcLHqAjEDugJ3lC%2BztMGYTADcoLaFyH%2B02DP9%2BWS4ahrXE4laALFKcq8vZfscNY8312mxfr27bLJZjnsYhSDIHmUxLu9h9N%2Fep%2B7pazwoZQw%2B1Nwi33epu7c2p8RooeqCdAHMGoOJIq3CUwIMEniRIaHVe3ZVnO2Vgsh1MstEkQUXVUc%2BjXfk3zbemxS6%2BpQmlPtUeALJ8VKj4JHvAelBqFFdSS3h1SPzQKr%2F%2BaRa0%2B0cCIWtJLauG5U%2FfbgyG01uiNqQhyzA8ddKj1OvK28AsZyN3DKE4X6AEWrU1jJx9N7RFpdPxpHU%2FtMOQG9SjfTp3Yz8KgRVKpfx88Dqhpseq606h%2F%2Bzxfh6LJ8eEDKWbxx9XEDwqzP1SVgAAAABJRU5ErkJggg%3D%3D
 [deepwiki-url]: https://deepwiki.com/xybrid-ai/xybrid
-[stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat-square
-[stars-url]: https://github.com/xybrid-ai/xybrid/stargazers
+[greptile-shield]: https://www.greptile.com/badge.svg
+[greptile-url]: https://www.greptile.com/?utm_source=oss_badge&utm_medium=readme&utm_campaign=greptile_for_open_source
 [twitter-shield]: https://img.shields.io/badge/Follow-%40xybrid__ai-000000?style=for-the-badge&logo=x&logoColor=white
 [twitter-url]: https://x.com/xybrid_ai
 [visitors-shield]: https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid
@@ -137,7 +139,7 @@ xybrid run --model kokoro-82m --input-text "国破山河在，城春草木深" -
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.16.0
+  xybrid_flutter: ^0.21.0
 ```
 
 **运行模型：**
@@ -154,7 +156,7 @@ final result = await model.run(XybridEnvelope.text('国破山河在，城春草�
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.16.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.21.0")
 }
 ```
 
@@ -176,7 +178,7 @@ val result = model.runAsync(Envelope.text("国破山河在，城春草木深"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.16.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.21.0")
 ]
 ```
 
@@ -225,7 +227,7 @@ var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 
 ```toml
 [dependencies]
-xybrid = "0.16.0"
+xybrid = "0.21.0"
 ```
 
 **运行模型：**
@@ -247,7 +249,8 @@ let result = model.run(&Envelope::text("国破山河在，城春草木深"))?;
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny-ggml  # 语音 → 文本
+  - id: asr
+    model: whisper-tiny-ggml  # 语音 → 文本
   - model: qwen2.5-0.5b       # 用 LLM 处理
   - model: kokoro-82m         # 文本 → 语音
 ```
@@ -265,17 +268,23 @@ final result = await pipeline.run(XybridEnvelope.audio(bytes: audioBytes, sample
 
 **Kotlin:**
 ```kotlin
-// 多模型流水线（MMP）支持即将推出，当前请使用单模型加载
+val pipeline = XybridPipeline.fromYamlAsync(yamlString)
+val result = pipeline.runAsync(inputEnvelope)
+val transcript = result.stage("asr")?.text  // 每个阶段的输出，而不只是最后一个
 ```
 
 **Swift:**
 ```swift
-// 多模型流水线（MMP）支持即将推出，当前请使用单模型加载
+let pipeline = try await XybridPipeline.fromYamlAsync(yamlString)
+let result = try await pipeline.runAsync(envelope: inputEnvelope)
+let transcript = result.stage("asr")?.text  // 每个阶段的输出，而不只是最后一个
 ```
 
 **Unity (C#):**
 ```csharp
-// 多模型流水线（MMP）支持即将推出，当前请使用单模型加载
+using var pipeline = Pipeline.FromYaml(yamlString);
+PipelineResult result = pipeline.Run(inputEnvelope);
+string transcript = result.Stage("asr")?.Text;  // 每个阶段的输出，而不只是最后一个
 ```
 
 **Rust:**
@@ -348,13 +357,15 @@ Xybrid 支持**任意** ONNX、GGUF 或 SafeTensors 模型，只需提供一个 
 
 ```sh
 # 将 xybrid skills 安装到你的项目中
-curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | sh
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | bash
 
 # 从 HuggingFace 模型生成 model_metadata.json
 claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 ```
 
 Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚本会为 Claude Code（`.claude/skills`）和 Codex（`.codex/skills`）创建符号链接。
+
+安装脚本还会添加 `/xybrid-connect`，无需注册即可把你的项目连接到 Xybrid 控制台。它运行 `xybrid connect`（需要 CLI 0.18.0 或更高版本）创建一个临时工作区，把受限密钥保存在已加入 gitignore 的文件中，并给你一个私密链接，用 GitHub 认领该工作区。如果不认领，密钥会在 7 天后停止工作，工作区会在 14 天后被删除。参见 [API 密钥](https://docs.xybrid.dev/zh/docs/concepts/api-keys#临时工作区)。
 
 **手动创建** — 在模型目录中新建 `model_metadata.json`：
 
@@ -370,7 +381,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 }
 ```
 
-完整 schema 见 [model metadata 文档](docs/sdk/API_REFERENCE.md)，或参考 [`integration-tests/fixtures/models/`](integration-tests/fixtures/models/) 中的现有示例。
+完整 schema 见 [model metadata 文档](docs/sdk/MODEL_METADATA.md)，或参考 [`integration-tests/fixtures/models/`](integration-tests/fixtures/models/) 中的现有示例。
 
 </details>
 
@@ -388,9 +399,9 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 | 嵌入模型 | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | 多模型流水线（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 模型下载与缓存 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 硬件加速 | Metal, ANE | CPU | Metal, ANE | CPU，可选 Vulkan | CPU |
+| 硬件加速 | 真机 Metal（llama.cpp）；模拟器 CPU | CPU | Metal | CPU，可选 Vulkan | CPU |
 
-**SDK MMP 支持：** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
+**SDK MMP 支持：** Flutter ✅ · Rust ✅ · Kotlin ✅ · Swift ✅ · React Native ✅ · Unity ✅
 
 **工具调用：** 本地模型调用你定义的函数——工具就是普通数据，循环由你的代码掌控。
 参见[工具调用指南](https://docs.xybrid.dev/zh/docs/guides/tool-calling)。
@@ -410,7 +421,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 - **无需发版即可更换模型** — 模型在运行时从注册表解析并缓存在设备上。
 - **云端回退** — 按次调用选择启用（[文档](https://docs.xybrid.dev/zh/docs/concepts/hybrid-execution)）。
 - **可控的遥测** — 需通过 API 密钥主动启用（[文档](docs/telemetry/registry.md)）。
-- **硬件加速** — Apple 平台支持 Metal 与 Apple Neural Engine，Linux 可选启用 Vulkan；Android 与 Windows 目前为 CPU（[文档](docs/INSTALLATION.md#platform-features)）。
+- **硬件加速** — Apple 平台支持 Metal，Linux 可选启用 Vulkan；Android 与 Windows 目前为 CPU（[文档](docs/INSTALLATION.md#platform-features)）。
 
 ### 与其他方案对比
 

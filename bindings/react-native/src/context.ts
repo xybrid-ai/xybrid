@@ -25,7 +25,7 @@ export class ConversationContext {
     readonly handle: string,
   ) {}
 
-  /** A new, empty conversation; `id` defaults to a fresh one (telemetry correlation). */
+  /** A new, empty conversation; `id` defaults to a fresh one (trace correlation). */
   static async create(id?: string): Promise<ConversationContext> {
     return new ConversationContext(await NativeXybrid.createContext(id ?? null));
   }

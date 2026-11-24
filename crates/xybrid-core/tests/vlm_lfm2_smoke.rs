@@ -95,13 +95,11 @@ fn lfm2_vl_runtime_caption_smoke_when_fixture_is_downloaded() {
         .expect("multipart VLM input");
     let config = GenerationConfig::greedy().with_max_tokens(24);
 
-    xybrid_core::tracing::init_tracing(true);
-    xybrid_core::tracing::reset_tracing();
+    let stage_trace = xybrid_core::tracing::capture();
     let output = executor
         .execute(&metadata, &input, Some(&config))
         .expect("LFM2-VL runtime caption smoke succeeds");
-    let spans = xybrid_core::tracing::get_stages_json();
-    xybrid_core::tracing::reset_tracing();
+    let spans = stage_trace.stages_json();
 
     match &output.kind {
         EnvelopeKind::Text(text) => {

@@ -67,13 +67,53 @@ export interface MultiPartEnvelope extends EnvelopeBase {
   parts: Envelope[];
 }
 
+/** Content is text or raw ordered JSON; never decode JSON through a JS object. */
+export type DecisionContent = { kind: 'text'; text: string } | { kind: 'json'; jsonText: string };
+export interface DecisionOption { key: string; description?: DecisionContent }
+export interface DecisionLevel { description?: DecisionContent }
+export type DecisionQuestionKind =
+  | { kind: 'choice'; options: DecisionOption[] }
+  | { kind: 'yesNo'; yes?: DecisionContent; no?: DecisionContent }
+  | { kind: 'score'; levels: DecisionLevel[] };
+export interface DecisionQuestion { id: string; instructions?: DecisionContent; kind: DecisionQuestionKind }
+export interface DecisionRequest { state?: DecisionContent; questions: DecisionQuestion[] }
+export type DecisionOrigin = 'caller' | 'fixed';
+export type ScoreStatistic = 'median' | 'expected';
+export interface DecisionScore {
+  key: string;
+  /** Negative infinity is a string because JSON has no infinity number. */
+  rawScore: number | '-Infinity';
+  probability: number;
+  origin: DecisionOrigin;
+}
+export type DecisionValue =
+  | { kind: 'choice'; key: string }
+  | { kind: 'yesNo'; pYes: number }
+  | { kind: 'score'; value: number; statistic: ScoreStatistic };
+export interface DecisionAnswer {
+  questionId: string;
+  distribution: DecisionScore[];
+  value: DecisionValue;
+  confidence?: number;
+}
+export interface Decisions { answers: DecisionAnswer[]; passes: number; inputTokens: number }
+/** Exactly one typed request or raw Liquid SystemOne JSON string. */
+export type DecisionRequestEnvelope = EnvelopeBase & ({
+  kind: 'decisionRequest'; request: DecisionRequest; requestJson?: never;
+} | {
+  kind: 'decisionRequest'; requestJson: string; request?: never;
+});
+export interface DecisionsEnvelope extends EnvelopeBase { kind: 'decisions'; decisions: Decisions }
+
 /** Input to (and output of) a model. Narrow on `kind`. */
 export type Envelope =
   | TextEnvelope
   | AudioEnvelope
   | EmbeddingEnvelope
   | ImageEnvelope
-  | MultiPartEnvelope;
+  | MultiPartEnvelope
+  | DecisionRequestEnvelope
+  | DecisionsEnvelope;
 
 /** The payload kinds an {@link Envelope} can carry. */
 export type EnvelopeKind = Envelope['kind'];
@@ -139,7 +179,15 @@ export type AbortSignalKind =
 export type ExecutionTarget = 'local' | 'cloud';
 
 /** What kind of payload a model produces. */
-export type OutputType = 'text' | 'audio' | 'embedding' | 'unknown';
+export type OutputType = 'text' | 'audio' | 'embedding' | 'unknown' | 'decisions';
+
+/** A PCM16 little-endian speech packet. Offsets count samples per channel. */
+export interface TtsAudioChunk {
+  pcmBase64: string;
+  sampleRate: number;
+  channels: number;
+  firstSample: number;
+}
 
 /** Latency of one pipeline stage. */
 export interface StageLatency {
@@ -168,6 +216,38 @@ export interface InferenceMetrics {
   stageLatenciesMs: StageLatency[];
 }
 
+/**
+ * Trace and span ids (lowercase hex, 32 and 16 characters) of a traced run.
+ * Pass it to `Observability.recordFeedback` / `recordEvaluation`.
+ *
+ * The member names are the portable reference shape every JavaScript package
+ * shares (`{ trace_id, span_id }`), so a reference from this SDK can be handed
+ * to `@xybrid/observability` or a server unchanged.
+ */
+export interface ObservationRef {
+  trace_id: string;
+  span_id: string;
+}
+
+/**
+ * Delivery counters of one signal: live while export runs, the final ones after
+ * shutdown until the next init, all zero before any.
+ */
+export interface SignalStats {
+  accepted: number;
+  exported: number;
+  dropped: number;
+  failed: number;
+  pending: number;
+}
+
+export interface ObservabilityStats {
+  enabled: boolean;
+  traces: SignalStats;
+  logs: SignalStats;
+  metrics: SignalStats;
+}
+
 /** The result of one inference. */
 export interface InferenceResult {
   /** The output, losslessly (payload plus metadata). */
@@ -175,6 +255,12 @@ export interface InferenceResult {
   outputType: OutputType;
   /** The model that answered — identical on the local and cloud legs. */
   modelId: string;
+  /** Ordered typed decisions; probabilities retain double precision. */
+  decisions?: Decisions;
+  /** Total evaluated input tokens across passes. */
+  tokensIn?: number;
+  /** Generated tokens; zero for decisions. */
+  tokensOut?: number;
   /** Text output, when the model produced text. */
   text?: string;
   /** Audio output (base64), when the model produced audio. */
@@ -192,6 +278,8 @@ export interface InferenceResult {
   metrics: InferenceMetrics;
   /** Where this answer actually came from. */
   executionTarget: ExecutionTarget;
+  /** The run's trace reference; absent when observability is off or the run was not traced. */
+  observation?: ObservationRef;
 }
 
 /** One token from a streaming run. */
@@ -251,6 +339,8 @@ export interface VoiceInfo {
 
 /** Identity and capabilities of a loaded model. */
 export interface ModelInfo {
+  /** Immutable reference for the load that created this model. */
+  loadObservationRef: ObservationRef | null;
   /** Registry / metadata id — not the native handle. */
   modelId: string;
   version: string;
@@ -310,6 +400,7 @@ export interface StageResult {
   /** Stages of one pipeline can run in different places. */
   executionTarget: ExecutionTarget;
   metrics: InferenceMetrics;
+  observation?: ObservationRef;
 }
 
 /** Result of a pipeline run: the final output plus every stage's own. */
@@ -323,6 +414,7 @@ export interface PipelineResult {
   latencyMs: number;
   /** Every executed stage, in order. */
   stages: StageResult[];
+  observation?: ObservationRef;
 }
 
 /** Static description of a loaded pipeline. */
@@ -334,6 +426,7 @@ export interface PipelineInfo {
 
 /** Chunking options for a live ASR session. */
 export interface StreamingConfig {
+  observation?: ObservationOptions;
   /** Must be 16000 — the ASR backends are fixed there. Default 16000. */
   sampleRate?: number;
   /**
@@ -351,6 +444,8 @@ export interface StreamingConfig {
 
 /** A partial transcript from a live ASR session. */
 export interface PartialResult {
+  /** Most recent actual decoder execution; cached reads retain this reference. */
+  decoderObservation: ObservationRef | null;
   /** Transcript so far. Cumulative — replace the previous partial. */
   text: string;
   /** `true` once this span is committed and will not change. */
@@ -359,4 +454,25 @@ export interface PartialResult {
   chunkSequence: number;
   /** Audio covered so far, in milliseconds. */
   audioDurationMs: number;
+}
+
+/** Discriminators used by the generated native decision enums. */
+export type DecisionContentKind = DecisionContent['kind'];
+export type DecisionQuestionType = DecisionQuestionKind['kind'];
+export type DecisionValueKind = DecisionValue['kind'];
+
+/** W3C parent, suppression and correlation shared by load and ASR APIs. */
+export interface ObservationOptions {
+  traceparent?: string;
+  tracestate?: string;
+  conversationId?: string;
+  suppressTrace?: boolean;
+}
+
+/** Final transcript and the workflow covering the utterance. */
+export interface TranscriptionResult {
+  text: string;
+  durationMs: number;
+  chunksProcessed: number;
+  observation: ObservationRef | null;
 }

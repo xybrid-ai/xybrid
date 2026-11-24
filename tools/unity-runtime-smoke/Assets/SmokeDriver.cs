@@ -31,11 +31,14 @@ public sealed class SmokeDriver : MonoBehaviour
         Envelope envelope = Envelope.Text("hello from il2cpp");
         Debug.Log($"[XybridSmoke] envelope={envelope}");
 
-        using (var config =
-               new TelemetryConfig("smoke-key").WithEndpoint("https://ingest.example"))
+        using (var config = ObservabilityConfig.Xybrid("smoke-key")
+                   .WithTracesEndpoint("https://ingest.example/v1/traces")
+                   .WithService("xybrid-smoke", XybridClient.Version)
+                   .WithMetadataOnly())
         {
-            Debug.Log($"[XybridSmoke] endpoint={config.Endpoint}");
+            Debug.Log($"[XybridSmoke] traces={config.TracesEndpoint}");
         }
+        Debug.Log($"[XybridSmoke] observability={XybridClient.IsObservabilityEnabled}");
 
         GenerationConfig generation = GenerationConfig.Greedy();
         Debug.Log($"[XybridSmoke] generation={generation}");

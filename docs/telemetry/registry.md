@@ -1,8 +1,8 @@
 # Registry Call Telemetry
 
-The Xybrid SDK attaches a single header — `X-Xybrid-Client` — to every metadata request it makes against the model registry. The header reports the binding that originated the call, the SDK and core versions, the build platform, and the active backend feature set. It is the only telemetry surface on registry traffic; outcome reporting (`/v1/anon` and friends) is intentionally not part of this path.
+The Xybrid SDK attaches a single header — `X-Xybrid-Client` — to every metadata request it makes against the model registry. The header reports the binding that originated the call, the SDK and core versions, the build platform, the active backend feature set, and whether the process runs under CI. It is the only telemetry surface on registry traffic; outcome reporting (`/v1/anon` and friends) is intentionally not part of this path.
 
-This page documents exactly what is sent, why it exists, and how to opt out.
+This page documents exactly what is sent, why it exists, how to opt out, and how to label CI runs.
 Resolve requests also carry functional compatibility parameters, including
 an optional runtime OS token; these are separate from the telemetry header.
 
@@ -14,7 +14,7 @@ Set the environment variable before any registry call is made:
 export XYBRID_TELEMETRY_OPTOUT=1
 ```
 
-When the variable is set to any of `1`, `true`, or `yes` (case-insensitive, surrounding whitespace ignored), the SDK omits `X-Xybrid-Client` from every registry request. The opt-out also disables the platform telemetry exporter described in [telemetry.md](../sdk/telemetry.md). It does not remove the `backends` or optional `os` query parameters from resolve requests, because they decide which file the registry serves; see [Resolve compatibility](#resolve-compatibility).
+When the variable is set to any of `1`, `true`, or `yes` (case-insensitive, surrounding whitespace ignored), the SDK omits `X-Xybrid-Client` from every registry request and omits automatically detected device attributes from observability resources. Explicit OpenTelemetry export is configured separately and is not disabled by this variable. Use `OTEL_SDK_DISABLED=true` for the CLI or environment-based OTLP configuration; applications using explicit configurations can omit initialization or call `shutdown_observability`. See the [SDK observability guide](../../crates/xybrid-sdk/README.md#observability-and-local-telemetry). The opt-out does not remove the `backends` or optional `os` query parameters from resolve requests, because they decide which file the registry serves; see [Resolve compatibility](#resolve-compatibility).
 
 The value is read once per process and cached, so changing it after the first registry call has no effect for that run.
 
@@ -34,12 +34,37 @@ registry telemetry: disabled (XYBRID_TELEMETRY_OPTOUT=1)
 
 The command exits 0 in both cases — it is a status report, not an error.
 
+## Labelling CI runs
+
+Test suites and pipelines resolve models too, often fake or unpublished ones, and their requests would otherwise count as real use. When the SDK runs under continuous integration it ends the header with `; ci=1`. The registry records the label, so its analytics can leave those requests out of the fleet numbers; registries that predate the key ignore it.
+
+Two environment variables decide, in this order (values are case-insensitive, surrounding whitespace ignored):
+
+1. `XYBRID_CI`: `1` or `true` labels the run and `0` or `false` doesn't, whatever `CI` says. Any other value is ignored.
+2. `CI`: any value but empty, `0` or `false` labels the run.
+
+GitHub Actions, GitLab CI, CircleCI, Buildkite, Travis CI and most other CI services set `CI` on every job, so nothing needs configuring there. Coding-agent sandboxes and development machines that run tests or scripts against the registry don't set it; label them with:
+
+```sh
+export XYBRID_CI=1
+```
+
+The same works for a build service that doesn't set `CI` (Jenkins, for example). `XYBRID_CI=0` keeps a process that serves real users from being labelled: a CI job that does, or a container image that bakes in `ENV CI=true`, as many Node images do.
+
+`ci=0` is never sent: a run outside CI sends the header without a `ci` key. The opt-out wins over the label: with `XYBRID_TELEMETRY_OPTOUT` set, no header is sent at all. Like the opt-out, both variables are read once per process, on the first registry call, and cached.
+
 ## What is sent
 
 The header is a single line, semicolon-separated:
 
 ```
 X-Xybrid-Client: binding=flutter; sdk_version=0.11.0; core_version=0.11.0; platform=ios-arm64; backends=asr-whispercpp,asr-whispercpp-coreml,llm-llamacpp,llm-llamacpp-vision,ort-coreml,ort-download,vision
+```
+
+Under CI, the same header ends with `ci=1`:
+
+```
+X-Xybrid-Client: binding=rust; sdk_version=0.19.0; core_version=0.19.0; platform=linux-x86_64; backends=vision; ci=1
 ```
 
 | Field | Type | Description |
@@ -49,6 +74,7 @@ X-Xybrid-Client: binding=flutter; sdk_version=0.11.0; core_version=0.11.0; platf
 | `core_version` | semver-ish string | `xybrid-core` package version, baked in via the same mechanism. Usually equal to `sdk_version` but reported independently so version skews surface. |
 | `platform` | enum string | Compile-time target triple summary. See the table below. |
 | `backends` | comma-separated list | Alphabetical list of enabled runtime feature flags from `xybrid_core::features::enabled()`. Never empty: `vision` is reported unconditionally because the vision pipeline is always compiled in. |
+| `ci` | `1`, optional | Present, always as `ci=1` and last, only when the process runs under CI. See [Labelling CI runs](#labelling-ci-runs). |
 
 ### `binding` values
 
@@ -60,9 +86,9 @@ X-Xybrid-Client: binding=flutter; sdk_version=0.11.0; core_version=0.11.0; platf
 | `kotlin` | Android library via BoltFFI. | `Xybrid.init(context)` (`bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt`); until then, the native library's Android fallback (`crates/xybrid-bolt/src/lib.rs`) |
 | `python` | Python package via BoltFFI. | `import xybrid` (`bindings/python/xybrid/__init__.py`) |
 | `react-native` | React Native package, wrapping the Swift and Kotlin SDKs. | Every bridged call, before the SDK it wraps (`bindings/react-native/ios/XybridModuleImpl.swift`, `bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt`) |
-| `swift` | iOS / macOS Swift package via BoltFFI. | `Xybrid.initialize()` (`bindings/apple/Sources/Xybrid/Xybrid.swift`); until then, the native library's Apple-platform fallback, set by any model, download or pipeline constructor (`crates/xybrid-bolt/src/lib.rs`) |
+| `swift` | iOS Swift package via BoltFFI. | `Xybrid.initialize()` (`bindings/apple/Sources/Xybrid/Xybrid.swift`); until then, the native library's Apple-platform fallback, set by any model, download or pipeline constructor (`crates/xybrid-bolt/src/lib.rs`) |
 | `unity` | Unity / C# binding via BoltFFI. | Static constructors on the generated types that reach native code (`bindings/unity/Runtime/BoltSupplement/BindingRegistration.cs`) |
-| `web` | Browser SDK (`@xybrid/web`). It sends only `binding`, `sdk_version` and `platform`, and has no opt-out: browsers have no environment variables. | Every registry resolve request (`bindings/web/src/internal/registry.ts`) |
+| `web` | Browser SDK (`@xybrid/web`). It sends only `binding`, `sdk_version` and `platform`, and has no opt-out or CI label: browsers have no environment variables. | Every registry resolve request (`bindings/web/src/internal/registry.ts`) |
 
 The first registration in a process wins. The native library's `swift` / `kotlin` fallback on Apple platforms and Android is not a registration: it applies only until an SDK registers, so React Native, Unity and Python report their own names even if a native call ran first.
 
@@ -121,6 +147,7 @@ The header carries only the fields above. It does **not** carry:
 - No device fingerprints (no chip family, no RAM size, no OS version, no kernel version)
 - No prompts, no inputs, no outputs, no error messages
 - No `device_id` or any session/trace identifier
+- No CI details beyond `ci=1` (no CI service name, repository, job or build identifier)
 
 The optional `os` query parameter does report a runtime OS or GNU libc version
 for resolve compatibility. It is separate from the header, is excluded from
@@ -136,6 +163,8 @@ We use the aggregate distribution of `binding`, `platform`, and `backends` to pr
 - Which bindings actually see usage (and which can be deprioritized)
 - Which platforms are deployed in the wild (so we know which CI matrices matter)
 - Which backend combinations users assemble (so we know which feature flag combinations to keep working)
+
+`ci=1` keeps test traffic out of those numbers: a CI suite that resolves fake model ids would otherwise read as users failing to find models.
 
 The data is summarized at the fleet level. The registry server stores parsed values bounded to a small allowlist — anything outside the allowlist is recorded as the literal string `unknown` so cardinality stays bounded and a single noisy app cannot pollute the dataset.
 

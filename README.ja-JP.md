@@ -39,7 +39,7 @@
 [![Swift Package Manager][spm-shield]][spm-url]
 <br>
 [![Ask DeepWiki][deepwiki-shield]][deepwiki-url]
-[![Stars][stars-shield]][stars-url]
+[![Greptile: The War on Bugs][greptile-shield]][greptile-url]
 [![Visitors][visitors-shield]][visitors-url]
 
 </p>
@@ -75,10 +75,12 @@
 [spm-url]: https://github.com/xybrid-ai/xybrid
 
 <!-- Community — flat-square -->
-[deepwiki-shield]: https://deepwiki.com/badge.svg
+<!-- DeepWiki's own badge.svg sits behind a bot checkpoint that GitHub's image
+     proxy can't pass; this is the same badge rendered by shields.io. -->
+[deepwiki-shield]: https://img.shields.io/badge/Ask_DeepWiki-007EC6?labelColor=black&logo=data%3Aimage%2Fpng%3Bbase64%2CiVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAAsVBMVEVHcEwmWMYZy38Akt0gwZoSaFIbYssUmr4gwJkBlN4WbNE4acofwZkBj9k4aMkBk94WgM0bsIM4aMkewJc2ZMM3Z8cbvIwYpHsewJYAftgBkt0fvpgBkt0cv44cv5wzYckAjtsCk90pasUboXsgwJkfwpYfwJg4aMoct44yXswAkd0BkN84Z8cBktwduZIjcO85lM4hwZo5acoBleA6a88iyaABmOQ8b9QhxZ0CnOoizaOW4DOvAAAAMHRSTlMAKCfW%2FAgWA%2F7%2FDfvMc9j7MU%2Frj3XBcRW%2FJMbe7kUxjI%2FlUzzz6tPQkJ%2BjVmW1oeulmmslAAAByUlEQVQ4y32Tia6jIBSGUVFcqliXtlq73rm3d50ERNC%2B%2F4PNQetoptMeE0PgC%2F9%2FFhCaBSH9Hz2J%2BONgPDl2DolSUWY%2FPL8oEQRCfPxHpFc3Ah5wHoiI6I05NXgjAOgQF3Jn1Dlo4XMPDDes09UE2d%2BREvl3lijBg4CrHNmrbcM2u9u5nwsRcAFfFHFY5sZ607Yua3GqpQiKE6G9cZHZThblZ4T2mLnMxde3ATASMUj72o0Pbs1fADDcLHqAjEDugJ3lC%2BztMGYTADcoLaFyH%2B02DP9%2BWS4ahrXE4laALFKcq8vZfscNY8312mxfr27bLJZjnsYhSDIHmUxLu9h9N%2Fep%2B7pazwoZQw%2B1Nwi33epu7c2p8RooeqCdAHMGoOJIq3CUwIMEniRIaHVe3ZVnO2Vgsh1MstEkQUXVUc%2BjXfk3zbemxS6%2BpQmlPtUeALJ8VKj4JHvAelBqFFdSS3h1SPzQKr%2F%2BaRa0%2B0cCIWtJLauG5U%2FfbgyG01uiNqQhyzA8ddKj1OvK28AsZyN3DKE4X6AEWrU1jJx9N7RFpdPxpHU%2FtMOQG9SjfTp3Yz8KgRVKpfx88Dqhpseq606h%2F%2Bzxfh6LJ8eEDKWbxx9XEDwqzP1SVgAAAABJRU5ErkJggg%3D%3D
 [deepwiki-url]: https://deepwiki.com/xybrid-ai/xybrid
-[stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat-square
-[stars-url]: https://github.com/xybrid-ai/xybrid/stargazers
+[greptile-shield]: https://www.greptile.com/badge.svg
+[greptile-url]: https://www.greptile.com/?utm_source=oss_badge&utm_medium=readme&utm_campaign=greptile_for_open_source
 [twitter-shield]: https://img.shields.io/badge/Follow-%40xybrid__ai-000000?style=for-the-badge&logo=x&logoColor=white
 [twitter-url]: https://x.com/xybrid_ai
 [visitors-shield]: https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid
@@ -137,7 +139,7 @@ xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.16.0
+  xybrid_flutter: ^0.21.0
 ```
 
 **モデルを実行:**
@@ -154,7 +156,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.16.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.21.0")
 }
 ```
 
@@ -176,7 +178,7 @@ val result = model.runAsync(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.16.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.21.0")
 ]
 ```
 
@@ -225,7 +227,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.16.0"
+xybrid = "0.21.0"
 ```
 
 **モデルを実行:**
@@ -247,7 +249,8 @@ let result = model.run(&Envelope::text("Hello world"))?;
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny-ggml  # 音声 → テキスト
+  - id: asr
+    model: whisper-tiny-ggml  # 音声 → テキスト
   - model: qwen2.5-0.5b       # LLMで処理
   - model: kokoro-82m         # テキスト → 音声
 ```
@@ -265,17 +268,23 @@ final result = await pipeline.run(XybridEnvelope.audio(bytes: audioBytes, sample
 
 **Kotlin:**
 ```kotlin
-// マルチモデルパイプライン（MMP）サポートは近日対応予定 — 現在は単一モデルの読み込みを使用してください
+val pipeline = XybridPipeline.fromYamlAsync(yamlString)
+val result = pipeline.runAsync(inputEnvelope)
+val transcript = result.stage("asr")?.text  // 最後のステージだけでなく、すべてのステージの出力
 ```
 
 **Swift:**
 ```swift
-// マルチモデルパイプライン（MMP）サポートは近日対応予定 — 現在は単一モデルの読み込みを使用してください
+let pipeline = try await XybridPipeline.fromYamlAsync(yamlString)
+let result = try await pipeline.runAsync(envelope: inputEnvelope)
+let transcript = result.stage("asr")?.text  // 最後のステージだけでなく、すべてのステージの出力
 ```
 
 **Unity (C#):**
 ```csharp
-// マルチモデルパイプライン（MMP）サポートは近日対応予定 — 現在は単一モデルの読み込みを使用してください
+using var pipeline = Pipeline.FromYaml(yamlString);
+PipelineResult result = pipeline.Run(inputEnvelope);
+string transcript = result.Stage("asr")?.Text;  // 最後のステージだけでなく、すべてのステージの出力
 ```
 
 **Rust:**
@@ -349,13 +358,15 @@ Xybridは**任意の**ONNX、GGUF、またはSafeTensorsモデルで動作しま
 
 ```sh
 # プロジェクトにxybridスキルをインストール
-curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | sh
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | bash
 
 # HuggingFaceモデルからmodel_metadata.jsonを生成
 claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 ```
 
 スキルはエージェント非依存で、[`agents/skills/`](agents/skills/)に配置されます。インストーラーはClaude Code（`.claude/skills`）とCodex（`.codex/skills`）にシンボリックリンクを作成します。
+
+インストーラーは`/xybrid-connect`も追加します。サインアップなしでプロジェクトをXybridコンソールに接続するスキルです。`xybrid connect`（CLI 0.18.0以降）を実行して仮のワークスペースを作成し、制限付きキーをgitignore済みのファイルに保存し、GitHubでワークスペースをクレーム（引き継ぎ）するための非公開リンクを渡します。クレームしない場合、キーは7日後に停止し、ワークスペースは14日後に削除されます。詳しくは[APIキー](https://docs.xybrid.dev/en/docs/concepts/api-keys#provisional-workspaces)を参照してください。
 
 **手動の場合** — モデルディレクトリに`model_metadata.json`を作成:
 
@@ -371,7 +382,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 }
 ```
 
-完全なスキーマについては[モデルメタデータドキュメント](docs/sdk/API_REFERENCE.md)を参照するか、[`integration-tests/fixtures/models/`](integration-tests/fixtures/models/)の既存の例をご覧ください。
+完全なスキーマについては[モデルメタデータドキュメント](docs/sdk/MODEL_METADATA.md)を参照するか、[`integration-tests/fixtures/models/`](integration-tests/fixtures/models/)の既存の例をご覧ください。
 
 </details>
 
@@ -389,9 +400,9 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 | 埋め込み | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | マルチモデルパイプライン（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | モデルのダウンロードとキャッシュ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| ハードウェアアクセラレーション | Metal, ANE | CPU | Metal, ANE | CPU、オプトインのVulkan | CPU |
+| ハードウェアアクセラレーション | 実機は Metal（llama.cpp）、シミュレータは CPU | CPU | Metal | CPU、オプトインのVulkan | CPU |
 
-**SDK MMP サポート:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
+**SDK MMP サポート:** Flutter ✅ · Rust ✅ · Kotlin ✅ · Swift ✅ · React Native ✅ · Unity ✅
 
 **ツール呼び出し:** ローカルモデルが自分で定義した関数を呼び出せます。ツールは単なる
 データで、ループを回すのは自分のコードです。詳しくは
@@ -414,7 +425,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 - **アプリを再リリースせずにモデルを差し替え** — モデルは実行時にレジストリから解決され、デバイス上にキャッシュされます。
 - **クラウドフォールバック** — 実行ごとにオプトイン（[ドキュメント](https://docs.xybrid.dev/en/docs/concepts/hybrid-execution)）。
 - **制御できるテレメトリ** — APIキーによるオプトイン（[ドキュメント](docs/telemetry/registry.md)）。
-- **ハードウェアアクセラレーション** — Apple では Metal と Apple Neural Engine、Linux ではオプトインの Vulkan。Android と Windows は現時点では CPU（[ドキュメント](docs/INSTALLATION.md#platform-features)）。
+- **ハードウェアアクセラレーション** — Apple では Metal、Linux ではオプトインの Vulkan。Android と Windows は現時点では CPU（[ドキュメント](docs/INSTALLATION.md#platform-features)）。
 
 ### 比較
 

@@ -8,13 +8,14 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'observability.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'streaming.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `error_chain`, `spawn`, `to_sdk`, `worker_gone`, `worker_loop`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Command`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner< FfiStreamSession>>
 abstract class FfiStreamSession implements RustOpaqueInterface {
@@ -42,7 +43,7 @@ abstract class FfiStreamSession implements RustOpaqueInterface {
   /// If finalization fails in the core, or the worker is already gone.
   ///
   /// [`feed`]: Self::feed
-  Future<String> flush();
+  Future<FfiTranscriptionResult> flush();
 
   /// Reset the session to transcribe fresh audio without reloading the model.
   ///
@@ -73,12 +74,14 @@ class FfiPartialResult {
 
   /// Audio covered so far, in milliseconds.
   final BigInt audioDurationMs;
+  final FfiObservationRef? decoderObservation;
 
   const FfiPartialResult({
     required this.text,
     required this.isStable,
     required this.chunkSequence,
     required this.audioDurationMs,
+    this.decoderObservation,
   });
 
   @override
@@ -86,7 +89,8 @@ class FfiPartialResult {
       text.hashCode ^
       isStable.hashCode ^
       chunkSequence.hashCode ^
-      audioDurationMs.hashCode;
+      audioDurationMs.hashCode ^
+      decoderObservation.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -96,7 +100,8 @@ class FfiPartialResult {
           text == other.text &&
           isStable == other.isStable &&
           chunkSequence == other.chunkSequence &&
-          audioDurationMs == other.audioDurationMs;
+          audioDurationMs == other.audioDurationMs &&
+          decoderObservation == other.decoderObservation;
 }
 
 /// Configuration for a live ASR session.
@@ -117,12 +122,14 @@ class FfiStreamingConfig {
 
   /// Optional Whisper encoder context in mel frames; `None` uses the model default.
   final int? audioCtx;
+  final FfiObservationOptions? observation;
 
   const FfiStreamingConfig({
     required this.sampleRate,
     required this.vad,
     this.language,
     this.audioCtx,
+    this.observation,
   });
 
   @override
@@ -130,7 +137,8 @@ class FfiStreamingConfig {
       sampleRate.hashCode ^
       vad.hashCode ^
       language.hashCode ^
-      audioCtx.hashCode;
+      audioCtx.hashCode ^
+      observation.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -140,7 +148,40 @@ class FfiStreamingConfig {
           sampleRate == other.sampleRate &&
           vad == other.vad &&
           language == other.language &&
-          audioCtx == other.audioCtx;
+          audioCtx == other.audioCtx &&
+          observation == other.observation;
+}
+
+/// Final transcript and the workflow that covered the utterance.
+class FfiTranscriptionResult {
+  final String text;
+  final BigInt durationMs;
+  final BigInt chunksProcessed;
+  final FfiObservationRef? observation;
+
+  const FfiTranscriptionResult({
+    required this.text,
+    required this.durationMs,
+    required this.chunksProcessed,
+    this.observation,
+  });
+
+  @override
+  int get hashCode =>
+      text.hashCode ^
+      durationMs.hashCode ^
+      chunksProcessed.hashCode ^
+      observation.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiTranscriptionResult &&
+          runtimeType == other.runtimeType &&
+          text == other.text &&
+          durationMs == other.durationMs &&
+          chunksProcessed == other.chunksProcessed &&
+          observation == other.observation;
 }
 
 @freezed

@@ -8,6 +8,13 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
+# Full upstream notices retained as explicit native-package assembly inputs.
+filegroup(
+    name = "decision_notices",
+    srcs = ["NOTICE"],
+    visibility = ["//visibility:public"],
+)
+
 # Platforms with the vision (mtmd) backend: the wrapper compiles its mtmd
 # functions + the crate enables `vision`, and //:llama builds/installs libmtmd
 # for the same configs. Android (since #341) + desktop-linux (Flip 1 — the
@@ -32,6 +39,10 @@ _VISION_PLATFORMS = [
 # from //:llama's include dir (installed by the Android mtmd build).
 cc_library(
     name = "wrapper_cc",
+    copts = ["-std=c++17"] + select({
+        "@rules_rs//rs/platforms/config:wasm32-unknown-emscripten": ["-fexceptions"],
+        "//conditions:default": [],
+    }),
     srcs = ["wrapper.cpp"],
     hdrs = ["wrapper.h"],
     defines = select({
@@ -74,7 +85,7 @@ cc_library(
         ],
         "//conditions:default": [],
     }),
-    deps = select({
+    deps = ["//:llama_decision_jinja"] + select({
         "@rules_rs//rs/platforms/config:wasm32-unknown-emscripten": ["//:llama_browser"],
         # --//:metal=true swaps in the Metal llama (a separate, local-pinned
         # target — see //:llama_metal), --//:vulkan=true the Vulkan one.

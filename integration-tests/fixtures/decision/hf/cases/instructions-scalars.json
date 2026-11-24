@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "instructions-scalars",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Number, boolean, empty and blank instructions are accepted: tojson for the scalars, the text as is for the strings",
+  "covers": [
+    "instructions-structured",
+    "json-literals",
+    "multi-question"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"int\": {\"type\": \"noul\", \"instructions\": 42}, \"float\": {\"type\": \"noul\", \"instructions\": 0.5}, \"false\": {\"type\": \"noul\", \"instructions\": false}, \"true\": {\"type\": \"noul\", \"instructions\": true}, \"empty\": {\"type\": \"noul\", \"instructions\": \"\"}, \"blank\": {\"type\": \"noul\", \"instructions\": \" \\t \"}}}",
+  "artifact": "d1-2b-hf"
+}

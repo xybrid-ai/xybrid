@@ -107,6 +107,27 @@ test('run options carry sampling, platform knobs and handles', () => {
   );
 });
 
+test('run options carry the trace fields, false suppressTrace included', () => {
+  const trace = {
+    traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+    tracestate: 'vendor=1',
+    conversationId: 'conv-1',
+    suppressTrace: false,
+  };
+  assert.deepEqual(wire.toWireRunOptions(trace), trace);
+  assert.deepEqual(wire.toWireTraceOptions({ correlationId: 'c', suppressTrace: true }), {
+    correlationId: 'c',
+    suppressTrace: true,
+  });
+});
+
+test('a frame session rides model run options, not the trace fields pipelines share', () => {
+  const live = { frameSessionId: 'camera-7', conversationId: 'conv-1' };
+  assert.deepEqual(wire.toWireRunOptions(live), live);
+  assert.deepEqual(wire.toWireTraceOptions(live), { conversationId: 'conv-1' });
+  assert.equal(wire.toWireRunOptions({}), null);
+});
+
 test('top-level sampling parameters are rejected instead of ignored', () => {
   assert.throws(
     () => wire.toWireRunOptions({ maxTokens: 64, temperature: 0 }),
@@ -135,7 +156,9 @@ test('results expose the lossless envelope plus payload shortcuts', () => {
     metrics,
     toolCalls: [{ id: '1', name: 'f', argumentsJson: '{}' }],
     reasoningContent: 'thinking',
+    observation: { trace_id: 'a'.repeat(32), span_id: 'b'.repeat(16) },
   });
+  assert.deepEqual(text.observation, { trace_id: 'a'.repeat(32), span_id: 'b'.repeat(16) });
   assert.equal(text.text, 'hello');
   assert.equal(text.envelope.role, 'assistant');
   assert.equal(text.reasoningContent, 'thinking');
@@ -155,6 +178,7 @@ test('results expose the lossless envelope plus payload shortcuts', () => {
   assert.equal(audio.audioBytesBase64, 'UklG');
   assert.equal(audio.envelope.sampleRate, 24000);
   assert.equal('reasoningContent' in audio, false);
+  assert.equal('observation' in audio, false, 'an untraced run has no observation');
 });
 
 test('an unknown download size reads as undefined on every platform', () => {
@@ -189,4 +213,36 @@ test('base64 matches Node for every length and PCM stays little-endian', () => {
   assert.equal(decoded.readFloatLE(4), 1);
   assert.equal(decoded.readFloatLE(8), -1);
   assert.equal(float32ToBase64([0.5]), float32ToBase64(new Float32Array([0.5])));
+});
+
+test('decision input keeps raw JSON and typed content byte-for-byte', () => {
+  const { Envelope } = loadLibrary();
+  const raw = '{"state":{"z":18446744073709551615,"a":9007199254740993,"n":-0.0},"questions":{}}';
+  const envelope = Envelope.decisionRequestJson(raw);
+  assert.equal(wire.toWireEnvelope(envelope).requestJson, raw);
+  const request = { state: { kind: 'json', jsonText: '{"z":1,"a":1.0}' }, questions: [
+    { id: 'q', instructions: { kind: 'text', text: 'choose\u0000' }, kind: { kind: 'choice', options: [{ key: 'a' }] } },
+  ] };
+  assert.deepEqual(wire.fromWireEnvelope(wire.toWireEnvelope(Envelope.decisionRequest(request))),
+    { kind: 'decisionRequest', request, metadata: {} });
+  assert.throws(() => wire.toWireEnvelope({ kind: 'decisionRequest', request, requestJson: raw }), /exactly one/);
+});
+
+test('decision results preserve f64 median boundary and negative infinity', () => {
+  const decisions = { passes: 1, inputTokens: 512, answers: [{ questionId: 'q',
+    value: { kind: 'score', value: 1, statistic: 'median' }, confidence: 0.5000000018693014,
+    distribution: [
+      { key: '0', rawScore: 0, probability: 0.4999999981306987, origin: 'caller' },
+      { key: '1', rawScore: 1e-8, probability: 0.5000000018693014, origin: 'caller' },
+      { key: '2', rawScore: '-Infinity', probability: 0, origin: 'caller' },
+    ],
+  }] };
+  const result = wire.fromWireResult({ envelope: { kind: 'decisions', decisions, metadata: { tokens_in: '512', tokens_out: '0' } },
+    outputType: 'decisions', modelId: 'd1', latencyMs: 1, executionTarget: 'local', metrics: { totalMs: 1, stageLatenciesMs: [] }, toolCalls: [] });
+  assert.equal(result.decisions, decisions);
+  assert.equal(result.tokensIn, 512);
+  assert.equal(result.tokensOut, 0);
+  assert.equal(result.decisions.answers[0].distribution[1].probability, 0.5000000018693014);
+  assert.equal(JSON.parse(JSON.stringify(result)).decisions.answers[0].distribution[2].rawScore, '-Infinity');
+  assert.throws(() => wire.toWireEnvelope(result.envelope), /cannot be used as model input/);
 });

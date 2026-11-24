@@ -91,8 +91,9 @@ XYBRID_API_KEY="<your-xybrid-api-key>" xybrid run \
 换成 `policies/local-only.yaml` 可让同一提示词留在设备上，换成 `policies/privacy.yaml`
 则按内容路由。`-v` 还会打印原始的 `routing_decision` JSON 行。
 
-使用 `--platform-url <base-url>` 可连接预发布或自托管平台。示例使用 `gpt-4o-mini`，
-平台需要配置其上游提供商。
+使用 `--platform-url <base-url>` 可连接预发布或自托管平台。示例的云端模型是
+`openai/gpt-4o-mini`：平台使用 OpenRouter 规范 ID 指定前沿模型，对 `gpt-4o-mini`
+这样的短 ID 返回 404 `model_not_found`。
 
 ### 直连提供商测试
 
@@ -123,7 +124,7 @@ stages:
   - whisper-tiny@1.0
   - target: integration
     provider: openai
-    model: gpt-4o-mini
+    model: openai/gpt-4o-mini
   - kokoro-82m@0.1
 ```
 

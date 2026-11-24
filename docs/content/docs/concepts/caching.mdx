@@ -115,14 +115,9 @@ Downloaded bundles use the format `{model_id}@{version}.xyb`. If no version is s
 
 Extraction is idempotent — if the `extracted/{model_id}/` directory already exists, the SDK skips re-extraction. This means the first run of a new model is slightly slower (download + extract), but all subsequent runs start instantly.
 
-### TTL & Cleanup
+### Cleanup
 
-| Source | TTL |
-|--------|-----|
-| **Local models** | Persist indefinitely |
-| **Cloud models** | 24 hours (configurable) |
-
-Cloud model bundles are automatically cleaned up after their TTL expires. Local models (loaded from disk) are never automatically removed.
+Cached models do not expire. A downloaded bundle and its extracted files stay on disk until you remove them: run `xybrid cache clear <model-id>`, or use the calls in [Managing the Cache](#managing-the-cache).
 
 ## Managing the Cache
 
@@ -243,8 +238,8 @@ xybrid cache status    # See total size
 xybrid cache clear     # Remove everything
 ```
 
-Or programmatically remove only expired cloud models:
+Or remove one model in code:
 
 ```rust
-CacheManager::new()?.clean_expired()?;
+CacheManager::new()?.clear_model("kokoro-82m")?;
 ```

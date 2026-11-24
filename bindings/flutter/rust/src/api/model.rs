@@ -15,13 +15,20 @@ use crate::frb_generated::StreamSink;
 
 use super::context::FfiConversationContext;
 use super::device;
-use super::result::FfiResult;
+use super::result::{map_completion, FfiResult, FfiRunResult};
 use super::spawn_reporting_panics;
 
 // Use the canonical SDK-to-FFI conversion to retain the source chain when
 // crossing Flutter's string-only error boundary.
 fn sdk_error_message(error: xybrid_sdk::SdkError) -> String {
     facade::Error::from(error).to_string()
+}
+
+fn decision_io_refusal() -> String {
+    facade::Error::UnsupportedModelCapability {
+        message: "decision inference requires a local batch run without context".into(),
+    }
+    .to_string()
 }
 
 /// Generation parameters for LLM inference.
@@ -167,13 +174,6 @@ impl FfiGenerationConfig {
                 .collect(),
         }
     }
-
-    /// # Errors
-    /// Returns the facade's message when a tool carries a `parametersJson`
-    /// that isn't valid JSON.
-    pub(crate) fn to_sdk_over(&self, base: GenerationConfig) -> Result<GenerationConfig, String> {
-        self.to_facade().apply_over(base).map_err(|e| e.to_string())
-    }
 }
 
 /// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
@@ -191,7 +191,7 @@ pub fn json_schema_to_gbnf(schema_json: String) -> Result<String, String> {
 /// Wraps the SDK [`CancellationToken`] (an `Arc<AtomicBool>` inside, hence
 /// `Clone + Send + Sync`). A Dart caller constructs one, passes it into a
 /// streaming run via the run options, and calls [`FfiCancellationToken::cancel`]
-/// to halt Rust generation at the next token boundary — releasing the model
+/// to halt Rust execution at its next abort boundary — releasing the model
 /// write lock promptly.
 ///
 /// The handle is cheap to clone; cloning shares the same underlying flag, so
@@ -205,6 +205,15 @@ impl FfiCancellationToken {
     #[frb(sync)]
     pub fn new() -> FfiCancellationToken {
         FfiCancellationToken(CancellationToken::new())
+    }
+
+    /// Create a separate FFI handle sharing this token's cancellation flag.
+    ///
+    /// Runs consume their opaque argument. Dart retains the original handle
+    /// and transfers this fork so cancellation remains callable while running.
+    #[frb(sync)]
+    pub fn fork(&self) -> FfiCancellationToken {
+        self.clone()
     }
 
     /// Request cooperative cancellation of the associated run.
@@ -240,7 +249,14 @@ impl Clone for FfiCancellationToken {
 ///
 /// This mirrors the customer-facing Dart `RunOptions` wrapper and maps into
 /// `xybrid_sdk::RunOptions` at the FFI boundary.
+#[frb(non_opaque)]
+#[derive(Default)]
 pub struct FfiRunOptions {
+    pub traceparent: Option<String>,
+    pub tracestate: Option<String>,
+    pub conversation_id: Option<String>,
+    #[frb(default = false)]
+    pub suppress_trace: bool,
     pub cloud_provider: Option<String>,
     pub cloud_model: Option<String>,
     pub cloud_gateway_url: Option<String>,
@@ -271,10 +287,17 @@ impl FfiRunOptions {
         }
         facade::RunOptions {
             generation_config,
+            traceparent: self.traceparent.clone(),
+            tracestate: self.tracestate.clone(),
+            conversation_id: self.conversation_id.clone(),
+            suppress_trace: self.suppress_trace,
             abort_on,
             fallback_to_cloud: self.fallback_to_cloud,
             max_grace_tokens: self.max_grace_tokens.unwrap_or(0),
             correlation_id: non_empty(self.correlation_id.as_deref()).map(str::to_string),
+            // Vision live-mode: the facade flips live_mode and the SDK samples
+            // live traces per session.
+            frame_session_id: non_empty(self.frame_session_id.as_deref()).map(str::to_string),
         }
     }
 
@@ -285,8 +308,8 @@ impl FfiRunOptions {
     /// canonical SDK options it returns, we layer the bits the facade keeps out
     /// of its FFI-safe surface: the Flutter resource provider, the cancellation
     /// token (plus `UserCancelled`, which the facade's `AbortSignal` omits by
-    /// design because cancellation is expressed through the token), and the
-    /// vision live-mode frame session.
+    /// design because cancellation is expressed through the token). The
+    /// vision live-mode frame session rides the facade options.
     ///
     /// When `cancellation_token` is `None` the abort policy is left untouched,
     /// preserving the default chat / cloud-fallback semantics exactly.
@@ -317,11 +340,6 @@ impl FfiRunOptions {
                 .with_cancellation_token(token.0.clone());
         }
 
-        // Vision live-mode: flips live_mode and rate-limits live telemetry.
-        if let Some(frame_session_id) = non_empty(self.frame_session_id.as_deref()) {
-            options = options.with_frame_session(frame_session_id.to_string());
-        }
-
         Ok(options)
     }
 }
@@ -332,6 +350,73 @@ impl FfiRunOptions {
 /// that races in after the last token must NOT trigger a false cancel.
 fn should_cancel_on_sink_close(reached_terminal: bool) -> bool {
     !reached_terminal
+}
+
+/// The token callback of a Dart token stream. Forwards each token to the
+/// sink through `add`, which reports whether the sink took it.
+///
+/// A sink Dart closed before the terminal token is the caller's cancellation:
+/// the callback cancels `cancel_handle` (when the caller passed one) and
+/// returns [`xybrid_sdk::AbortReason::UserCancelled`], so the run stops at this
+/// token and the SDK records it as cancelled instead of running it to the end.
+/// A close that races in after the terminal token is not a cancellation.
+fn sink_token_callback(
+    mut add: impl FnMut(FfiStreamEvent) -> bool + Send,
+    cancel_handle: Option<FfiCancellationToken>,
+    reached_terminal: Arc<std::sync::atomic::AtomicBool>,
+) -> impl FnMut(
+    xybrid_core::runtime_adapter::types::PartialToken,
+) -> Result<(), xybrid_sdk::StreamingError>
+       + Send {
+    let mut token_index = 0u32;
+    move |token| {
+        let is_final = token.finish_reason.is_some();
+        let ffi_token = FfiStreamToken::from_sdk(&token, token_index);
+        token_index = token_index.saturating_add(1);
+        // Mark terminal *before* the final emit so a sink-close that races
+        // the last token does not look like a mid-stream cancel.
+        if is_final {
+            reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        if !add(FfiStreamEvent::Token(ffi_token))
+            && should_cancel_on_sink_close(
+                reached_terminal.load(std::sync::atomic::Ordering::SeqCst),
+            )
+        {
+            if let Some(handle) = cancel_handle.as_ref() {
+                handle.0.cancel();
+            }
+            return Err(Box::new(xybrid_sdk::AbortReason::UserCancelled));
+        }
+        Ok(())
+    }
+}
+
+/// Preserve the default streaming policy unless the caller supplied options.
+/// Generation parameters have already been resolved against the loaded model.
+fn resolved_streaming_run_options(
+    config: Option<GenerationConfig>,
+    cancellation_token: Option<&FfiCancellationToken>,
+    frame_session_id: Option<&str>,
+    options: Option<&FfiRunOptions>,
+) -> Result<RunOptions, String> {
+    let Some(options) = options else {
+        return Ok(streaming_run_options(
+            config,
+            cancellation_token,
+            frame_session_id,
+        ));
+    };
+    let mut mapped = options.to_sdk_with_cancellation_over(
+        None,
+        GenerationConfig::default(),
+        cancellation_token,
+    )?;
+    mapped.generation_config = config;
+    if let Some(id) = non_empty(frame_session_id) {
+        mapped = mapped.with_frame_session(id.to_string());
+    }
+    Ok(mapped)
 }
 
 /// Build minimal SDK [`RunOptions`] for the plain (non-cloud-fallback)
@@ -382,13 +467,27 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
     })
 }
 
+/// The cloud leg's model when the app sets no `cloudModel`.
+///
+/// The fallback always goes through a Xybrid gateway (`backend: gateway`, and
+/// [`validate_cloud_gateway_url`] admits only Xybrid hosts in release builds),
+/// which names frontier models by their canonical OpenRouter id. It answers
+/// `404 model_not_found` for a short id such as `gpt-4o-mini`.
+const DEFAULT_CLOUD_FALLBACK_MODEL: &str = "openai/gpt-4o-mini";
+
 fn apply_cloud_fallback_metadata(
     envelope: &mut xybrid_sdk::ir::Envelope,
     options: &FfiRunOptions,
     config: Option<&FfiGenerationConfig>,
 ) -> Result<Option<String>, String> {
+    if envelope.kind.contains_decision_kind() {
+        return Err(facade::Error::UnsupportedModelCapability {
+            message: "decision inference is local-only and does not support cloud overrides".into(),
+        }
+        .to_string());
+    }
     let provider = non_empty(options.cloud_provider.as_deref()).unwrap_or("openai");
-    let model = non_empty(options.cloud_model.as_deref()).unwrap_or("gpt-4o-mini");
+    let model = non_empty(options.cloud_model.as_deref()).unwrap_or(DEFAULT_CLOUD_FALLBACK_MODEL);
     envelope
         .metadata
         .insert("provider".to_string(), provider.to_string());
@@ -537,6 +636,8 @@ pub enum FfiStreamEvent {
     Complete(FfiResult),
     /// An error occurred
     Error(String),
+    /// Local completion and the preceding speculative cloud error.
+    Recovered(FfiResult, String),
 }
 
 /// Event emitted during streaming TTS. Audio rides the stream as raw 16-bit LE
@@ -547,9 +648,50 @@ pub enum FfiTtsStreamEvent {
     /// One synthesized chunk: raw 16-bit LE PCM and its sample rate (Hz).
     AudioChunk { pcm: Vec<u8>, sample_rate: u32 },
     /// Synthesis completed.
-    Complete,
+    Complete(FfiTtsStreamResult),
     /// An error occurred during synthesis.
     Error(String),
+}
+
+/// Terminal synthesis status and counters, including partial cancellation.
+#[derive(Clone)]
+pub struct FfiTtsStreamResult {
+    pub status: FfiTtsStatus,
+    pub sample_rate: u32,
+    pub channels: u32,
+    pub samples: u64,
+    pub chunks: u32,
+    pub limited_chunks: u32,
+    pub observation: Option<super::observability::FfiObservationRef>,
+}
+
+#[derive(Clone)]
+pub enum FfiTtsStatus {
+    Completed,
+    Cancelled,
+    Limited,
+}
+
+impl From<xybrid_sdk::result::TtsStreamResult> for FfiTtsStreamResult {
+    fn from(result: xybrid_sdk::result::TtsStreamResult) -> Self {
+        use xybrid_core::execution::TtsStatus;
+        Self {
+            status: match result.status {
+                TtsStatus::Completed => FfiTtsStatus::Completed,
+                TtsStatus::Cancelled => FfiTtsStatus::Cancelled,
+                TtsStatus::Limited => FfiTtsStatus::Limited,
+            },
+            sample_rate: result.sample_rate,
+            channels: result.channels,
+            samples: result.samples,
+            chunks: result.chunks,
+            limited_chunks: result.limited_chunks,
+            observation: result
+                .observation
+                .as_ref()
+                .map(super::observability::FfiObservationRef::from_sdk),
+        }
+    }
 }
 
 /// Token received during streaming inference.
@@ -610,14 +752,11 @@ impl FfiStreamToken {
 /// Lifecycle of a model download.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FfiDownloadState {
-    /// Bytes still in flight. For a speculative load, runs are served from
-    /// the cloud meanwhile.
+    /// Bytes still in flight. Speculative runs try the cloud meanwhile.
     Downloading,
     /// Every artifact landed and the model is usable.
     Ready,
-    /// Download failed — for a speculative load the cloud keeps serving and
-    /// the model never becomes local. Surfacing this is the only way the UI
-    /// can stop waiting.
+    /// Download failed; a speculative model never becomes local.
     Failed,
     /// The download was cancelled by the caller.
     Cancelled,
@@ -661,7 +800,61 @@ impl FfiDownloadStatus {
 
 /// FFI wrapper for ModelLoader (preparatory step before loading).
 #[frb(opaque)]
-pub struct FfiModelLoader(ModelLoader);
+pub struct FfiModelLoader(LoaderSource);
+
+/// What a loader loads. The SDK cannot build a directory loader before the
+/// directory has a `model_metadata.json`, so a raw GGUF file waits here, with
+/// any observation controls, until a load writes that sidecar.
+#[derive(Clone)]
+enum LoaderSource {
+    Sdk(ModelLoader),
+    ModelFile {
+        path: String,
+        observation: Option<xybrid_sdk::ObservationOptions>,
+    },
+}
+
+impl LoaderSource {
+    /// The SDK loader for this source. A model file reads the GGUF header and
+    /// may write the sidecar, so call this off the Dart thread.
+    fn resolve(&self) -> Result<ModelLoader, String> {
+        match self {
+            Self::Sdk(loader) => Ok(loader.clone()),
+            Self::ModelFile { path, observation } => {
+                let directory = facade::prepare_model_file(path).map_err(|e| e.to_string())?;
+                let loader = ModelLoader::from_directory(directory).map_err(sdk_error_message)?;
+                Ok(match observation {
+                    Some(observation) => loader.observation(observation.clone()),
+                    None => loader,
+                })
+            }
+        }
+    }
+}
+
+/// The work of `FfiModelLoader::load_with_progress`, which runs it on a worker
+/// thread: resolve the source, load it with download progress, then end with
+/// exactly one `Complete` or `Error`. A model file downloads nothing, so it
+/// emits no `Progress`.
+fn load_reporting_progress(source: &LoaderSource, emit: impl Fn(FfiLoadEvent)) {
+    let result = source
+        .resolve()
+        .and_then(|loader| {
+            loader
+                .load_with_progress(|status| {
+                    emit(FfiLoadEvent::Progress(FfiDownloadStatus::from_sdk(status)));
+                })
+                .map_err(sdk_error_message)
+        })
+        // Flutter loads through the SDK, not the facade's loader, so it
+        // applies the facade's FFI refusal itself.
+        .and_then(|model| facade::ensure_ffi_supported(&model).map_err(|e| e.to_string()));
+    emit(match result {
+        // The model is now cached; `load()` returns it at once.
+        Ok(()) => FfiLoadEvent::Complete,
+        Err(message) => FfiLoadEvent::Error(message),
+    });
+}
 
 /// FFI wrapper for a loaded XybridModel ready for inference.
 #[frb(opaque)]
@@ -671,10 +864,7 @@ impl FfiStreamEvent {
     /// The event that ends a successful run: `Complete` only when the result
     /// converts, so a stream never completes with its output dropped.
     fn completion(result: &InferenceResult) -> Self {
-        match FfiResult::try_from_inference_result(result) {
-            Ok(result) => FfiStreamEvent::Complete(result),
-            Err(error) => FfiStreamEvent::Error(error),
-        }
+        map_completion(result, Self::Complete, Self::Recovered).unwrap_or_else(Self::Error)
     }
 }
 
@@ -705,13 +895,30 @@ impl From<xybrid_sdk::StreamEvent> for FfiStreamEvent {
 }
 
 impl FfiModelLoader {
+    /// Clone this loader with validated observation controls.
+    #[frb(sync)]
+    pub fn with_observation(
+        &self,
+        options: super::observability::FfiObservationOptions,
+    ) -> Result<Self, String> {
+        let Some(options) = options.to_sdk()? else {
+            return Ok(Self(self.0.clone()));
+        };
+        Ok(Self(match &self.0 {
+            LoaderSource::Sdk(loader) => LoaderSource::Sdk(loader.clone().observation(options)),
+            LoaderSource::ModelFile { path, .. } => LoaderSource::ModelFile {
+                path: path.clone(),
+                observation: Some(options),
+            },
+        }))
+    }
     #[frb(sync)]
     pub fn from_registry(model_id: String) -> FfiModelLoader {
-        FfiModelLoader(ModelLoader::from_registry(&model_id))
+        FfiModelLoader(LoaderSource::Sdk(ModelLoader::from_registry(&model_id)))
     }
 
-    /// Loader that serves from the cloud gateway while the registry weights
-    /// download in the background, instead of blocking on the download.
+    /// Try the registry id at the cloud gateway while the weights download.
+    /// Only ids also listed in the gateway catalog can be served remotely.
     ///
     /// `load()` then returns almost immediately with a cloud-backed model that
     /// switches to on-device by itself once the download lands. Requires a
@@ -722,7 +929,9 @@ impl FfiModelLoader {
     /// `FfiModel::is_cloud_serving` reports the outcome.
     #[frb(sync)]
     pub fn from_registry_speculative(model_id: String) -> FfiModelLoader {
-        FfiModelLoader(ModelLoader::from_registry(&model_id).with_speculative_cloud(true))
+        FfiModelLoader(LoaderSource::Sdk(
+            ModelLoader::from_registry(&model_id).with_speculative_cloud(true),
+        ))
     }
 
     /// Whether `load()` may speculate: enabled, an API key resolves, and the
@@ -731,20 +940,23 @@ impl FfiModelLoader {
     /// chat model.
     #[frb(sync)]
     pub fn will_speculate(&self) -> bool {
-        self.0.will_speculate()
+        match &self.0 {
+            LoaderSource::Sdk(loader) => loader.will_speculate(),
+            LoaderSource::ModelFile { .. } => false,
+        }
     }
 
     #[frb(sync)]
     pub fn from_bundle(path: String) -> Result<FfiModelLoader, String> {
         ModelLoader::from_bundle(&path)
-            .map(FfiModelLoader)
+            .map(|loader| FfiModelLoader(LoaderSource::Sdk(loader)))
             .map_err(sdk_error_message)
     }
 
     #[frb(sync)]
     pub fn from_directory(path: String) -> Result<FfiModelLoader, String> {
         ModelLoader::from_directory(&path)
-            .map(FfiModelLoader)
+            .map(|loader| FfiModelLoader(LoaderSource::Sdk(loader)))
             .map_err(sdk_error_message)
     }
 
@@ -754,12 +966,39 @@ impl FfiModelLoader {
     /// Requires the `huggingface` feature flag to be enabled.
     #[frb(sync)]
     pub fn from_huggingface(repo: String) -> FfiModelLoader {
-        FfiModelLoader(ModelLoader::from_huggingface(&repo))
+        FfiModelLoader(LoaderSource::Sdk(ModelLoader::from_huggingface(&repo)))
+    }
+
+    /// Loader for a raw llama.cpp GGUF file. Creating it touches no disk:
+    /// `load()` and `load_with_progress()` write a generated
+    /// `model_metadata.json` beside the file if absent, then load its
+    /// directory. Nothing is downloaded, so `load_with_progress()` emits only
+    /// `Complete` or `Error`.
+    #[frb(sync)]
+    pub fn from_model_file(path: String) -> FfiModelLoader {
+        FfiModelLoader(LoaderSource::ModelFile {
+            path,
+            observation: None,
+        })
     }
 
     /// Load the model without progress updates.
     pub async fn load(&self) -> Result<FfiModel, String> {
-        let model = self.0.load_async().await.map_err(sdk_error_message)?;
+        let loader = match &self.0 {
+            LoaderSource::Sdk(loader) => loader.clone(),
+            source @ LoaderSource::ModelFile { .. } => {
+                let source = source.clone();
+                tokio::task::spawn_blocking(move || source.resolve())
+                    .await
+                    .map_err(|e| {
+                        facade::Error::LoadError {
+                            message: format!("Task join error: {e}"),
+                        }
+                        .to_string()
+                    })??
+            }
+        };
+        let model = loader.load_async().await.map_err(sdk_error_message)?;
         // Flutter loads through the SDK, not the facade's loader, so it
         // applies the facade's FFI refusal itself.
         facade::ensure_ffi_supported(&model).map_err(|e| e.to_string())?;
@@ -776,27 +1015,14 @@ impl FfiModelLoader {
     ///
     /// After receiving `Complete`, call `load()` to get the cached model instantly.
     pub fn load_with_progress(&self, sink: StreamSink<FfiLoadEvent>) {
-        let loader = self.0.clone();
+        let source = self.0.clone();
 
         // Run loading in a background thread to not block
         let panic_sink = sink.clone();
         let work = move || {
-            let result = loader.load_with_progress(|status| {
-                let _ = sink.add(FfiLoadEvent::Progress(FfiDownloadStatus::from_sdk(status)));
+            load_reporting_progress(&source, |event| {
+                let _ = sink.add(event);
             });
-
-            match result
-                .map_err(sdk_error_message)
-                .and_then(|model| facade::ensure_ffi_supported(&model).map_err(|e| e.to_string()))
-            {
-                Ok(()) => {
-                    // Model is now cached, send complete event
-                    let _ = sink.add(FfiLoadEvent::Complete);
-                }
-                Err(message) => {
-                    let _ = sink.add(FfiLoadEvent::Error(message));
-                }
-            }
         };
         spawn_reporting_panics(work, move |message| {
             let _ = panic_sink.add(FfiLoadEvent::Error(message));
@@ -805,8 +1031,15 @@ impl FfiModelLoader {
 }
 
 impl FfiModel {
-    /// Whether runs are currently answered by the cloud because the local
-    /// weights are not ready yet. `false` for ordinary local models.
+    /// Immutable reference for the load that created this model.
+    #[frb(sync)]
+    pub fn load_observation_ref(&self) -> Option<super::observability::FfiObservationRef> {
+        self.0
+            .load_observation_ref()
+            .map(super::observability::FfiObservationRef::from_sdk)
+    }
+
+    /// Whether a run would try the gateway because the local weights are not ready.
     ///
     /// This predicts the *next* run; `FfiResult.executionTarget` reports what a
     /// run that already happened actually did. They differ when a cloud leg
@@ -871,7 +1104,7 @@ impl FfiModel {
                     }
                     xybrid_sdk::DownloadState::Failed => {
                         let _ = sink.add(FfiLoadEvent::Error(
-                            "speculative model download failed; still serving from cloud"
+                            "speculative model download failed; local inference unavailable"
                                 .to_string(),
                         ));
                         break;
@@ -881,7 +1114,7 @@ impl FfiModel {
                         // download — but the state exists, so report it rather
                         // than leaving the stream hanging if that changes.
                         let _ = sink.add(FfiLoadEvent::Error(
-                            "model download cancelled; still serving from cloud".to_string(),
+                            "model download cancelled; local inference unavailable".to_string(),
                         ));
                         break;
                     }
@@ -897,27 +1130,38 @@ impl FfiModel {
     ///
     /// Pass an optional `config` to control generation parameters.
     /// When `None`, the model's default parameters are used.
+    /// Decision requests reject explicit generation parameters. Cancellation
+    /// is checked before preparation, between passes, and by the native engine.
     pub fn run(
         &self,
         envelope: super::envelope::FfiEnvelope,
         config: Option<FfiGenerationConfig>,
-    ) -> Result<FfiResult, String> {
-        let sdk_config = config
-            .as_ref()
-            .map(|c| c.to_sdk_over(self.0.default_generation_config()))
-            .transpose()?;
+        cancellation_token: Option<FfiCancellationToken>,
+        options: Option<FfiRunOptions>,
+    ) -> Result<FfiRunResult, String> {
+        if envelope.0.kind.contains_decision_kind() && config.is_some() {
+            return Err(facade::Error::UnsupportedModelCapability {
+                message: "decision inference does not support generation settings".into(),
+            }
+            .to_string());
+        }
+        let options = options.unwrap_or_default().to_sdk_with_cancellation_over(
+            config.map(|c| c.to_facade()),
+            self.0.default_generation_config(),
+            cancellation_token.as_ref(),
+        )?;
         let result = self
             .0
-            .run(&envelope.into_envelope(), sdk_config.as_ref())
+            .run_with_options(&envelope.into_envelope(), &options)
             .map_err(sdk_error_message)?;
-        FfiResult::try_from_inference_result(&result)
+        FfiRunResult::try_from_inference_result(&result)
     }
 
     /// Run inference with streaming output.
     ///
     /// Returns a stream of events:
     /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-    /// - `FfiStreamEvent::Complete` when inference finishes
+    /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
     /// - `FfiStreamEvent::Error` if an error occurs
     ///
     /// For non-LLM models, a single Token event is emitted with the full result.
@@ -952,8 +1196,13 @@ impl FfiModel {
         cancellation_token: Option<FfiCancellationToken>,
         preempt: bool,
         frame_session_id: Option<String>,
+        options: Option<FfiRunOptions>,
         sink: StreamSink<FfiStreamEvent>,
     ) {
+        if envelope.0.kind.contains_decision_kind() {
+            let _ = sink.add(FfiStreamEvent::Error(decision_io_refusal()));
+            return;
+        }
         let model = self.0.clone();
         let env = envelope.into_envelope();
         let facade_config = config.map(|c| c.to_facade());
@@ -980,39 +1229,28 @@ impl FfiModel {
                     return;
                 }
             };
-            let run_options = streaming_run_options(
+            let run_options = match resolved_streaming_run_options(
                 sdk_config,
                 cancel_handle.as_ref(),
                 frame_session_id.as_deref(),
-            );
+                options.as_ref(),
+            ) {
+                Ok(options) => options,
+                Err(error) => {
+                    let _ = sink.add(FfiStreamEvent::Error(error));
+                    return;
+                }
+            };
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let mut token_index = 0u32;
             let result = {
-                let reached_terminal = reached_terminal.clone();
-                let cancel_handle = cancel_handle.clone();
                 // Clone the sink for the callback so the original remains
                 // available for the terminal Complete/Error emit below.
                 let token_sink = sink.clone();
-                let on_token = move |token: xybrid_core::runtime_adapter::types::PartialToken| {
-                    let is_final = token.finish_reason.is_some();
-                    let ffi_token = FfiStreamToken::from_sdk(&token, token_index);
-                    token_index = token_index.saturating_add(1);
-                    // Mark terminal *before* the final emit so a sink-close that
-                    // races the last token does not look like a mid-stream cancel.
-                    if is_final {
-                        reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
-                    }
-                    if token_sink.add(FfiStreamEvent::Token(ffi_token)).is_err()
-                        && should_cancel_on_sink_close(
-                            reached_terminal.load(std::sync::atomic::Ordering::SeqCst),
-                        )
-                    {
-                        if let Some(handle) = cancel_handle.as_ref() {
-                            handle.0.cancel();
-                        }
-                    }
-                    Ok(())
-                };
+                let on_token = sink_token_callback(
+                    move |event| token_sink.add(event).is_ok(),
+                    cancel_handle.clone(),
+                    reached_terminal.clone(),
+                );
                 model.run_streaming_with_options_preempt(&env, &run_options, preempt, on_token)
             };
 
@@ -1045,8 +1283,13 @@ impl FfiModel {
         envelope: super::envelope::FfiEnvelope,
         config: Option<FfiGenerationConfig>,
         cancellation_token: Option<FfiCancellationToken>,
+        options: Option<FfiRunOptions>,
         sink: StreamSink<FfiTtsStreamEvent>,
     ) {
+        if envelope.0.kind.contains_decision_kind() {
+            let _ = sink.add(FfiTtsStreamEvent::Error(decision_io_refusal()));
+            return;
+        }
         let model = self.0.clone();
         let env = envelope.into_envelope();
         let facade_config = config.map(|c| c.to_facade());
@@ -1067,7 +1310,18 @@ impl FfiModel {
                     return;
                 }
             };
-            let run_options = streaming_run_options(sdk_config, cancel_handle.as_ref(), None);
+            let run_options = match resolved_streaming_run_options(
+                sdk_config,
+                cancel_handle.as_ref(),
+                None,
+                options.as_ref(),
+            ) {
+                Ok(options) => options,
+                Err(error) => {
+                    let _ = sink.add(FfiTtsStreamEvent::Error(error));
+                    return;
+                }
+            };
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let result = {
                 let reached_terminal = reached_terminal.clone();
@@ -1101,23 +1355,9 @@ impl FfiModel {
             match result {
                 Ok(summary) => {
                     reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
-                    // A cancelled run (barge-in via sink-close, or the caller
-                    // cancelling the token) stopped early — don't surface it as a
-                    // successful Complete. On sink-close the add would no-op
-                    // anyway, but a token-only cancel keeps the sink open.
-                    let cancelled = cancel_handle
-                        .as_ref()
-                        .map(|h| h.0.is_cancelled())
-                        .unwrap_or(false);
-                    if summary.status == xybrid_core::execution::TtsStatus::Limited {
-                        let _ = sink.add(FfiTtsStreamEvent::Error(
-                            "TTS output limited; partial audio delivered".into(),
-                        ));
-                    } else if !cancelled
-                        && summary.status != xybrid_core::execution::TtsStatus::Cancelled
-                    {
-                        let _ = sink.add(FfiTtsStreamEvent::Complete);
-                    }
+                    // Terminal status distinguishes completed, limited and
+                    // cancelled synthesis while retaining counters/reference.
+                    let _ = sink.add(FfiTtsStreamEvent::Complete(summary.into()));
                 }
                 Err(e) => {
                     let _ = sink.add(FfiTtsStreamEvent::Error(sdk_error_message(e)));
@@ -1153,11 +1393,16 @@ impl FfiModel {
         envelope: super::envelope::FfiEnvelope,
         context: &FfiConversationContext,
         config: Option<FfiGenerationConfig>,
-    ) -> Result<FfiResult, String> {
-        let sdk_config = config
-            .as_ref()
-            .map(|c| c.to_sdk_over(self.0.default_generation_config()))
-            .transpose()?;
+        options: Option<FfiRunOptions>,
+    ) -> Result<FfiRunResult, String> {
+        if envelope.0.kind.contains_decision_kind() {
+            return Err(decision_io_refusal());
+        }
+        let options = options.unwrap_or_default().to_sdk_with_cancellation_over(
+            config.map(|c| c.to_facade()),
+            self.0.default_generation_config(),
+            None,
+        )?;
         let ctx_guard = context
             .0
             .read()
@@ -1165,10 +1410,10 @@ impl FfiModel {
 
         let result = self
             .0
-            .run_with_context(&envelope.into_envelope(), &ctx_guard, sdk_config.as_ref())
+            .run_with_context_options(&envelope.into_envelope(), &ctx_guard, &options)
             .map_err(sdk_error_message)?;
 
-        FfiResult::try_from_inference_result(&result)
+        map_completion(&result, FfiRunResult::Legacy, FfiRunResult::Recovered)
     }
 
     /// Run inference with streaming output and conversation context.
@@ -1178,7 +1423,7 @@ impl FfiModel {
     ///
     /// Returns a stream of events:
     /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-    /// - `FfiStreamEvent::Complete` when inference finishes
+    /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
     /// - `FfiStreamEvent::Error` if an error occurs
     ///
     /// Pass an optional `config` to control generation parameters.
@@ -1201,8 +1446,7 @@ impl FfiModel {
     // FRB-exported boundary fn: each param maps to a named Dart argument, so
     // they cannot be bundled into a struct without reshaping the generated Dart
     // API. The arg count (envelope, context, config, token, preempt,
-    // frame_session_id, sink) is inherent to the binding surface.
-    #[allow(clippy::too_many_arguments)]
+    // frame_session_id, options, sink) is inherent to the binding surface.
     pub fn run_stream_with_context(
         &self,
         envelope: super::envelope::FfiEnvelope,
@@ -1211,8 +1455,13 @@ impl FfiModel {
         cancellation_token: Option<FfiCancellationToken>,
         preempt: bool,
         frame_session_id: Option<String>,
+        options: Option<FfiRunOptions>,
         sink: StreamSink<FfiStreamEvent>,
     ) {
+        if envelope.0.kind.contains_decision_kind() {
+            let _ = sink.add(FfiStreamEvent::Error(decision_io_refusal()));
+            return;
+        }
         let model = self.0.clone();
         let env = envelope.into_envelope();
         let ctx = context.0.clone();
@@ -1235,11 +1484,18 @@ impl FfiModel {
                     return;
                 }
             };
-            let run_options = streaming_run_options(
+            let run_options = match resolved_streaming_run_options(
                 sdk_config,
                 cancel_handle.as_ref(),
                 frame_session_id.as_deref(),
-            );
+                options.as_ref(),
+            ) {
+                Ok(options) => options,
+                Err(error) => {
+                    let _ = sink.add(FfiStreamEvent::Error(error));
+                    return;
+                }
+            };
             // Get read lock on context
             let ctx_guard = match ctx.read() {
                 Ok(guard) => guard,
@@ -1253,37 +1509,21 @@ impl FfiModel {
             };
 
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let mut token_index = 0u32;
 
             // Use callback-based streaming through the options-aware path so the
             // per-token abort check runs (honouring the cancellation token).
             let result = {
-                let reached_terminal = reached_terminal.clone();
-                let cancel_handle = cancel_handle.clone();
                 let token_sink = sink.clone();
                 model.run_streaming_with_context_options_preempt(
                     &env,
                     &ctx_guard,
                     &run_options,
                     preempt,
-                    move |token| {
-                        let is_final = token.finish_reason.is_some();
-                        let ffi_token = FfiStreamToken::from_sdk(&token, token_index);
-                        token_index = token_index.saturating_add(1);
-                        if is_final {
-                            reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
-                        }
-                        if token_sink.add(FfiStreamEvent::Token(ffi_token)).is_err()
-                            && should_cancel_on_sink_close(
-                                reached_terminal.load(std::sync::atomic::Ordering::SeqCst),
-                            )
-                        {
-                            if let Some(handle) = cancel_handle.as_ref() {
-                                handle.0.cancel();
-                            }
-                        }
-                        Ok(())
-                    },
+                    sink_token_callback(
+                        move |event| token_sink.add(event).is_ok(),
+                        cancel_handle.clone(),
+                        reached_terminal.clone(),
+                    ),
                 )
             };
 
@@ -1349,29 +1589,13 @@ impl FfiModel {
                 }
             };
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let mut token_index = 0u32;
             let result = {
-                let reached_terminal = reached_terminal.clone();
-                let cancel_handle = cancel_handle.clone();
                 let token_sink = sink.clone();
-                let mut on_token = |token: xybrid_core::runtime_adapter::types::PartialToken| {
-                    let is_final = token.finish_reason.is_some();
-                    let ffi_token = FfiStreamToken::from_sdk(&token, token_index);
-                    token_index = token_index.saturating_add(1);
-                    if is_final {
-                        reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
-                    }
-                    if token_sink.add(FfiStreamEvent::Token(ffi_token)).is_err()
-                        && should_cancel_on_sink_close(
-                            reached_terminal.load(std::sync::atomic::Ordering::SeqCst),
-                        )
-                    {
-                        if let Some(handle) = cancel_handle.as_ref() {
-                            handle.0.cancel();
-                        }
-                    }
-                    Ok(())
-                };
+                let mut on_token = sink_token_callback(
+                    move |event| token_sink.add(event).is_ok(),
+                    cancel_handle.clone(),
+                    reached_terminal.clone(),
+                );
                 let mut on_seam = |_seam: xybrid_sdk::model::SeamInfo| {};
 
                 model.run_streaming_with_fallback(
@@ -1446,6 +1670,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cancellation_forks_share_the_original_flag() {
+        let original = FfiCancellationToken::new();
+        let transferred = original.fork();
+        assert!(!transferred.is_cancelled());
+        original.cancel();
+        assert!(transferred.is_cancelled());
+        assert!(original.is_cancelled());
+    }
+
+    #[test]
     fn sdk_diagnostics_retain_load_and_inference_causes() {
         let load = xybrid_sdk::SdkError::LoadError {
             message: "Failed to parse metadata".into(),
@@ -1467,6 +1701,166 @@ mod tests {
         assert_eq!(message.matches("Inference failed:").count(), 1);
     }
 
+    /// A scratch directory, removed on drop. Not `tempfile`: this crate has no
+    /// dev-dependencies, and adding one changes `Cargo.lock`, which makes four
+    /// more CI lanes (three of them macOS) run on every push.
+    struct ScratchDir(std::path::PathBuf);
+
+    impl ScratchDir {
+        fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "xybrid-flutter-model-file-{}-{n}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        fn path(&self, name: &str) -> String {
+            self.0.join(name).to_string_lossy().into_owned()
+        }
+    }
+
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A header-only GGUF: an `lfm3` model declaring a 262,144-token context,
+    /// the same bytes as the SDK's metadata-generation test.
+    fn write_gguf_header(path: &str) {
+        const GGUF_TYPE_UINT32: u32 = 4;
+        const GGUF_TYPE_STRING: u32 = 8;
+        fn string(bytes: &mut Vec<u8>, value: &str) {
+            bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(value.as_bytes());
+        }
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3u32.to_le_bytes()); // version
+        bytes.extend_from_slice(&0u64.to_le_bytes()); // tensor count
+        bytes.extend_from_slice(&2u64.to_le_bytes()); // key-value count
+        string(&mut bytes, "general.architecture");
+        bytes.extend_from_slice(&GGUF_TYPE_STRING.to_le_bytes());
+        string(&mut bytes, "lfm3");
+        string(&mut bytes, "lfm3.context_length");
+        bytes.extend_from_slice(&GGUF_TYPE_UINT32.to_le_bytes());
+        bytes.extend_from_slice(&262_144u32.to_le_bytes());
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    fn conversation_options(id: &str) -> super::super::observability::FfiObservationOptions {
+        super::super::observability::FfiObservationOptions {
+            conversation_id: Some(id.into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_model_file_loader_touches_no_disk_until_load() {
+        let dir = ScratchDir::new();
+        let gguf = dir.path("model.gguf");
+        write_gguf_header(&gguf);
+
+        let loader = FfiModelLoader::from_model_file(gguf)
+            .with_observation(conversation_options("conversation-1"))
+            .unwrap()
+            // Default options keep the stored controls, as on other sources.
+            .with_observation(Default::default())
+            .unwrap();
+
+        assert!(!std::path::Path::new(&dir.path("model_metadata.json")).exists());
+        assert!(!loader.will_speculate());
+        assert!(matches!(
+            &loader.0,
+            LoaderSource::ModelFile {
+                observation: Some(observation),
+                ..
+            } if observation.conversation_id.as_deref() == Some("conversation-1")
+        ));
+        // Controls are still validated when they are set, not at load.
+        let invalid = super::super::observability::FfiObservationOptions {
+            traceparent: Some("invalid".into()),
+            ..Default::default()
+        };
+        assert!(loader.with_observation(invalid).is_err());
+    }
+
+    #[test]
+    fn a_model_file_load_writes_the_sidecar_and_loads_its_directory() {
+        let dir = ScratchDir::new();
+        let gguf = dir.path("Model-File.gguf");
+        write_gguf_header(&gguf);
+
+        let model = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(FfiModelLoader::from_model_file(gguf).load())
+            .unwrap_or_else(|message| panic!("model file load failed: {message}"));
+
+        assert!(std::path::Path::new(&dir.path("model_metadata.json")).exists());
+        assert_eq!(model.0.model_id(), "model-file");
+    }
+
+    #[test]
+    fn a_model_file_load_applies_the_stored_observation() {
+        let dir = ScratchDir::new();
+        let gguf = dir.path("model.gguf");
+        write_gguf_header(&gguf);
+
+        let traced = FfiModelLoader::from_model_file(gguf.clone())
+            .with_observation(conversation_options("conversation-1"))
+            .unwrap();
+        let resolved = traced.0.resolve().unwrap();
+        assert!(format!("{resolved:?}").contains("conversation-1"));
+
+        let plain = FfiModelLoader::from_model_file(gguf).0.resolve().unwrap();
+        assert!(!format!("{plain:?}").contains("conversation-1"));
+    }
+
+    #[test]
+    fn a_missing_model_file_fails_at_load_with_the_facade_message() {
+        let dir = ScratchDir::new();
+        let missing = dir.path("missing.gguf");
+
+        let loader = FfiModelLoader::from_model_file(missing.clone());
+        let error = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(loader.load())
+            .err()
+            .expect("a missing GGUF must not load");
+
+        assert_eq!(
+            error,
+            format!("Invalid configuration: GGUF file not found: {missing}")
+        );
+    }
+
+    #[test]
+    fn a_model_file_progress_load_reports_only_complete_or_error() {
+        let dir = ScratchDir::new();
+        let gguf = dir.path("model.gguf");
+        write_gguf_header(&gguf);
+        let events_for = |path: String| {
+            let events = std::sync::Mutex::new(Vec::new());
+            load_reporting_progress(&FfiModelLoader::from_model_file(path).0, |event| {
+                events.lock().unwrap().push(event)
+            });
+            events.into_inner().unwrap()
+        };
+
+        assert!(matches!(
+            events_for(gguf).as_slice(),
+            [FfiLoadEvent::Complete]
+        ));
+        assert!(matches!(
+            events_for(dir.path("missing.gguf")).as_slice(),
+            [FfiLoadEvent::Error(message)] if message.contains("GGUF file not found")
+        ));
+    }
+
     fn sample_options() -> FfiRunOptions {
         FfiRunOptions {
             cloud_provider: None,
@@ -1478,7 +1872,136 @@ mod tests {
             fallback_to_cloud: false,
             max_grace_tokens: None,
             frame_session_id: None,
+            ..FfiRunOptions::default()
         }
+    }
+
+    #[test]
+    fn observation_options_reach_sdk_without_altering_generation_or_cancel() {
+        let mut options = sample_options();
+        options.traceparent =
+            Some("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01".into());
+        options.tracestate = Some("vendor=value".into());
+        options.conversation_id = Some("conversation-1".into());
+        options.suppress_trace = true;
+        let sdk = options
+            .to_sdk_with_cancellation_over(
+                Some(facade::GenerationConfig {
+                    max_tokens: Some(17),
+                    ..Default::default()
+                }),
+                GenerationConfig::default(),
+                None,
+            )
+            .unwrap();
+        assert_eq!(sdk.generation_config.as_ref().unwrap().max_tokens, 17);
+        let observation = sdk.observation.unwrap();
+        assert_eq!(
+            observation.parent.unwrap().trace_id(),
+            "0af7651916cd43dd8448eb211c80319c"
+        );
+        assert_eq!(
+            observation.conversation_id.as_deref(),
+            Some("conversation-1")
+        );
+        assert_eq!(
+            observation.trace,
+            xybrid_sdk::observability::TraceMode::Suppress
+        );
+        assert!(!sdk.abort_policy.observes(AbortSignal::UserCancelled));
+        options.traceparent = Some("invalid".into());
+        options.tracestate = None;
+        options.conversation_id = None;
+        options.suppress_trace = false;
+        assert!(options
+            .to_sdk_with_cancellation_over(None, GenerationConfig::default(), None)
+            .is_err());
+    }
+
+    #[test]
+    fn streaming_options_keep_model_config_cancellation_and_frame_session() {
+        let token = FfiCancellationToken::new();
+        let mut options = sample_options();
+        options.conversation_id = Some("stream-1".into());
+        let config = GenerationConfig {
+            max_tokens: 23,
+            ..Default::default()
+        };
+        let sdk = resolved_streaming_run_options(
+            Some(config),
+            Some(&token),
+            Some("frame-1"),
+            Some(&options),
+        )
+        .unwrap();
+        assert_eq!(sdk.generation_config.as_ref().unwrap().max_tokens, 23);
+        assert_eq!(sdk.frame_session_id.as_deref(), Some("frame-1"));
+        assert!(sdk.abort_policy.observes(AbortSignal::UserCancelled));
+        assert_eq!(
+            sdk.observation.as_ref().unwrap().conversation_id.as_deref(),
+            Some("stream-1")
+        );
+    }
+
+    #[test]
+    fn decision_cloud_overrides_fail_before_metadata_changes() {
+        use xybrid_sdk::ir::{DecisionRequest, DecisionState, Envelope, EnvelopeKind};
+        let request = Envelope::new(EnvelopeKind::DecisionRequest(DecisionRequest::new(
+            DecisionState::default(),
+            vec![],
+        )));
+        let mut nested = Envelope::new(EnvelopeKind::MultiPart(vec![request]));
+        let before = nested.metadata.clone();
+        let error =
+            apply_cloud_fallback_metadata(&mut nested, &sample_options(), None).unwrap_err();
+        assert!(error.starts_with("Unsupported model capability:"));
+        assert!(error.contains("local-only"));
+        assert_eq!(nested.metadata, before);
+    }
+
+    /// The managed gateway takes frontier models by canonical id only: the
+    /// short `gpt-4o-mini` this default used to be answers 404 there.
+    #[test]
+    fn cloud_fallback_defaults_to_a_canonical_gateway_model() {
+        use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+
+        let mut envelope = Envelope::new(EnvelopeKind::Text("hello".into()));
+        let gateway_url =
+            apply_cloud_fallback_metadata(&mut envelope, &sample_options(), None).unwrap();
+
+        assert_eq!(gateway_url, None);
+        assert_eq!(
+            envelope.metadata.get("model").map(String::as_str),
+            Some("openai/gpt-4o-mini")
+        );
+        assert_eq!(
+            envelope.metadata.get("provider").map(String::as_str),
+            Some("openai")
+        );
+        assert_eq!(
+            envelope.metadata.get("backend").map(String::as_str),
+            Some("gateway")
+        );
+    }
+
+    #[test]
+    fn cloud_fallback_sends_the_app_model_unchanged() {
+        use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+
+        let mut options = sample_options();
+        options.cloud_provider = Some("anthropic".to_string());
+        options.cloud_model = Some(" anthropic/claude-haiku-4.5 ".to_string());
+        let mut envelope = Envelope::new(EnvelopeKind::Text("hello".into()));
+        apply_cloud_fallback_metadata(&mut envelope, &options, None).unwrap();
+
+        assert_eq!(
+            envelope.metadata.get("model").map(String::as_str),
+            Some("anthropic/claude-haiku-4.5")
+        );
+        assert_eq!(
+            envelope.metadata.get("provider").map(String::as_str),
+            Some("anthropic")
+        );
     }
 
     #[test]
@@ -1568,6 +2091,62 @@ mod tests {
         assert_eq!(sdk.frame_session_id.as_deref(), Some("frame-sess-9"));
     }
 
+    fn token(
+        index: usize,
+        finish_reason: Option<&str>,
+    ) -> xybrid_core::runtime_adapter::types::PartialToken {
+        xybrid_core::runtime_adapter::types::PartialToken {
+            token: format!("t{index}"),
+            token_id: None,
+            index,
+            cumulative_text: String::new(),
+            finish_reason: finish_reason.map(str::to_owned),
+            tool_calls: Vec::new(),
+            raw_text: None,
+        }
+    }
+
+    #[test]
+    fn a_sink_closed_mid_stream_stops_the_run_at_that_token_as_a_user_cancellation() {
+        // Dart takes two tokens, then cancels its subscription: the next
+        // token cannot be added. With or without a cancellation token, the
+        // callback stops the run there with the cancellation the SDK records
+        // as `cancelled`, and cancels the caller's token when there is one.
+        for cancel_handle in [None, Some(FfiCancellationToken::new())] {
+            let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let open = accepted.clone();
+            let mut on_token = sink_token_callback(
+                move |_event| open.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2,
+                cancel_handle.clone(),
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            );
+            assert!(on_token(token(0, None)).is_ok());
+            assert!(on_token(token(1, None)).is_ok());
+
+            let stopped = on_token(token(2, None)).expect_err("the sink is closed");
+            assert_eq!(
+                stopped.downcast_ref::<xybrid_sdk::AbortReason>(),
+                Some(&xybrid_sdk::AbortReason::UserCancelled),
+                "{stopped}"
+            );
+            if let Some(handle) = cancel_handle {
+                assert!(handle.is_cancelled());
+            }
+        }
+    }
+
+    #[test]
+    fn a_sink_closed_after_the_terminal_token_is_not_a_cancellation() {
+        let cancel_handle = FfiCancellationToken::new();
+        let mut on_token = sink_token_callback(
+            |_event| false,
+            Some(cancel_handle.clone()),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
+        assert!(on_token(token(0, Some("stop"))).is_ok());
+        assert!(!cancel_handle.is_cancelled());
+    }
+
     #[test]
     fn sink_close_cancels_only_before_terminal() {
         // Non-terminal sink close (Dart unsubscribed mid-stream) → cancel.
@@ -1599,6 +2178,7 @@ mod tests {
             fallback_to_cloud: false,
             max_grace_tokens: Some(2),
             frame_session_id: None,
+            ..FfiRunOptions::default()
         };
 
         let sdk = ffi

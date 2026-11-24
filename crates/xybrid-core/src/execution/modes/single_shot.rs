@@ -27,8 +27,11 @@ pub fn execute_single_shot_stage(
 ) -> ExecutorResult<HashMap<String, ArrayD<f32>>> {
     // Resolution of path
     let model_full_path = Path::new(base_path).join(&stage.model_file);
+    let _load = crate::execution::executor::pending_load_label(&*runtime, &model_full_path)
+        .map(crate::tracing::model_load_stage);
     runtime
         .load(&model_full_path)
+        .inspect_err(|_| crate::tracing::mark_stage_failed())
         .map_err(|e| AdapterError::RuntimeError(format!("Stage load failed: {}", e)))?;
 
     // Convert input

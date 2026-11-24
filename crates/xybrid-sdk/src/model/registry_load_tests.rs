@@ -1,8 +1,8 @@
 //! Registry loads with speculation requested.
 //!
 //! The extracted cache answers first, and an uncached model is resolved once:
-//! only a variant the registry describes as a chat model is served from the
-//! cloud while it downloads. Each test runs against a local mock registry and
+//! only a variant the registry describes as a chat model tries the gateway
+//! while it downloads. Each test runs against a local mock registry and
 //! a temporary cache, and counts the requests it receives.
 
 use super::*;
@@ -157,7 +157,7 @@ fn an_uncached_chat_model_speculates_after_one_resolve_and_downloads_that_varian
     // background download has got.
     assert!(
         model.is_speculative(),
-        "a chat model must be served from the cloud while it downloads"
+        "a chat variant must opt into a speculative load"
     );
     let status = model.await_download(DOWNLOAD_TIMEOUT_MS);
     assert_eq!(status.state, DownloadState::Ready, "{status:?}");

@@ -1,2 +1,7 @@
 allowBuilds:
   esbuild: true
+# Develop against the sibling package. The published manifest keeps the plain version range
+# from package.json (npm pack does not see this override), so the archive installs
+# @xybrid/observability from the registry.
+overrides:
+  "@xybrid/observability": "link:../observability-js"

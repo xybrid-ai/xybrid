@@ -18,20 +18,23 @@ namespace XybridBolt
     /// </param>
     /// <param name="LatencyMs">Wall-clock time of the whole run.</param>
     /// <param name="Stages">Every executed stage, in order.</param>
+    /// <param name="Observation">The workflow enclosing this execution, when observed.</param>
     public readonly struct XybridPipelineResult
     {
-        public XybridPipelineResult(XybridEnvelope Envelope, XybridOutputType OutputType, uint LatencyMs, XybridStageResult[] Stages) { this.Envelope = Envelope; this.OutputType = OutputType; this.LatencyMs = LatencyMs; this.Stages = Stages; }
+        public XybridPipelineResult(XybridEnvelope Envelope, XybridOutputType OutputType, uint LatencyMs, XybridStageResult[] Stages, XybridObservationRef? Observation = null) { this.Envelope = Envelope; this.OutputType = OutputType; this.LatencyMs = LatencyMs; this.Stages = Stages; this.Observation = Observation; }
         public XybridEnvelope Envelope { get; }
         public XybridOutputType OutputType { get; }
         public uint LatencyMs { get; }
         public XybridStageResult[] Stages { get; }
+        public XybridObservationRef? Observation { get; }
 
         internal static XybridPipelineResult Decode(WireReader reader) =>
             new XybridPipelineResult(
                 XybridEnvelope.Decode(reader),
                 (XybridOutputType)reader.ReadI32(),
                 reader.ReadU32(),
-                reader.ReadArray(reader => XybridStageResult.Decode(reader))
+                reader.ReadArray(reader => XybridStageResult.Decode(reader)),
+                reader.ReadU8() == 0 ? default(XybridObservationRef?) : XybridObservationRef.Decode(reader)
             );
 
         internal void Encode(WireWriter writer)
@@ -50,6 +53,17 @@ namespace XybridBolt
                 foreach (var boltffiValue0 in this.Stages)
                 {
                     boltffiValue0.Encode(writer);
+                }
+            }
+            {
+                if (this.Observation is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    boltffiValue0.Encode(writer);
+                }
+                else
+                {
+                    writer.WriteU8(0);
                 }
             }
         }

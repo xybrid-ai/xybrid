@@ -98,6 +98,7 @@ fn prefill(ctx: &LlamaContext, model: &LlamaModel, tokens: &[i32], n_past: usize
         1.0,
         &[],
         None,
+        &[],
         |_token_id, _text| Err(PrefillDone.into()),
         n_past,
     );
@@ -122,6 +123,7 @@ fn answer(ctx: &LlamaContext, model: &LlamaModel, tokens: &[i32], n_past: usize)
         1.0,
         &[],
         None,
+        &[],
         |_token_id, _text| Ok(()),
         n_past,
     )

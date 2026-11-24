@@ -1,0 +1,346 @@
+{
+  "config": {
+    "content_capture": "span_and_event",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "Structured null stays null and empty strings stay empty strings, on spans (JSON strings) and in structured event content, including a top-level null tool result. Empty request arrays and an empty finish-reason list are absent rather than recorded as empty arrays.",
+  "expect": {
+    "logs": [
+      {
+        "attributes": {
+          "gen_ai.input.messages": [
+            {
+              "parts": [
+                {
+                  "content": "",
+                  "type": "text"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "parts": [
+                {
+                  "id": "c1",
+                  "response": null,
+                  "type": "tool_call_response"
+                }
+              ],
+              "role": "tool"
+            }
+          ],
+          "gen_ai.operation.name": "chat",
+          "gen_ai.output.messages": [
+            {
+              "finish_reason": "tool_call",
+              "parts": [
+                {
+                  "arguments": {
+                    "q": "",
+                    "unit": null
+                  },
+                  "id": "c2",
+                  "name": "lookup",
+                  "type": "tool_call"
+                }
+              ],
+              "role": "assistant"
+            }
+          ],
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny",
+          "gen_ai.tool.definitions": [
+            {
+              "description": "",
+              "name": "lookup",
+              "parameters": {
+                "properties": {
+                  "unit": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            }
+          ]
+        },
+        "event_name": "gen_ai.client.inference.operation.details",
+        "severity_number": 5,
+        "span": "chat"
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.tool.call.arguments": {
+            "x": null
+          },
+          "gen_ai.tool.call.result": null,
+          "gen_ai.tool.name": "lookup"
+        },
+        "event_name": "gen_ai.execute_tool.operation.details",
+        "severity_number": 5,
+        "span": "tool"
+      }
+    ],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.01
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.execute_tool.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "execute_tool",
+              "gen_ai.tool.name": "lookup"
+            },
+            "count": 1,
+            "sum": 0.01
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.input.messages": [
+            {
+              "parts": [
+                {
+                  "content": "",
+                  "type": "text"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "parts": [
+                {
+                  "id": "c1",
+                  "response": null,
+                  "type": "tool_call_response"
+                }
+              ],
+              "role": "tool"
+            }
+          ],
+          "gen_ai.operation.name": "chat",
+          "gen_ai.output.messages": [
+            {
+              "finish_reason": "tool_call",
+              "parts": [
+                {
+                  "arguments": {
+                    "q": "",
+                    "unit": null
+                  },
+                  "id": "c2",
+                  "name": "lookup",
+                  "type": "tool_call"
+                }
+              ],
+              "role": "assistant"
+            }
+          ],
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny",
+          "gen_ai.tool.definitions": [
+            {
+              "description": "",
+              "name": "lookup",
+              "parameters": {
+                "properties": {
+                  "unit": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            }
+          ],
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.output.modalities": [
+            "text"
+          ],
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 10,
+        "id": "chat",
+        "kind": "INTERNAL",
+        "name": "chat tiny",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.tool.call.arguments": {
+            "x": null
+          },
+          "gen_ai.tool.call.result": null,
+          "gen_ai.tool.name": "lookup"
+        },
+        "end_ms": 30,
+        "id": "tool",
+        "kind": "INTERNAL",
+        "name": "execute_tool lookup",
+        "parent": null,
+        "start_ms": 20,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 1
+      }
+    ]
+  },
+  "name": "null_and_empty_values",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "start_inference",
+      "request": {
+        "input_modalities": [],
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "output_modalities": [
+          "text"
+        ],
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp",
+        "stop_sequences": []
+      }
+    },
+    {
+      "at_ms": 1,
+      "id": "chat",
+      "op": "input_messages",
+      "value": [
+        {
+          "parts": [
+            {
+              "content": "",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "id": "c1",
+              "response": null,
+              "type": "tool_call_response"
+            }
+          ],
+          "role": "tool"
+        }
+      ]
+    },
+    {
+      "at_ms": 1,
+      "id": "chat",
+      "op": "tool_definitions",
+      "value": [
+        {
+          "description": "",
+          "name": "lookup",
+          "parameters": {
+            "properties": {
+              "unit": {
+                "default": null,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "at_ms": 5,
+      "id": "chat",
+      "op": "output_messages",
+      "value": [
+        {
+          "finish_reason": "tool_call",
+          "parts": [
+            {
+              "arguments": {
+                "q": "",
+                "unit": null
+              },
+              "id": "c2",
+              "name": "lookup",
+              "type": "tool_call"
+            }
+          ],
+          "role": "assistant"
+        }
+      ]
+    },
+    {
+      "at_ms": 5,
+      "id": "chat",
+      "op": "finish_reasons",
+      "value": []
+    },
+    {
+      "at_ms": 10,
+      "id": "chat",
+      "op": "end"
+    },
+    {
+      "arguments": {
+        "x": null
+      },
+      "at_ms": 20,
+      "id": "tool",
+      "name": "lookup",
+      "op": "start_tool"
+    },
+    {
+      "at_ms": 25,
+      "id": "tool",
+      "op": "tool_result",
+      "value": null
+    },
+    {
+      "at_ms": 30,
+      "id": "tool",
+      "op": "end"
+    }
+  ]
+}

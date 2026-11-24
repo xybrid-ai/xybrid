@@ -82,6 +82,10 @@ pub enum LlamaError {
         detail: String,
     },
 
+    /// A decision pass was aborted before producing an atomic result.
+    #[error("decision evaluation cancelled")]
+    DecisionCancelled,
+
     /// Catch-all for other non-zero C return codes. Carries whatever
     /// contextual string the safe wrapper could gather.
     #[error("internal llama.cpp error: {0}")]

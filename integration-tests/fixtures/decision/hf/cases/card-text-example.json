@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "id": "card-text-example",
+  "profile": "lfm3-d1/text/v1",
+  "title": "The model card's text request: noul, choice and score over one text state",
+  "covers": [
+    "state-string",
+    "multi-question",
+    "noul-no-criteria",
+    "choice-order"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"refund\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}, \"team\": {\"type\": \"choice\", \"instructions\": \"Which team should handle this?\", \"criteria\": {\"billing\": \"Charges, refunds, invoices\", \"technical\": \"App or site faults\", \"fraud\": \"Suspected unauthorised use\"}}, \"urgency\": {\"type\": \"score\", \"instructions\": \"How urgent is this?\", \"criteria\": [\"Can wait\", \"Today\", \"Blocking the customer now\"]}}}",
+  "artifact": "d1-2b-hf"
+}

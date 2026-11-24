@@ -1,0 +1,81 @@
+name: Fetch a test model
+description: >
+  Put one integration-tests/fixtures/models/models.json entry under
+  integration-tests/fixtures/models/<model> with download.sh, restoring it from
+  the cache when master has saved it, and verify the pinned weights.
+
+# Lanes that test with real weights set XYBRID_REQUIRE_MODELS, so a missing
+# model fails the test instead of skipping it. This action makes sure the model
+# is there and is the one the suite is calibrated against.
+inputs:
+  model:
+    description: The models.json entry download.sh resolves.
+    required: true
+  sha256:
+    description: >
+      SHA-256 of `file`. It also keys the cache: a mutable registry artifact
+      cannot silently redefine the test. Without it the key is models.json's hash.
+    default: ''
+  file:
+    description: The file `sha256` covers, relative to the model directory.
+    default: ''
+  cache:
+    description: >
+      Restore (and on master, save) the model. `false` downloads every time,
+      for large models that would crowd the repository's 10 GB cache.
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    # download.sh parses the registry response with jq and unpacks zstd
+    # tarballs. Both ship on the runner images; install only if that changes.
+    - name: Ensure download tooling (jq, zstd)
+      shell: bash
+      run: |
+        for tool in jq zstd; do
+          command -v "$tool" >/dev/null && continue
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            brew install "$tool"
+          else
+            sudo apt-get update && sudo apt-get install -y "$tool"
+          fi
+        done
+
+    - name: Restore ${{ inputs.model }}
+      id: restore
+      if: inputs.cache == 'true'
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: integration-tests/fixtures/models/${{ inputs.model }}
+        key: ${{ inputs.model }}-${{ runner.os }}-${{ inputs.sha256 || hashFiles('integration-tests/fixtures/models/models.json') }}
+
+    # `download.sh --check` treats a model as present when its directory holds
+    # model_metadata.json, which is exactly what a cache hit restores.
+    - name: Download ${{ inputs.model }}
+      if: steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        MODEL: ${{ inputs.model }}
+      run: ./integration-tests/download.sh "$MODEL"
+
+    - name: Verify ${{ inputs.model }} weights
+      if: inputs.sha256 != ''
+      shell: bash
+      env:
+        MODEL: ${{ inputs.model }}
+        SHA256: ${{ inputs.sha256 }}
+        FILE: ${{ inputs.file }}
+      run: |
+        if [ -z "$FILE" ]; then
+          echo "::error::fetch-model: sha256 needs the file it covers"
+          exit 1
+        fi
+        echo "$SHA256  integration-tests/fixtures/models/$MODEL/$FILE" | shasum -a 256 -c -
+
+    - name: Save ${{ inputs.model }}
+      if: inputs.cache == 'true' && steps.restore.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: integration-tests/fixtures/models/${{ inputs.model }}
+        key: ${{ inputs.model }}-${{ runner.os }}-${{ inputs.sha256 || hashFiles('integration-tests/fixtures/models/models.json') }}

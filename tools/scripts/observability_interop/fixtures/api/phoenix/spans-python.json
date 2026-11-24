@@ -1,0 +1,441 @@
+{
+ "data": [
+  {
+   "attributes": {
+    "gen_ai": {
+     "operation": {
+      "name": "execute_tool"
+     },
+     "tool": {
+      "call": {
+       "arguments": "{\"query\":\"weather\",\"token\":\"[scenario-redacted]\"}",
+       "id": "call-scenario-1",
+       "result": "{\"answer\":\"sunny\",\"echo\":\"[scenario-redacted]\"}"
+      },
+      "name": "scenario_lookup",
+      "type": "function"
+     }
+    },
+    "input": {
+     "mime_type": "application/json",
+     "value": "{\"query\":\"weather\",\"token\":\"[scenario-redacted]\"}"
+    },
+    "openinference": {
+     "span": {
+      "kind": "TOOL"
+     }
+    },
+    "output": {
+     "mime_type": "application/json",
+     "value": "{\"answer\":\"sunny\",\"echo\":\"[scenario-redacted]\"}"
+    },
+    "tool": {
+     "name": "scenario_lookup"
+    }
+   },
+   "context": {
+    "span_id": "db1a749676e8acb3",
+    "trace_id": "78793a707974686f6e00000000000000"
+   },
+   "end_time": "2026-11-09T16:46:45.877+00:00",
+   "events": [],
+   "id": "U3BhbjoxMDA0",
+   "name": "execute_tool scenario_lookup",
+   "parent_id": "b640cb8c1c2849ee",
+   "span_kind": "TOOL",
+   "start_time": "2026-11-09T16:46:45.877+00:00",
+   "status_code": "UNSET",
+   "status_message": ""
+  },
+  {
+   "attributes": {
+    "gen_ai": {
+     "input": {
+      "messages": "[{\"parts\":[{\"content\":\"my token is [scenario-redacted]\",\"type\":\"text\"}],\"role\":\"user\"}]"
+     },
+     "operation": {
+      "name": "chat"
+     },
+     "output": {
+      "messages": "[{\"finish_reason\":\"stop\",\"parts\":[{\"content\":\"I will not repeat [scenario-redacted]\",\"type\":\"text\"}],\"role\":\"assistant\"}]"
+     },
+     "provider": {
+      "name": "scenario-provider"
+     },
+     "request": {
+      "model": "scenario-model"
+     }
+    },
+    "input": {
+     "mime_type": "application/json",
+     "value": "[{\"parts\":[{\"content\":\"my token is [scenario-redacted]\",\"type\":\"text\"}],\"role\":\"user\"}]"
+    },
+    "llm": {
+     "model_name": "scenario-model",
+     "provider": "scenario-provider"
+    },
+    "openinference": {
+     "span": {
+      "kind": "LLM"
+     }
+    },
+    "output": {
+     "mime_type": "application/json",
+     "value": "[{\"finish_reason\":\"stop\",\"parts\":[{\"content\":\"I will not repeat [scenario-redacted]\",\"type\":\"text\"}],\"role\":\"assistant\"}]"
+    },
+    "xybrid": {
+     "genai": {
+      "execution": {
+       "location": "local"
+      },
+      "runtime": {
+       "name": "scenario-runtime"
+      }
+     }
+    }
+   },
+   "context": {
+    "span_id": "e495596a7e3814ed",
+    "trace_id": "78793a707974686f6e00000000000000"
+   },
+   "end_time": "2026-11-09T16:46:45.877+00:00",
+   "events": [],
+   "id": "U3BhbjoxMDA1",
+   "name": "chat scenario-model",
+   "parent_id": "b640cb8c1c2849ee",
+   "span_kind": "LLM",
+   "start_time": "2026-11-09T16:46:45.877+00:00",
+   "status_code": "UNSET",
+   "status_message": ""
+  },
+  {
+   "attributes": {
+    "error": {
+     "type": "scenario_error"
+    },
+    "gen_ai": {
+     "operation": {
+      "name": "chat"
+     },
+     "provider": {
+      "name": "scenario-provider"
+     },
+     "request": {
+      "model": "scenario-model"
+     }
+    },
+    "llm": {
+     "model_name": "scenario-model",
+     "provider": "scenario-provider"
+    },
+    "openinference": {
+     "span": {
+      "kind": "LLM"
+     }
+    },
+    "xybrid": {
+     "genai": {
+      "execution": {
+       "location": "local"
+      },
+      "runtime": {
+       "name": "scenario-runtime"
+      }
+     }
+    }
+   },
+   "context": {
+    "span_id": "4486b88a464166a7",
+    "trace_id": "78793a707974686f6e00000000000000"
+   },
+   "end_time": "2026-11-09T16:46:45.877+00:00",
+   "events": [],
+   "id": "U3BhbjoxMDA2",
+   "name": "chat scenario-model",
+   "parent_id": "b640cb8c1c2849ee",
+   "span_kind": "LLM",
+   "start_time": "2026-11-09T16:46:45.877+00:00",
+   "status_code": "ERROR",
+   "status_message": "upstream rejected [scenario-redacted]"
+  },
+  {
+   "attributes": {
+    "error": {
+     "type": "cancelled"
+    },
+    "gen_ai": {
+     "input": {
+      "messages": "[{\"parts\":[{\"content\":\"abandoned request\",\"type\":\"text\"}],\"role\":\"user\"}]"
+     },
+     "operation": {
+      "name": "chat"
+     },
+     "provider": {
+      "name": "scenario-provider"
+     },
+     "request": {
+      "model": "scenario-model"
+     }
+    },
+    "input": {
+     "mime_type": "application/json",
+     "value": "[{\"parts\":[{\"content\":\"abandoned request\",\"type\":\"text\"}],\"role\":\"user\"}]"
+    },
+    "llm": {
+     "model_name": "scenario-model",
+     "provider": "scenario-provider"
+    },
+    "openinference": {
+     "span": {
+      "kind": "LLM"
+     }
+    },
+    "xybrid": {
+     "genai": {
+      "execution": {
+       "location": "local"
+      },
+      "runtime": {
+       "name": "scenario-runtime"
+      }
+     }
+    }
+   },
+   "context": {
+    "span_id": "eaa62471ce145c30",
+    "trace_id": "78793a707974686f6e00000000000000"
+   },
+   "end_time": "2026-11-09T16:46:45.878+00:00",
+   "events": [],
+   "id": "U3BhbjoxMDA3",
+   "name": "chat scenario-model",
+   "parent_id": "b640cb8c1c2849ee",
+   "span_kind": "LLM",
+   "start_time": "2026-11-09T16:46:45.877+00:00",
+   "status_code": "ERROR",
+   "status_message": "cancelled"
+  },
+  {
+   "attributes": {
+    "gen_ai": {
+     "conversation": {
+      "id": "scenario-conversation-python"
+     },
+     "operation": {
+      "name": "load_model"
+     },
+     "request": {
+      "model": "scenario-weightless"
+     }
+    },
+    "openinference": {
+     "span": {
+      "kind": "CHAIN"
+     }
+    },
+    "xybrid": {
+     "genai": {
+      "model": {
+       "format": "onnx"
+      },
+      "runtime": {
+       "name": "onnxruntime"
+      }
+     },
+     "load": {
+      "trigger": "load"
+     }
+    }
+   },
+   "context": {
+    "span_id": "6720394789545b6c",
+    "trace_id": "78793a707974686f6e00000000000000"
+   },
+   "end_time": "2026-11-09T16:46:45.878+00:00",
+   "events": [],
+   "id": "U3BhbjoxMDA4",
+   "name": "load_model scenario-weightless",
+   "parent_id": "b640cb8c1c2849ee",
+   "span_kind": "CHAIN",
+   "start_time": "2026-11-09T16:46:45.878+00:00",
+   "status_code": "UNSET",
+   "status_message": ""
+  },
+  {
+   "attributes": {
+    "error": {
+     "type": "load_error"
+    },
+    "gen_ai": {
+     "conversation": {
+      "id": "scenario-conversation-python"
+     },
+     "operation": {
+      "name": "load_model"
+     },
+     "provider": {
+      "name": "onnxruntime"
+     },
+     "request": {
+      "model": "scenario-weightless"
+     }
+    },
+    "openinference": {
+     "span": {
+      "kind": "CHAIN"
+     }
+    },
+    "xybrid": {
+     "genai": {
+      "model": {
+       "format": "onnx"
+      },
+      "runtime": {
+       "name": "onnxruntime"
+      }
+     },
+     "load": {
+      "trigger": "lazy"
+     }
+    }
+   },
+   "context": {
+    "span_id": "4609c5b592dffd26",
+    "trace_id": "78793a707974686f6e00000000000000"
+   },
+   "end_time": "2026-11-09T16:46:45.879+00:00",
+   "events": [],
+   "id": "U3BhbjoxMDA5",
+   "name": "load_model scenario-weightless",
+   "parent_id": "8bbe65780d9afff0",
+   "span_kind": "CHAIN",
+   "start_time": "2026-11-09T16:46:45.879+00:00",
+   "status_code": "ERROR",
+   "status_message": "load_error"
+  },
+  {
+   "attributes": {
+    "gen_ai": {
+     "conversation": {
+      "id": "scenario-conversation-python"
+     }
+    },
+    "openinference": {
+     "span": {
+      "kind": "CHAIN"
+     }
+    },
+    "xybrid": {
+     "stage": {
+      "backend": "ort",
+      "name": "execute:scenario-weightless",
+      "span_kind": "cpu"
+     }
+    }
+   },
+   "context": {
+    "span_id": "8bbe65780d9afff0",
+    "trace_id": "78793a707974686f6e00000000000000"
+   },
+   "end_time": "2026-11-09T16:46:45.879+00:00",
+   "events": [],
+   "id": "U3BhbjoxMDA6",
+   "name": "execute:scenario-weightless",
+   "parent_id": "c496be9eec254c48",
+   "span_kind": "CHAIN",
+   "start_time": "2026-11-09T16:46:45.879+00:00",
+   "status_code": "UNSET",
+   "status_message": ""
+  },
+  {
+   "attributes": {
+    "error": {
+     "type": "inference_error"
+    },
+    "gen_ai": {
+     "conversation": {
+      "id": "scenario-conversation-python"
+     },
+     "input": {
+      "messages": "[{\"parts\":[{\"content\":\"run input [scenario-redacted]\",\"type\":\"text\"}],\"role\":\"user\"}]"
+     },
+     "operation": {
+      "name": "predict"
+     },
+     "provider": {
+      "name": "onnxruntime"
+     },
+     "request": {
+      "model": "scenario-weightless"
+     }
+    },
+    "input": {
+     "mime_type": "application/json",
+     "value": "[{\"parts\":[{\"content\":\"run input [scenario-redacted]\",\"type\":\"text\"}],\"role\":\"user\"}]"
+    },
+    "openinference": {
+     "span": {
+      "kind": "CHAIN"
+     }
+    },
+    "xybrid": {
+     "genai": {
+      "execution": {
+       "location": "local"
+      },
+      "model": {
+       "format": "onnx"
+      },
+      "runtime": {
+       "name": "onnxruntime"
+      }
+     }
+    }
+   },
+   "context": {
+    "span_id": "c496be9eec254c48",
+    "trace_id": "78793a707974686f6e00000000000000"
+   },
+   "end_time": "2026-11-09T16:46:45.879+00:00",
+   "events": [],
+   "id": "U3BhbjoxMDA7",
+   "name": "predict scenario-weightless",
+   "parent_id": "b640cb8c1c2849ee",
+   "span_kind": "CHAIN",
+   "start_time": "2026-11-09T16:46:45.879+00:00",
+   "status_code": "ERROR",
+   "status_message": "inference_error"
+  },
+  {
+   "attributes": {
+    "gen_ai": {
+     "operation": {
+      "name": "invoke_workflow"
+     },
+     "workflow": {
+      "name": "scenario-workflow"
+     }
+    },
+    "openinference": {
+     "span": {
+      "kind": "CHAIN"
+     }
+    }
+   },
+   "context": {
+    "span_id": "b640cb8c1c2849ee",
+    "trace_id": "78793a707974686f6e00000000000000"
+   },
+   "end_time": "2026-11-09T16:46:45.879+00:00",
+   "events": [],
+   "id": "U3BhbjoxMDA8",
+   "name": "invoke_workflow scenario-workflow",
+   "parent_id": "707974686f6e0000",
+   "span_kind": "CHAIN",
+   "start_time": "2026-11-09T16:46:45.876+00:00",
+   "status_code": "UNSET",
+   "status_message": ""
+  }
+ ],
+ "next_cursor": null
+}

@@ -28,7 +28,7 @@ sys.modules[SPEC.name] = PULL
 SPEC.loader.exec_module(PULL)
 FRAMEWORK = "XybridFFI.xcframework"
 NOTICE_ROOT = FRAMEWORK + "/Notices/zzz/"
-BASE_FILES = {FRAMEWORK + "/Info.plist"} | {
+BASE_FILES = {FRAMEWORK + "/Info.plist", FRAMEWORK + "/Notices/llama/NOTICE"} | {
     FRAMEWORK + "/" + platform + "/XybridFFI.framework/" + name
     for platform in ("ios-arm64", "ios-arm64-simulator")
     for name in ("XybridFFI", "Info.plist", "Headers/xybrid-bolt.h", "Modules/module.modulemap")

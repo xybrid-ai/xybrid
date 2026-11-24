@@ -47,7 +47,7 @@ cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli
 By default, `cargo install` builds without hardware acceleration. For optimal performance, add platform features:
 
 ```bash
-# macOS — Metal GPU + Apple Neural Engine + llama.cpp
+# macOS — Metal GPU + llama.cpp + whisper.cpp
 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-macos
 
 # Linux / Windows — ONNX + llama.cpp
@@ -118,7 +118,7 @@ only binaries you compile yourself.
 | **Individual flags** | |
 | `ort-download` | Download prebuilt ONNX Runtime binaries |
 | `ort-dynamic` | Load ONNX Runtime .so at runtime |
-| `ort-coreml` | Apple Neural Engine acceleration |
+| `ort-coreml` | Links ONNX Runtime's Core ML execution provider (the SDK does not select it yet) |
 | `candle` | Candle ML backend (Whisper models) |
 | `candle-metal` | Metal GPU acceleration for Candle |
 | `candle-cuda` | CUDA GPU acceleration for Candle |
@@ -253,13 +253,13 @@ xybrid run --model smollm2-360m --input-text "What is the capital of France?"
 
 ### Vision-Language Input
 
-Vision-language models require a build with `vision` or `llm-llamacpp-vision`
-enabled, plus a model bundle that includes the vision encoder artifact.
-Platform presets alone are text-only; compose a preset with
-`llm-llamacpp-vision` for local VLM generation.
+Vision-language models need a build with `llm-llamacpp-vision`, plus a model
+bundle that includes the vision encoder artifact. Every platform preset already
+enables `llm-llamacpp-vision`, so a preset build runs VLMs with no extra
+feature:
 
 ```bash
-cargo build --release -p xybrid-cli --features platform-macos,llm-llamacpp-vision
+cargo build --release -p xybrid-cli --features platform-macos
 ```
 
 ```bash
@@ -345,7 +345,17 @@ xybrid run --config voice-assistant.yaml --input-audio question.wav --output res
 |------|-------------|
 | `-v`, `-vv` | Increase verbosity |
 | `-q`, `--quiet` | Suppress output, show errors only |
-| `--api-key` | Platform API key for telemetry (or `XYBRID_API_KEY` env) |
+| `--api-key` | Cloud API key (or `XYBRID_API_KEY` env); does not enable observability by itself |
+| `--platform-url` | Cloud gateway URL (or `XYBRID_PLATFORM_URL` env) |
+| `--observability` | Opt into Xybrid trace export; requires an API key |
+| `--traces-endpoint` | Full trace URL for `--observability` (default `https://ingest.xybrid.dev/v1/traces`) |
+
+Collector export uses `OTEL_EXPORTER_OTLP_ENDPOINT` or per-signal
+`OTEL_EXPORTER_OTLP_*_ENDPOINT` variables and does not require a Xybrid API key.
+`OTEL_SDK_DISABLED=true` disables export in either mode. The CLI flushes and
+shuts down its exporter when the command ends.
+Enabled observability captures prompts and outputs by default. Set
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT=no_content` for metadata only.
 
 ### `run` Input Sources
 

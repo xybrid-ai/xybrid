@@ -2,11 +2,12 @@
 # `local.properties` is gitignored, so your key never lands in the repo.
 #
 # Android Studio reads it automatically — just press Run.
-# Get a free key at https://dashboard.xybrid.dev.
+# Get a key at https://console.xybrid.dev.
 #
-# Leave it unset to run anonymously (on-device inference, telemetry disabled).
-xybrid.apiKey=xy_live_xxxxxxxxxxxxxxxxxxxxxxxx
+# Leave it unset to run anonymously (on-device inference, no trace export).
+# When set, the app also starts trace export to Xybrid.
+xybrid.apiKey=sk_live_YOUR_KEY
 
-# Optional: point telemetry at a self-hosted / tunneled platform (ingest URL).
-# Leave unset to use the default Xybrid platform endpoint.
-xybrid.platformUrl=https://your-platform.example.com
+# Optional: send traces to a self-hosted / tunneled OTLP trace endpoint
+# (full URL, including /v1/traces). Leave unset to send them to Xybrid.
+# xybrid.tracesEndpoint=https://your-platform.example.com/v1/traces

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "instructions-array",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Array instructions: compact tojson",
+  "covers": [
+    "instructions-structured"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": [\"Is\", \"this\", \"a refund\", 1, null]}}}",
+  "artifact": "d1-2b-hf"
+}

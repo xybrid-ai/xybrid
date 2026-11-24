@@ -1,0 +1,195 @@
+{
+  "binding": "python",
+  "device": {
+    "machine": "arm64",
+    "python": "3.14.8",
+    "release": "27.2.0",
+    "system": "Darwin"
+  },
+  "lane": "python-mac",
+  "model_id": "lfm2.5-230m",
+  "run": "s6-20261111t143025z-python-mac",
+  "scenario_error": null,
+  "schema": "xybrid-staging-scenario/1",
+  "sdk_version": "0.17.0",
+  "sessions": {
+    "collector": {
+      "completed": {
+        "chunks": 8,
+        "finish_reason": "stop",
+        "outcome": "ok",
+        "text_chars": 28,
+        "tokens_out": 8
+      },
+      "init": "ok",
+      "lifecycle": {
+        "flush": "ok",
+        "shutdown": "ok"
+      },
+      "parent_span_id": "0e8d2ed0fc949625",
+      "quality": {
+        "evaluation": true,
+        "feedback": true
+      },
+      "references": {
+        "load": {
+          "span_id": "df05b374697cb70b",
+          "trace_id": "022ae33191b8339e9c19f12b6ed47f0e"
+        },
+        "run": {
+          "span_id": "49e7e6a1ca73cad7",
+          "trace_id": "022ae33191b8339e9c19f12b6ed47f0e"
+        },
+        "workflow": {
+          "span_id": "3e227d8bab313e18",
+          "trace_id": "022ae33191b8339e9c19f12b6ed47f0e"
+        }
+      },
+      "stats": {
+        "after_flush": {
+          "enabled": true,
+          "logs": {
+            "accepted": 2,
+            "dropped": 0,
+            "exported": 2,
+            "failed": 0,
+            "pending": 0
+          },
+          "metrics": {
+            "accepted": 13,
+            "dropped": 0,
+            "exported": 13,
+            "failed": 0,
+            "pending": 0
+          },
+          "traces": {
+            "accepted": 7,
+            "dropped": 0,
+            "exported": 7,
+            "failed": 0,
+            "pending": 0
+          }
+        },
+        "after_shutdown": {
+          "enabled": false,
+          "logs": {
+            "accepted": 2,
+            "dropped": 0,
+            "exported": 2,
+            "failed": 0,
+            "pending": 0
+          },
+          "metrics": {
+            "accepted": 26,
+            "dropped": 0,
+            "exported": 26,
+            "failed": 0,
+            "pending": 0
+          },
+          "traces": {
+            "accepted": 7,
+            "dropped": 0,
+            "exported": 7,
+            "failed": 0,
+            "pending": 0
+          }
+        }
+      },
+      "stopped": {
+        "chunks_consumed": 3,
+        "delivery": "pull",
+        "outcome": "cancelled"
+      },
+      "trace_id": "022ae33191b8339e9c19f12b6ed47f0e"
+    },
+    "direct": {
+      "completed": {
+        "chunks": 8,
+        "finish_reason": "stop",
+        "outcome": "ok",
+        "text_chars": 28,
+        "tokens_out": 8
+      },
+      "init": "ok",
+      "lifecycle": {
+        "flush": "ok",
+        "shutdown": "ok"
+      },
+      "parent_span_id": "2bb5632aba620022",
+      "quality": {
+        "evaluation": false,
+        "feedback": false
+      },
+      "references": {
+        "load": {
+          "span_id": "ba5f59e28ebe2c8f",
+          "trace_id": "8f25e8437f84d311d8af4e1177122905"
+        },
+        "run": {
+          "span_id": "a621599a47d6a940",
+          "trace_id": "8f25e8437f84d311d8af4e1177122905"
+        },
+        "workflow": {
+          "span_id": "47b15d561151eda7",
+          "trace_id": "8f25e8437f84d311d8af4e1177122905"
+        }
+      },
+      "stats": {
+        "after_flush": {
+          "enabled": true,
+          "logs": {
+            "accepted": 0,
+            "dropped": 0,
+            "exported": 0,
+            "failed": 0,
+            "pending": 0
+          },
+          "metrics": {
+            "accepted": 0,
+            "dropped": 0,
+            "exported": 0,
+            "failed": 0,
+            "pending": 0
+          },
+          "traces": {
+            "accepted": 7,
+            "dropped": 0,
+            "exported": 7,
+            "failed": 0,
+            "pending": 0
+          }
+        },
+        "after_shutdown": {
+          "enabled": false,
+          "logs": {
+            "accepted": 0,
+            "dropped": 0,
+            "exported": 0,
+            "failed": 0,
+            "pending": 0
+          },
+          "metrics": {
+            "accepted": 0,
+            "dropped": 0,
+            "exported": 0,
+            "failed": 0,
+            "pending": 0
+          },
+          "traces": {
+            "accepted": 7,
+            "dropped": 0,
+            "exported": 7,
+            "failed": 0,
+            "pending": 0
+          }
+        }
+      },
+      "stopped": {
+        "chunks_consumed": 3,
+        "delivery": "pull",
+        "outcome": "cancelled"
+      },
+      "trace_id": "8f25e8437f84d311d8af4e1177122905"
+    }
+  }
+}

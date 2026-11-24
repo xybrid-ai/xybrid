@@ -12,7 +12,7 @@ Add to your `build.gradle.kts`:
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.16.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.21.0")
 }
 ```
 
@@ -199,6 +199,77 @@ result.text?.let { println("Answer: $it") }
 result.reasoningContent?.let { println("Reasoning: $it") }
 ```
 
+### Observability (OpenTelemetry)
+
+Export is off until you start it; an API key passed to `Xybrid.init` does not
+enable it. Once started, each run is exported as an OpenTelemetry trace, with
+prompts and outputs included unless you call `.metadataOnly()`.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
+
+```kotlin
+import ai.xybrid.metadataOnly
+import ai.xybrid.runOptions
+import ai.xybrid.service
+import ai.xybrid.start
+
+// Traces to Xybrid (get a key at console.xybrid.dev)
+Xybrid.Observability.xybrid(apiKey)
+    .service("MyApp", version = BuildConfig.VERSION_NAME)
+    .start()
+
+// Or traces, metrics, and logs to any OTLP/HTTP endpoint (OpenTelemetry Collector)
+Xybrid.Observability.otlp("http://collector:4318")
+    .metadataOnly()
+    .start()
+
+// Join your own trace, and tag the run with your conversation id
+val result = model.runAsync(
+    envelope,
+    runOptions(traceparent = currentTraceparent, conversationId = chatId),
+)
+
+// Link user feedback to the run's trace (needs the OTLP preset's logs signal)
+result.observation?.let {
+    Xybrid.Observability.recordFeedback(it, score = 1.0, label = "thumbs_up")
+}
+
+// Before the app goes to the background
+Xybrid.Observability.flushAsync()
+```
+
+`Xybrid.Observability.stats` reports accepted, exported, dropped, failed, and
+pending counts per signal (`traces`, `logs`, `metrics`); after `shutdown` they are
+the session's final counters (what the shutdown failed or dropped included)
+until the next `start()`. A flush or shutdown that
+cannot deliver everything throws `XybridError.TelemetryDelivery`; the inference
+already succeeded, so do not rerun it. `suppressTrace = true` in `runOptions`
+skips the detailed trace for one run. For a camera or microphone loop, pass
+the same `frameSessionId` on every run of the loop: each frame is counted in
+metrics, and detailed traces are kept for roughly one frame per
+`setLiveTraceIntervalMs` per session. Pipelines take the same trace fields and
+return `observation` references for the workflow and each stage; ASR sessions
+take them through `streamingConfigWithVad(..., observation = ...)` or the
+config's `observation`.
+
+Record work Xybrid does not run itself (a tool, another runtime's inference)
+with a manual operation. Pass `context()?.childOptions` to its children. The
+first terminal call wins, and closing an unfinished one cancels it without
+flushing:
+
+```kotlin
+Xybrid.Observability.withWorkflow("answer-question") { workflow ->
+    val call = XybridToolCallInfo("search", null, null, null, "{\"q\":\"otel\"}")
+    Xybrid.Observability.startTool(call, workflow.context()?.childOptions).use { tool ->
+        tool.recordResult("{\"hits\":3}")
+        tool.complete()
+    }
+}
+```
+
+`withWorkflow` completes on return, cancels on `CancellationException`, and
+fails with the label `application_error` (never the exception text) otherwise.
+
 ### Error Handling
 
 ```kotlin
@@ -267,6 +338,7 @@ Creating a source or loader is always cheap. Only `load()` and
 | `audioBytes` | `ByteArray?` | Audio output (for TTS) |
 | `embedding` | `List<Float>?` | Embedding output |
 | `latencyMs` | `UInt` | Inference latency in milliseconds |
+| `observation` | `XybridObservationRef?` | Trace/span ids of the run, when it was traced |
 
 ## Directory Structure
 
@@ -486,7 +558,3 @@ for armeabi-v7a and x86_64.
 ## Telemetry
 
 The Android binding reports `binding=kotlin` in a small `X-Xybrid-Client` header attached to registry metadata calls. See [docs/telemetry/registry.md](../../docs/telemetry/registry.md) for the exact wire format and the opt-out switch (`XYBRID_TELEMETRY_OPTOUT=1`).
-
-## Full Plan
-
-See [DRAFT-PLATFORM-SDK-RESTRUCTURE.md](../../docs/architecture/DRAFT-PLATFORM-SDK-RESTRUCTURE.md) for the complete restructuring plan.

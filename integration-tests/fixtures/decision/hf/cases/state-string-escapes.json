@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "state-string-escapes",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Quotes, backslashes, control characters and non-ASCII text: raw in a text state, escaped by tojson in a JSON one",
+  "covers": [
+    "json-escapes",
+    "json-unicode",
+    "state-string"
+  ],
+  "request_text": "{\"state\": \"Quote \\\" backslash \\\\ newline\\nend tab\\tend bell\\u0007 nul\\u0000 é 中文 😀   ​\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": {\"text\": \"Quote \\\" backslash \\\\ newline\\nend tab\\tend bell\\u0007 nul\\u0000 é 中文 😀   ​ \"}}}}",
+  "artifact": "d1-2b-hf"
+}

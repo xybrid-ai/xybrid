@@ -45,6 +45,7 @@ use std::sync::Arc;
 
 use super::choice::onnx::OnnxChoiceScorer;
 use super::choice::{ensure_no_choice_kinds, validate_choice_request, EntryPoint};
+use super::decision::{ensure_no_decision_kinds, validate_decision_request};
 use super::listener::ExecutionGuard;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use super::llm_telemetry::{
@@ -60,7 +61,7 @@ use super::tool_continuation::{
 use crate::ir::ChoiceRequest;
 
 fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
-    if error.cloud_fallback_abort_reason().is_some() {
+    if error.cloud_fallback_abort_reason().is_some() || matches!(error, AdapterError::Cancelled) {
         guard.set_controlled_abort();
     } else {
         guard.set_failed(error.to_string());
@@ -274,6 +275,8 @@ pub struct TemplateExecutor {
     /// [`ChoiceScorerCache`]). Lives for the executor's lifetime, like the
     /// session above.
     choice_scorer_cache: Option<ChoiceScorerCache>,
+    #[cfg(feature = "llm-llamacpp")]
+    decision_cache: Option<super::decision::runtime::DecisionRuntime>,
     /// Parsed `tokenizer.json` files for the `Tokenize` and `WhisperDecode`
     /// steps (see [`TokenizerCache`]). Lives for the executor's lifetime, like
     /// the caches above, so each tokenizer is parsed once per loaded model.
@@ -284,6 +287,24 @@ pub struct TemplateExecutor {
     /// multimodal messages through their backend-owned mtmd path. This registry
     /// exists for backends that expose a separate image-encoder tensor seam.
     vision_encoders: HashMap<String, Box<dyn VisionEncoder>>,
+}
+
+/// Runtime wire label for a load of `path` that would actually load weights,
+/// or `None` when the runtime already holds them or cannot tell.
+///
+/// Only runtimes that report their cache are asked, so a runtime without one
+/// never reports a load it may not perform.
+pub(crate) fn pending_load_label(runtime: &dyn ModelRuntime, path: &Path) -> Option<&'static str> {
+    if let Some(onnx) = runtime.as_any().downcast_ref::<OnnxRuntime>() {
+        return (!onnx.has_session(path)).then_some("ort");
+    }
+    let label = match runtime.name() {
+        "whispercpp" => "whispercpp",
+        "zzz" => "zzz",
+        "candle" => "candle",
+        _ => return None,
+    };
+    (!runtime.is_loaded(path)).then_some(label)
 }
 
 impl TemplateExecutor {
@@ -339,6 +360,8 @@ impl TemplateExecutor {
             llm_adapter_cache: None,
             onnx_session_cache: OnnxSessionCache::default(),
             choice_scorer_cache: None,
+            #[cfg(feature = "llm-llamacpp")]
+            decision_cache: None,
             tokenizer_cache: TokenizerCache::default(),
             vision_encoders: HashMap::new(),
         }
@@ -383,6 +406,8 @@ impl TemplateExecutor {
             | EnvelopeKind::Text(_)
             | EnvelopeKind::Embedding(_)
             | EnvelopeKind::ChoiceRequest(_)
+            | EnvelopeKind::DecisionRequest(_)
+            | EnvelopeKind::Decisions(_)
             | EnvelopeKind::ChoiceScores(_) => false,
         }
     }
@@ -528,6 +553,12 @@ impl TemplateExecutor {
     /// browser-only templates) — read it as "an execution would pay a load".
     pub fn is_model_loaded(&self, metadata: &ModelMetadata) -> bool {
         let (runtime_type, model_file) = match &metadata.execution_template {
+            #[cfg(feature = "llm-llamacpp")]
+            ExecutionTemplate::Decision(spec) => {
+                return self.decision_cache.as_ref().is_some_and(|runtime| {
+                    runtime.matches(&Path::new(&self.base_path).join(&spec.model_file), spec)
+                })
+            }
             #[cfg(feature = "candle")]
             ExecutionTemplate::SafeTensors { model_file, .. } => ("candle", model_file),
             ExecutionTemplate::Onnx { model_file } => ("onnx", model_file),
@@ -552,24 +583,108 @@ impl TemplateExecutor {
             .unwrap_or(false)
     }
 
+    /// Executes with cooperative cancellation across decision preparation and passes.
+    /// Other templates ignore `abort` and keep their batch execution behavior.
+    pub fn execute_controlled(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        config: Option<&GenerationConfig>,
+        abort: Option<&std::sync::atomic::AtomicBool>,
+    ) -> ExecutorResult<Envelope> {
+        let guard = ExecutionGuard::new_silent(&metadata.model_id, "execute");
+        let result = self.execute_controlled_impl(metadata, input, config, abort);
+        if let Err(error) = &result {
+            mark_execution_terminal(&guard, error);
+        }
+        result
+    }
+
+    fn execute_controlled_impl(
+        &mut self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+        config: Option<&GenerationConfig>,
+        abort: Option<&std::sync::atomic::AtomicBool>,
+    ) -> ExecutorResult<Envelope> {
+        let decision = matches!(metadata.execution_template, ExecutionTemplate::Decision(_));
+        if decision && abort.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire)) {
+            return Err(AdapterError::Cancelled);
+        }
+        validate_decision_request(metadata, input, EntryPoint::Batch)?;
+        if decision {
+            if config.is_some() {
+                return Err(super::decision::unsupported(
+                    &metadata.model_id,
+                    "decision generation options",
+                ));
+            }
+            self.load_decision(metadata)?;
+            #[cfg(feature = "llm-llamacpp")]
+            if let (Some(runtime), EnvelopeKind::DecisionRequest(request)) =
+                (&mut self.decision_cache, &input.kind)
+            {
+                return runtime.run(request, abort);
+            }
+            return Err(super::decision::unsupported(
+                &metadata.model_id,
+                "decision runtime unavailable",
+            ));
+        }
+        self.execute_impl(metadata, input, config)
+    }
+
+    /// Loads and validates a decision model eagerly; other templates are unchanged.
+    pub fn load_decision(&mut self, metadata: &ModelMetadata) -> ExecutorResult<()> {
+        let ExecutionTemplate::Decision(spec) = &metadata.execution_template else {
+            return Ok(());
+        };
+        if cfg!(target_arch = "wasm32") {
+            return Err(super::decision::unsupported(
+                &metadata.model_id,
+                "browser decision execution",
+            ));
+        }
+        spec.validate()?;
+        if !metadata.preprocessing.is_empty() || !metadata.postprocessing.is_empty() {
+            return Err(super::decision::unsupported(
+                &metadata.model_id,
+                "decision preprocessing or postprocessing",
+            ));
+        }
+        #[cfg(feature = "llm-llamacpp")]
+        {
+            let path = Path::new(&self.base_path).join(&spec.model_file);
+            if !self
+                .decision_cache
+                .as_ref()
+                .is_some_and(|runtime| runtime.matches(&path, spec))
+            {
+                self.decision_cache = None;
+                self.decision_cache = Some(super::decision::runtime::DecisionRuntime::load(
+                    &metadata.model_id,
+                    &path,
+                    spec,
+                )?);
+            }
+            Ok(())
+        }
+        #[cfg(not(feature = "llm-llamacpp"))]
+        Err(super::decision::unsupported(
+            &metadata.model_id,
+            "decision execution requires llm-llamacpp",
+        ))
+    }
+
     pub fn execute(
         &mut self,
         metadata: &ModelMetadata,
         input: &Envelope,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
-        // Silent guard: the SDK's `XybridModel::run` / `run_async` wrappers
-        // around this method emit `ModelComplete` with full attribution
-        // (model_id, backend, latency, etc.). Emitting an outer
-        // `Started` / `Completed` pair from here would surface as
-        // duplicate noise rows on the Traces dashboard. Failed-path
-        // emission via `mark_execution_terminal` is preserved.
-        let guard = ExecutionGuard::new_silent(&metadata.model_id, "execute");
-        let result = self.execute_impl(metadata, input, config);
-        if let Err(e) = &result {
-            mark_execution_terminal(&guard, e);
-        }
-        result
+        // The controlled wrapper retains the existing silent listener guard,
+        // including content-free failure events for both SDK execution paths.
+        self.execute_controlled(metadata, input, config, None)
     }
 
     /// Internal implementation of execute — no telemetry listener events.
@@ -866,7 +981,7 @@ impl TemplateExecutor {
                         .to_string(),
                 ));
             }
-            ExecutionTemplate::ChoiceScorer { .. } => {
+            ExecutionTemplate::ChoiceScorer { .. } | ExecutionTemplate::Decision(_) => {
                 return Err(AdapterError::RuntimeError(
                     "ChoiceScorer execution should dispatch before the single-model path"
                         .to_string(),
@@ -1009,9 +1124,14 @@ impl TemplateExecutor {
 
             // Ensure model is loaded (runtime handles caching)
             debug!(target: "xybrid_core", "Loading model: {:?}", model_full_path);
-            runtime
-                .load(&model_full_path)
-                .map_err(|e| AdapterError::RuntimeError(format!("Load failed: {}", e)))?;
+            {
+                let _load = pending_load_label(&**runtime, &model_full_path)
+                    .map(xybrid_trace::model_load_stage);
+                runtime
+                    .load(&model_full_path)
+                    .inspect_err(|_| xybrid_trace::mark_stage_failed())
+                    .map_err(|e| AdapterError::RuntimeError(format!("Load failed: {}", e)))?;
+            }
 
             debug!(target: "xybrid_core", "Running inference");
             runtime.execute(&runtime_input)?
@@ -1163,7 +1283,15 @@ impl TemplateExecutor {
     ) -> ExecutorResult<Envelope> {
         // History is never scored, so a choice kind there is refused like one
         // in the input — for every model, scorers included.
+        validate_decision_request(metadata, input, EntryPoint::Conversation)?;
         validate_choice_request(metadata, input, EntryPoint::Conversation)?;
+        ensure_no_decision_kinds(
+            &metadata.model_id,
+            context
+                .system_envelope()
+                .into_iter()
+                .chain(context.history()),
+        )?;
         ensure_no_choice_kinds(
             &metadata.model_id,
             context
@@ -1391,6 +1519,7 @@ impl TemplateExecutor {
         #[allow(unused_variables)] on_token: StreamingCallback<'_>,
         #[allow(unused_variables)] config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        validate_decision_request(metadata, input, EntryPoint::Streaming)?;
         validate_choice_request(metadata, input, EntryPoint::Streaming)?;
 
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -1570,7 +1699,15 @@ impl TemplateExecutor {
         on_token: StreamingCallback<'_>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        validate_decision_request(metadata, input, EntryPoint::Streaming)?;
         validate_choice_request(metadata, input, EntryPoint::Streaming)?;
+        ensure_no_decision_kinds(
+            &metadata.model_id,
+            context
+                .system_envelope()
+                .into_iter()
+                .chain(context.history()),
+        )?;
         ensure_no_choice_kinds(
             &metadata.model_id,
             context
@@ -1800,7 +1937,10 @@ impl TemplateExecutor {
             }
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            adapter.load_model_with_config(&config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
@@ -1935,7 +2075,10 @@ impl TemplateExecutor {
             }
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            adapter.load_model_with_config(&config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
@@ -2235,7 +2378,10 @@ impl TemplateExecutor {
                 context_length,
             );
 
-            adapter.load_model_with_config(&llm_config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&llm_config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key, adapter));
         }
 
@@ -2427,7 +2573,10 @@ impl TemplateExecutor {
                 context_length,
             );
 
-            adapter.load_model_with_config(&llm_config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&llm_config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
@@ -2530,7 +2679,10 @@ impl TemplateExecutor {
             }
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            adapter.load_model_with_config(&config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
@@ -2662,7 +2814,10 @@ impl TemplateExecutor {
 
             // Create adapter with the appropriate backend based on hint
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            adapter.load_model_with_config(&config)?;
+            let _load = xybrid_trace::model_load_stage(adapter.wire_label().unwrap_or("llm"));
+            adapter
+                .load_model_with_config(&config)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())?;
 
             // Cache the adapter
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
@@ -2961,9 +3116,14 @@ impl TemplateExecutor {
             let runtime = self.runtimes.get_mut("onnx").ok_or_else(|| {
                 AdapterError::RuntimeError("ONNX runtime not configured".to_string())
             })?;
-            runtime.load(&model_full_path).map_err(|e| {
-                AdapterError::RuntimeError(format!("Failed to load session: {}", e))
-            })?;
+            let _load = pending_load_label(&**runtime, &model_full_path)
+                .map(xybrid_trace::model_load_stage);
+            runtime
+                .load(&model_full_path)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())
+                .map_err(|e| {
+                    AdapterError::RuntimeError(format!("Failed to load session: {}", e))
+                })?;
         }
 
         // Get session (immutable borrow)
@@ -3429,8 +3589,11 @@ impl TemplateExecutor {
                 .runtimes
                 .get_mut("zzz")
                 .expect("zzz runtime was present above");
+            let _load =
+                pending_load_label(&**runtime, &primary).map(xybrid_trace::model_load_stage);
             runtime
                 .load(&primary)
+                .inspect_err(|_| xybrid_trace::mark_stage_failed())
                 .map_err(|error| AdapterError::RuntimeError(format!("Load failed: {error}")))?;
             Ok(())
         }
@@ -3668,6 +3831,7 @@ impl TemplateExecutor {
         };
         use crate::ir::EnvelopeKind;
 
+        validate_decision_request(metadata, input, EntryPoint::Streaming)?;
         validate_choice_request(metadata, input, EntryPoint::Streaming)?;
 
         const DEFAULT_MAX_TTS_CHARS: usize = 350;
@@ -5509,7 +5673,6 @@ mod tests {
     #[test]
     fn vision_language_streaming_uses_multimodal_streaming_span() {
         use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
-        let _trace_lock = crate::tracing::test_lock();
 
         let metadata = ModelMetadata {
             model_id: "gemma-3n-e2b".to_string(),
@@ -5552,8 +5715,7 @@ mod tests {
         let image = Envelope::image(image_bytes, "png").unwrap();
         let input = Envelope::user_message("Describe this image", vec![image]).unwrap();
 
-        crate::tracing::init_tracing(true);
-        crate::tracing::reset_tracing();
+        let stage_trace = crate::tracing::capture();
 
         let mut executor = TemplateExecutor::with_base_path("/models");
         cache_text_only_boundary_backend(
@@ -5566,8 +5728,7 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("does not support vision input"));
 
-        let json = crate::tracing::get_stages_json();
-        crate::tracing::reset_tracing();
+        let json = stage_trace.stages_json();
         let spans = json["spans"].as_array().unwrap();
         assert!(
             spans
@@ -5587,7 +5748,6 @@ mod tests {
         };
         use ndarray::{ArrayD, IxDyn};
         use std::sync::{Arc, Mutex};
-        let _trace_lock = crate::tracing::test_lock();
 
         struct SpyVisionEncoder {
             events: Arc<Mutex<Vec<&'static str>>>,
@@ -5719,8 +5879,7 @@ mod tests {
         let image = Envelope::image(image_bytes, "png").unwrap();
         let input = Envelope::user_message("Describe this image", vec![image]).unwrap();
 
-        crate::tracing::init_tracing(true);
-        crate::tracing::reset_tracing();
+        let stage_trace = crate::tracing::capture();
 
         let events = Arc::new(Mutex::new(Vec::new()));
         let observed_shape = Arc::new(Mutex::new(None));
@@ -5763,8 +5922,7 @@ mod tests {
         assert_eq!(*image_count.lock().unwrap(), Some(1));
         assert_eq!(*events.lock().unwrap(), vec!["encoder", "llm"]);
 
-        let spans = crate::tracing::get_stages_json();
-        crate::tracing::reset_tracing();
+        let spans = stage_trace.stages_json();
         let vision_encoder_metadata = spans["spans"]
             .as_array()
             .and_then(|spans| {

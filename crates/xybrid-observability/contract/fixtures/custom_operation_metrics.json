@@ -1,0 +1,254 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "Inference operation names outside chat, text_completion, generate_content, embeddings and predict (provider-specific names, and even catalog names of other APIs) use the generative inference metrics including usage. Span names are '{operation} {model}' built literally, with no template or replacement-pattern expansion.",
+  "expect": {
+    "logs": [],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "execute_tool",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.01
+          },
+          {
+            "attributes": {
+              "gen_ai.operation.name": "rank{model}$&",
+              "gen_ai.provider.name": "local-ml",
+              "gen_ai.request.model": "m$1{x}",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.01
+          },
+          {
+            "attributes": {
+              "gen_ai.operation.name": "rerank",
+              "gen_ai.provider.name": "cohere",
+              "gen_ai.request.model": "rerank-v3",
+              "server.address": "api.cohere.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "count": 1,
+            "sum": 0.04
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.inference.operation.input_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "rerank",
+              "gen_ai.provider.name": "cohere",
+              "gen_ai.request.model": "rerank-v3",
+              "server.address": "api.cohere.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "count": 1,
+            "sum": 10
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.operation.output_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "rerank",
+              "gen_ai.provider.name": "cohere",
+              "gen_ai.request.model": "rerank-v3",
+              "server.address": "api.cohere.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "count": 1,
+            "sum": 2
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.usage.input_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "rerank",
+              "gen_ai.provider.name": "cohere",
+              "gen_ai.request.model": "rerank-v3",
+              "gen_ai.token.modality": "unknown",
+              "server.address": "api.cohere.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "value": 10
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.usage.output_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "rerank",
+              "gen_ai.provider.name": "cohere",
+              "gen_ai.request.model": "rerank-v3",
+              "gen_ai.token.modality": "unknown",
+              "server.address": "api.cohere.com",
+              "server.port": 443,
+              "xybrid.genai.execution.location": "remote"
+            },
+            "value": 2
+          }
+        ],
+        "unit": "{token}"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "rerank",
+          "gen_ai.provider.name": "cohere",
+          "gen_ai.request.frequency_penalty": 0,
+          "gen_ai.request.model": "rerank-v3",
+          "gen_ai.request.presence_penalty": 0.5,
+          "gen_ai.request.temperature": 0,
+          "gen_ai.request.top_p": 1,
+          "gen_ai.usage.input_tokens": 10,
+          "gen_ai.usage.output_tokens": 2,
+          "server.address": "api.cohere.com",
+          "server.port": 443,
+          "xybrid.genai.execution.location": "remote",
+          "xybrid.genai.runtime.name": "http"
+        },
+        "end_ms": 40,
+        "id": "rerank",
+        "kind": "CLIENT",
+        "name": "rerank rerank-v3",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "rank{model}$&",
+          "gen_ai.provider.name": "local-ml",
+          "gen_ai.request.model": "m$1{x}",
+          "xybrid.genai.execution.location": "local"
+        },
+        "end_ms": 60,
+        "id": "odd",
+        "kind": "INTERNAL",
+        "name": "rank{model}$& m$1{x}",
+        "parent": null,
+        "start_ms": 50,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 1
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny",
+          "xybrid.genai.execution.location": "local"
+        },
+        "end_ms": 80,
+        "id": "misused",
+        "kind": "INTERNAL",
+        "name": "execute_tool tiny",
+        "parent": null,
+        "start_ms": 70,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 2
+      }
+    ]
+  },
+  "name": "custom_operation_metrics",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "rerank",
+      "op": "start_inference",
+      "request": {
+        "frequency_penalty": 0,
+        "location": "remote",
+        "model": "rerank-v3",
+        "operation": "rerank",
+        "presence_penalty": 0.5,
+        "provider": "cohere",
+        "runtime": "http",
+        "server_address": "api.cohere.com",
+        "server_port": 443,
+        "temperature": 0,
+        "top_p": 1
+      }
+    },
+    {
+      "at_ms": 5,
+      "id": "rerank",
+      "input_tokens": 10,
+      "op": "usage",
+      "output_tokens": 2
+    },
+    {
+      "at_ms": 40,
+      "id": "rerank",
+      "op": "end"
+    },
+    {
+      "at_ms": 50,
+      "id": "odd",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "m$1{x}",
+        "operation": "rank{model}$&",
+        "provider": "local-ml"
+      }
+    },
+    {
+      "at_ms": 60,
+      "id": "odd",
+      "op": "end"
+    },
+    {
+      "at_ms": 70,
+      "id": "misused",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "tiny",
+        "operation": "execute_tool",
+        "provider": "llama.cpp"
+      }
+    },
+    {
+      "at_ms": 80,
+      "id": "misused",
+      "op": "end"
+    }
+  ]
+}

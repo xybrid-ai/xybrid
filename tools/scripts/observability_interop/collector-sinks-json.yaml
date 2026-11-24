@@ -1,0 +1,12 @@
+# Overlay for sinks.yaml in the harness: the harness's sink is its own
+# capture server, which records OTLP/JSON, so the two sink exporters send
+# uncompressed JSON. Endpoints stay those of sinks.yaml
+# (METRICS_OTLP_ENDPOINT, LOGS_OTLP_ENDPOINT), which run_interop.py sets.
+
+exporters:
+  otlphttp/metrics:
+    encoding: json
+    compression: none
+  otlphttp/logs:
+    encoding: json
+    compression: none

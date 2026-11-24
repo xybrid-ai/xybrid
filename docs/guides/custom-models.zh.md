@@ -195,7 +195,7 @@ curl -L "$BASE/tokenizer.json" -o embeddinggemma-2/tokenizer.json
 
 ```rust
 use xybrid_sdk::ModelLoader;
-use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 
 let loader = ModelLoader::from_directory("/path/to/my-custom-model")?;
 let model = loader.load()?;
@@ -204,7 +204,8 @@ let input = Envelope {
     kind: EnvelopeKind::Text("Hello, world!".into()),
     metadata: Default::default(),
 };
-let output = model.run(&input)?;
+// 第二个参数是可选的 `GenerationConfig`。
+let output = model.run(&input, None)?;
 ```
 
 ### Flutter (Dart)
@@ -215,32 +216,37 @@ import 'package:xybrid_flutter/xybrid_flutter.dart';
 final loader = XybridModelLoader.fromDirectory('/path/to/my-custom-model');
 final model = await loader.load();
 
-final result = await model.run(
-  envelope: XybridEnvelope.text(text: 'Hello, world!'),
-);
+final result = await model.run(XybridEnvelope.text('Hello, world!'));
 ```
+
+单个 llama.cpp GGUF 文件无需手写元数据：`XybridModelLoader.fromModelFile('/path/to/model.gguf')` 会在 `load()` 时（若文件旁尚无 `model_metadata.json`）在文件旁写入该文件。因此 GGUF 所在目录必须可写：Flutter assets 不是磁盘上的文件，iOS 应用 Bundle 是只读的，请先把 GGUF 复制到 `getApplicationSupportDirectory()` 下（见下文“Flutter — 打包资源”）。
 
 ### Kotlin (Android)
 
 ```kotlin
+import ai.xybrid.Envelope
 import ai.xybrid.ModelLoader
+import ai.xybrid.runAsync
 
+// 需在协程中调用：load() 与 runAsync() 都是挂起函数。
 val loader = ModelLoader.fromDirectory("/path/to/my-custom-model")
 val model = loader.load()
 
-val result = model.run(XybridEnvelope.text("Hello, world!"))
+val result = model.runAsync(Envelope.text("Hello, world!"))
 ```
 
-### Swift (iOS / macOS)
+### Swift (iOS)
 
 ```swift
 import Xybrid
 
-let loader = try ModelLoader.fromDirectory(path: "/path/to/my-custom-model")
-let model = try loader.load()
+let url = URL(fileURLWithPath: "/path/to/my-custom-model")
+let model = try await Xybrid.model(.directory(url)).load()
 
-let result = try model.run(envelope: .text("Hello, world!"))
+let result = try await model.runAsync(envelope: .text("Hello, world!"))
 ```
+
+单个 llama.cpp GGUF 文件无需手写元数据：Swift 的 `Xybrid.model(.modelFile(ggufURL))` 与 React Native 的 `fromModelFile`、Unity 的 `FromModelFile` 一样，会在 `load()` 时（若文件旁尚无 `model_metadata.json`）在文件旁写入该文件。因此 GGUF 所在目录必须可写：iOS 应用 Bundle 是只读的，请先把 GGUF 复制到应用容器内，或在其旁边随附 `model_metadata.json`。
 
 ### Unity (C#)
 
@@ -316,17 +322,17 @@ if (!modelDir.exists()) {
 val loader = ModelLoader.fromDirectory(modelDir.absolutePath)
 ```
 
-### iOS / macOS — 应用包
+### iOS — 应用包
 
 将模型文件作为文件夹引用添加到 Xcode 项目：
 
 ```swift
 // 添加到 Xcode 项目的模型位于应用包中
-guard let modelPath = Bundle.main.path(forResource: "my-model", ofType: nil) else {
+guard let modelURL = Bundle.main.url(forResource: "my-model", withExtension: nil) else {
     fatalError("Model directory not found in bundle")
 }
 
-let loader = try ModelLoader.fromDirectory(path: modelPath)
+let model = try await Xybrid.model(.directory(modelURL)).load()
 ```
 
 ### Unity — StreamingAssets
@@ -432,7 +438,7 @@ EOF
 
 ```rust
 use xybrid_sdk::ModelLoader;
-use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let loader = ModelLoader::from_directory("my-minilm")?;
@@ -443,10 +449,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         metadata: Default::default(),
     };
 
-    let output = model.run(&input)?;
+    let output = model.run(&input, None)?;
 
-    // output.kind 为 EnvelopeKind::Embedding(Vec<f32>)，共 384 维，单位长度
-    if let EnvelopeKind::Embedding(embedding) = &output.kind {
+    // embedding() 返回该向量，共 384 维，单位长度
+    if let Some(embedding) = output.embedding() {
         println!("Embedding dimensions: {}", embedding.len());
         println!("First 5 values: {:?}", &embedding[..5]);
     }

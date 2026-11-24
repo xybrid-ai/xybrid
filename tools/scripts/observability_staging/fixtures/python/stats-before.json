@@ -1,0 +1,11 @@
+{
+  "avg_latency_ms_24h": null,
+  "daily_executions": [],
+  "executions_on_cloud": 0,
+  "executions_on_device": 0,
+  "success_rate_24h": 100.0,
+  "top_models": [],
+  "total_executions_24h": 0,
+  "total_executions_30d": 0,
+  "total_executions_7d": 0
+}

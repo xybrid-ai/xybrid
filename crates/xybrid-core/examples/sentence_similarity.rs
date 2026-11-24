@@ -37,6 +37,9 @@ fn encode_sentence(
     let output_envelope = executor.execute(metadata, &input_envelope, None)?;
 
     match &output_envelope.kind {
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            Err("Unexpected decision output".into())
+        }
         EnvelopeKind::Embedding(embedding) => Ok(embedding.clone()),
         _ => Err("Unexpected output type".into()),
     }

@@ -15,7 +15,7 @@ Or add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.16.0
+  xybrid_flutter: ^0.21.0
 ```
 
 <details>
@@ -42,8 +42,7 @@ import 'package:xybrid_flutter/xybrid_flutter.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Runs locally with no key. Pass an apiKey to light up the dashboard:
-  //   await Xybrid.init(apiKey: const String.fromEnvironment('XYBRID_API_KEY'));
+  // Runs locally with no key. Configure observability explicitly to export.
   await Xybrid.init();
 
   // Load a TTS model from the registry
@@ -55,16 +54,162 @@ Future<void> main() async {
 }
 ```
 
-Inference runs entirely on-device whether or not you authenticate. Without an
-`apiKey`, telemetry is disabled and the first inference logs a one-shot hint
-pointing at the dashboard (suppress with `XYBRID_QUIET=1`). Get a free key at
-[dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+Inference runs locally without an account. `apiKey` configures cloud authentication;
+export is off until you explicitly configure observability.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
+
+## Observability
+
+```dart
+await Xybrid.init(
+  apiKey: const String.fromEnvironment('XYBRID_API_KEY'), // optional cloud auth
+  observability: ObservabilityConfig.xybrid(
+    apiKey: const String.fromEnvironment('XYBRID_API_KEY'),
+    metadataOnly: true,
+  ),
+);
+// Or: ObservabilityConfig.otlp(endpoint: 'http://localhost:4318',
+//   serviceName: 'my-app', metadataOnly: true)
+
+final result = await model.run(
+  XybridEnvelope.text('Hello'),
+  options: const RunOptions(observation: ObservationOptions(
+    conversationId: 'conversation-1',
+    // Optional W3C traceparent/tracestate link this run to a caller's span.
+  )),
+);
+final reference = result.observation; // null when untraced/suppressed
+if (reference != null) {
+  XybridObservability.recordFeedback(reference, score: 1.0);
+}
+await XybridObservability.flush(timeoutMs: 5000);
+await XybridObservability.shutdown(timeoutMs: 5000);
+```
+
+Xybrid's preset exports traces only. A Collector receives traces, metrics, and
+logs; feedback/evaluation returns `false` if logs are unavailable. Explicit export
+configuration captures prompts, outputs, and tool payloads by default unless
+`metadataOnly` is set or the native environment disables content. No observability
+credentials are needed for offline inference. Export configuration is independent of cloud
+authentication, and changing either does not change the other's key.
+Legacy `ingestUrl` and `initTelemetry` calls preserve metadata-only export;
+use explicit observability configuration to enable content capture.
+
+The same `RunOptions.observation` works with `runWithContext`, `runStreaming`,
+`runStreamingWithContext`, `runStreamingWithFallback`, and `runTtsStreaming`.
+`suppressTrace: true` skips detailed spans while retaining aggregate metrics.
+An invalid explicit `traceparent` is rejected before any work starts: `run`
+and `XybridPipeline.run` throw `XybridException`, token streams end with an
+error token, `runTtsStreaming` fails its stream with a `StateError`, and
+`XybridStreamSession.fromModel`, `withObservation` and the manual `start*`
+calls throw. Every token stream (`runStreaming`, `runStreamingWithContext`,
+`runStreamingWithFallback`) merges `observation` and metrics into one terminal
+token, preserving its native index and finish reason. Tool calls are delivered
+once.
+
+Every traced surface takes observation controls and returns a reference
+(`null` when untraced or suppressed):
+
+| Surface | Controls | Reference |
+|---|---|---|
+| `model.run(...)` and token streams | `RunOptions.observation` | `result.observation`; the terminal `StreamToken.observation` |
+| Model load | `XybridModelLoader.withObservation(options)` | `model.loadObservationRef` |
+| Pipeline | `pipeline.run(envelope, observation: options)` | `result.observation` (the workflow); `result.metrics.stageLatenciesMs[i].observation` (each stage's inference) |
+| Live ASR | `XybridStreamSession.fromModel(model, observation: options)` | `(await session.flush()).observation` (the session); `partial.decoderObservation` (each decoder run) |
+| Streamed TTS | `runTtsStreaming(..., options: RunOptions(observation: options))` | `onComplete: (result) => result.observation` |
+
+```dart
+final pipeline = XybridPipeline.fromYaml(yaml);
+final run = await pipeline.run(
+  XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000),
+  observation: const ObservationOptions(conversationId: 'conversation-1'),
+);
+final workflow = run.observation;
+final stages = run.metrics.stageLatenciesMs.map((stage) => stage.observation);
+```
+
+`XybridObservability.init(config)` replaces an exporter and propagates config
+errors; corrected config can be retried. `shutdown` disables native exporter
+state and is idempotent; a later `init` restarts export. Flush/shutdown run off
+the UI isolate, have bounded timeouts, and surface native lifecycle errors. Counters
+and state are available through `XybridObservability.stats`; after shutdown the
+counters are the session's final ones (what the shutdown failed or dropped
+included) until the next `init`.
+
+Migration: `Xybrid.init(apiKey: ...)` now configures authentication only. Pass
+`observability:` to enable export. The explicit legacy
+`Xybrid.init(apiKey: ..., ingestUrl: ...)` and `Xybrid.initTelemetry` still start
+a real OTLP trace exporter: bare URLs map to `/v1/traces`, full endpoint paths
+are preserved. Existing custom receivers must accept OTLP instead of legacy
+platform events. Legacy initialization now replaces prior config (the obsolete
+process-wide once-guard is gone); `isTelemetryInitialized` reports actual native
+state, including shutdown. Dedicated `initTelemetry` preserves the current cloud
+key; combined `init(apiKey: ..., ingestUrl: ...)` configures both with the supplied
+key. `resourceTelemetry` keeps configuring CPU/memory
+sampling independently of export (`off`, `boundary`, `summary[:ms]`,
+`debug_local[:ms]`). Invalid modes and malformed intervals now fail before
+export is enabled or replaced.
+
+Migration (breaking): `XybridStreamSession.flush()` returns an
+`FfiTranscriptionResult` instead of a `String`. Read `.text` for the
+transcript; `durationMs`, `chunksProcessed` and `observation` come with it.
+`FfiTtsStreamEvent.complete` now carries an `FfiTtsStreamResult` (status,
+sample rate, channels, sample and chunk counts, `observation`).
+`runTtsStreaming` passes it to the new `onComplete` callback and, when the
+status is `limited`, fails the stream with a `StateError` after the partial
+audio. A `traceparent` that is not valid W3C now fails the call instead of
+being ignored.
+
+### Manual operations
+
+Record work Xybrid does not run itself (a tool, another runtime's inference, a
+model load) with a manual handle. `context()` returns the W3C context to pass
+to children, `observationRef()` the reference for feedback. The first terminal
+call (`complete`, `fail` or `cancel`) wins. Disposing an unfinished handle
+cancels it without flushing.
+
+```dart
+final workflow = await XybridObservability.startWorkflow('answer-question',
+    options: const ObservationOptions(conversationId: 'conversation-1'));
+final parent = await workflow.context(); // null when untraced or suppressed
+final child = parent == null
+    ? null
+    : ObservationOptions(
+        traceparent: parent.traceparent, tracestate: parent.tracestate);
+
+final tool = await XybridObservability.startTool(
+  const ToolCallInfo(name: 'search', callId: 'call-1', argumentsJson: '{"q":"rivers"}'),
+  options: child,
+);
+try {
+  await tool.recordResult(resultJson: '{"hits":3}');
+  await tool.complete();
+} catch (error) {
+  await tool.fail(errorType: 'tool_error', message: '$error');
+}
+
+final answer = await model.run(
+  XybridEnvelope.text('Name three rivers.'),
+  options: RunOptions(observation: child),
+);
+await workflow.complete();
+tool.dispose();
+workflow.dispose();
+```
+
+`XybridObservability.startInference(InferenceRequest(...))` records another
+runtime's inference (`recordInputMessages`, `recordOutputMessages`,
+`recordUsage`, `recordFirstToken`, `recordChunk`, `recordFinishReasons`), and
+`startModelLoad(ModelLoadInfo(model: ...))` a load (`recordCacheHit`). Content
+arguments are JSON strings; they go through the same capture mode, redaction
+rules and size budgets as the SDK's own content.
 
 ## Features
 
 ### Model Loading
 
-Load models from the Xybrid registry or local bundles:
+Load models from the Xybrid registry, a local bundle or a raw GGUF file:
 
 ```dart
 // From registry (downloads + caches automatically)
@@ -73,11 +218,26 @@ final model = await XybridModelLoader.fromRegistry('kokoro-82m').load();
 // From local bundle
 final model = await XybridModelLoader.fromBundle('path/to/model.xyb').load();
 
+// From a raw llama.cpp GGUF file (no model_metadata.json needed)
+final model = await XybridModelLoader.fromModelFile('/abs/path/model.gguf').load();
+
 // Check if already cached
 if (Xybrid.isModelCached('kokoro-82m')) {
   print('Model ready, no download needed');
 }
 ```
+
+`fromModelFile` touches no disk until `load()`, which generates
+`model_metadata.json` from the GGUF header and writes it next to the file
+unless one is already there, with the context capped at 4,096 tokens (raise
+its `context_length` for longer chats). So the directory must be writable:
+assets are not files on disk and the iOS app bundle is read-only, so copy the
+GGUF into a directory of its own under `getApplicationSupportDirectory()`
+first. An existing `model_metadata.json` is used as is, so keep one GGUF per
+directory. The generated metadata has no vision projector; load a vision GGUF
+with an mmproj through `fromDirectory`. A missing file makes `load()` throw an
+`XybridException` containing `GGUF file not found: <path>`, and
+`loadWithProgress()` emits only `LoadComplete` or `LoadError`.
 
 ### Download Progress
 
@@ -290,13 +450,21 @@ await for (final token in model.runStreamingWithContext(envelope, context)) {
 
 ## Platform Support
 
-| Platform | ONNX Runtime | Candle | LLM (llama.cpp) | Notes |
-|----------|:---:|:---:|:---:|-------|
-| **macOS** | ✅ | ✅ Metal | ✅ | Apple Silicon only (M1+) |
-| **iOS** | ✅ CoreML | ✅ Metal | ✅ | arm64, downloads ORT from HuggingFace |
-| **Android** | ✅ | — | ✅ | arm64-v8a, x86_64; ORT from Maven Central |
-| **Linux** | ✅ | ✅ CPU | ✅ | x86_64 |
-| **Windows** | ✅ | ✅ CPU | ✅ | x86_64 |
+Precompiled libraries ship for iOS (device and Simulator, arm64), macOS on
+Apple Silicon (M1+), Android (arm64-v8a, x86_64), Linux (x86_64) and Windows
+(x86_64). Where a model runs depends on its format:
+
+| Model format | iOS device | iOS Simulator | macOS | Android, Linux, Windows |
+|--------------|------------|---------------|-------|-------------------------|
+| GGUF (llama.cpp: LLMs, vision-language models) | Metal GPU | CPU | Metal GPU | CPU |
+| Whisper (whisper.cpp) | CPU; optional Core ML encoder | CPU; optional Core ML encoder | Metal GPU | CPU |
+| ONNX (ONNX Runtime) | CPU | CPU | CPU | CPU |
+
+On iOS, whisper.cpp runs the encoder on Core ML when a
+`<model>-encoder.mlmodelc` (e.g. `ggml-base.en-encoder.mlmodelc`) sits beside
+the model file. ONNX Runtime's Core ML execution provider is linked on iOS and
+macOS, but the SDK does not select it yet, so ONNX models run on the CPU. The
+precompiled libraries do not include Candle.
 
 ### Model Support
 
@@ -304,7 +472,7 @@ await for (final token in model.runStreamingWithContext(envelope, context)) {
 |-------|------|:---:|
 | Kokoro 82M | TTS | ✅ |
 | KittenTTS Nano | TTS | ✅ |
-| Whisper Tiny (Candle) | ASR | ✅ |
+| Whisper Tiny (whisper.cpp) | ASR | ✅ |
 | Wav2Vec2 (ONNX) | ASR | ✅ |
 | SmolLM2 360M | LLM | ✅ |
 | Qwen 2.5 0.5B | LLM | ✅ |
@@ -402,7 +570,7 @@ https://github.com/xybrid-ai/xybrid/tree/master/examples/flutter
 | Class | Purpose |
 |-------|---------|
 | `Xybrid` | SDK initialization, cache checking, factory methods |
-| `XybridModelLoader` | Load models from registry or local bundle |
+| `XybridModelLoader` | Load models from the registry, Hugging Face, a local bundle or directory, or a GGUF file |
 | `XybridModel` | Run inference (batch, streaming, with context) |
 | `XybridEnvelope` | Type-safe inputs: audio, text, embedding |
 | `XybridResult` | Inference output: text, audio, embedding, latency |
@@ -417,6 +585,57 @@ Full API documentation: [pub.dev/documentation/xybrid_flutter](https://pub.dev/d
 ## Telemetry
 
 The plugin reports `binding=flutter` in a small `X-Xybrid-Client` header attached to registry metadata calls. See [docs/telemetry/registry.md](../../docs/telemetry/registry.md) for the exact wire format and the opt-out switch (`XYBRID_TELEMETRY_OPTOUT=1`).
+
+## Decision requests
+
+Liquid d1 text/JSON models use the existing `run` method and return typed
+decisions without generated text. Load a local directory containing the pinned
+GGUF and its `model_metadata.json` with the `lfm3-d1/text/v1` decision template:
+
+```dart
+final model = await XybridModelLoader.fromDirectory('/models/d1-2b-q4km').load();
+final request = DecisionRequest(
+  state: DecisionContent.jsonText('{"ticket":"Charged twice","order":9007199254740993}'),
+  questions: [
+    DecisionQuestion.choice(
+      id: 'route',
+      instructions: DecisionContent.text('Which team should handle this?'),
+      options: [
+        DecisionOption('billing', description: DecisionContent.text('Payments and refunds')),
+        const DecisionOption('technical'),
+      ],
+    ),
+  ],
+);
+final cancel = CancellationToken();
+final result = await model.run(
+  XybridEnvelope.decisionRequest(request),
+  cancellationToken: cancel,
+);
+final answer = result.decisions!.answers.single;
+final selected = (answer.value as ChoiceDecision).key;
+```
+
+`XybridEnvelope.decisionRequestJson` also accepts bounded Liquid SystemOne JSON
+directly. Keep structured content as JSON text to retain object order, signed
+zero and integers above `2^53`; the native decoder validates it. Questions and
+options retain caller order. Probabilities are full-precision protocol outputs,
+not an application action or abstention policy. Decisions support 1–16 questions,
+choice, yes/no and median ordinal scores, with 4,096 input tokens per question.
+Inference is local-only: streaming, conversation context, generation settings,
+cloud overrides and pipelines are refused. Cancellation applies before and
+between passes and at native abort boundaries. Rust and Dart generated bridge
+artifacts must be shipped together; FRB rejects a content-hash mismatch.
+
+This source integration does not establish packaged-device or numerical
+qualification; those remain release gates documented in the decision plan.
+
+The real bridge smoke test accepts `XYBRID_FLUTTER_NATIVE_LIBRARY` (a matching
+Flutter cdylib) and `XYBRID_DECISION_MODEL_DIR` (the pinned local model directory).
+Run `XYBRID_REQUIRE_MODELS=1 flutter test test/decision_native_test.dart` with
+both paths set to require execution; missing artifacts fail that invocation.
+Ordinary package tests report this smoke test as skipped when artifacts are absent.
+
 
 ## License
 

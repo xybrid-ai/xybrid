@@ -108,7 +108,7 @@ export async function transcribeLive(
     }
     // A second of silence lets the chunker close the last window.
     await session.feed(new Float32Array(16000));
-    const transcript = await session.flush();
+    const { text: transcript } = await session.flush();
     await reader;
     return { transcript, partials };
   } finally {

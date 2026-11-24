@@ -24,7 +24,7 @@ import { TurboModuleRegistry } from 'react-native';
 
 export interface Spec extends TurboModule {
   // -- SDK configuration --
-  // `options` is `{ apiKey?, gatewayUrl?, ingestUrl?, cacheDir? }`. The SDK
+  // `options` is `{ apiKey?, gatewayUrl?, cacheDir? }`. The SDK
   // configures itself anonymously on first use; the first `initialize` that
   // carries options applies them, and later ones reject if they differ.
   initialize(options: Object | null): Promise<void>;
@@ -38,6 +38,30 @@ export interface Spec extends TurboModule {
   releaseMemory(): Promise<number>;
   setAutoRelease(enabled: boolean): Promise<void>;
   isAutoReleaseEnabled(): Promise<boolean>;
+
+  // -- Observability (OpenTelemetry export; off until observabilityInit) --
+  // `config` is the WireObservabilityConfig built by src/observability.ts:
+  // `{ kind: 'xybrid', apiKey } | { kind: 'otlp', endpoint }` plus optional
+  // setter values. `target` is `{ trace_id, span_id }`; `feedback` is
+  // `{ score?, label?, comment? }`; `evaluation` is
+  // `{ name, scoreValue?, scoreLabel?, explanation? }`.
+  observabilityInit(config: Object): Promise<void>;
+  observabilityDefaultTracesEndpoint(): Promise<string>;
+  observabilityStats(): Promise<Object>;
+  observabilityFlush(timeoutMs: number): Promise<void>;
+  observabilityShutdown(timeoutMs: number): Promise<void>;
+  observabilityRecordFeedback(target: Object, feedback: Object): Promise<boolean>;
+  observabilityRecordEvaluation(target: Object, evaluation: Object): Promise<boolean>;
+
+  // Manual observations use the same registry and disposal as model handles.
+  observationStart(kind: string, descriptor: Object, options: Object | null): Promise<string>;
+  observationContext(handle: string): Promise<Object | null>;
+  observationReference(handle: string): Promise<Object | null>;
+  observationComplete(handle: string): Promise<void>;
+  observationFail(handle: string, errorType: string, message: string | null): Promise<void>;
+  observationCancel(handle: string): Promise<void>;
+  observationIsFinished(handle: string): Promise<boolean>;
+  observationRecord(handle: string, field: string, value: Object): Promise<void>;
 
   // -- Device state push (both platforms also observe it natively) --
   setBatteryLevel(percent: number): Promise<void>;
@@ -122,7 +146,7 @@ export interface Spec extends TurboModule {
   openStreamingSession(model: string, config: Object | null): Promise<string>;
   sessionFeed(session: string, samplesBase64: string): Promise<void>;
   sessionNextPartial(session: string): Promise<Object | null>;
-  sessionFlush(session: string): Promise<string>;
+  sessionFlush(session: string): Promise<Object>;
   sessionReset(session: string): Promise<void>;
   sessionCancel(session: string): Promise<void>;
   sessionIsRunning(session: string): Promise<boolean>;

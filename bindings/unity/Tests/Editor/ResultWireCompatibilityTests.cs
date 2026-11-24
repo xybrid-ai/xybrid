@@ -13,6 +13,34 @@ namespace Xybrid.Tests.Editor
     public class ResultWireCompatibilityTests
     {
         [Test]
+        public void DecisionWireKeepsDoublePrecisionNegativeInfinityAndLegacyOrdinals()
+        {
+            const double probability = 0.5000000018693014;
+            var decisions = new XybridDecisions(new[] {
+                new XybridDecisionAnswer("q", new[] {
+                    new XybridDecisionScore("0", 0f, 1 - probability, XybridDecisionOrigin.Caller),
+                    new XybridDecisionScore("1", 1e-8f, probability, XybridDecisionOrigin.Caller),
+                    new XybridDecisionScore("2", float.NegativeInfinity, 0, XybridDecisionOrigin.Caller),
+                }, new XybridDecisionValue.Score(1, XybridScoreStatistic.Median), probability),
+            }, 1, 512);
+            var envelope = new XybridEnvelope(new XybridEnvelopeKind.Decisions(decisions),
+                new[] { new XybridMetadataEntry("tokens_in", "512"), new XybridMetadataEntry("tokens_out", "0") });
+            var native = new XybridResult(envelope, XybridOutputType.Decisions, "d1", 1,
+                XybridExecutionTarget.Local,
+                new XybridInferenceMetrics(1, null, null, null, null, 0, Array.Empty<XybridStageLatency>()),
+                Array.Empty<XybridToolCall>());
+            using InferenceResult result = InferenceResult.FromBolt(Decode(Encode(native)));
+            Assert.IsTrue(result.Success);
+            Assert.AreEqual(OutputType.Decisions, result.OutputType);
+            Assert.AreEqual(512ul, result.TokensIn);
+            Assert.AreEqual(probability, result.Decisions!.Value.Answers[0].Distribution[1].Probability);
+            Assert.AreEqual(float.NegativeInfinity, result.Decisions.Value.Answers[0].Distribution[2].RawScore);
+            Assert.AreEqual(0, (int)XybridOutputType.Text);
+            Assert.AreEqual(3, (int)XybridOutputType.Unknown);
+            Assert.IsNull(result.Text);
+        }
+
+        [Test]
         public void ResultDecoderAcceptsToolCallingWireWithoutReasoningTail()
         {
             XybridResult toolCalling = Decode(ResultWire());
@@ -22,6 +50,19 @@ namespace Xybrid.Tests.Editor
             XybridResult current = Decode(ResultWire(typedReasoning: "typed reasoning"));
             Assert.AreEqual(new[] { "call-1" }, Array.ConvertAll(current.ToolCalls, call => call.Id));
             Assert.AreEqual("typed reasoning", current.ReasoningContent);
+        }
+
+        [Test]
+        public void LocalRecoveryKeepsTheAnswerAndTheSpeculativeCloudError()
+        {
+            const string error = "404 model_not_found";
+            using InferenceResult recovered = InferenceResult.FromBolt(Decode(ResultWire(cloudError: error)));
+            Assert.IsTrue(recovered.Success);
+            Assert.AreEqual("answer", recovered.Text);
+            Assert.AreEqual(XybridExecutionTarget.Local, recovered.ExecutionTarget);
+            Assert.AreEqual(error, recovered.SpeculativeCloudError);
+            using InferenceResult ordinary = InferenceResult.FromBolt(Decode(ResultWire()));
+            Assert.IsNull(ordinary.SpeculativeCloudError);
         }
 
         [Test]
@@ -197,11 +238,13 @@ namespace Xybrid.Tests.Editor
             }
         }
 
-        private static byte[] ResultWire(string? typedReasoning = null)
+        private static byte[] ResultWire(string? typedReasoning = null, string? cloudError = null)
         {
+            var metadata = new List<XybridMetadataEntry> { new XybridMetadataEntry("reasoning_content", "metadata reasoning") };
+            if (cloudError != null) metadata.Add(new XybridMetadataEntry("speculative_cloud_error", cloudError));
             var envelope = new XybridEnvelope(
                 new XybridEnvelopeKind.Text("answer"),
-                new[] { new XybridMetadataEntry("reasoning_content", "metadata reasoning") }
+                metadata.ToArray()
             );
             var metrics = new XybridInferenceMetrics(
                 7,

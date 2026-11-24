@@ -1,6 +1,6 @@
 use crate::ir::Envelope;
 use crate::runtime_adapter::onnx::OnnxRuntimeAdapter;
-use crate::runtime_adapter::{AdapterResult, ModelRuntime, RuntimeAdapter};
+use crate::runtime_adapter::{AdapterResult, ModelRuntime, RuntimeAdapter, RuntimeAdapterExt};
 use std::path::Path;
 
 /// ModelRuntime implementation for generic ONNX models.
@@ -20,6 +20,13 @@ impl OnnxRuntime {
         Self {
             adapter: OnnxRuntimeAdapter::new(),
         }
+    }
+
+    /// Whether a session for `model_path` is already cached, so loading it
+    /// would not touch the weights again.
+    pub(crate) fn has_session(&self, model_path: &Path) -> bool {
+        let id = self.adapter.extract_model_id(&model_path.to_string_lossy());
+        self.adapter.is_loaded(&id)
     }
 
     pub fn get_session(

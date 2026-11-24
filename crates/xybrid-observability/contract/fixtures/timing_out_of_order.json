@@ -1,0 +1,196 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "Explicit times measured elsewhere may go backwards and the observer clock may step back. Durations, time to first chunk/token and inter-chunk times are clamped to zero, metric points are never lost, inter-chunk times follow call order, and a span never ends before it starts.",
+  "expect": {
+    "logs": [],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.0
+          },
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny2",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.0
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.inference.time_per_output_chunk",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 2,
+            "sum": 0.04
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.inference.time_to_first_chunk",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.0
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "xybrid.genai.client.inference.time_to_first_token",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.0
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "chat",
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny",
+          "gen_ai.request.stream": true,
+          "gen_ai.response.time_to_first_chunk": 0,
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.response.chunk_count": 3,
+          "xybrid.genai.response.time_to_first_token": 0,
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 100,
+        "id": "chat",
+        "kind": "INTERNAL",
+        "name": "chat tiny",
+        "parent": null,
+        "start_ms": 100,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "chat",
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny2",
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 200,
+        "id": "stepped",
+        "kind": "INTERNAL",
+        "name": "chat tiny2",
+        "parent": null,
+        "start_ms": 200,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 1
+      }
+    ]
+  },
+  "name": "timing_out_of_order",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp",
+        "stream": true
+      },
+      "time_ms": 100
+    },
+    {
+      "at_ms": 1,
+      "id": "chat",
+      "op": "first_token",
+      "time_ms": 95
+    },
+    {
+      "at_ms": 2,
+      "id": "chat",
+      "op": "chunk",
+      "time_ms": 90
+    },
+    {
+      "at_ms": 3,
+      "id": "chat",
+      "op": "chunk",
+      "time_ms": 80
+    },
+    {
+      "at_ms": 4,
+      "id": "chat",
+      "op": "chunk",
+      "time_ms": 120
+    },
+    {
+      "at_ms": 5,
+      "id": "chat",
+      "op": "end",
+      "time_ms": 50
+    },
+    {
+      "at_ms": 200,
+      "id": "stepped",
+      "op": "start_inference",
+      "request": {
+        "location": "local",
+        "model": "tiny2",
+        "operation": "chat",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp"
+      }
+    },
+    {
+      "at_ms": 150,
+      "id": "stepped",
+      "op": "end"
+    }
+  ]
+}

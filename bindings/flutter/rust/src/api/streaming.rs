@@ -32,6 +32,7 @@ use flutter_rust_bridge::frb;
 use tokio::sync::{mpsc, oneshot};
 use xybrid_sdk::{PartialResult as SdkPartialResult, StreamConfig, XybridStream};
 
+use super::observability::{FfiObservationOptions, FfiObservationRef};
 use crate::frb_generated::StreamSink;
 
 /// 16 kHz mono — the only sample rate the ASR backends accept.
@@ -70,6 +71,7 @@ pub struct FfiStreamingConfig {
     pub language: Option<String>,
     /// Optional Whisper encoder context in mel frames; `None` uses the model default.
     pub audio_ctx: Option<u32>,
+    pub observation: Option<FfiObservationOptions>,
 }
 
 impl FfiStreamingConfig {
@@ -94,6 +96,12 @@ impl FfiStreamingConfig {
             vad_model_dir,
             language: self.language.clone(),
             audio_ctx: self.audio_ctx,
+            observation: self
+                .observation
+                .as_ref()
+                .map(FfiObservationOptions::to_sdk)
+                .transpose()?
+                .flatten(),
             ..StreamConfig::default()
         })
     }
@@ -110,6 +118,7 @@ pub struct FfiPartialResult {
     pub chunk_sequence: u64,
     /// Audio covered so far, in milliseconds.
     pub audio_duration_ms: u64,
+    pub decoder_observation: Option<FfiObservationRef>,
 }
 
 impl From<SdkPartialResult> for FfiPartialResult {
@@ -119,6 +128,30 @@ impl From<SdkPartialResult> for FfiPartialResult {
             is_stable: p.is_stable,
             chunk_sequence: p.chunk_index,
             audio_duration_ms: p.audio_duration_ms,
+            decoder_observation: p
+                .decoder_observation
+                .as_ref()
+                .map(FfiObservationRef::from_sdk),
+        }
+    }
+}
+
+/// Final transcript and the workflow that covered the utterance.
+#[derive(Debug, Clone)]
+pub struct FfiTranscriptionResult {
+    pub text: String,
+    pub duration_ms: u64,
+    pub chunks_processed: u64,
+    pub observation: Option<FfiObservationRef>,
+}
+
+impl From<xybrid_sdk::TranscriptionResult> for FfiTranscriptionResult {
+    fn from(result: xybrid_sdk::TranscriptionResult) -> Self {
+        Self {
+            text: result.text,
+            duration_ms: result.duration_ms,
+            chunks_processed: result.chunks_processed,
+            observation: result.observation.as_ref().map(FfiObservationRef::from_sdk),
         }
     }
 }
@@ -130,7 +163,7 @@ enum Command {
     /// Feed PCM samples; inference may run and emit a partial.
     Feed(Vec<f32>),
     /// Finalize: drain remaining audio and reply with the full transcript.
-    Flush(oneshot::Sender<Result<String, String>>),
+    Flush(oneshot::Sender<Result<FfiTranscriptionResult, String>>),
     /// Reset for fresh audio without reloading the model.
     Reset(oneshot::Sender<Result<(), String>>),
 }
@@ -203,7 +236,7 @@ impl FfiStreamSession {
     /// If finalization fails in the core, or the worker is already gone.
     ///
     /// [`feed`]: Self::feed
-    pub async fn flush(&self) -> Result<String, String> {
+    pub async fn flush(&self) -> Result<FfiTranscriptionResult, String> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.cmd_tx
             .send(Command::Flush(reply_tx))
@@ -318,7 +351,7 @@ fn worker_loop(stream: XybridStream, mut cmd_rx: mpsc::UnboundedReceiver<Command
             Command::Flush(reply) => {
                 let result = stream
                     .flush()
-                    .map(|r| r.text)
+                    .map(FfiTranscriptionResult::from)
                     .map_err(|e| format!("ASR flush failed: {}", error_chain(&e)));
                 let _ = reply.send(result);
                 break; // session finalized; the worker ends here.

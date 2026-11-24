@@ -1,0 +1,82 @@
+{
+  "js": {
+    "inference": {
+      "span_id": "6377df9ae27a9ac6",
+      "trace_id": "19bb687eefd304a04c44d374e21f0e83"
+    },
+    "tool": {
+      "span_id": "9597702924d1cea6",
+      "trace_id": "19bb687eefd304a04c44d374e21f0e83"
+    },
+    "workflow": {
+      "span_id": "80bf5875a6472657",
+      "trace_id": "19bb687eefd304a04c44d374e21f0e83"
+    }
+  },
+  "js-metadata": {
+    "inference": {
+      "span_id": "cb47e0778da19fe9",
+      "trace_id": "18bf533210c6c6a642a5e895b22605c0"
+    },
+    "tool": {
+      "span_id": "df36af332e3710f9",
+      "trace_id": "18bf533210c6c6a642a5e895b22605c0"
+    },
+    "workflow": {
+      "span_id": "da852d595b5fb62c",
+      "trace_id": "18bf533210c6c6a642a5e895b22605c0"
+    }
+  },
+  "python": {
+    "inference": {
+      "span_id": "e495596a7e3814ed",
+      "trace_id": "78793a707974686f6e00000000000000"
+    },
+    "inference_failed": {
+      "span_id": "4486b88a464166a7",
+      "trace_id": "78793a707974686f6e00000000000000"
+    },
+    "inference_released": {
+      "span_id": "eaa62471ce145c30",
+      "trace_id": "78793a707974686f6e00000000000000"
+    },
+    "load": {
+      "span_id": "6720394789545b6c",
+      "trace_id": "78793a707974686f6e00000000000000"
+    },
+    "tool": {
+      "span_id": "db1a749676e8acb3",
+      "trace_id": "78793a707974686f6e00000000000000"
+    },
+    "workflow": {
+      "span_id": "b640cb8c1c2849ee",
+      "trace_id": "78793a707974686f6e00000000000000"
+    }
+  },
+  "rust": {
+    "attempts.0": {
+      "span_id": "57da3250cc8cd77e",
+      "trace_id": "e65def71db67b57b768f59d149f76bbd"
+    },
+    "attempts.1": {
+      "span_id": "c8c741433d3ad279",
+      "trace_id": "e65def71db67b57b768f59d149f76bbd"
+    },
+    "inference": {
+      "span_id": "80878d0eb62dd7da",
+      "trace_id": "e65def71db67b57b768f59d149f76bbd"
+    },
+    "load": {
+      "span_id": "967de46ca9d304c8",
+      "trace_id": "e65def71db67b57b768f59d149f76bbd"
+    },
+    "tool": {
+      "span_id": "a2019d2d18afc332",
+      "trace_id": "e65def71db67b57b768f59d149f76bbd"
+    },
+    "workflow": {
+      "span_id": "f17460911705c1a5",
+      "trace_id": "e65def71db67b57b768f59d149f76bbd"
+    }
+  }
+}

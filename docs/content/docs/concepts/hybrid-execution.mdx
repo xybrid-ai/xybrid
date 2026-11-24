@@ -20,7 +20,7 @@ stages:
   - model: whisper-tiny-ggml
     target: device
 
-  - model: gpt-4o-mini
+  - model: openai/gpt-4o-mini
     target: cloud
     provider: openai
 ```
@@ -28,7 +28,7 @@ stages:
 ### Hybrid stages
 
 A stage with `target: auto` **and** a `provider` has two legs: the local model
-named by `model`, and the provider's model named by `cloud_model` (defaults to
+named by `model`, and the cloud model named by `cloud_model` (defaults to
 `model`). The policy and the device state pick one leg per request. Shared
 options (`system_prompt`, `temperature`, `max_tokens`, `top_p`) apply to
 whichever leg runs.
@@ -43,15 +43,16 @@ stages:
   - id: llm
     model: functiongemma-270m-it      # local leg
     target: auto
-    provider: openai                  # upstream provider behind Xybrid Platform
-    cloud_model: gpt-4o-mini
+    provider: openai                  # the cloud model's vendor
+    cloud_model: openai/gpt-4o-mini   # canonical model ID
     backend: gateway                  # Xybrid Platform, authenticated with XYBRID_API_KEY
     system_prompt: "You are a concise assistant."
     max_tokens: 128
 ```
 
 This is `crates/xybrid-cli/examples/hybrid-platform.yaml`. Its cloud model must
-be supported by the platform, with the corresponding provider configured there.
+be one the platform serves, named by its canonical ID (see
+[Cloud execution](#cloud-execution)).
 A policy denial also forbids sending inference to Xybrid Platform. If the
 local model is unusable, the stage fails locally. An uncached local model may
 still need to be downloaded before inference.
@@ -82,6 +83,13 @@ Cloud stages use OpenAI-compatible chat requests; supported providers also offer
 With `backend: gateway` (the default), cloud stages send requests to Xybrid
 Platform at `https://api.xybrid.dev/v1`. The platform authenticates your Xybrid
 key and calls the upstream using its own configured provider credentials.
+
+The platform routes on the model ID alone; `provider` does not change where the
+request goes. Name frontier models by their canonical OpenRouter ID, such as
+`openai/gpt-4o-mini` or `anthropic/claude-haiku-4.5`. Short IDs such as
+`gpt-4o-mini` are not accepted: they return 404 with `"code": "model_not_found"`.
+`GET /v1/models` lists every model you can call. With `backend: direct`, use the
+provider's own model ID instead.
 
 ```bash
 export XYBRID_API_KEY="<your-xybrid-api-key>"
@@ -203,7 +211,9 @@ can restart in the cloud after a configured resource-driven local abort, when
 policy permits it. In the Flutter SDK, `runStreamingWithFallback` exposes this
 behavior for LLM streaming.
 
-Every routing decision is recorded in telemetry; inspect them with [`xybrid trace`](/docs/cli/reference/trace).
+Use `xybrid run --trace-export FILE` to capture routing decisions locally and
+inspect the artifact with [`xybrid trace FILE`](/docs/cli/reference/trace).
+Remote trace export requires explicit observability configuration.
 
 ## Related
 

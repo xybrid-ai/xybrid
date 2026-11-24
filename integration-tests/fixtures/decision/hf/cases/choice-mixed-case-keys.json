@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "choice-mixed-case-keys",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Mixed-case single-letter keys",
+  "covers": [
+    "choice-letter-keys",
+    "choice-lowercase-keys"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"a\": null, \"B\": null, \"c\": null, \"D\": null}}}}",
+  "artifact": "d1-2b-hf"
+}

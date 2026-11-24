@@ -15,3 +15,4 @@ mkdir -p ios/XybridSwift
 cp "$REPO/bindings/apple/Sources/Xybrid/Xybrid.swift" \
    "$REPO/bindings/apple/Sources/Xybrid/xybrid_bolt.swift" ios/XybridSwift/
 cp "$REPO/LICENSE" LICENSE
+cp "$REPO/crates/llama-cpp-sys/NOTICE" NOTICE

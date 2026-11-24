@@ -10,6 +10,12 @@ use std::time::Duration;
 use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 use xybrid_sdk::PipelineRef;
 
+fn init_test_cache() {
+    static CACHE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(|| tempfile::tempdir().expect("create SDK test cache"));
+    xybrid_sdk::init_sdk_cache_dir(cache.path().join("models"));
+}
+
 fn pipeline_yaml(server: &MockServer) -> String {
     // Each stage carries its own gateway and key, so a machine with production
     // credentials or gateway environment variables still stays on loopback.
@@ -55,6 +61,7 @@ fn text_of(envelope: &Envelope) -> Option<&str> {
 
 #[test]
 fn every_stage_output_survives_the_run() {
+    init_test_cache();
     let server = MockServer::start();
     let first = server.mock(|when, then| {
         when.method(POST)
@@ -112,6 +119,7 @@ fn every_stage_output_survives_the_run() {
 
 #[test]
 fn a_later_stage_failure_is_an_error_not_partial_success() {
+    init_test_cache();
     let server = MockServer::start();
     let first = server.mock(|when, then| {
         when.method(POST)

@@ -14,6 +14,10 @@ load("@rules_rs//rs:rust_static_library.bzl", "rust_static_library")
 load("@crates//:defs.bzl", "all_crate_deps")
 load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
+# //xtask:xtask_test checks the package name `cargo xtask build-ffi` passes to
+# cargo against this manifest.
+exports_files(["Cargo.toml"])
+
 _BOLTFFI_EXPANSION_ENV = {
     "BOLTFFI_BINDING_EXPANSION": "1",
     "BOLTFFI_BINDING_EXPANSION_ROOT": "$${pwd}/crates/xybrid-bolt",

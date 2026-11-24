@@ -39,6 +39,67 @@ class XybridEnvelope:
 
 
 @dataclass(frozen=True, slots=True)
+class XybridDecisionOption:
+    """Foreign DecisionOption; field order is frozen."""
+    key: str
+    description: XybridDecisionContent | None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionLevel:
+    """Foreign DecisionLevel; field order is frozen."""
+    description: XybridDecisionContent | None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionQuestion:
+    """Foreign DecisionQuestion; field order is frozen."""
+    id: str
+    instructions: XybridDecisionContent | None
+    kind: XybridDecisionQuestionKind
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionRequest:
+    """Foreign DecisionRequest; field order is frozen."""
+    state: XybridDecisionContent | None
+    questions: list[XybridDecisionQuestion]
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionScore:
+    """Foreign DecisionScore; field order is frozen."""
+    key: str
+    raw_score: float
+    probability: float
+    origin: XybridDecisionOrigin
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionAnswer:
+    """Foreign DecisionAnswer; field order is frozen."""
+    question_id: str
+    distribution: list[XybridDecisionScore]
+    value: XybridDecisionValue
+    confidence: float | None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisions:
+    """Foreign Decisions; field order is frozen."""
+    answers: list[XybridDecisionAnswer]
+    passes: int
+    input_tokens: int
+
+
+
+@dataclass(frozen=True, slots=True)
 class XybridToolDefinition:
     """A tool (function) the model may ask to call.
 
@@ -105,6 +166,31 @@ class XybridRunOptions:
     fallback_to_cloud: bool
     max_grace_tokens: int
     correlation_id: str | None
+    traceparent: str | None
+    """W3C `traceparent` of the caller's span: the run becomes its child."""
+    tracestate: str | None
+    """W3C `tracestate` accompanying `traceparent`."""
+    conversation_id: str | None
+    """Caller-owned conversation id recorded on the run."""
+    suppress_trace: bool
+    """Skip the detailed trace for this run; metrics are still recorded."""
+    frame_session_id: str | None
+    """Your id for one continuous live-capture session (a camera or
+    microphone loop). Every run of the session is counted in metrics, and
+    detailed traces are kept for roughly one run per live trace interval
+    per session (`set_live_trace_interval_ms`). Blank values are ignored.
+    Applies to model runs: a pipeline run ignores it.
+    """
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridObservationRef:
+    """Trace and span ids (lowercase hex) of a recorded run, for linking
+    feedback and evaluation results.
+    """
+    trace_id: str
+    span_id: str
 
 
 
@@ -138,9 +224,7 @@ class XybridResult:
     model_id: str
     latency_ms: int
     execution_target: XybridExecutionTarget
-    """Where the answer actually came from. Cloud fallback keeps `model_id`
-    identical on both legs, so this is the only way to tell them apart.
-    """
+    """Where the answer actually came from, even when both legs requested the same model id."""
     metrics: XybridInferenceMetrics
     tool_calls: list[XybridToolCall]
     """Tool calls the model emitted this turn. Empty unless the request
@@ -151,6 +235,8 @@ class XybridResult:
     """Model reasoning emitted separately from the final answer text.
     Appended last because `#[data]` fields serialize in declaration order.
     """
+    observation: XybridObservationRef | None = None
+    """The run's trace reference, when it was traced."""
 
 
 
@@ -197,6 +283,8 @@ class XybridStageResult:
     """Generation figures (TTFT, tokens per second) when this stage is a
     language model; `total_ms` is the stage latency.
     """
+    observation: XybridObservationRef | None = None
+    """The logical inference performed by this stage, when observed."""
 
 
 
@@ -215,6 +303,8 @@ class XybridPipelineResult:
     """Wall-clock time of the whole run."""
     stages: list[XybridStageResult]
     """Every executed stage, in order."""
+    observation: XybridObservationRef | None = None
+    """The workflow enclosing this execution, when observed."""
 
 
 
@@ -323,6 +413,17 @@ class XybridStreamingConfig:
     """Language hint (e.g. `"en"`); null uses the model default."""
     audio_ctx: int | None
     """Whisper encoder context in mel frames; null uses the model default."""
+    observation: XybridObservationOptions | None = None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridObservationOptions:
+    """W3C parent, suppression and conversation controls shared by execution APIs."""
+    traceparent: str | None
+    tracestate: str | None
+    conversation_id: str | None
+    suppress_trace: bool
 
 
 
@@ -339,6 +440,97 @@ class XybridPartialResult:
     """Monotonic chunk sequence number this result corresponds to."""
     audio_duration_ms: int
     """Audio covered so far, in milliseconds."""
+    decoder_observation: XybridObservationRef | None = None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridTranscriptionResult:
+    """Final transcript and its ASR session workflow."""
+    text: str
+    duration_ms: int
+    chunks_processed: int
+    observation: XybridObservationRef | None = None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridSignalStats:
+    """Delivery counts for a single signal. Pending includes queued and in-flight items."""
+    accepted: int
+    exported: int
+    dropped: int
+    failed: int
+    pending: int
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridObservabilityStats:
+    """Delivery counters of the observability pipeline."""
+    enabled: bool
+    traces: XybridSignalStats
+    logs: XybridSignalStats
+    metrics: XybridSignalStats
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridObservationContext:
+    """Typed metadata for manual observations."""
+    traceparent: str
+    tracestate: str | None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridInferenceRequest:
+    """Typed metadata for manual observations."""
+    operation: str
+    provider: str
+    model: str | None
+    location: XybridExecutionLocation
+    runtime: str | None
+    task: str | None
+    stream: bool
+    max_tokens: int | None
+    temperature: float | None
+    top_p: float | None
+    server_address: str | None
+    server_port: int | None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridToolCallInfo:
+    """Typed metadata for manual observations."""
+    name: str
+    call_id: str | None
+    tool_type: str | None
+    description: str | None
+    arguments_json: str | None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridUsage:
+    """Typed metadata for manual observations."""
+    input_tokens: int | None
+    output_tokens: int | None
+    cache_read_input_tokens: int | None
+    cache_write_input_tokens: int | None
+    reasoning_output_tokens: int | None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridModelLoadInfo:
+    """Typed metadata for manual observations."""
+    model: str
+    provider: str | None
+    runtime: str | None
+    format: str | None
+    size_bytes: int | None
 
 
 
@@ -479,6 +671,12 @@ class XybridErrorCancelled(XybridError):
     message: str
 
 
+@dataclass(frozen=True, slots=True)
+class XybridErrorTelemetryDelivery(XybridError):
+    """Telemetry delivery is incomplete or unknown; do not rerun inference."""
+    message: str
+
+
 
 class XybridErrorException(RuntimeError):
     error: XybridError
@@ -516,12 +714,97 @@ class XybridEnvelopeKindMultiPart(XybridEnvelopeKind):
     parts: list[XybridEnvelope]
 
 
+@dataclass(frozen=True, slots=True)
+class XybridEnvelopeKindDecisionRequest(XybridEnvelopeKind):
+    request: XybridDecisionRequest
+
+
+@dataclass(frozen=True, slots=True)
+class XybridEnvelopeKindDecisions(XybridEnvelopeKind):
+    decisions: XybridDecisions
+
+
 
 
 class XybridMessageRole(IntEnum):
     SYSTEM = 0
     USER = 1
     ASSISTANT = 2
+
+
+class XybridDecisionContent:
+    """Foreign DecisionContent; variants are append-only."""
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionContentText(XybridDecisionContent):
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionContentJson(XybridDecisionContent):
+    json_text: str
+
+
+
+
+class XybridDecisionQuestionKind:
+    """Foreign DecisionQuestionKind; variants are append-only."""
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionQuestionKindChoice(XybridDecisionQuestionKind):
+    options: list[XybridDecisionOption]
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionQuestionKindYesNo(XybridDecisionQuestionKind):
+    yes: XybridDecisionContent | None
+    no: XybridDecisionContent | None
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionQuestionKindScore(XybridDecisionQuestionKind):
+    levels: list[XybridDecisionLevel]
+
+
+
+
+class XybridDecisionOrigin(IntEnum):
+    """Foreign DecisionOrigin; variants are append-only."""
+    CALLER = 0
+    FIXED = 1
+
+
+class XybridScoreStatistic(IntEnum):
+    """Foreign ScoreStatistic; variants are append-only."""
+    MEDIAN = 0
+    EXPECTED = 1
+
+
+class XybridDecisionValue:
+    """Foreign DecisionValue; variants are append-only."""
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionValueChoice(XybridDecisionValue):
+    key: str
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionValueYesNo(XybridDecisionValue):
+    p_yes: float
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionValueScore(XybridDecisionValue):
+    value: float
+    statistic: XybridScoreStatistic
+
+
 
 
 class XybridAbortSignal(IntEnum):
@@ -536,6 +819,7 @@ class XybridOutputType(IntEnum):
     AUDIO = 1
     EMBEDDING = 2
     UNKNOWN = 3
+    DECISIONS = 4
 
 
 class XybridExecutionTarget(IntEnum):
@@ -599,6 +883,45 @@ class XybridVadModeEnabled(XybridVadMode):
     model_dir: str
 
 
+
+
+class XybridModelSource:
+    """Model source for the options-enabled load surface."""
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class XybridModelSourceRegistry(XybridModelSource):
+    id: str
+    speculative: bool
+
+
+@dataclass(frozen=True, slots=True)
+class XybridModelSourceDirectory(XybridModelSource):
+    path: str
+
+
+@dataclass(frozen=True, slots=True)
+class XybridModelSourceBundle(XybridModelSource):
+    path: str
+
+
+@dataclass(frozen=True, slots=True)
+class XybridModelSourceHuggingFace(XybridModelSource):
+    repo: str
+    revision: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class XybridModelSourceModelFile(XybridModelSource):
+    path: str
+
+
+
+
+class XybridExecutionLocation(IntEnum):
+    LOCAL = 0
+    REMOTE = 1
 
 
 
@@ -682,7 +1005,7 @@ class XybridStreamingSession:
         full, which back-pressures a producer feeding faster than the model
         can keep up.
         """
-    def flush(self) -> str:
+    def flush(self) -> XybridTranscriptionResult:
         """Finalize: drain buffered audio and return the complete transcript.
 
         The session is over afterwards — `feed` fails and the partial stream
@@ -752,19 +1075,22 @@ class XybridModel:
     def _from_handle(cls, handle: int) -> "XybridModel": ...
     def __del__(self) -> None: ...
     @classmethod
+    def load(cls, source: XybridModelSource, observation: XybridObservationOptions | None) -> "XybridModel":
+        """Load any supported source with explicit observation controls."""
+    @classmethod
     def from_registry(cls, id: str) -> "XybridModel":
         """Load from the xybrid registry. Recommended path."""
     @classmethod
     def from_registry_speculative(cls, id: str) -> "XybridModel":
-        """Load from the registry, serving from the cloud gateway while the weights
-        download in the background.
+        """Try the registry id at the cloud gateway while the weights download.
+        Only ids also listed in the gateway catalog can be served remotely.
 
         Returns almost immediately instead of blocking on the download. Requires
         a resolvable API key, an uncached model, and a chat model the registry
         serves as a direct download (GGUF or vision-language, not a `.xyb`
         bundle); otherwise it behaves exactly like `from_registry`. Poll
-        `download_status` for progress and `is_cloud_serving` to know which leg
-        is answering.
+        `download_status` for progress and `is_cloud_serving` to see whether a
+        run would try the gateway.
         """
     @classmethod
     def from_directory(cls, path: str) -> "XybridModel":
@@ -783,14 +1109,14 @@ class XybridModel:
         """Load from a raw GGUF file, auto-generating `model_metadata.json` from the
         GGUF header (written next to the file if absent).
         """
+    def load_observation_ref(self) -> XybridObservationRef | None:
+        """The immutable observation of the load that created this model."""
     def model_id(self) -> str: ...
     def version(self) -> str: ...
     def output_type(self) -> XybridOutputType: ...
     def is_loaded(self) -> bool: ...
     def is_cloud_serving(self) -> bool:
-        """Whether runs are currently answered by the cloud because the local
-        weights are not ready yet. `false` for ordinary local models.
-        """
+        """Whether a run would try the gateway because the local weights are not ready."""
     def download_status(self) -> XybridDownloadStatus:
         """Download progress + state in one read — poll this to drive a progress
         bar. Reports `Ready` at 1.0 for an ordinary local model, so hosts need
@@ -841,7 +1167,12 @@ class XybridModel:
     def stream_result(self, stream_id: int) -> XybridResult:
         """Take the final result after receiving a `Complete` event."""
     def stream_close(self, stream_id: int) -> None:
-        """Forget a streaming session."""
+        """Forget a streaming session.
+
+        Closing a session before its terminal event cancels its run: the run
+        stops at its next token and is recorded as a user cancellation
+        (`error.type` `cancelled`), not as an error.
+        """
     def run_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> XybridResult:
         """Run inference seeded with a conversation `context` (multi-turn chat).
 
@@ -906,7 +1237,7 @@ class XybridPipeline:
         """Execute every stage, downloading any missing models first, and return
         each stage's output alongside the final one.
 
-        Of `options`, only `correlation_id` applies to a pipeline run. Setting
+        Observation controls and `correlation_id` apply to a pipeline run. Setting
         `generation_config` or `abort_on` fails with `ConfigError` rather than
         being ignored; per-stage generation settings belong in the YAML.
         """
@@ -954,41 +1285,66 @@ class XybridConversationContext:
 
 
 
-class XybridTelemetryConfig:
+class XybridObservabilityConfig:
     _handle: int
 
-
-    def __init__(self, api_key: str) -> None:
-        """A new config bound to the default ingest endpoint and the given API key."""
-
+    def __init__(self) -> None: ...
 
     @classmethod
-    def _from_handle(cls, handle: int) -> "XybridTelemetryConfig": ...
+    def _from_handle(cls, handle: int) -> "XybridObservabilityConfig": ...
     def __del__(self) -> None: ...
-    def set_endpoint(self, endpoint: str) -> None:
-        """Override the ingest endpoint (self-hosted collector / non-prod)."""
-    def set_app_version(self, version: str) -> None:
-        """Set the app version reported with every event."""
-    def set_device_label(self, label: str) -> None:
-        """Set the human-friendly device label reported with every event."""
-    def set_device_attribute(self, key: str, value: str) -> None:
-        """Attach an app-provided device attribute (stored under `device.custom`)."""
-    def set_batch_size(self, batch_size: int) -> None:
-        """Set the number of events buffered before a flush."""
-    def set_flush_interval_secs(self, secs: int) -> None:
-        """Set the background flush interval, in seconds."""
-    def init(self) -> None:
-        """Start the process-global telemetry exporter from this config.
-
-        Consumes the config: subsequent setters no-op and a second `init` on the
-        same handle errors. Modeled as a method (not a free `telemetry_init`)
-        because boltffi 0.25.3 drops free functions that take a handle
-        parameter, but lowers a handle self-method fine (same reason the
-        generated `run` lives on `XybridModel`).
+    @classmethod
+    def xybrid(cls, api_key: str) -> "XybridObservabilityConfig":
+        """Traces to the Xybrid dashboard, authenticated with `api_key`."""
+    @classmethod
+    def otlp(cls, endpoint: str) -> "XybridObservabilityConfig":
+        """Traces, metrics, and logs to an OTLP/HTTP endpoint
+        (`http://host:4318`).
+        """
+    def set_traces_endpoint(self, endpoint: str) -> None:
+        """Override the full trace endpoint URL (staging, self-hosted)."""
+    def set_header(self, name: str, value: str) -> None:
+        """Add an HTTP header sent with every export request."""
+    def set_json_protocol(self, json: bool) -> None:
+        """Send OTLP JSON instead of protobuf."""
+    def set_service(self, name: str, version: str | None) -> None:
+        """Set the reported service (app) name and version."""
+    def set_resource_attribute(self, key: str, value: str) -> None:
+        """Attach a resource attribute (for example `deployment.environment`)."""
+    def set_metadata_only(self, metadata_only: bool) -> None:
+        """Record metadata only: no prompts, outputs, or tool payloads."""
+    def set_max_content_bytes(self, bytes: int) -> None:
+        """Maximum bytes per captured content attribute, clamped to at most
+        416 KiB (208 KiB when exporting OTLP/JSON, which can double content)
+        so that a span's content leaves 64 KiB of the 480 KiB export request
+        for its other data.
+        """
+    def allow_provider_context(self, origin: str) -> None:
+        """Allows context propagation to one exact third-party HTTP(S) origin."""
+    def set_device_id(self, id: str) -> None:
+        """Sets a caller-owned device identifier."""
+    def add_literal_redaction(self, find: str, replacement: str) -> None:
+        """Appends an ordered literal replacement of content string values.
 
         # Errors
-        Errors if this config was already consumed, or if telemetry is already
-        initialized without an intervening [`telemetry_shutdown`].
+        For an empty search string.
+        """
+    def omit_content_attribute(self, key: str) -> None:
+        """Omits an exact governed content attribute key.
+
+        # Errors
+        For an empty key.
+        """
+    def set_live_trace_interval_ms(self, ms: int) -> None:
+        """Minimum interval between traced frames of one live session."""
+    def init(self) -> None:
+        """Start exporting with this configuration, replacing any previous one.
+        Consumes the config: later setters no-op and a second `init` errors.
+        A method rather than a free function because boltffi drops free
+        functions that take a handle parameter.
+
+        # Errors
+        If this config was already consumed or is rejected.
         """
 
 
@@ -1029,8 +1385,138 @@ class XybridBundle:
 
 
 
+class XybridWorkflowObservation:
+    _handle: int
 
 
+    def __init__(self, name: str, options: XybridObservationOptions | None) -> None:
+        """Starts an operation using the configured SDK session and explicit parent controls."""
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridWorkflowObservation": ...
+    def __del__(self) -> None: ...
+    def context(self) -> XybridObservationContext | None:
+        """Context for child operations, including valid unsampled spans."""
+    def observation_ref(self) -> XybridObservationRef | None:
+        """Reference to this operation's own span."""
+    def complete(self) -> None:
+        """Ends successfully. The first terminal call wins."""
+    def fail(self, error_type: str, message: str | None) -> None:
+        """Ends with a governed error message."""
+    def cancel(self) -> None:
+        """Cancels without flushing."""
+    def is_finished(self) -> bool:
+        """Whether any terminal transition has happened."""
+
+
+
+class XybridToolObservation:
+    _handle: int
+
+
+    def __init__(self, call: XybridToolCallInfo, options: XybridObservationOptions | None) -> None:
+        """Starts an operation using the configured SDK session and explicit parent controls."""
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridToolObservation": ...
+    def __del__(self) -> None: ...
+    def context(self) -> XybridObservationContext | None:
+        """Context for child operations, including valid unsampled spans."""
+    def observation_ref(self) -> XybridObservationRef | None:
+        """Reference to this operation's own span."""
+    def complete(self) -> None:
+        """Ends successfully. The first terminal call wins."""
+    def fail(self, error_type: str, message: str | None) -> None:
+        """Ends with a governed error message."""
+    def cancel(self) -> None:
+        """Cancels without flushing."""
+    def is_finished(self) -> bool:
+        """Whether any terminal transition has happened."""
+    def record_result(self, result_json: str) -> None:
+        """Records structured tool output through the content policy."""
+
+
+
+class XybridInferenceObservation:
+    _handle: int
+
+
+    def __init__(self, request: XybridInferenceRequest, options: XybridObservationOptions | None) -> None:
+        """Starts an operation using the configured SDK session and explicit parent controls."""
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridInferenceObservation": ...
+    def __del__(self) -> None: ...
+    def context(self) -> XybridObservationContext | None:
+        """Context for child operations, including valid unsampled spans."""
+    def observation_ref(self) -> XybridObservationRef | None:
+        """Reference to this operation's own span."""
+    def complete(self) -> None:
+        """Ends successfully. The first terminal call wins."""
+    def fail(self, error_type: str, message: str | None) -> None:
+        """Ends with a governed error message."""
+    def cancel(self) -> None:
+        """Cancels without flushing."""
+    def is_finished(self) -> bool:
+        """Whether any terminal transition has happened."""
+    def record_system_instructions(self, parts_json: str) -> None:
+        """Records governed structured content."""
+    def record_input_messages(self, messages_json: str) -> None:
+        """Records governed structured content."""
+    def record_output_messages(self, messages_json: str) -> None:
+        """Records governed structured content."""
+    def record_tool_definitions(self, definitions_json: str) -> None:
+        """Records governed structured content."""
+    def record_chunk(self) -> None:
+        """Records a chunk arrival; this does not estimate first-token time."""
+    def record_first_token(self, at_epoch_ms: int | None) -> None:
+        """Records a runtime-measured first token (epoch milliseconds, or now)."""
+    def record_usage(self, usage: XybridUsage) -> None:
+        """Replaces the cumulative usage snapshot, preserving unknown fields."""
+    def record_finish_reasons(self, reasons: Sequence[str]) -> None:
+        """Records measured finish reasons."""
+    def record_response(self, response_id: str | None, model: str | None) -> None:
+        """Records provider-assigned response identifiers."""
+
+
+
+class XybridModelLoadObservation:
+    _handle: int
+
+
+    def __init__(self, info: XybridModelLoadInfo, options: XybridObservationOptions | None) -> None:
+        """Starts an operation using the configured SDK session and explicit parent controls."""
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridModelLoadObservation": ...
+    def __del__(self) -> None: ...
+    def context(self) -> XybridObservationContext | None:
+        """Context for child operations, including valid unsampled spans."""
+    def observation_ref(self) -> XybridObservationRef | None:
+        """Reference to this operation's own span."""
+    def complete(self) -> None:
+        """Ends successfully. The first terminal call wins."""
+    def fail(self, error_type: str, message: str | None) -> None:
+        """Ends with a governed error message."""
+    def cancel(self) -> None:
+        """Cancels without flushing."""
+    def is_finished(self) -> bool:
+        """Whether any terminal transition has happened."""
+    def record_cache_hit(self, hit: bool) -> None:
+        """Records the measured cache outcome."""
+
+
+
+
+
+def decision_request_envelope(request: XybridDecisionRequest) -> XybridEnvelope:
+    """Validate ordered typed decision data and build input for the existing run API."""
+def decision_request_json_envelope(json: str) -> XybridEnvelope:
+    """Decode bounded Liquid SystemOne JSON without foreign dictionary conversion."""
 def tool_results_envelope(user_text: str, prior_assistant_text: str, results: Sequence[XybridToolResult]) -> XybridEnvelope:
     """Build the continuation envelope for the turn after the model asked for
     tools.
@@ -1053,12 +1539,13 @@ def set_thermal_state(state: XybridThermalState) -> None: ...
 def clear_thermal_state() -> None: ...
 def set_battery_level(percent: int) -> None: ...
 def clear_battery_level() -> None: ...
-def configure_runtime(api_key: str | None, gateway_url: str | None, ingest_url: str | None) -> None:
-    """One-stop SDK initialization: API key + gateway/ingest URL overrides in
-    one call. Delegates to [`facade::configure_runtime`]; blank strings are
-    treated as absent. This is the canonical init the Swift
-    `Xybrid.initialize(apiKey:gatewayUrl:ingestUrl:)` and Kotlin
-    `Xybrid.init(context, apiKey, gatewayUrl, ingestUrl)` wrappers call.
+def configure_runtime(api_key: str | None, gateway_url: str | None) -> None:
+    """One-stop SDK initialization: API key + gateway URL override in one call.
+    Delegates to [`facade::configure_runtime`]; blank strings are treated as
+    absent. This is the canonical init the Swift
+    `Xybrid.initialize(apiKey:gatewayUrl:)` and Kotlin
+    `Xybrid.init(context, apiKey, gatewayUrl)` wrappers call. Observability
+    export is configured separately with [`XybridObservabilityConfig`].
     """
 def init_sdk_cache_dir(cache_dir: str) -> None: ...
 def cache_status() -> XybridCacheStatus:
@@ -1089,8 +1576,8 @@ def set_platform_url(url: str) -> None:
     Pass a bare base URL — the `/v1` suffix is applied internally.
     """
 def set_speculative_cloud(enabled: bool) -> None:
-    """Enable speculative cloud fallback globally: a registry chat model that
-    isn't downloaded yet is served from the gateway while the weights download.
+    """Try the registry chat model's id at the gateway while its weights download.
+    Only ids also listed in the gateway catalog can be served remotely.
 
     An uncached load asks the registry first, so other models (ASR, TTS,
     `.xyb` bundles) download and load as usual.
@@ -1128,9 +1615,34 @@ def set_auto_release(enabled: bool) -> None:
     """
 def is_auto_release_enabled() -> bool:
     """Whether automatic model release is enabled process-wide."""
-def telemetry_default_endpoint() -> str:
-    """The SDK's default telemetry ingest endpoint (for display alongside a config)."""
-def telemetry_flush() -> None:
-    """Flush pending telemetry events. Safe before init / after shutdown."""
-def telemetry_shutdown() -> None:
-    """Shut down the telemetry exporter. Idempotent."""
+def observability_default_traces_endpoint() -> str:
+    """The default Xybrid OTLP trace endpoint."""
+def observability_stats() -> XybridObservabilityStats:
+    """Delivery counters: live while export runs, the final ones after shutdown until the next init."""
+def observability_flush(timeout_ms: int) -> None:
+    """Export queued telemetry, waiting at most `timeout_ms`.
+
+    # Errors
+    When the bound is exceeded.
+    """
+def observability_shutdown(timeout_ms: int) -> None:
+    """Flush and stop exporting, waiting at most `timeout_ms`. Idempotent.
+
+    # Errors
+    When the bound is exceeded.
+    """
+def observability_record_feedback(target: XybridObservationRef, score: float | None, label: str | None, comment: str | None) -> bool:
+    """Record end-user feedback on a run (`XybridResult::observation`). Returns
+    `false` when no logs signal is configured (the Xybrid preset sends traces
+    only).
+
+    # Errors
+    When `target` is not a valid trace/span id pair.
+    """
+def observability_record_evaluation(target: XybridObservationRef, name: str, score_value: float | None, score_label: str | None, explanation: str | None) -> bool:
+    """Record an evaluation result on a run. Returns `false` when no logs signal
+    is configured.
+
+    # Errors
+    When `target` is not a valid trace/span id pair.
+    """

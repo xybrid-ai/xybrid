@@ -62,16 +62,15 @@ pub(crate) const MIN_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 /// Lifecycle of a model download.
 ///
 /// Also describes the background download behind a speculative load, where
-/// `Downloading` means runs are being served from the cloud meanwhile.
+/// `Downloading` means runs can try the registry id at the gateway.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DownloadState {
     /// Bytes still in flight.
     Downloading,
     /// Every artifact landed, verified and extracted — the model is usable.
     Ready,
-    /// The download failed. For a speculative load the cloud keeps serving and
-    /// `is_loaded()` will never flip, so surfacing this is the only way a host
-    /// can stop waiting.
+    /// The download failed. A speculative model cannot recover locally;
+    /// runs can still try the gateway.
     Failed,
     /// The caller asked for the download to stop (see [`ModelDownload::cancel`]).
     Cancelled,
@@ -423,10 +422,21 @@ impl ModelDownload {
 
         let worker = Arc::clone(&download);
         let worker_id = id.clone();
+        // The caller's context and session, so the download is a span of the
+        // operation that started it rather than an orphan root.
+        let context = crate::observability::CapturedContext::capture();
         let spawned = std::thread::Builder::new()
             .name(format!("xybrid-download-{id}"))
             .spawn(move || {
+                let _context = context.enter();
                 let id = worker_id;
+                let span = crate::observability::SpanScope::start(
+                    &format!("download {id}"),
+                    vec![crate::observability::KeyValue::new(
+                        "gen_ai.request.model",
+                        id.clone(),
+                    )],
+                );
                 let publisher = Arc::clone(&worker);
                 let outcome = RegistryClient::from_env().and_then(|client| {
                     client.fetch_extracted_cancellable(
@@ -436,6 +446,7 @@ impl ModelDownload {
                         move |status| publisher.publish(status),
                     )
                 });
+                span.end(&outcome);
                 match outcome {
                     Ok(_) => worker.publish_terminal(DownloadState::Ready, None),
                     Err(SdkError::Cancelled { message }) => {

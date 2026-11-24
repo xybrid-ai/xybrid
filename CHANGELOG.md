@@ -7,6 +7,513 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **llama.cpp:** update to [v0.9.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.9.0) (commit `cd959bae99ff4bed22bef2604f45241c09bbb8c8`).
+
+## [0.21.0] - 2026-11-22
+
+### Added
+
+- **A run that recovers on-device after a failed speculative cloud attempt
+  reports the gateway's error** in `speculative_cloud_error` result metadata:
+  `speculative_cloud_error()` in Rust, `speculativeCloudError` in Flutter and
+  `SpeculativeCloudError` in Unity.
+- **Flutter: load a local GGUF file.** `XybridModelLoader.fromModelFile(path)`
+  loads a raw llama.cpp GGUF with no `model_metadata.json`, as Swift's
+  `ModelLoader.fromModelFile`, React Native's `fromModelFile` and Unity's
+  `FromModelFile` already do: `load()` generates the metadata from the GGUF
+  header and writes it next to the file unless one is there, with the context
+  capped at 4,096 tokens. Creating the loader does no disk I/O, and
+  `loadWithProgress()` reports only `LoadComplete` or `LoadError`. The
+  facade's sidecar step is now the public `prepare_model_file`, shared by the
+  bolt bindings and Flutter (#813).
+- **CLI: `xybrid connect --via <entrypoint>`** names the setup entrypoint that
+  led to a new workspace: `web-copy`, `setup-prompt`, `llms-txt`, `skill`,
+  `mcp` or `docs`; any other value is dropped. It is sent as `client_info.via`
+  only when the platform's challenge allows collection. A saved request
+  retries with the same value unless a replacement challenge no longer allows
+  it, and reusing a saved key or adding a project sends nothing new. The
+  `xybrid-connect` skill and the `connect` docs pass `--via` only when
+  `xybrid connect --help` lists it, so an older CLI keeps working. The skill's
+  reference script, `xybrid_agent_connect.py`, takes the same option, so its
+  published SHA-256 changed (#831).
+
+### Changed
+
+- **Apple: the SDKs no longer link MetalPerformanceShaders.** `Package.swift`,
+  the `swift` branch manifest, the React Native pod and the Flutter iOS and
+  macOS pods dropped `MetalPerformanceShaders`, and the first three also
+  dropped `MetalPerformanceShadersGraph`. They were added in 0.1.0-beta4 for
+  Candle's Metal backend, whose `metal` dependency references
+  `MPSSupportsMTLDevice`; Candle left the platform presets in #476, and no
+  library shipped in v0.20.0 references either framework. CI now fails if the
+  XCFramework or the Flutter Apple libraries reference an MPS symbol, and links
+  the XCFramework's device slice. An app whose own code uses
+  MetalPerformanceShaders, or a custom build with `candle-metal`, must link the
+  framework itself (#807).
+
+### Fixed
+
+- **The trusted SDK source checker accepts normal release bumps.** It checks
+  only registered install pins in docs, accepts the observability JS and web
+  version pins, and recognizes the exact changelog heading and llama.cpp release
+  stamp written by the release tools without allowing unrelated edits (#811).
+- **The speculative cloud docs stop claiming the gateway serves every registry
+  chat model.** A speculative run requests the registry id, and the gateway
+  answers only when its catalog lists it.
+- **The Swift samples on the iOS page and in the Swift README compile.** Error
+  Handling catches the generated `XybridError` cases (`modelNotFound(id:)`,
+  `inferenceError(message:)`, `ioError(message:)`), Result Handling switches on
+  `XybridOutputType` instead of strings and no longer reads a `result.error`
+  that does not exist, and the README's audio envelope uses
+  `audio(pcmData:sampleRate:channels:)`. A failed run throws, so the samples no
+  longer check `result.success` (#804).
+- **The Swift README describes the current build.** Its Structure tree points
+  at the repo-root `Package.swift`, the local XCFramework steps include the
+  `set-natives-mode.sh` toggle, Troubleshooting covers the Bazel and SwiftPM
+  flow, and the dead "Full Plan" links are gone from the Swift, Kotlin and tools
+  READMEs, along with the two placeholder build scripts they described (#805).
+- **The docs stop claiming ONNX models run on Core ML or NNAPI.** The pipeline
+  `execution_provider` key is documented as parsed but not applied yet (every
+  ONNX session runs on the CPU), and the Flutter platform tables say what each
+  model format runs on (#806).
+- **Apple build comments describe the build.** `ort-coreml` is described as
+  linking ONNX Runtime's Core ML execution provider (not Neural Engine
+  acceleration), including in the error shown when it is enabled off Apple.
+  The iOS `.bazelrc` config no longer calls the iOS build CPU-only with Metal
+  off, and the XCFramework and Flutter pod comments no longer list Candle among
+  what the iOS library links (#807).
+- **The streaming docs list the real `finishReason` values** (`stop`,
+  `length`, `tool_calls`), say how each SDK reports a failed stream, and
+  document `tokenId`, `toolCalls` and `rawText` (#808).
+- **The Unity examples target iOS 16**, the floor the Unity iOS library is
+  built for, and the starter README's iOS, Windows and platform notes are
+  current (#809).
+- **Stale docs claims from #646.** The custom-models guide's Rust, Flutter and
+  Kotlin snippets match the SDKs, every page agrees that the platform presets
+  include the vision path, the cache docs say cached models do not expire, and
+  the feature matrix names `xybrid-llama-sys`, lists no CLI default features
+  and shows `candle-hub` on rustls (#646).
+- **Rust: `ExecutionProviderInfo::current()` reports what ONNX Runtime runs
+  on.** `name` is `cpu` on every build: it was `coreml-ane` or `coreml` when
+  xybrid-sdk's `ort-coreml` feature was on, although every ONNX session is
+  built on the CPU execution provider. `coreml_available` is true whenever
+  ONNX Runtime's Core ML execution provider is linked, including under the
+  `platform-ios` and `platform-macos` presets, where it was false; it means
+  linked, not in use. Loading a pipeline whose stage sets `execution_provider`
+  to anything but `cpu` logs a warning, and `xybrid run`, `xybrid repl` and
+  `xybrid prepare` print one (#806).
+- **Flutter: `runStreamingWithContext` ends a turn on one final token.** It
+  emitted the native terminal token and then a second final token for the
+  metrics. On a tool-call turn that second token reported `finishReason:
+  'stop'`, no `toolCalls`, and a `cumulativeText` that included the raw
+  tool-call block; a turn cut off by `maxTokens` also ended on `'stop'`
+  instead of `'length'`. The stream now merges the two, as `runStreaming` and
+  `runStreamingWithFallback` do: the last token keeps the native index, text,
+  finish reason, `toolCalls` and `rawText`, and carries `metrics` and
+  `observation`. Code that expected two `isFinal` tokens per turn sees one.
+  When a tool-call block is suppressed but does not parse, the stream no
+  longer carries the raw output; `runWithContext` returns it in
+  `XybridResult.text` (#820).
+- **`fromModelFile` accepts a bare file name.** A GGUF named without a
+  directory, such as `model.gguf` in the working directory, now loads. The
+  shared facade step wrote its `model_metadata.json` and then failed with
+  `Directory not found` (#813).
+- **Two first loads of the same GGUF no longer race.** `fromModelFile` wrote
+  `model_metadata.json` in place, so a load starting at the same moment could
+  read the file half written and fail to parse it. The sidecar is now written
+  to a temporary file and linked into place, and an existing one is never
+  replaced. Publishing it needs hard links: on a filesystem without them, such
+  as FAT32 or exFAT, a first load with no `model_metadata.json` beside the
+  GGUF now fails with an I/O error instead of writing the file in place. A
+  GGUF whose sidecar is already there still loads (#813).
+
+## [0.20.0] - 2026-11-17
+
+### Added
+
+- **Registry telemetry:** CI runs now label their registry calls. When the
+  `CI` environment variable is set (GitHub Actions, GitLab CI, CircleCI,
+  Buildkite and most other CI services set it) to anything but empty, `0` or
+  `false`, the `X-Xybrid-Client` header ends with `; ci=1`, so registry
+  analytics can leave test traffic, such as suites resolving fake model ids,
+  out of real usage. `XYBRID_CI=1` (or `true`) labels a run where `CI` is
+  unset, such as a coding-agent sandbox or a development machine, and
+  `XYBRID_CI=0` (or `false`) keeps a CI run unlabelled. `ci=0` is never sent,
+  registries that predate the key ignore it, and `XYBRID_TELEMETRY_OPTOUT`
+  still drops the whole header. Every SDK built on the Rust core sends it; the
+  browser SDK (`@xybrid/web`) can't read environment variables and doesn't.
+  See [Registry call telemetry](docs/telemetry/registry.md#labelling-ci-runs).
+- **Swift: load a local GGUF file.** `ModelLoader.fromModelFile(_:)` and
+  `Xybrid.model(.modelFile(url))` load a raw GGUF with no `model_metadata.json`,
+  as React Native's `fromModelFile` and Unity's `FromModelFile` already do:
+  `load()` generates the metadata from the GGUF header and writes it next to the
+  file unless one is there. `ModelSource` gains a `.modelFile(URL)` case, so a
+  `switch` over it without a `default` needs one more arm.
+
+### Fixed
+
+- **SDK:** loading a pipeline no longer asks the model registry about its
+  cloud and provider stages. `PipelineRef::load`, which every binding's
+  pipeline constructor goes through, checked whether each stage's model was
+  cached by resolving it in the registry, including stages that name a
+  provider or `target: cloud`, `server` or `integration`. Their models
+  (`gpt-4o-mini`) are not registry ids, so each load spent a registry round
+  trip per such stage and got a 404 back. Only device and auto stages are
+  checked now; what a stage reports (`Pipeline::stages`) is unchanged.
+- **Flutter:** the cloud fallback (`runStreamingWithFallback`) asks the Xybrid
+  gateway for `openai/gpt-4o-mini` when the app sets no `cloudModel`. It sent
+  `gpt-4o-mini`, a short id the managed gateway (`api.xybrid.dev`) no longer
+  accepts: it names frontier models by their canonical OpenRouter id
+  (`vendor/model`), so every such fallback failed with `404 model_not_found`.
+  A `cloudModel` the app sets is sent unchanged, so it needs a canonical id
+  too (`anthropic/claude-haiku-4.5`, not `claude-haiku-4.5`).
+- **Rust:** `LlmClientConfig::default()` and
+  `xybrid_core::gateway::GatewayConfig::default()`, which target the Xybrid
+  gateway, default to `openai/gpt-4o-mini` instead of `gpt-4o-mini`. An
+  `LlmClientConfig` with `backend: Direct` that relied on the default must now
+  set `default_model` to the provider's own id.
+- **Docs and examples:** the pipeline, hybrid execution and `xybrid run`
+  pages (English and Chinese), the CLI's `hybrid-platform.yaml` and
+  `hiiipe.yaml`, the `cloud_fallback_demo` and `voice_assistant_gateway_demo`
+  examples and the staging acceptance tooling name the gateway's cloud model
+  by its canonical id. A cloud stage written from them on the default
+  `backend: gateway` sent `gpt-4o-mini` (or `deepseek-flash`) and got
+  `404 model_not_found`. With `backend: direct`, a stage still uses the
+  provider's own model id.
+- **The Swift README no longer calls the SDK "Coming Soon".** Its opening banner
+  told production users to pick Flutter or Kotlin, while the same README
+  documents the SwiftPM install of the shipped package. The Chinese and
+  Japanese READMEs and the pipelines page also stop listing Swift, Kotlin and
+  Unity pipelines as coming soon or planned, matching the English README.
+- **The iOS docs match the Swift package.** The iOS page, the Swift README and
+  the pages that repeat them drop the "early access" label and the iOS 13 /
+  macOS 10.15 minimums: the package supports iOS 16.0 and later, on devices and
+  the arm64 Simulator, and ships no macOS slice. The accelerator tables (the
+  iOS page, the READMEs, the installation guide and the feature matrix) no
+  longer claim the Apple Neural Engine: GGUF models run on llama.cpp's Metal
+  backend on devices and on the CPU in the Simulator, and ONNX models run on the
+  CPU. The Simulator known issue
+  ([#179](https://github.com/xybrid-ai/xybrid/issues/179), fixed in 0.4.0-alpha)
+  is gone, and building needs Xcode 15.3 (Swift 5.10).
+- **The iOS example README is current.** It targets iOS 16.0, loads models
+  with `Xybrid.model(...).load()` instead of the blocking `Model(fromRegistry:)`,
+  and no longer says Swift lacks token streaming: `streamTokens` has shipped,
+  and the iOS page, the Swift README, the streaming docs and the API reference
+  now document it (Kotlin's `streamTokens` too), and the streaming page no
+  longer calls live transcription planned. What Swift still lacks for live
+  vision is named instead: Flutter's `preempt` flag and raw-frame `imageRaw`
+  envelopes.
+- **`Package.swift` points external users at the current release.** Its
+  install comment said `exact: "0.1.0-beta13"`; it now uses `from:` with the
+  current version, and `just bump-version` rewrites it with the other SwiftPM
+  install snippets. The trusted zzz SDK source policy accepts that line moving
+  with the version in a release bump.
+
+## [0.19.0] - 2026-11-14
+
+### Added
+
+- **Agent setup:** the skills installer now includes `xybrid-connect` and its
+  reference script, with a SHA-256 check before replacing an installed copy.
+  The CLI installers describe the optional `xybrid connect` command, and the
+  documentation covers `connect`, `auth` and provisional workspace deadlines
+  in English and Chinese. Agent signup is available in production; trace
+  export still requires explicit configuration.
+
+### Changed
+
+- **Cargo:** refreshed the generated llama.cpp native manifest for the LFM3
+  fix below, so matching prebuilt archives are available to external builds.
+- **Flutter:** regenerated the FRB binding comments for Rust 1.100.
+
+### Fixed
+
+- **SDK:** a pipeline stage with no `target:` and no provider runs locally
+  again when its model is a passthrough GGUF or not downloaded yet. The SDK
+  treated an extracted passthrough model as missing, skipped the download
+  when its routing check preferred the cloud, and the stage then failed with
+  `Missing 'provider' in metadata`. `Pipeline::load_models` now downloads
+  every local stage's model, as the CLI does, and `Pipeline::is_ready`
+  reports a stage downloaded by `load_models` as ready, so later runs don't
+  reload it.
+- **LFM3 with thinking off (llama.cpp):** a turn is one answer again. With a
+  system prompt or earlier turns in the conversation, LFM3 wrote a first
+  answer, a stray `</think>` and the answer once more. A batch run filed the
+  first answer under `reasoning_content`, but a stream had already sent all
+  three, so `xybrid repl --stream` printed
+  `The capital of France is Paris.</think>The capital of France is Paris.`
+  and stream and final text disagreed, on tool continuations too. LFM3's
+  thinking-off prompt ends with the think channel closed, and after such a
+  prompt the sampler can no longer pick `<think>` or `</think>`. That makes
+  thinking off strict for LFM3: it cannot open a think block of its own
+  either. Thinking-on runs are unchanged. In
+  `xybrid-llama`, `generate_with_stops`, `generate_streaming` and
+  `generate_from_current_logits_streaming` take a `banned_tokens` list after
+  `grammar`; pass `&[]` to ban nothing.
+- **CLI:** `xybrid connect` gave the wrong date to claim a provisional
+  workspace by. Its `tell_the_user` and the comment it writes above the key
+  in the `--write-env` file said to claim by the key's expiry
+  (`key_expires_at`), but the workspace can be claimed until it is deleted
+  (`claim_expires_at`, a week later on Xybrid's platform), and claiming
+  restores an expired key. Both now say to claim by `claim_expires_at`, and
+  still give `key_expires_at` as the date the key, and with it platform
+  access, stops. The `xybrid-connect` skill's reference script,
+  `xybrid_agent_connect.py`, made the same mistake and is fixed too, so its
+  published SHA-256 changed. The deadlines themselves, the JSON report and
+  the saved credentials are unchanged.
+
+## [0.18.0] - 2026-11-12
+
+### Added
+
+- **CLI:** `xybrid connect` gives a project a Xybrid key without an account,
+  for coding agents. It creates (or reuses) a claimable workspace with a
+  restricted client key, saves the key privately, and writes it to an
+  untracked, gitignored project file with `--write-env`. It never enables
+  trace export and never prints the key; `--json` prints one object with
+  `tell_the_user`, the claim link and the workspace's deadlines. A second
+  repository on the same machine becomes a new project in the same unclaimed
+  workspace; `--new` starts another. Exit codes: 0 created or existing, 3
+  signup closed, 4 offline, 5 CI or opted out, 6 project file tracked by Git,
+  7 workspace expired but still claimable. Agent signup is turned on per
+  environment by Xybrid; until then `connect` exits with 3.
+- **CLI:** `xybrid auth status` shows the project's key source, the
+  workspace's lifecycle and whether traces have arrived; `xybrid auth claim`
+  shows the private link to claim the workspace with GitHub; `xybrid auth
+  logout` removes the project's saved credentials. `--platform-url` accepts
+  the production and staging APIs and pins their console and ingest; other
+  hosts need `--allow-custom-host`.
+
+- Application-owned observability sessions and typed workflow, tool, inference
+  and model-load handles, with explicit parents, first-terminal-wins completion
+  and cancellation on last-owner disposal.
+- Observation controls and returned references across model loads, pipelines,
+  streamed TTS and live ASR, including native bindings and React Native cleanup.
+- Caller-owned device IDs, declarative redaction and opt-in third-party context
+  propagation. Export remains explicitly configured and offline use stays available.
+- Resource samples export peak CPU utilization
+  (`xybrid.genai.resource.cpu.peak_utilization`, 0–1), minimum available memory
+  (`xybrid.genai.resource.memory.min_available_bytes`) and memory pressure
+  (`xybrid.genai.resource.memory.pressure`: `normal`, `warn` or `critical`).
+  The Rust SDK maps them from its resource summary; unmeasured values stay
+  absent. Rust and JS `ResourceSample` gained the matching optional fields.
+- Live frame sessions in every binding. `RunOptions.frame_session_id` in the
+  facade and Bolt names one continuous capture loop (a camera or microphone)
+  on a model run: every frame is counted in metrics, and detailed traces are
+  kept for roughly one frame per live trace interval per session. It was
+  reachable only from Rust and Flutter, so the interval setting did nothing
+  elsewhere. Swift `XybridRunOptions.make(frameSessionId:)`, Kotlin
+  `runOptions(frameSessionId = …)`, Unity `ObservationOptions.FrameSessionId`
+  and React Native `frameSessionId` default to none. It applies to model
+  runs; a pipeline run ignores it. The generated
+  `XybridRunOptions` record gained the field, so code that builds it directly
+  (Python, or the Swift, Kotlin and C# initializers) passes one more
+  argument: `None`, `nil` or `null` for a one-shot run.
+- **Rust:** per-destination OTLP response hooks in `xybrid-observability`
+  (`otlp::ResponseHook`, `SignalEndpoint::with_response_hook`). A hook sees
+  every HTTP response of its destination once, including retries and the
+  shutdown drain, and may disable that destination alone; what it no longer
+  sends is counted as `dropped`, never as exported.
+  `SignalEndpoint::is_xybrid_preset` marks the endpoint the Xybrid preset built.
+- **Rust:** Xybrid workspace feedback. With the Xybrid preset, trace ingest
+  reports a `xybrid connect` key's provisional deadline or its expiry
+  (`WorkspaceNotice`), read through `ObservabilitySession::workspace_feedback`
+  or `observability::workspace_feedback`. The CLI prints it after a run's
+  final export, with one claim line a day pointing at `xybrid auth claim`.
+- **Liquid d1 decision models (`lfm3-d1/text/v1`).** A local LiquidAI d1-2B
+  GGUF answers 1 to 16 typed questions about a text or ordered-JSON state,
+  without generating text: one choice among up to 255 options, yes/no, or an
+  ordinal score with 2 to 10 levels. A request is an
+  `EnvelopeKind::DecisionRequest` on the ordinary `run`, `run_async` and
+  `run_with_options`, and the result (`OutputType::Decisions`) holds one
+  answer per question with the probabilities it was read from. Model metadata
+  uses the new `ExecutionTemplate::Decision`. It needs `llm-llamacpp` and runs
+  on the CPU, one pass of at most 4,096 tokens per question. Streaming,
+  conversation history, pipelines, cloud fallback and the browser refuse
+  decision requests. This is an implementation, not a qualified release: see
+  `docs/sdk/decisions.md` and `docs/development/decision-conformance.md`. The
+  registry serves no decision model yet (no build reports the
+  `llamacpp-lfm3-d1-text-v1` capability), so load a local directory.
+  - **Rust:** `xybrid_sdk::decode_decision_request`,
+    `InferenceResult::decisions`, `tokens_in` and `tokens_out`.
+  - **CLI:** `xybrid run --decision-request <file|->` prints one
+    `xybrid.decision.v1` JSON record; `--output` writes it to a file.
+  - **Bindings:** a `decisionRequest` and a `decisionRequestJson` envelope and
+    a `decisions` result accessor in Swift, Kotlin, Flutter and React Native,
+    `XybridEnvelope.decision_request_json` in Python and
+    `Envelope.DecisionRequestJson` in Unity. Pass structured state as JSON
+    text: a dictionary or a JavaScript object can reorder keys and lose
+    integers above 2^53.
+
+### Changed
+
+- A decision model ends a batch run with `SdkError::Cancelled` when its
+  `CancellationToken` is cancelled, before or during the run, whatever the
+  abort policy observes. Every other model keeps its batch contract.
+- llama.cpp chat loading refuses a GGUF that carries decision metadata (a
+  `systemone` template, `systemone.*` keys or `<architecture>.decision.*`
+  keys) and cannot generate text: it is a decision model, loaded through
+  `ExecutionTemplate::Decision`. A model that does both, such as Granite
+  Switch, still loads as a chat model.
+- At any `XYBRID_LLAMACPP_VERBOSITY`, a thread prints no llama.cpp log while
+  it tokenizes, or while it loads or runs a decision model: those diagnostics
+  can quote the prompt. Other threads keep their logs.
+- `Envelope::from_bytes` and `Envelope::from_json` errors no longer carry the
+  decoder's message, which could quote the payload. They name the kind of
+  failure, and for JSON its line and column.
+- Metadata generated from a GGUF (`from_model_file`, a Hugging Face repository
+  without `model_metadata.json`, `xybrid init`) reads the whole file header to
+  find decision metadata. A header that declares more than 65,536 metadata
+  entries is refused with `MetadataInvalid`. A sidecar marked `auto_generated`
+  that names a decision model as a chat model is rewritten on load.
+- **Python:** `XybridModel.run` releases the GIL during the native call, so
+  another thread can call `cancel()` on the run's token meanwhile. Calls on
+  one model run one at a time, and `close()` waits for an active run. Models
+  that share one cancellation token still run at the same time.
+- Packages that contain llama.cpp carry its notices (llama.cpp, ggml, Jinja
+  and nlohmann-json; the source is `crates/llama-cpp-sys/NOTICE`): the Kotlin
+  AAR and the Android zip at `assets/xybrid/llama/NOTICE`, the Flutter, Python,
+  Unity, React Native and web packages, the Apple XCFramework zip, and a `.NOTICE`
+  asset beside each CLI binary. Keep them when you redistribute.
+- When Xybrid's trace ingest reports that a key's unclaimed workspace expired
+  (HTTP 401 with `X-Xybrid-Workspace: expired` and a `workspace_expired`
+  status), every binding using the Xybrid preset stops sending traces to it
+  for the rest of the session. Later spans are counted as `dropped` in the
+  existing exporter stats; local inference, local spans and other destinations
+  continue. Claim the workspace and start observability again to resume.
+- The first-inference nudge points at `xybrid connect` and the console, and
+  says that a key alone exports nothing. Its docs link now opens the API keys
+  page (`/docs/concepts/api-keys`); the old `/sdk/observability` link was a 404.
+
+- Portable observability contract v2 preserves numeric/null wire types and
+  unsampled references, bounds retained content and delivery queues, and cancels
+  HTTP work on lifecycle deadlines. Per-signal counters report delivery outcomes.
+- Observability content budgets are clamped so that a span's content fits the
+  export request bound (480 KiB by default) with 64 KiB left for the span's
+  other data: a raised budget truncates or omits (and lists) content instead
+  of dropping the span. The clamp follows how the exporter writes content.
+  OTLP/protobuf, the default protocol, sends it as retained, so the default
+  retained-operation budget is 416 KiB; OTLP/JSON can double it, so the same
+  request carries 208 KiB. A packaged pipeline fits content as protobuf only
+  when its traces signal, and its logs signal if it has one (content sent as
+  events rides it within the same budget), both use protobuf. Providers the
+  application owns are fitted as JSON until the policy names protobuf (Rust
+  `ContentPolicy::with_span_content_encoding`, JS
+  `content.spanContentEncoding`). A request bound under 128 KiB reserves half
+  of itself instead of 64 KiB, so a small bound still carries content.
+  That allowance is reserved, not enforced, so a span whose other data
+  outgrows it (large application attributes or resource, many or very long
+  omitted prompt-variable names) can still be dropped as an oversized item.
+  Content for spans that are not recording is no longer processed, a Rust
+  redaction hook that panics fails closed, a span processor that panics (Rust)
+  or throws (JS) while a span ends is contained (that span is lost; a failure
+  while a span starts still propagates), and Rust and JS per-signal stats
+  report `buffered_bytes` / `bufferedBytes`.
+- After `shutdown_observability` (and the bindings' observability shutdown),
+  `stats()` keeps the shut-down session's final per-signal counters, including
+  what the shutdown failed in flight or dropped from the queue, until the next
+  initialization; it used to read zero. Export still reports disabled.
+- A per-run observability session or observer (`ObservationOptions::session`,
+  `::observer`) can only lower content capture: its policy is capped by the
+  session the run would otherwise use (the enclosing operation's, else the
+  default; a disabled one caps nothing, so the next one out caps), so a
+  per-run setting that would capture more is ignored.
+  `ContentPolicy::capped_by` and `Observer::content_capped_by` (Rust) build
+  such capped policies and observers.
+- The live-frame sampler remembers at most 1,024 frame sessions (least
+  recently used evicted) besides forgetting sessions 300 s after their last
+  frame, and no longer scans every session per frame.
+- `XybridModel::run_async` and `run_stream` (and the facade's async run) take
+  their caller's parent only from the ambient OpenTelemetry context; this is
+  now documented, with `FutureExt::with_context` for spawned futures.
+- Dropping a Rust `XybridModel::run_stream` stream before its terminal event
+  now stops the run at its next token and releases the model write lock; the
+  run used to generate to the end. Unsubscribing a Flutter token stream
+  started without a `CancellationToken` now does the same, as it already did
+  with one, and closing a facade streaming session or a Bolt stream
+  (`stream_close`) early already stopped its run. Observability records these
+  runs as `cancelled`.
+- A token callback that returns an error stops a model stream as the
+  caller's cancellation whatever the error's type (a typed
+  `CloudFallbackAbort` aside, which hands over to the cloud leg):
+  observability records the run as `cancelled`, as a streaming pipeline
+  already did. An untyped
+  callback error used to be recorded as `inference_error`, although the model
+  had not failed. The error returned to the caller is unchanged.
+- JavaScript exporter support covers aligned OpenTelemetry 3.0/0.300 and
+  3.1/0.301 families. The core entry point stays independent of SDK packages.
+- CLI traces are scoped to each operation; `--trace-export PATH` explicitly
+  writes an artifact. See `docs/sdk/observability-coverage.md` for migration and
+  execution coverage.
+
+### Fixed
+
+- Cloud calls no longer sleep for whatever `Retry-After` a server sends. A 429
+  whose error code or type is `insufficient_quota` (a spent quota, such as an
+  unclaimed agent workspace's) fails at once with the server's message instead
+  of being retried, and repeats of it no longer open the gateway circuit
+  breaker, so a long-lived `Cloud` keeps returning that message rather than
+  "try again later". Other waits are honored up to
+  `xybrid_core::http::MAX_RETRY_AFTER` (60 s per call, in total); a longer
+  `Retry-After` returns the rate-limit error at once. `Retry-After` is read as
+  seconds or as an HTTP-date (`xybrid_core::http::parse_retry_after`), so a
+  far-off date gives up at once instead of waiting a 60 s default. Registry
+  calls (across every registry URL they try) and model downloads follow the
+  same bound.
+- An opened circuit breaker recovers after its open duration instead of
+  refusing every later call until reset. The gateway client and registry calls
+  took a half-open circuit's only test request twice (once to fail fast, once
+  for the attempt), so the probe was never sent. Nor is that request kept any
+  longer by a retried call that gives up on a long `Retry-After`, or by a
+  registry probe that ends offline (it is given back) or with a compatibility
+  refusal (it closes the circuit). `CircuitBreaker::is_refusing` checks without
+  taking a request, and `CircuitBreaker::release` gives one back.
+- A registry call whose failures open a URL's circuit (three 5xx, or one 429)
+  now moves on to the next registry URL instead of failing with "circuit
+  open", and without first sleeping out a `Retry-After` for a retry the open
+  circuit would refuse. When no URL answers, the call reports the registry's
+  own error, so a 429 surfaces as `RateLimited` with its `Retry-After`.
+
+### Migration
+
+- Analyze saved traces with `xybrid trace FILE`; the session/latest selectors
+  were removed. `--trace-export PATH` now writes OTLP/JSON instead of Chrome
+  trace JSON.
+- Observability stats now contain per-signal accepted, exported, dropped,
+  failed and pending counters. Update consumers of the previous flat fields.
+- Rust streamed TTS returns `TtsStreamResult` (core summary plus observation),
+  and ASR flush returns a transcription result carrying its session reference.
+  Public streaming, stage and pipeline result records gained observation fields;
+  update exhaustive struct literals and serialized-result consumers.
+- Live ASR `flush()` returns a transcription record instead of a string in every
+  binding: Swift, Kotlin and Python `XybridTranscriptionResult`, Unity
+  `XybridBolt.XybridTranscriptionResult`, React Native `TranscriptionResult`
+  and Flutter `FfiTranscriptionResult`. Read `text` (Unity `Text`) for the
+  transcript; the record also carries the duration, the chunk count and the
+  session's observation reference.
+- Flutter `FfiTtsStreamEvent.complete` carries an `FfiTtsStreamResult`.
+  `runTtsStreaming` reports it through `onComplete` and fails the stream with
+  a `StateError` when the output was limited.
+- Invalid explicit W3C parents are rejected. Validate caller-supplied
+  `traceparent` values before passing observation options.
+- React Native observation references use `{trace_id, span_id}`. Replace reads
+  of `traceId` and `spanId` with the corresponding snake-case fields.
+- Unity `Pipeline.Run` and `Model.Stream` accept optional observation controls.
+  Recompile assemblies using the wrappers to pick up the changed signatures.
+- Python observation context managers classify interruption and cancellation
+  separately from application errors. Release still cancels unfinished work
+  without flushing.
+- Delivery failures from flush/shutdown use `TelemetryDelivery` in native
+  bindings. Inspect delivery stats or retry export; do not rerun inference to
+  recover a missing acknowledgement.
+- **Rust:** `xybrid_observability::otlp::SignalEndpoint` gained a private
+  field, so it can no longer be built with a struct literal. Use
+  `SignalEndpoint::new` and its `with_*` methods.
+
+## [0.17.0] - 2026-11-05
+
 ### Added
 
 - **Rust:** decision-model data types in `xybrid_core::ir::decision`,
@@ -55,17 +562,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lack the `lfm3` architecture, and 0.16.0 loads it without LFM3's prompt
   format, tool calls or image-token cap.
 
-### Changed
+- **Phoneme timings from ONNX TTS models, for lip sync.** When an ONNX TTS
+  model declares a per-token duration output (named `duration`, `durations`
+  or `pred_dur`), the result now says when each phoneme is spoken: the
+  phoneme and its start and end, in seconds from the first sample of the
+  returned audio. Silence trimming and the crossfades between long-text
+  chunks are already accounted for, and pads and silence tokens are left out.
+  Rust reads them with `InferenceResult::phoneme_timings()` and Unity with
+  `InferenceResult.PhonemeTimings` and `HasPhonemeTimings`. Kotlin, Swift and
+  Python have no typed field yet: they parse the `phoneme_timings` JSON entry
+  of the result envelope's metadata. Dart results carry no metadata, so Dart
+  gets no timings. KittenTTS 0.8 already declares `duration`. Stock Kokoro-82M
+  does not; `tools/conformance/expose_tts_duration.py` adds the output to its
+  ONNX graph without changing the audio (see
+  [`TTSAudioEncode`](docs/sdk/MODEL_METADATA.md#ttsaudioencode)). A model
+  without such an output returns the same audio as before and no new metadata
+  key. Streaming TTS, the zzz speech engines (Phonon, Kitten TTS 2), codec TTS
+  (NeuTTS) and runs answered by the cloud report no timings.
 
-- **llama.cpp:** update to [v0.9.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.9.0) (commit `cd959bae99ff4bed22bef2604f45241c09bbb8c8`).
+### Changed
 
 - **Rust:** `xybrid-core` turns on serde_json's `float_roundtrip` feature, so
   every crate that links it parses JSON floats correctly rounded (serde_json's
   default is best-effort and can be one ulp off). Float-dense JSON parses about
   19–32% slower.
-
-### Changed
-
 - **Breaking (Flutter):** `xybrid_flutter` now declares the platform minimums
   its precompiled libraries are built for: iOS 16.0 (was 13.0), macOS 14.0
   (was 10.15) and Android 9, API 28 (`minSdkVersion` was 21). An app that
@@ -78,6 +598,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `macos/Podfile` and a macOS Deployment Target of 14.0. The libraries are
   unchanged. The Flutter README's macOS 13.3 was too low: the libraries'
   llama.cpp and whisper.cpp code is built for macOS 14.0.
+- **Build tooling:** upgrade rules_rs to 0.2.0 and remove its local patch.
+  llama.cpp remains pinned to v0.8.0.
 
 ### Fixed
 
@@ -140,6 +662,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reopened (`<think>\n\n</think>\n\n<think>\n`); it now asks for thinking on
   when the model's `reasoning` flag is set. gemma-4 still renders with
   thinking off.
+- **Rust builds:** refresh the generated llama.cpp native manifest for the
+  current wrapper, restoring matching prebuilt archives for external Cargo
+  builds on supported targets.
+- **Release preparation:** reject stale Flutter precompiled libraries after
+  native inputs change, verify Apple libraries against their declared OS
+  minimums, and check the draft XCFramework against the SwiftPM and React
+  Native checksums before publishing. Documentation install pins now update
+  with every version bump and are checked in CI.
 
 ## [0.16.0] - 2026-10-30
 
@@ -160,23 +690,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine's fourteen notice files (its runtime terms and the upstream licenses)
   under `assets/xybrid/zzz/`. Android merges library assets into the APK, so
   every app that ships the SDK carries them.
-- **Phoneme timings from ONNX TTS models, for lip sync.** When an ONNX TTS
-  model declares a per-token duration output (named `duration`, `durations`
-  or `pred_dur`), the result now says when each phoneme is spoken: the
-  phoneme and its start and end, in seconds from the first sample of the
-  returned audio. Silence trimming and the crossfades between long-text
-  chunks are already accounted for, and pads and silence tokens are left out.
-  Rust reads them with `InferenceResult::phoneme_timings()` and Unity with
-  `InferenceResult.PhonemeTimings` and `HasPhonemeTimings`. Kotlin, Swift and
-  Python have no typed field yet: they parse the `phoneme_timings` JSON entry
-  of the result envelope's metadata. Dart results carry no metadata, so Dart
-  gets no timings. KittenTTS 0.8 already declares `duration`. Stock Kokoro-82M
-  does not; `tools/conformance/expose_tts_duration.py` adds the output to its
-  ONNX graph without changing the audio (see
-  [`TTSAudioEncode`](docs/sdk/MODEL_METADATA.md#ttsaudioencode)). A model
-  without such an output returns the same audio as before and no new metadata
-  key. Streaming TTS, the zzz speech engines (Phonon, Kitten TTS 2), codec TTS
-  (NeuTTS) and runs answered by the cloud report no timings.
 
 ### Changed
 

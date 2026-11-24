@@ -10,7 +10,7 @@ stages:
   #   model: whisper-tiny
   #   target: device
 
-  - model: gpt-4o-mini
+  - model: openai/gpt-4o-mini
     target: cloud
     provider: openai
     system_prompt: "You are a helpful voice assistant. Keep responses concise."

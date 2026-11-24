@@ -33,11 +33,14 @@ namespace Xybrid
         public uint Chunks { get; }
         public uint LimitedChunks { get; }
         public string Error { get; }
+        public XybridBolt.XybridObservationRef? Observation { get; }
         internal TtsStreamResult(TtsStatus status, uint rate = 0, uint channels = 0,
-            ulong samples = 0, uint chunks = 0, uint limited = 0, string error = null)
+            ulong samples = 0, uint chunks = 0, uint limited = 0, string error = null,
+            XybridBolt.XybridObservationRef? observation = null)
         {
             Status = status; SampleRate = rate; Channels = channels;
             Samples = samples; Chunks = chunks; LimitedChunks = limited; Error = error;
+            Observation = observation;
         }
         internal static TtsStreamResult FromBolt(XybridBolt.XybridResult result)
         {
@@ -55,7 +58,7 @@ namespace Xybrid
             return new TtsStreamResult(status == "cancelled" ? TtsStatus.Cancelled :
                 status == "limited" ? TtsStatus.Limited : TtsStatus.Completed,
                 (uint)Number("sample_rate"), (uint)Number("channels"), Number("samples"),
-                (uint)Number("chunks"), (uint)Number("zzz_limited_chunks"));
+                (uint)Number("chunks"), (uint)Number("zzz_limited_chunks"), observation: result.Observation);
         }
     }
 }

@@ -1,0 +1,466 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "Speech-to-text, text-to-speech, embeddings and classification use modality data instead of fake chat semantics; raw media is only described by metadata or references.",
+  "expect": {
+    "logs": [],
+    "metrics": [
+      {
+        "name": "gen_ai.client.embeddings.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "embeddings",
+              "gen_ai.provider.name": "onnxruntime",
+              "gen_ai.request.model": "all-minilm-l6-v2",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.015
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.embeddings.operation.input_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "embeddings",
+              "gen_ai.provider.name": "onnxruntime",
+              "gen_ai.request.model": "all-minilm-l6-v2",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 7
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "generate_content",
+              "gen_ai.provider.name": "onnxruntime",
+              "gen_ai.request.model": "kokoro-82m",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.35
+          },
+          {
+            "attributes": {
+              "gen_ai.operation.name": "generate_content",
+              "gen_ai.provider.name": "whisper.cpp",
+              "gen_ai.request.model": "whisper-tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.7
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.inference.time_per_output_chunk",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "generate_content",
+              "gen_ai.provider.name": "onnxruntime",
+              "gen_ai.request.model": "kokoro-82m",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.15
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.inference.time_to_first_chunk",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "generate_content",
+              "gen_ai.provider.name": "onnxruntime",
+              "gen_ai.request.model": "kokoro-82m",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.15
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.operation.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "predict",
+              "gen_ai.provider.name": "onnxruntime",
+              "gen_ai.request.model": "mobilenet-v2",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.04
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.input.messages": [
+            {
+              "parts": [
+                {
+                  "mime_type": "audio/wav",
+                  "modality": "audio",
+                  "type": "uri",
+                  "uri": "file:///recordings/clip.wav"
+                },
+                {
+                  "duration_s": 10.0,
+                  "mime_type": "audio/wav",
+                  "modality": "audio",
+                  "size_bytes": 320044,
+                  "type": "media"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "gen_ai.operation.name": "generate_content",
+          "gen_ai.output.messages": [
+            {
+              "finish_reason": "stop",
+              "parts": [
+                {
+                  "content": "hello world",
+                  "type": "text"
+                }
+              ],
+              "role": "assistant"
+            }
+          ],
+          "gen_ai.provider.name": "whisper.cpp",
+          "gen_ai.request.model": "whisper-tiny",
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.input.modalities": [
+            "audio"
+          ],
+          "xybrid.genai.output.modalities": [
+            "text"
+          ],
+          "xybrid.genai.runtime.name": "whisper.cpp",
+          "xybrid.genai.task": "speech_to_text"
+        },
+        "end_ms": 700,
+        "id": "asr",
+        "kind": "INTERNAL",
+        "name": "generate_content whisper-tiny",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      },
+      {
+        "attributes": {
+          "gen_ai.input.messages": [
+            {
+              "parts": [
+                {
+                  "content": "hello world",
+                  "type": "text"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "gen_ai.operation.name": "generate_content",
+          "gen_ai.output.messages": [
+            {
+              "finish_reason": "stop",
+              "parts": [
+                {
+                  "duration_s": 2.0,
+                  "mime_type": "audio/pcm",
+                  "modality": "audio",
+                  "size_bytes": 96000,
+                  "type": "media"
+                }
+              ],
+              "role": "assistant"
+            }
+          ],
+          "gen_ai.output.type": "speech",
+          "gen_ai.provider.name": "onnxruntime",
+          "gen_ai.request.model": "kokoro-82m",
+          "gen_ai.request.stream": true,
+          "gen_ai.response.time_to_first_chunk": 0.15,
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.input.modalities": [
+            "text"
+          ],
+          "xybrid.genai.output.modalities": [
+            "audio"
+          ],
+          "xybrid.genai.response.chunk_count": 2,
+          "xybrid.genai.runtime.name": "onnxruntime",
+          "xybrid.genai.task": "text_to_speech"
+        },
+        "end_ms": 1150,
+        "id": "tts",
+        "kind": "INTERNAL",
+        "name": "generate_content kokoro-82m",
+        "parent": null,
+        "start_ms": 800,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 1
+      },
+      {
+        "attributes": {
+          "gen_ai.embeddings.dimension.count": 384,
+          "gen_ai.operation.name": "embeddings",
+          "gen_ai.provider.name": "onnxruntime",
+          "gen_ai.request.model": "all-minilm-l6-v2",
+          "gen_ai.usage.input_tokens": 7,
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.runtime.name": "onnxruntime"
+        },
+        "end_ms": 1215,
+        "id": "emb",
+        "kind": "INTERNAL",
+        "name": "embeddings all-minilm-l6-v2",
+        "parent": null,
+        "start_ms": 1200,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 2
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "predict",
+          "gen_ai.provider.name": "onnxruntime",
+          "gen_ai.request.model": "mobilenet-v2",
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.input.modalities": [
+            "image"
+          ],
+          "xybrid.genai.runtime.name": "onnxruntime",
+          "xybrid.genai.task": "image_classification"
+        },
+        "end_ms": 1340,
+        "id": "cls",
+        "kind": "INTERNAL",
+        "name": "predict mobilenet-v2",
+        "parent": null,
+        "start_ms": 1300,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 3
+      }
+    ]
+  },
+  "name": "media_modalities",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "asr",
+      "op": "start_inference",
+      "request": {
+        "input_modalities": [
+          "audio"
+        ],
+        "location": "local",
+        "model": "whisper-tiny",
+        "operation": "generate_content",
+        "output_modalities": [
+          "text"
+        ],
+        "provider": "whisper.cpp",
+        "runtime": "whisper.cpp",
+        "task": "speech_to_text"
+      }
+    },
+    {
+      "at_ms": 0,
+      "id": "asr",
+      "op": "input_messages",
+      "value": [
+        {
+          "parts": [
+            {
+              "mime_type": "audio/wav",
+              "modality": "audio",
+              "type": "uri",
+              "uri": "file:///recordings/clip.wav"
+            },
+            {
+              "duration_s": 10.0,
+              "mime_type": "audio/wav",
+              "modality": "audio",
+              "size_bytes": 320044,
+              "type": "media"
+            }
+          ],
+          "role": "user"
+        }
+      ]
+    },
+    {
+      "at_ms": 700,
+      "id": "asr",
+      "op": "output_messages",
+      "value": [
+        {
+          "finish_reason": "stop",
+          "parts": [
+            {
+              "content": "hello world",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        }
+      ]
+    },
+    {
+      "at_ms": 700,
+      "id": "asr",
+      "op": "end"
+    },
+    {
+      "at_ms": 800,
+      "id": "tts",
+      "op": "start_inference",
+      "request": {
+        "input_modalities": [
+          "text"
+        ],
+        "location": "local",
+        "model": "kokoro-82m",
+        "operation": "generate_content",
+        "output_modalities": [
+          "audio"
+        ],
+        "output_type": "speech",
+        "provider": "onnxruntime",
+        "runtime": "onnxruntime",
+        "stream": true,
+        "task": "text_to_speech"
+      }
+    },
+    {
+      "at_ms": 800,
+      "id": "tts",
+      "op": "input_messages",
+      "value": [
+        {
+          "parts": [
+            {
+              "content": "hello world",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        }
+      ]
+    },
+    {
+      "at_ms": 950,
+      "id": "tts",
+      "op": "chunk"
+    },
+    {
+      "at_ms": 1100,
+      "id": "tts",
+      "op": "chunk"
+    },
+    {
+      "at_ms": 1100,
+      "id": "tts",
+      "op": "output_messages",
+      "value": [
+        {
+          "finish_reason": "stop",
+          "parts": [
+            {
+              "duration_s": 2.0,
+              "mime_type": "audio/pcm",
+              "modality": "audio",
+              "size_bytes": 96000,
+              "type": "media"
+            }
+          ],
+          "role": "assistant"
+        }
+      ]
+    },
+    {
+      "at_ms": 1150,
+      "id": "tts",
+      "op": "end"
+    },
+    {
+      "at_ms": 1200,
+      "id": "emb",
+      "op": "start_inference",
+      "request": {
+        "embedding_dimensions": 384,
+        "location": "local",
+        "model": "all-minilm-l6-v2",
+        "operation": "embeddings",
+        "provider": "onnxruntime",
+        "runtime": "onnxruntime"
+      }
+    },
+    {
+      "at_ms": 1210,
+      "id": "emb",
+      "input_tokens": 7,
+      "op": "usage"
+    },
+    {
+      "at_ms": 1215,
+      "id": "emb",
+      "op": "end"
+    },
+    {
+      "at_ms": 1300,
+      "id": "cls",
+      "op": "start_inference",
+      "request": {
+        "input_modalities": [
+          "image"
+        ],
+        "location": "local",
+        "model": "mobilenet-v2",
+        "operation": "predict",
+        "provider": "onnxruntime",
+        "runtime": "onnxruntime",
+        "task": "image_classification"
+      }
+    },
+    {
+      "at_ms": 1340,
+      "id": "cls",
+      "op": "end"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "noul-false-first",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Criteria with false first still print Yes first: options are true, false",
+  "covers": [
+    "noul-order"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\", \"criteria\": {\"false\": \"Anything else\", \"true\": \"They ask for money back\"}}}}",
+  "artifact": "d1-2b-hf"
+}

@@ -67,17 +67,20 @@ class _Model implements FfiModel {
   final _ErrorApi _api;
 
   @override
-  Future<FfiResult> run({
+  Future<FfiRunResult> run({
     required FfiEnvelope envelope,
     FfiGenerationConfig? config,
+    FfiCancellationToken? cancellationToken,
+    FfiRunOptions? options,
   }) async =>
       throw _api.runError;
 
   @override
-  Future<FfiResult> runWithContext({
+  Future<FfiRunResult> runWithContext({
     required FfiEnvelope envelope,
     required FfiConversationContext context,
     FfiGenerationConfig? config,
+    FfiRunOptions? options,
   }) async =>
       throw _api.runError;
 

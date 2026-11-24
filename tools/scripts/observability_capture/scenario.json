@@ -1,0 +1,61 @@
+{
+  "schema": "xybrid-observability-scenario/1",
+  "bindings": ["python", "swift", "kotlin", "unity", "flutter", "react-native", "rust"],
+  "ids": {
+    "trace_id": "hex(utf8(\"xy:\" + binding)), right-padded with 0 to 32 hex digits",
+    "parent_span_id": "hex(utf8(binding)), right-padded with 0 and cut to 16 hex digits"
+  },
+  "per_binding": {
+    "service_name": "xybrid-scenario-{binding}",
+    "service_version": "1.0.0",
+    "device_id": "scenario-device-{binding}",
+    "conversation_id": "scenario-conversation-{binding}"
+  },
+  "secret": "xybrid-scenario-secret-4c1d",
+  "replacement": "[scenario-redacted]",
+  "omitted_attribute": "gen_ai.system_instructions",
+  "omit_marker": "xybrid-scenario-omitted-9b2e",
+  "workflow_name": "scenario-workflow",
+  "after_shutdown_workflow_name": "scenario-after-shutdown",
+  "tool": {
+    "name": "scenario_lookup",
+    "call_id": "call-scenario-1",
+    "tool_type": "function",
+    "description": null,
+    "arguments_json": "{\"query\":\"weather\",\"token\":\"xybrid-scenario-secret-4c1d\"}",
+    "result_json": "{\"answer\":\"sunny\",\"echo\":\"xybrid-scenario-secret-4c1d\"}"
+  },
+  "inference_request": {
+    "operation": "chat",
+    "provider": "scenario-provider",
+    "model": "scenario-model",
+    "location": "local",
+    "runtime": "scenario-runtime",
+    "task": null,
+    "stream": false,
+    "max_tokens": null,
+    "temperature": null,
+    "top_p": null,
+    "server_address": null,
+    "server_port": null
+  },
+  "inference": {
+    "system_instructions_json": "[{\"type\":\"text\",\"content\":\"xybrid-scenario-omitted-9b2e\"}]",
+    "input_messages_json": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"my token is xybrid-scenario-secret-4c1d\"}]}]",
+    "output_messages_json": "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"text\",\"content\":\"I will not repeat xybrid-scenario-secret-4c1d\"}],\"finish_reason\":\"stop\"}]"
+  },
+  "failed_inference": {
+    "error_type": "scenario_error",
+    "message": "upstream rejected xybrid-scenario-secret-4c1d"
+  },
+  "released_inference": {
+    "input_messages_json": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"content\":\"abandoned request\"}]}]"
+  },
+  "model": {
+    "directory_name": "scenario-weightless",
+    "metadata_json": "{\"model_id\":\"scenario-weightless\",\"version\":\"1.0\",\"execution_template\":{\"type\":\"Onnx\",\"model_file\":\"model.onnx\"},\"files\":[]}",
+    "model_id": "scenario-weightless",
+    "run_input_text": "run input xybrid-scenario-secret-4c1d"
+  },
+  "timeout_ms": 5000
+}

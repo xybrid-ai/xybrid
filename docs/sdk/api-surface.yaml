@@ -47,8 +47,8 @@ classes:
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       setSpeculativeCloud:
         params: [{ name: enabled, type: bool }]
-        # Process-wide DEFAULT for serving an undownloaded registry model from
-        # the cloud while its weights download. It applies only to loads that
+        # Process-wide default for trying a registry id at the gateway
+        # while its weights download. It applies only to loads that
         # do not opt in per-load: fromRegistrySpeculative sets the per-load
         # override itself and is unaffected by this toggle.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
@@ -169,8 +169,8 @@ classes:
         static: true
         params: [{ name: filePath, type: String }]
         return: XybridModelLoader
-        notes: "Loads a raw GGUF file directly. Auto-generates model_metadata.json from GGUF binary header if not present."
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+        notes: "Loads a raw GGUF file without hand-written metadata: generates model_metadata.json from the GGUF header, writes it beside the file and loads that directory. An existing model_metadata.json is kept, even one written for another GGUF, so keep one GGUF per directory. Swift: ModelLoader.fromModelFile(_ url: URL), or Xybrid.model(.modelFile(url)). Dart: XybridModelLoader.fromModelFile(String path); the loader touches no disk until load(), and loadWithProgress() emits only LoadComplete or LoadError."
+        status: { dart: implemented, kotlin: planned, swift: implemented, csharp: implemented }
       fromHuggingFace:
         static: true
         params: [{ name: repo, type: String }]
@@ -197,7 +197,7 @@ classes:
       download:
         # Starts the download in the background without loading, so a blocking
         # host has something to watch. Returns null for a source with nothing
-        # to fetch (bundle, directory, Hugging Face repo). Named StartDownload
+        # to fetch (bundle, directory, model file, Hugging Face repo). Named StartDownload
         # in C#.
         return: "XybridDownload?"
         status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
@@ -205,9 +205,9 @@ classes:
         static: true
         params: [{ name: modelId, type: String }]
         return: XybridModelLoader
-        # Serves from the cloud gateway while the weights download, instead of
-        # blocking on the download. Sets the per-load override itself, so it
-        # does not depend on Xybrid.setSpeculativeCloud.
+        # Tries the same registry id at the gateway while its weights download.
+        # Sets the per-load override itself, so it does not depend on
+        # Xybrid.setSpeculativeCloud.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       willSpeculate:
         return: bool
@@ -342,7 +342,8 @@ classes:
           - { name: envelope, type: Envelope }
           - { name: options, type: RunOptions }
         return: XybridResult
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Swift and Kotlin (partial): the same call is run(envelope, options), plus runAsync."
+        status: { rust: implemented, dart: planned, kotlin: partial, swift: partial, csharp: planned }
       runWithContext:
         async: true
         params:
@@ -350,7 +351,8 @@ classes:
           - { name: context, type: ConversationContext }
           - { name: config, type: "GenerationConfig?", default: "null" }
         return: XybridResult
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+        notes: "Swift and Kotlin take RunOptions rather than a GenerationConfig: runWithContext(envelope, context, options)."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       runWithContextOptions:
         async: true
         params:
@@ -358,20 +360,22 @@ classes:
           - { name: context, type: ConversationContext }
           - { name: options, type: RunOptions }
         return: XybridResult
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Swift and Kotlin (partial): the same call is runWithContext(envelope, context, options); see runWithContext."
+        status: { rust: implemented, dart: planned, kotlin: partial, swift: partial, csharp: planned }
       runStreaming:
         params:
           - { name: envelope, type: Envelope }
           - { name: config, type: "GenerationConfig?" }
         return: "Stream<StreamToken>"
-        notes: "Dart accepts two extra optional named params beyond the contract shape: cancellationToken (issue 10) and preempt (issue 11). preempt defaults to false (drop-if-busy / serialized — the existing behavior). When preempt=true AND a cancellationToken is supplied, the run cancels the model's previously in-flight streaming run before acquiring the model write lock (latest-frame-wins), so a continuous live-capture loop can flip from drop-if-busy to cancel-and-replace without head-of-line blocking. preempt with no token is a no-op. Threaded Dart→FFI→SDK (run_streaming_with_options_preempt); the cancel-and-replace slot is a separate mutex on the model, never held across the handle write lock."
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+        notes: "Dart accepts two extra optional named params beyond the contract shape: cancellationToken (issue 10) and preempt (issue 11). preempt defaults to false (drop-if-busy / serialized — the existing behavior). When preempt=true AND a cancellationToken is supplied, the run cancels the model's previously in-flight streaming run before acquiring the model write lock (latest-frame-wins), so a continuous live-capture loop can flip from drop-if-busy to cancel-and-replace without head-of-line blocking. preempt with no token is a no-op. Threaded Dart→FFI→SDK (run_streaming_with_options_preempt); the cancel-and-replace slot is a separate mutex on the model, never held across the handle write lock. Swift (partial): streamTokens(envelope:options:) returns an AsyncSequence of XybridStreamToken; generation config rides XybridRunOptions, cancelling the consuming task stops generation at the next token, and there is no preempt. Kotlin (partial): streamTokens(envelope, options) returns a Flow of XybridStreamToken with the same semantics."
+        status: { dart: implemented, kotlin: partial, swift: partial, csharp: implemented }
       runStreamingWithOptions:
         params:
           - { name: envelope, type: Envelope }
           - { name: options, type: RunOptions }
         return: "Stream<StreamToken>"
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Swift and Kotlin (partial): streamTokens(envelope, options) takes RunOptions; see runStreaming."
+        status: { rust: implemented, dart: planned, kotlin: partial, swift: partial, csharp: planned }
       runTtsStreaming:
         params:
           - { name: envelope, type: Envelope }
@@ -392,15 +396,16 @@ classes:
           - { name: context, type: ConversationContext }
           - { name: config, type: "GenerationConfig?" }
         return: "Stream<StreamToken>"
-        notes: "Dart accepts the same two extra optional named params as runStreaming: cancellationToken (issue 10) and preempt (issue 11, default false). preempt=true + a cancellationToken makes this run cancel the model's previously in-flight streaming run before taking the write lock (latest-frame-wins). See runStreaming notes for the full cancel-and-replace contract."
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+        notes: "Dart accepts the same two extra optional named params as runStreaming: cancellationToken (issue 10) and preempt (issue 11, default false). preempt=true + a cancellationToken makes this run cancel the model's previously in-flight streaming run before taking the write lock (latest-frame-wins). See runStreaming notes for the full cancel-and-replace contract. Swift (partial): the pull API runStreamWithContext(envelope:context:options:) returns a stream id drained with streamNext(streamId:) and closed with streamClose(streamId:); there is no AsyncSequence form and no preempt. Kotlin (partial): the same pull API, runStreamWithContext(envelope, context, options)."
+        status: { dart: implemented, kotlin: partial, swift: partial, csharp: implemented }
       runStreamingWithContextOptions:
         params:
           - { name: envelope, type: Envelope }
           - { name: context, type: ConversationContext }
           - { name: options, type: RunOptions }
         return: "Stream<StreamToken>"
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Swift and Kotlin (partial): the pull API runStreamWithContext(envelope, context, options) takes RunOptions; see runStreamingWithContext."
+        status: { rust: implemented, dart: planned, kotlin: partial, swift: partial, csharp: planned }
       benchmark:
         async: true
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
@@ -412,7 +417,7 @@ classes:
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
       isCloudServing:
         return: bool
-        # True while the cloud answers because the local weights are not ready.
+        # True when a run would try the gateway because the local weights are not ready.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       supportsToolCalling:
         return: "bool?"
@@ -442,7 +447,8 @@ classes:
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       executionProviderInfo:
         return: ExecutionProviderInfo
-        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Rust only today, as ExecutionProviderInfo::current() (a build-level read, not a model method). It describes ONNX Runtime: name is always cpu, because every ONNX session is built on the CPU execution provider, and coremlAvailable means the Core ML execution provider is linked into the build, not that a session uses it. GGUF, whisper.cpp, Core ML bundle and Candle models are not described. Flutter already reports the linked features through Xybrid.runtimeFeatures(). No binding exports it (see issue 509)."
+        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
 
   # -------------------------------------------------------------------
   # 4. XybridPipeline
@@ -509,6 +515,14 @@ classes:
     swift_name: XybridEnvelope
     csharp_name: Envelope
     factories:
+      decisionRequestJson:
+        params: [{ name: json, type: String }]
+        notes: "Bounded Liquid SystemOne JSON. Preserves ordered content and numeric identity. Local text/v1 only; package/device qualification is a separate release gate."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      decisionRequest:
+        params: [{ name: request, type: DecisionRequest }]
+        notes: "Ordered typed builders; structured JSON content crosses as text. Uses the existing run API."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       text:
         params:
           - { name: text, type: String }
@@ -605,6 +619,18 @@ classes:
     swift_name: XybridResult
     csharp_name: InferenceResult
     properties:
+      decisions:
+        type: "Decisions?"
+        notes: "Typed ordered answers with f64 probabilities and total passes/inputTokens; no generated text."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      tokensIn:
+        type: "int?"
+        notes: "Total evaluated input tokens from envelope metadata; no frozen wire-record fields added."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      tokensOut:
+        type: "int?"
+        notes: "Generated token usage from envelope metadata, zero for decisions."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       success:
         type: bool
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
@@ -635,10 +661,12 @@ classes:
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       executionTarget:
         type: ExecutionTarget
-        # Whether the answer came from the device or the cloud gateway. Cloud
-        # fallback keeps modelId identical on both legs, so this is the only
-        # way to tell them apart.
+        # Whether the answer came from the device or the cloud gateway.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      speculativeCloudError:
+        type: "String?"
+        notes: "Error from a speculative cloud attempt that recovered locally. Also available in result envelope metadata under speculative_cloud_error."
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
       isFailure:
         type: bool
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
@@ -961,6 +989,10 @@ classes:
     # generated bolt type, the same way ToolCall/GenerationConfig work there.
     status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
     properties:
+      speculativeCloudError:
+        type: "String?"
+        notes: "Flutter carries the recovered cloud error on the final token; other bindings can inspect the completed inference result."
+        status: { dart: implemented, kotlin: na, swift: na, csharp: na }
       toolCalls:
         type: "List<ToolCall>"
         # Tool calls the model emitted, on the terminal token only. Tool-call
@@ -1227,6 +1259,7 @@ classes:
         status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
       cloudModel:
         type: "String?"
+        notes: "Model for the cloud fallback leg, sent to the Xybrid gateway unchanged; unset sends openai/gpt-4o-mini. Frontier models use canonical OpenRouter ids (vendor/model)."
         status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
       cloudGatewayUrl:
         type: "String?"

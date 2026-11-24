@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "multi-question-order",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Answers follow request order, ids unsorted; usage sums every pass",
+  "covers": [
+    "multi-question",
+    "json-order"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"zeta\": {\"type\": \"choice\", \"instructions\": \"Which team should handle this?\", \"criteria\": {\"billing\": \"Charges, refunds, invoices\", \"technical\": \"App or site faults\", \"fraud\": \"Suspected unauthorised use\"}}, \"alpha\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}, \"Mid\": {\"type\": \"score\", \"instructions\": \"How urgent is this?\", \"criteria\": [\"Can wait\", \"Today\", \"Blocking the customer now\"]}, \"beta\": {\"type\": \"noul\", \"instructions\": \"Is the customer polite?\", \"criteria\": {\"true\": \"Polite wording\"}}}}",
+  "artifact": "d1-2b-hf"
+}

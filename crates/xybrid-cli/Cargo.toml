@@ -73,13 +73,15 @@ serde_yaml = "0.9"
 serde_json = "1.0"
 anyhow = "1.0"
 dirs = "6.0"
+url = "2"
 chrono = "0.4"
 sha2 = "0.10"
 colored = "2.1"
 tempfile = "3.10"
 uuid = { version = "1.0", features = ["v4"] }
-lazy_static = "1.4"
-hostname = "0.4"
+opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace"] }
+xybrid-observability = { path = "../xybrid-observability" }
 # Built-in REPL tools (web_search / fetch_url)
 ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 # CLI UI
@@ -91,5 +93,12 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-flame = "0.2"
 
+# Credentials store: the running account's uid/gid, to check who owns the
+# store's directory and file before trusting a saved key
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 image = "0.25"
+# Loopback platform API for the connect/auth subprocess tests (same as xybrid-sdk)
+httpmock = "0.7"

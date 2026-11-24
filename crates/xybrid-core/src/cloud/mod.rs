@@ -61,11 +61,14 @@ mod config;
 mod error;
 
 pub use client::Cloud;
-pub(crate) use client::{openai_chat_body, parse_gateway_usage, MissingModel};
+pub(crate) use client::{
+    inject_transport_trace_headers, openai_chat_body, parse_gateway_usage, MissingModel,
+};
 pub use completion::{CompletionRequest, CompletionResponse, Message, Role, ThinkingMode, Usage};
 pub use config::{
     has_xybrid_api_key, set_xybrid_api_key, set_xybrid_gateway_url, set_xybrid_platform_url,
     xybrid_api_key, xybrid_gateway_url, xybrid_platform_url, CloudBackend, CloudConfig,
 };
 pub use config::{platform_gateway_url, resolve_api_key_for, same_origin, url_origin};
+pub(crate) use error::is_insufficient_quota;
 pub use error::CloudError;

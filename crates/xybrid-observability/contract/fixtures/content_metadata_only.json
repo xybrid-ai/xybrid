@@ -1,0 +1,152 @@
+{
+  "config": {
+    "content_capture": "no_content",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "no_content mode: no governed content on spans or events; tool definitions and modalities are still recorded.",
+  "expect": {
+    "logs": [],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "tiny",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.06
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": "chat",
+          "gen_ai.prompt.name": "describe",
+          "gen_ai.prompt.version": "3",
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "tiny",
+          "gen_ai.tool.definitions": [
+            {
+              "description": "Look things up",
+              "name": "lookup",
+              "type": "function"
+            }
+          ],
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.input.modalities": [
+            "text",
+            "image"
+          ],
+          "xybrid.genai.output.modalities": [
+            "text"
+          ],
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 60,
+        "id": "chat",
+        "kind": "INTERNAL",
+        "name": "chat tiny",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      }
+    ]
+  },
+  "name": "content_metadata_only",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "start_inference",
+      "request": {
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "location": "local",
+        "model": "tiny",
+        "operation": "chat",
+        "output_modalities": [
+          "text"
+        ],
+        "prompt_name": "describe",
+        "prompt_variables": {
+          "subject": "a cat"
+        },
+        "prompt_version": "3",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp"
+      }
+    },
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "tool_definitions",
+      "value": [
+        {
+          "description": "Look things up",
+          "name": "lookup",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "at_ms": 0,
+      "id": "chat",
+      "op": "input_messages",
+      "value": [
+        {
+          "parts": [
+            {
+              "content": "Describe",
+              "type": "text"
+            },
+            {
+              "height": 64,
+              "mime_type": "image/png",
+              "modality": "image",
+              "size_bytes": 2048,
+              "type": "media",
+              "width": 64
+            }
+          ],
+          "role": "user"
+        }
+      ]
+    },
+    {
+      "at_ms": 50,
+      "id": "chat",
+      "op": "output_messages",
+      "value": [
+        {
+          "finish_reason": "stop",
+          "parts": [
+            {
+              "content": "A cat.",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        }
+      ]
+    },
+    {
+      "at_ms": 60,
+      "id": "chat",
+      "op": "end"
+    }
+  ]
+}

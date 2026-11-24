@@ -1,0 +1,329 @@
+{
+  "config": {
+    "content_capture": "span_only",
+    "logs": true,
+    "max_content_attribute_bytes": 16384,
+    "redact_substrings": []
+  },
+  "description": "A workflow parents an inference and a tool call; tool arguments and results are content; workflow and tool durations are recorded.",
+  "expect": {
+    "logs": [],
+    "metrics": [
+      {
+        "name": "gen_ai.client.inference.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "lfm3",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 0.205
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.client.inference.operation.input_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "lfm3",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 30
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.operation.output_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "lfm3",
+              "xybrid.genai.execution.location": "local"
+            },
+            "count": 1,
+            "sum": 12
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.usage.input_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "lfm3",
+              "gen_ai.token.modality": "unknown",
+              "xybrid.genai.execution.location": "local"
+            },
+            "value": 30
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.client.inference.usage.output_tokens",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.provider.name": "llama.cpp",
+              "gen_ai.request.model": "lfm3",
+              "gen_ai.token.modality": "unknown",
+              "xybrid.genai.execution.location": "local"
+            },
+            "value": 12
+          }
+        ],
+        "unit": "{token}"
+      },
+      {
+        "name": "gen_ai.execute_tool.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "execute_tool",
+              "gen_ai.tool.name": "get_weather",
+              "gen_ai.tool.type": "function"
+            },
+            "count": 1,
+            "sum": 0.05
+          }
+        ],
+        "unit": "s"
+      },
+      {
+        "name": "gen_ai.invoke_workflow.duration",
+        "points": [
+          {
+            "attributes": {
+              "gen_ai.operation.name": "invoke_workflow",
+              "gen_ai.workflow.name": "voice_assistant"
+            },
+            "count": 1,
+            "sum": 0.3
+          }
+        ],
+        "unit": "s"
+      }
+    ],
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.input.messages": [
+            {
+              "parts": [
+                {
+                  "content": "Weather in Paris?",
+                  "type": "text"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "gen_ai.operation.name": "chat",
+          "gen_ai.output.messages": [
+            {
+              "finish_reason": "tool_call",
+              "parts": [
+                {
+                  "arguments": {
+                    "location": "Paris"
+                  },
+                  "id": "call_1",
+                  "name": "get_weather",
+                  "type": "tool_call"
+                }
+              ],
+              "role": "assistant"
+            }
+          ],
+          "gen_ai.provider.name": "llama.cpp",
+          "gen_ai.request.model": "lfm3",
+          "gen_ai.response.finish_reasons": [
+            "tool_call"
+          ],
+          "gen_ai.usage.input_tokens": 30,
+          "gen_ai.usage.output_tokens": 12,
+          "xybrid.genai.execution.location": "local",
+          "xybrid.genai.runtime.name": "llama.cpp"
+        },
+        "end_ms": 210,
+        "id": "llm",
+        "kind": "INTERNAL",
+        "name": "chat lfm3",
+        "parent": "wf",
+        "start_ms": 5,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.tool.call.arguments": {
+            "location": "Paris"
+          },
+          "gen_ai.tool.call.id": "call_1",
+          "gen_ai.tool.call.result": {
+            "forecast": "rainy",
+            "temperature_f": 57
+          },
+          "gen_ai.tool.description": "Get the weather",
+          "gen_ai.tool.name": "get_weather",
+          "gen_ai.tool.type": "function"
+        },
+        "end_ms": 265,
+        "id": "tool",
+        "kind": "INTERNAL",
+        "name": "execute_tool get_weather",
+        "parent": "wf",
+        "start_ms": 215,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      },
+      {
+        "attributes": {
+          "gen_ai.operation.name": "invoke_workflow",
+          "gen_ai.workflow.name": "voice_assistant"
+        },
+        "end_ms": 300,
+        "id": "wf",
+        "kind": "INTERNAL",
+        "name": "invoke_workflow voice_assistant",
+        "parent": null,
+        "start_ms": 0,
+        "status": {
+          "code": "UNSET"
+        },
+        "trace": 0
+      }
+    ]
+  },
+  "name": "workflow_tool_inference",
+  "steps": [
+    {
+      "at_ms": 0,
+      "id": "wf",
+      "name": "voice_assistant",
+      "op": "start_workflow"
+    },
+    {
+      "at_ms": 5,
+      "id": "llm",
+      "op": "start_inference",
+      "parent": "wf",
+      "request": {
+        "location": "local",
+        "model": "lfm3",
+        "operation": "chat",
+        "provider": "llama.cpp",
+        "runtime": "llama.cpp"
+      }
+    },
+    {
+      "at_ms": 5,
+      "id": "llm",
+      "op": "input_messages",
+      "value": [
+        {
+          "parts": [
+            {
+              "content": "Weather in Paris?",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        }
+      ]
+    },
+    {
+      "at_ms": 200,
+      "id": "llm",
+      "op": "output_messages",
+      "value": [
+        {
+          "finish_reason": "tool_call",
+          "parts": [
+            {
+              "arguments": {
+                "location": "Paris"
+              },
+              "id": "call_1",
+              "name": "get_weather",
+              "type": "tool_call"
+            }
+          ],
+          "role": "assistant"
+        }
+      ]
+    },
+    {
+      "at_ms": 200,
+      "id": "llm",
+      "op": "finish_reasons",
+      "value": [
+        "tool_call"
+      ]
+    },
+    {
+      "at_ms": 200,
+      "id": "llm",
+      "input_tokens": 30,
+      "op": "usage",
+      "output_tokens": 12
+    },
+    {
+      "at_ms": 210,
+      "id": "llm",
+      "op": "end"
+    },
+    {
+      "arguments": {
+        "location": "Paris"
+      },
+      "at_ms": 215,
+      "call_id": "call_1",
+      "description": "Get the weather",
+      "id": "tool",
+      "name": "get_weather",
+      "op": "start_tool",
+      "parent": "wf",
+      "tool_type": "function"
+    },
+    {
+      "at_ms": 265,
+      "id": "tool",
+      "op": "tool_result",
+      "value": {
+        "forecast": "rainy",
+        "temperature_f": 57
+      }
+    },
+    {
+      "at_ms": 265,
+      "id": "tool",
+      "op": "end"
+    },
+    {
+      "at_ms": 300,
+      "id": "wf",
+      "op": "end"
+    }
+  ]
+}

@@ -1,59 +1,13 @@
-# Purpose: Build and verify the Apple XCFramework, then compile and unit-test the Swift wrapper on an iOS Simulator.
+# Purpose: Build and verify the Apple XCFramework, then unit-test the Swift wrapper and run the observability runtime scenario on an iOS Simulator.
 name: "SDK: Apple"
 
+# A lane: ci.yml's `Apple` job calls this file when one of the paths in
+# LANE_PATHS["apple"] (tools/scripts/ci_gate.py) changes, on pull requests and
+# on master pushes, which keep master's caches warm for new branches. Its
+# checks are named `Apple / <job>`. Dispatch it here to run it alone.
 on:
-  pull_request:
-    branches: [master]
-    paths:
-      - 'bindings/apple/**'
-      - 'crates/xybrid-bolt/**'
-      - 'crates/xybrid-ffi-facade/**'
-      - 'crates/xybrid-core/**'
-      - 'crates/xybrid-sdk/**'
-      - 'crates/xybrid-llama/**'
-      - 'crates/llama-cpp-sys/**'
-      # The Bazel graph that assembles the xcframework (G4): sim triple + ort-sys
-      # annotation, the llama iOS arms, --config=ios, the fetched sim-ORT rule,
-      # and the committed device ORT slice.
-      - 'MODULE.bazel'
-      - 'BUILD.bazel'
-      - '.bazelrc'
-      - 'bazel/**'
-      - 'vendor/ort-ios/**'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - '.github/workflows/build-apple.yml'
-      # Docs-only changes under the paths above (READMEs, examples) never
-      # affect the native build — exclude markdown so they don't trigger it.
-      - '!**.md'
-  # Run on master merges too, so the Bazel xcframework build stays green on the
-  # default branch (and warms any future Bazel remote/disk cache — the build is
-  # currently uncached, so a cold iOS build is ~15-20 min; caching is a follow-up).
-  # Keep these paths in sync with the pull_request trigger above.
-  push:
-    branches: [master]
-    paths:
-      - 'bindings/apple/**'
-      - 'crates/xybrid-bolt/**'
-      - 'crates/xybrid-ffi-facade/**'
-      - 'crates/xybrid-core/**'
-      - 'crates/xybrid-sdk/**'
-      - 'crates/xybrid-llama/**'
-      - 'crates/llama-cpp-sys/**'
-      - 'MODULE.bazel'
-      - 'BUILD.bazel'
-      - '.bazelrc'
-      - 'bazel/**'
-      - 'vendor/ort-ios/**'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - '.github/workflows/build-apple.yml'
-      - '!**.md'
+  workflow_call:
   workflow_dispatch:
-
-concurrency:
-  group: build-apple-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions: read-all
 
@@ -129,6 +83,19 @@ jobs:
             file "$BIN" | grep -qi 'archive' || { echo "Error: $BIN is not an ar archive"; exit 1; }
             grep -q "<string>$slice</string>" "$XCFW/Info.plist" || { echo "Error: $slice not in Info.plist"; exit 1; }
             echo "OK: $slice -> $(lipo -info "$BIN" | sed 's/.*: //')"
+            # No Apple manifest links MetalPerformanceShaders (#807), so an MPS
+            # symbol here is undefined in every app that links this slice: link
+            # the framework again in Package.swift, the swift-branch manifest
+            # (release-publish.yml) and the React Native and Flutter podspecs
+            # in the same change. This sees link-time references only. Metal is
+            # the control: without its symbol the scan read nothing.
+            UNDEF="$(nm -u "$BIN" 2>/dev/null || true)"
+            test "$(printf '%s\n' "$UNDEF" | grep -cE '(^| )_MTLCreateSystemDefaultDevice$' || true)" -gt 0 \
+              || { echo "Error: $slice: nm -u lists no Metal symbol, so the MPS check would prove nothing"; exit 1; }
+            if printf '%s\n' "$UNDEF" | grep -E '(^| )_(MPS|OBJC_(CLASS|METACLASS)_\$_MPS)' | sort -u; then
+              echo "::error::$slice references MetalPerformanceShaders, which no Apple manifest links (#807)"; exit 1
+            fi
+            echo "OK: $slice references no MetalPerformanceShaders symbol"
           done
           echo "XCFramework verify: device + simulator slices OK"
 
@@ -159,53 +126,31 @@ jobs:
           # CI-runtime flip to the locally-built xcframework. Do NOT commit this.
           ./bindings/apple/scripts/set-natives-mode.sh --set-local
           xcodebuild -resolvePackageDependencies
+          # One DerivedData for this job: the unit tests reuse this build and
+          # the scenario below reuses the tests' build. (-resolvePackageDependencies
+          # refuses -derivedDataPath without a scheme; the build resolves there.)
           xcodebuild build \
             -scheme Xybrid \
             -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Run Swift unit tests (iOS Simulator)
         # The generic build above can't execute tests (no bootable device).
-        # Don't target a pre-created device by name/OS: hosted macOS runners
-        # sometimes report none of the image's simulators while CoreSimulator
-        # rebuilds its caches (actions/runner-images#12862, #12948), and a fixed
-        # pair breaks whenever the image moves its runtimes. Instead wait for an
-        # available iOS runtime, create an iPhone that runtime supports, and test
-        # it by UDID. Timeout guards against a simulator/test hang.
+        # boot-ci-simulator.sh creates an iPhone on the newest available iOS
+        # runtime and boots it, rather than naming a pre-created device (see the
+        # script for why). Timeout guards against a simulator/test hang.
         timeout-minutes: 10
         run: |
           set -euo pipefail
-          # Prints "<runtime id> <device type id>": the newest available iOS
-          # runtime and the newest iPhone it supports.
-          pick_simulator() {
-            python3 - <<'PY'
-          import json, subprocess, sys
-          listing = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "runtimes", "--json"]))
-          runtimes = [r for r in listing["runtimes"] if r.get("platform") == "iOS" and r.get("isAvailable")]
-          runtimes.sort(key=lambda r: [int(part) for part in r["version"].split(".")], reverse=True)
-          for runtime in runtimes:
-              # supportedDeviceTypes lists the newest models first.
-              iphones = [d for d in runtime.get("supportedDeviceTypes", []) if d.get("productFamily") == "iPhone"]
-              if iphones:
-                  print(f"Using {iphones[0]['name']} on {runtime['name']}", file=sys.stderr)
-                  print(runtime["identifier"], iphones[0]["identifier"])
-                  sys.exit()
-          sys.exit("no available iOS simulator runtime with an iPhone device type")
-          PY
-          }
-          for attempt in 1 2 3 4 5 6; do
-            if PICK="$(pick_simulator)"; then break; fi
-            if [ "$attempt" -eq 6 ]; then xcrun simctl list runtimes >&2 || true; exit 1; fi
-            echo "Retrying in 20s (attempt $attempt/6)" >&2
-            sleep 20
-          done
-          read -r RUNTIME_ID DEVICE_TYPE <<<"$PICK"
-          SIM_ID="$(xcrun simctl create "Xybrid CI iPhone" "$DEVICE_TYPE" "$RUNTIME_ID")"
-          xcrun simctl bootstatus "$SIM_ID" -b
+          SIM_ID="$(./bindings/apple/scripts/boot-ci-simulator.sh)"
+          # The observability scenario below runs on the same simulator.
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
           xcodebuild test \
             -scheme Xybrid \
             -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO
 
@@ -215,3 +160,66 @@ jobs:
           name: XybridFFI-xcframework
           path: bindings/apple/XCFrameworks/XybridFFI.xcframework
           if-no-files-found: error
+
+      # Runs the shared observability scenario
+      # (tools/scripts/observability_capture/scenario.md) through the public
+      # Swift API on the simulator the unit tests used, linked against the
+      # xcframework built above: parent-in, reference-out, manual operations,
+      # content redaction and omission, release and the flush/shutdown
+      # lifecycle. run_scenario.py starts capture_server.py, runs the test,
+      # stops the receiver and runs check_capture.py on what reached it. This
+      # is the Swift row of docs/sdk/observability-coverage.md.
+      #
+      # xcodebuild rather than `swift test --filter`: the xcframework ships
+      # only ios-arm64 + ios-arm64-simulator and Package.swift declares iOS
+      # only, so a macOS-host `swift test` has no slice to link.
+      # `-only-testing:` is the filter, and `test-without-building` reuses the
+      # unit tests' build. xcodebuild hands the test runner only
+      # TEST_RUNNER_-prefixed variables (prefix stripped), hence the `env`
+      # below. The simulator reaches the receiver on the host as 127.0.0.1 and
+      # reads and writes host paths.
+      - name: Run observability scenario (iOS Simulator)
+        id: scenario
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          # {endpoint}, {expectations} and {workdir} are run_scenario.py
+          # placeholders, filled in once the receiver is listening.
+          python3 tools/scripts/observability_capture/run_scenario.py \
+            --binding swift --out-dir "$RUNNER_TEMP/observability-swift" --timeout 420 -- \
+            env \
+              "TEST_RUNNER_XYBRID_SCENARIO_ENDPOINT={endpoint}" \
+              "TEST_RUNNER_XYBRID_SCENARIO_EXPECTATIONS={expectations}" \
+              "TEST_RUNNER_XYBRID_SCENARIO_WORKDIR={workdir}" \
+              "TEST_RUNNER_XYBRID_SCENARIO_SPEC=$GITHUB_WORKSPACE/tools/scripts/observability_capture/scenario.json" \
+            xcodebuild test-without-building \
+              -scheme Xybrid \
+              -destination "platform=iOS Simulator,id=$SIM_ID" \
+              -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+              -only-testing:XybridTests/ObservabilityRuntimeTests \
+              -skipPackagePluginValidation \
+              CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload scenario report
+        if: ${{ !cancelled() && steps.scenario.outcome != 'skipped' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: observability-runtime-swift
+          path: ${{ runner.temp }}/observability-swift
+          if-no-files-found: warn
+
+      # The steps above link only the simulator slice. build-for-testing on a
+      # generic iOS device links XybridTests.xctest for arm64 iphoneos against
+      # the ios-arm64 slice with Package.swift's linkerSettings, so a framework
+      # the device archive needs but the manifest does not link fails here
+      # (#807). It reuses the local-natives flip from the wrapper build; its own
+      # DerivedData leaves the simulator builds alone. No device, no signing.
+      - name: Link the device slice (iOS, no signing)
+        run: |
+          set -euo pipefail
+          xcodebuild build-for-testing \
+            -scheme Xybrid \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData-device" \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO

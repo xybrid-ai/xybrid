@@ -5,7 +5,7 @@
 // through the generated types (the documented pinned-revision constructor,
 // XybridModel.FromHuggingfaceWithRevision, exists only there), with or without
 // XybridClient.Initialize(). Every generated type whose calls can reach the
-// registry or telemetry gets a static constructor, which runs before that
+// registry or observability export gets a static constructor, which runs before that
 // type's first static call or new instance. The native library's platform
 // fallback (`swift` on Apple platforms, `kotlin` on Android) never outranks a
 // registration, so a registration that comes late still wins. The types that
@@ -66,8 +66,8 @@ namespace XybridBolt
         }
     }
 
-    public sealed partial class XybridTelemetryConfig
+    public sealed partial class XybridObservabilityConfig
     {
-        static XybridTelemetryConfig() => BindingRegistration.Register();
+        static XybridObservabilityConfig() => BindingRegistration.Register();
     }
 }

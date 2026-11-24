@@ -257,9 +257,25 @@ jobs:
           corepack enable
           corepack prepare pnpm@11.2.2 --activate
 
+      - name: Install Observability SDK dependencies
+        working-directory: bindings/observability-js
+        run: pnpm install --frozen-lockfile
+
+      - name: Test and pack the Observability SDK
+        working-directory: bindings/observability-js
+        run: |
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+          pnpm pack:release
+
       - name: Install Web SDK dependencies
         working-directory: bindings/web
         run: pnpm install --frozen-lockfile
+
+      - name: Test package verification from a clean checkout
+        working-directory: bindings/web
+        run: pnpm test:release
 
       - name: Build CPU and WebGPU Rust runtimes and Web SDK
         working-directory: bindings/web
@@ -267,6 +283,8 @@ jobs:
 
       - name: Pack and verify the Web SDK as an isolated npm consumer
         working-directory: bindings/web
+        env:
+          XYBRID_OBSERVABILITY_ARCHIVE: ${{ github.workspace }}/bindings/observability-js/test-results/npm/xybrid-observability-${{ needs.check-release-branch.outputs.version }}.tgz
         run: pnpm pack:release
 
       - name: Cache Web example model assets
@@ -301,13 +319,28 @@ jobs:
           VERSION: ${{ needs.check-release-branch.outputs.version }}
         run: sha256sum "xybrid-web-${VERSION}.tgz" > "xybrid-web-${VERSION}.tgz.sha256"
 
+      - name: Checksum the Observability npm release archive
+        working-directory: bindings/observability-js/test-results/npm
+        env:
+          VERSION: ${{ needs.check-release-branch.outputs.version }}
+        run: sha256sum "xybrid-observability-${VERSION}.tgz" > "xybrid-observability-${VERSION}.tgz.sha256"
+
+      - name: Upload Observability SDK release package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: observability-npm
+          path: |
+            bindings/observability-js/test-results/npm/*.tgz
+            bindings/observability-js/test-results/npm/*.tgz.sha256
+          if-no-files-found: error
+
       - name: Upload Web SDK release package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: web-npm
           path: |
-            bindings/web/test-results/npm/*.tgz
-            bindings/web/test-results/npm/*.tgz.sha256
+            bindings/web/test-results/npm/xybrid-web-*.tgz
+            bindings/web/test-results/npm/xybrid-web-*.tgz.sha256
           if-no-files-found: error
 
   # =========================================================================
@@ -476,6 +509,10 @@ jobs:
             # 0 vs 158 on real slices. (`nm`, not `strings`, for the same
             # reason the sibling ggml_metal / mtmd gates use it.)
             test "$(nm "$lib" 2>/dev/null | grep -c '_whisper_')" -gt 0 || { echo "$1: MISSING whisper.cpp (ASR) symbols"; exit 1; }
+            # The podspecs do not link MetalPerformanceShaders (#807) and both
+            # force_load this archive, so one MPS symbol fails every app's link.
+            # The _ggml_metal check above is the control.
+            test "$(nm -u "$lib" 2>/dev/null | grep -cE '(^| )_(MPS|OBJC_(CLASS|METACLASS)_\$_MPS)')" -eq 0 || { echo "$1: references MetalPerformanceShaders, which the Flutter podspecs do not link"; exit 1; }
             local platform
             platform=$(otool -l "$lib" | awk '/LC_BUILD_VERSION/{f=1} f && /platform/ && !p {p=$2} END{print p}')
             test "$platform" = "$2" || { echo "$1: wrong platform $platform (want $2)"; exit 1; }
@@ -585,6 +622,7 @@ jobs:
           mkdir -p dist-cli
           BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=macos-metal -c opt)
           cp "$BIN" dist-cli/xybrid-${TAG}-macos-arm64
+          cp crates/llama-cpp-sys/NOTICE dist-cli/xybrid-${TAG}-macos-arm64.NOTICE
           chmod +w dist-cli/xybrid-${TAG}-macos-arm64   # bazel outputs are read-only
           strip dist-cli/xybrid-${TAG}-macos-arm64
           chmod +x dist-cli/xybrid-${TAG}-macos-arm64
@@ -739,8 +777,9 @@ jobs:
             --readelf readelf --speech --min-sdk 29
 
       # The release zip: the AAR's jni/<abi>/ directories at the root (the
-      # bindings/kotlin/libs/ layout publish-kotlin stages from) plus
-      # assets/xybrid/zzz/, gated again as the exact bytes that ship.
+      # bindings/kotlin/libs/ layout publish-kotlin stages from) plus the
+      # notices (assets/xybrid/llama/NOTICE and assets/xybrid/zzz/), gated
+      # again as the exact bytes that ship.
       - name: Prepare artifact with version
         shell: bash
         env:
@@ -1209,6 +1248,7 @@ jobs:
           ARTIFACT="dist/xybrid-${TAG}-linux-x86_64"
           BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote -c opt)
           cp "$BIN" "$ARTIFACT"
+          cp crates/llama-cpp-sys/NOTICE "${ARTIFACT}.NOTICE"
           chmod +w "$ARTIFACT"   # bazel-bin outputs are read-only
           strip "$ARTIFACT"
           chmod +x "$ARTIFACT"
@@ -1300,6 +1340,7 @@ jobs:
           ARTIFACT="dist/xybrid-${TAG}-windows-x86_64.exe"
           EXE=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=windows -c opt)
           cp "$EXE" "$ARTIFACT"
+          cp crates/llama-cpp-sys/NOTICE "${ARTIFACT}.NOTICE"
           echo "artifact_path=$ARTIFACT" >> "$GITHUB_OUTPUT"
 
       - name: Attest CLI provenance (windows-x86_64)
@@ -1461,7 +1502,7 @@ jobs:
             echo
             echo "**Android**"
             echo "- Maven Central: \`ai.xybrid:xybrid-kotlin:${TAG#v}\` (minSdk 29, Android 10); arm64-v8a includes Phonon/Kitten TTS 2 speech"
-            echo "- \`xybrid-android-${TAG}.zip\` — Native .so files for arm64-v8a (with Phonon/Kitten TTS 2 speech), armeabi-v7a and x86_64 (without speech), plus the speech engine's notices under \`assets/xybrid/zzz/\`. Copy only the ABI directories into \`jniLibs\`, ship \`assets/xybrid/zzz/\` with your app's assets, and set minSdk 29 (Android 10)"
+            echo "- \`xybrid-android-${TAG}.zip\` — Native .so files for arm64-v8a (with Phonon/Kitten TTS 2 speech), armeabi-v7a and x86_64 (without speech), plus the third-party notices under \`assets/xybrid/\`: \`llama/NOTICE\` for llama.cpp and \`zzz/\` for the speech engine. Copy only the ABI directories into \`jniLibs\`, ship all of \`assets/xybrid/\` with your app's assets, and set minSdk 29 (Android 10)"
             echo
             echo "**Flutter**"
             echo "- Precompiled native libraries auto-downloaded by cargokit"
@@ -1475,10 +1516,13 @@ jobs:
             echo
             echo "**CLI**"
             echo "- Cross-platform binaries for macOS (arm64), Linux (x86_64), and Windows (x86_64)"
+            echo "- Each CLI binary has a matching .NOTICE asset containing its llama.cpp/Jinja and JSON dependency licenses; retain it when redistributing the binary"
             echo
             echo "**Web (GGUF preview)**"
             echo "- \`xybrid-web-${TAG#v}.tgz\` — ESM, TypeScript declarations, worker, CPU/WASM SIMD and experimental WebGPU runtimes"
-            echo "- Matching \`.tgz.sha256\` checksum; install the tarball directly or use \`@xybrid/web\` after npm approval"
+            echo "- Matching \`.tgz.sha256\` checksum; use \`@xybrid/web\` after npm approval"
+            echo "- \`xybrid-observability-${TAG#v}.tgz\` and matching checksum — the validated \`@xybrid/observability\` dependency; approve it on npm before web"
+            echo "- Before npm approval, verify both checksums and install together: \`npm install ./xybrid-observability-${TAG#v}.tgz ./xybrid-web-${TAG#v}.tgz @opentelemetry/api\`"
             echo
             echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}"
           } > CHANGELOG_RELEASE.md

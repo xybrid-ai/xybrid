@@ -9,7 +9,7 @@ plugins {
 //   1. -P<name>=... on the Gradle command line (CI / one-liner)
 //   2. <name> environment variable
 //   3. <localPropKey> in local.properties (gitignored — best for Android Studio)
-// Unset resolves to "", which the SDK treats as anonymous / default platform.
+// Unset resolves to "", which the app treats as anonymous / default endpoint.
 val localProperties = Properties().apply {
     val f = rootProject.file("local.properties")
     if (f.exists()) f.inputStream().use { load(it) }
@@ -22,7 +22,7 @@ fun resolveConfig(name: String, localPropKey: String): String =
         ?: ""
 
 val xybridApiKey = resolveConfig("XYBRID_API_KEY", "xybrid.apiKey")
-val xybridPlatformUrl = resolveConfig("XYBRID_PLATFORM_URL", "xybrid.platformUrl")
+val xybridTracesEndpoint = resolveConfig("XYBRID_TRACES_ENDPOINT", "xybrid.tracesEndpoint")
 
 android {
     namespace = "ai.xybrid.example"
@@ -37,9 +37,9 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Surfaced to the app as BuildConfig.XYBRID_API_KEY / XYBRID_PLATFORM_URL.
+        // Surfaced to the app as BuildConfig.XYBRID_API_KEY / XYBRID_TRACES_ENDPOINT.
         buildConfigField("String", "XYBRID_API_KEY", "\"$xybridApiKey\"")
-        buildConfigField("String", "XYBRID_PLATFORM_URL", "\"$xybridPlatformUrl\"")
+        buildConfigField("String", "XYBRID_TRACES_ENDPOINT", "\"$xybridTracesEndpoint\"")
 
         vectorDrawables {
             useSupportLibrary = true

@@ -545,6 +545,7 @@ impl LlamaCppBackend {
 
         let prompt_token_count = tokens.len();
         let max_tokens = clamp_generation_budget(config.max_tokens, n_ctx, prompt_token_count);
+        let banned_tokens = closed_thinking_bans(&tokens, think_tag_tokens(model));
         let (tail, n_past) =
             self.prepare_kv_cache_and_get_tail(model, context, &tokens, max_tokens)?;
 
@@ -553,6 +554,7 @@ impl LlamaCppBackend {
             max_tokens,
             tail,
             n_past,
+            banned_tokens,
         })
     }
 
@@ -589,6 +591,7 @@ impl LlamaCppBackend {
             config.repetition_penalty,
             stop_sequences,
             config.grammar.as_deref(),
+            &prepared.banned_tokens,
             |token_id, token_text| on_chunk(token_id, token_text, &mut tel),
             prepared.n_past,
         )?;
@@ -608,6 +611,9 @@ struct PreparedGeneration {
     max_tokens: usize,
     tail: Vec<i32>,
     n_past: usize,
+    /// Tokens the sampler must not pick after this prompt; see
+    /// [`closed_thinking_bans`].
+    banned_tokens: Vec<i32>,
 }
 
 enum PromptKind {
@@ -663,6 +669,62 @@ fn output_from_fields(
 /// surface their input-too-long error for that.
 fn clamp_generation_budget(requested: usize, n_ctx: usize, consumed: usize) -> usize {
     requested.min(n_ctx.saturating_sub(consumed))
+}
+
+/// The think-channel tags as text. LFM3's vocabulary holds each as one
+/// special token.
+const THINK_OPEN_TAG: &str = "<think>";
+const THINK_CLOSE_TAG: &str = "</think>";
+
+/// The token ids of [`THINK_OPEN_TAG`] and [`THINK_CLOSE_TAG`], when the
+/// model's vocabulary spells each tag as a single token.
+///
+/// A tag that takes several tokens cannot be banned as a unit, so such a
+/// model gets `None`. So does one whose tokenizer rejects a tag: the ban is
+/// a guard and must never be the reason a generation fails.
+fn think_tag_tokens(model: &xybrid_llama::LlamaModel) -> Option<[i32; 2]> {
+    let single = |tag: &str| match model.tokenize_special(tag, false).ok()?.as_slice() {
+        [token] => Some(*token),
+        _ => None,
+    };
+    Some([single(THINK_OPEN_TAG)?, single(THINK_CLOSE_TAG)?])
+}
+
+/// The tokens the sampler must never pick after `prompt_tokens`: both think
+/// tags when the prompt ends with the think channel already closed, and none
+/// otherwise.
+///
+/// LFM3's template ends a thinking-off prompt with an empty, closed channel
+/// (`<think></think>`). The model still writes a first answer, a second
+/// `</think>` and the answer again at times. A closed channel leaves neither
+/// tag a place in the turn, and no filter can take back text that has already
+/// streamed, so the sampler is kept from picking them. Both are banned, not
+/// the close tag alone: a block the model opened itself would then have no
+/// way to end.
+///
+/// The check reads the prompt's last two tokens, so it holds for chat, raw
+/// (tool continuation) and vision prompts alike. A prompt that ends inside an
+/// open channel (thinking on) bans nothing: the model needs `</think>` to
+/// finish its thought.
+fn closed_thinking_bans(prompt_tokens: &[i32], think_tags: Option<[i32; 2]>) -> Vec<i32> {
+    match think_tags {
+        Some(tags) if prompt_tokens.ends_with(&tags) => tags.to_vec(),
+        _ => Vec::new(),
+    }
+}
+
+/// [`closed_thinking_bans`] for a prompt still held as text: the vision paths
+/// hand theirs to mtmd, which tokenizes it together with the images.
+#[cfg(feature = "llm-llamacpp-vision")]
+fn closed_thinking_bans_for_text(model: &xybrid_llama::LlamaModel, prompt: &str) -> Vec<i32> {
+    // A closed channel ends in the close tag; skip the tokenizer otherwise.
+    if !prompt.ends_with(THINK_CLOSE_TAG) {
+        return Vec::new();
+    }
+    match model.tokenize_special(prompt, false) {
+        Ok(tokens) => closed_thinking_bans(&tokens, think_tag_tokens(model)),
+        Err(_) => Vec::new(),
+    }
 }
 
 /// Restore the stream invariant that emitted deltas concatenate to the
@@ -1141,6 +1203,12 @@ impl LlmBackend for LlamaCppBackend {
             // feed before the clean text lands. Same known v1 limitation
             // `run_tool_continuation` documents; the models tested self-open
             // the tag.
+            //
+            // LFM3 with thinking off is not this case any more. It wrote a
+            // first answer, a stray `</think>` and the answer again, on chat
+            // turns as well as here, and all of it reached the stream. Its
+            // closed-channel prompts now ban both think tags in the sampler
+            // (`closed_thinking_bans`), so the model cannot write them.
             let primed = is_reasoning_primed(prompt);
             let mut filter = if primed {
                 StreamingTextFilter::new_reasoning_primed(stop_patterns.clone())
@@ -1485,6 +1553,7 @@ impl LlmBackend for LlamaCppBackend {
                 self.reasoning_enabled(),
                 &config.tools,
             )?;
+            let banned_tokens = closed_thinking_bans_for_text(model, &prompt);
             let generation_stop_patterns =
                 merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
             let (
@@ -1558,6 +1627,7 @@ impl LlmBackend for LlamaCppBackend {
                         config.repetition_penalty,
                         &generation_stop_patterns,
                         config.grammar.as_deref(),
+                        &banned_tokens,
                         new_n_past as usize,
                         |_token_id, _token_text| {
                             tel.record_chunk();
@@ -1652,6 +1722,7 @@ impl LlmBackend for LlamaCppBackend {
                 self.reasoning_enabled(),
                 &config.tools,
             )?;
+            let banned_tokens = closed_thinking_bans_for_text(model, &prompt);
             let generation_stop_patterns =
                 merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
             let suppress_tools = !config.tools.is_empty();
@@ -1745,6 +1816,7 @@ impl LlmBackend for LlamaCppBackend {
                     config.repetition_penalty,
                     &generation_stop_patterns,
                     config.grammar.as_deref(),
+                    &banned_tokens,
                     new_n_past as usize,
                     |token_id, token_text| {
                         tel.record_chunk();
@@ -1914,6 +1986,54 @@ mod tests {
         assert_eq!(effective_gpu_layers(99, true), 0);
         assert_eq!(effective_gpu_layers(0, true), 0);
         assert_eq!(effective_gpu_layers(99, false), 99);
+    }
+
+    /// `<think>` and `</think>` in LFM3 1.7B's vocabulary; the other ids below
+    /// stand for `<|im_start|>`, `assistant` and a newline.
+    const THINK_TAGS: [i32; 2] = [124901, 124902];
+
+    #[test]
+    fn closed_think_channel_bans_both_think_tags() {
+        // `...<|im_start|>assistant\n<think></think>`: LFM3 with thinking off,
+        // on a chat prompt and on a tool continuation alike.
+        let prompt = [124899, 1620, 708, 124901, 124902];
+        assert_eq!(closed_thinking_bans(&prompt, Some(THINK_TAGS)), THINK_TAGS);
+        // The two tags are the whole prompt.
+        assert_eq!(
+            closed_thinking_bans(&THINK_TAGS, Some(THINK_TAGS)),
+            THINK_TAGS
+        );
+    }
+
+    #[test]
+    fn open_think_channel_bans_nothing() {
+        // Thinking on: the prompt ends inside the channel, and the model
+        // needs `</think>` to finish its thought.
+        assert!(closed_thinking_bans(&[124899, 1620, 708, 124901], Some(THINK_TAGS)).is_empty());
+        // `THINK_PRIME`: the opener and a newline.
+        assert!(
+            closed_thinking_bans(&[124899, 1620, 708, 124901, 708], Some(THINK_TAGS)).is_empty()
+        );
+    }
+
+    #[test]
+    fn prompt_that_does_not_end_in_the_closed_channel_bans_nothing() {
+        // No think state at all.
+        assert!(closed_thinking_bans(&[124899, 1620, 708], Some(THINK_TAGS)).is_empty());
+        assert!(closed_thinking_bans(&[], Some(THINK_TAGS)).is_empty());
+        // The close tag alone, or with the tags the wrong way round.
+        assert!(closed_thinking_bans(&[124902], Some(THINK_TAGS)).is_empty());
+        assert!(closed_thinking_bans(&[124902, 124901], Some(THINK_TAGS)).is_empty());
+        // Qwen3.5's thinking-off shape, `<think>\n\n</think>\n\n`: text sits
+        // between and after the tags. Not covered until it is run.
+        assert!(closed_thinking_bans(&[124901, 708, 124902, 708], Some(THINK_TAGS)).is_empty());
+        // A closed channel earlier in the prompt, with text after it.
+        assert!(closed_thinking_bans(&[124901, 124902, 1620, 708], Some(THINK_TAGS)).is_empty());
+    }
+
+    #[test]
+    fn model_without_single_token_think_tags_bans_nothing() {
+        assert!(closed_thinking_bans(&[124899, 1620, 708, 124901, 124902], None).is_empty());
     }
 
     #[test]

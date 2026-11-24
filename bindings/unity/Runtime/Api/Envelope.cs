@@ -32,6 +32,17 @@ namespace Xybrid
             Bolt = bolt;
         }
 
+        /// <summary>Build ordered typed decision input for the existing Run API.</summary>
+        public static Envelope DecisionRequest(XybridBolt.XybridDecisionRequest request) =>
+            new Envelope(XybridBolt.XybridBolt.DecisionRequestEnvelope(request));
+
+        /// <summary>Decode Liquid JSON without dictionary or floating-point conversion.</summary>
+        public static Envelope DecisionRequestJson(string json)
+        {
+            if (json == null) throw new ArgumentNullException(nameof(json));
+            return new Envelope(XybridBolt.XybridBolt.DecisionRequestJsonEnvelope(json));
+        }
+
         /// <summary>
         /// Creates an envelope containing text data for TTS or LLM inference.
         /// </summary>

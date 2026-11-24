@@ -7,14 +7,30 @@ using System.Runtime.InteropServices;
 
 namespace XybridBolt
 {
+    /// <param name="Traceparent">W3C `traceparent` of the caller's span: the run becomes its child.</param>
+    /// <param name="Tracestate">W3C `tracestate` accompanying `traceparent`.</param>
+    /// <param name="ConversationId">Caller-owned conversation id recorded on the run.</param>
+    /// <param name="SuppressTrace">Skip the detailed trace for this run; metrics are still recorded.</param>
+    /// <param name="FrameSessionId">
+    /// Your id for one continuous live-capture session (a camera or
+    /// microphone loop). Every run of the session is counted in metrics, and
+    /// detailed traces are kept for roughly one run per live trace interval
+    /// per session (`set_live_trace_interval_ms`). Blank values are ignored.
+    /// Applies to model runs: a pipeline run ignores it.
+    /// </param>
     public readonly struct XybridRunOptions
     {
-        public XybridRunOptions(XybridGenerationConfig? GenerationConfig, XybridAbortSignal[] AbortOn, bool FallbackToCloud, uint MaxGraceTokens, string? CorrelationId) { this.GenerationConfig = GenerationConfig; this.AbortOn = AbortOn; this.FallbackToCloud = FallbackToCloud; this.MaxGraceTokens = MaxGraceTokens; this.CorrelationId = CorrelationId; }
+        public XybridRunOptions(XybridGenerationConfig? GenerationConfig, XybridAbortSignal[] AbortOn, bool FallbackToCloud, uint MaxGraceTokens, string? CorrelationId, string? Traceparent, string? Tracestate, string? ConversationId, bool SuppressTrace, string? FrameSessionId) { this.GenerationConfig = GenerationConfig; this.AbortOn = AbortOn; this.FallbackToCloud = FallbackToCloud; this.MaxGraceTokens = MaxGraceTokens; this.CorrelationId = CorrelationId; this.Traceparent = Traceparent; this.Tracestate = Tracestate; this.ConversationId = ConversationId; this.SuppressTrace = SuppressTrace; this.FrameSessionId = FrameSessionId; }
         public XybridGenerationConfig? GenerationConfig { get; }
         public XybridAbortSignal[] AbortOn { get; }
         public bool FallbackToCloud { get; }
         public uint MaxGraceTokens { get; }
         public string? CorrelationId { get; }
+        public string? Traceparent { get; }
+        public string? Tracestate { get; }
+        public string? ConversationId { get; }
+        public bool SuppressTrace { get; }
+        public string? FrameSessionId { get; }
 
         internal static XybridRunOptions Decode(WireReader reader) =>
             new XybridRunOptions(
@@ -22,6 +38,11 @@ namespace XybridBolt
                 reader.ReadArray(reader => (XybridAbortSignal)reader.ReadI32()),
                 reader.ReadBool(),
                 reader.ReadU32(),
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
+                reader.ReadBool(),
                 reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
             );
 
@@ -53,6 +74,53 @@ namespace XybridBolt
             }
             {
                 if (this.CorrelationId is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.Traceparent is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.Tracestate is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.ConversationId is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                writer.WriteBool(this.SuppressTrace);
+            }
+            {
+                if (this.FrameSessionId is { } boltffiValue0)
                 {
                     writer.WriteU8(1);
                     writer.WriteString(boltffiValue0);
