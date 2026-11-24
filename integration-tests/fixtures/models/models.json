@@ -1071,7 +1071,7 @@
       "files": [
         {
           "output": "Qwen3.5-0.8B-F16.gguf",
-          "sha256": "3c483d57dd2d78672f29218c5d933e6fa4025f8e91db1e31cb5c16260794fba4"
+          "sha256": "2c7155aea546db6830d24fa68f42c6700cc713052f85d7cb778aa291f36a6270"
         }
       ]
     },
@@ -1085,7 +1085,7 @@
         {
           "model": "qwen3.5-0.8b-f16-cf",
           "output": "Qwen3.5-0.8B-F16.gguf",
-          "sha256": "3c483d57dd2d78672f29218c5d933e6fa4025f8e91db1e31cb5c16260794fba4"
+          "sha256": "2c7155aea546db6830d24fa68f42c6700cc713052f85d7cb778aa291f36a6270"
         }
       ],
       "files": [
