@@ -7,15 +7,15 @@ outside this directory. `corpus.json` fixes 42 calibration and 21 held-out
 requests before numerical observations; `cases/` contains their exact bytes.
 
 These files are reference **inputs**, not a claim that HF and GGUF agree.
-The collector and comparison commands are documented in
-[`decision-conformance.md`](../../../../docs/development/decision-conformance.md).
+The collector and comparison scripts are `hf_reference.py` and
+`compare_reference.py` in
+[`tools/conformance/decision`](../../../../tools/conformance/decision/).
 They use one question per call, one batch row, and explicit `set_size=1`.
 The collector records both the raw output-head logits and the log-probabilities
 that the HF runner actually passes to its finalizer.
 
-The [implementation findings](../../../../docs/development/decision-conformance.md#implementation-validation-summary)
-summarize the initial CPU comparison: HF completed 58 of 63 attempted cases
-and refused five; 12 accepted cases differed in preparation, and four
+In the initial CPU comparison, HF completed 58 of 63 attempted cases and
+refused five; 12 accepted cases differed in preparation, and four
 choices/medians differed against Q4 even with matching preparation. These
 findings do not establish numerical promotion bounds. Raw collection outputs
 are kept outside the source tree; the commands above reproduce them in the
