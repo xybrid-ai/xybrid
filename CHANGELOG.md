@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **llama.cpp:** update to [v0.9.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.9.0) (commit `cd959bae99ff4bed22bef2604f45241c09bbb8c8`).
+
+## [0.21.0] - 2026-11-22
+
 ### Added
 
 - **A run that recovers on-device after a failed speculative cloud attempt
