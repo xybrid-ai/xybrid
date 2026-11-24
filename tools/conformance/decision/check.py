@@ -13,7 +13,7 @@ import hf_reference
 
 ROOT = hf_reference.ROOT
 FIXTURES = hf_reference.FIXTURES
-PIN = "cd959bae99ff4bed22bef2604f45241c09bbb8c8"
+PIN = "b1b770d90d94cad9e9ea5b993bdbc383a522fb28"
 
 
 def check(model: Path | None = None) -> None:

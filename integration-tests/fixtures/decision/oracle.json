@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "llama_cpp": {
-    "commit": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+    "commit": "b1b770d90d94cad9e9ea5b993bdbc383a522fb28",
     "path": "vendor/llama-cpp",
     "routines": "tools/server/server-decision.cpp, linked unmodified from the server-context library"
   },
@@ -14,7 +14,7 @@
       "test_access.h": "41d4b5ed68279a1957eb72edd18fdef41b4e5f0e504b19ee4453155ba3f91cd1",
       "build.sh": "19bb0f1f204b722d6c61bdae8d3002e1d5aa768df2e97a0dc1675d26618efa75",
       "cases.py": "27aef08e3deb0ffa66a782148ede27c2f31d429919822019f22390acf5d66e94",
-      "oracle.py": "990630973906dd1a41b91b09411c312baefa472d42df155949cb62d82865b357"
+      "oracle.py": "5b619c2998cb1597d978220d251301dcfc3acc20d8220e75d424e5d5d5a704ee"
     }
   },
   "collector": {
@@ -24,11 +24,11 @@
   },
   "build": {
     "identity_version": 1,
-    "fingerprint": "e7891fc6e07bb7293f855ce7dd64a5b5d1413a5662757b6d1a29b4a0282c6f77",
+    "fingerprint": "58e16f4b3c4b6a87d66acc74150f5305c272d56f04e9fd4031bdd48ca353d892",
     "llama_cpp_dir": "vendor/llama-cpp",
     "llama_cpp": {
       "checkout": "git",
-      "commit": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "commit": "b1b770d90d94cad9e9ea5b993bdbc383a522fb28",
       "dirty": false
     },
     "tool_files": {
@@ -40,9 +40,9 @@
     "upstream_files": {
       "tools/server/server-decision.cpp": "129f922c4c69430233489b398a1c18e13019a3a27dbab19e3c68467144d5caa5",
       "tools/server/server-decision.h": "b2badfb6dfa7514208875bdaa2fb52061d65e313bfc6c1c586cafbb2560a1710",
-      "tools/server/server-context.cpp": "bc44c602e3638f81ce0ea2300f6f3dc1ea4599f42dc9f32bd3e555de214c6ee3",
-      "tools/server/server.cpp": "d4d343db7c1b648eb5358ae2b87966a5f78ce5c9b245c7fbfe9827ba6971f08b",
-      "tools/server/server-common.cpp": "b686729ed7d098e2f0c3da1ba28325d0e6d30721dab09f71cb9b53f342710ddb"
+      "tools/server/server-context.cpp": "9b632c3aedb0acfea3ef44308e4f04be1f5fad10110329b05ea737fcb7bb83ef",
+      "tools/server/server.cpp": "a58e21d5f413f4e9b9bbffe6050d971c47d5b78695bf5211f257ceb3c8b56a70",
+      "tools/server/server-common.cpp": "350dfb104d7c1ad1ffe388c35342d93e3f90b4d5c906458952e719e13f59c346"
     },
     "build": {
       "system": "Linux",
@@ -144,7 +144,7 @@
   "platform": {
     "system": "Linux",
     "machine": "x86_64",
-    "cpu": "Intel(R) Xeon(R) Processor @ 2.90GHz",
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.50GHz",
     "libc": "glibc 2.34"
   },
   "artifacts": {
