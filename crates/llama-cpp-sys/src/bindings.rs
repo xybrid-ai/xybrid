@@ -59,7 +59,8 @@ pub const ggml_type_GGML_TYPE_MXFP4: ggml_type = 39;
 pub const ggml_type_GGML_TYPE_NVFP4: ggml_type = 40;
 pub const ggml_type_GGML_TYPE_Q1_0: ggml_type = 41;
 pub const ggml_type_GGML_TYPE_Q2_0: ggml_type = 42;
-pub const ggml_type_GGML_TYPE_COUNT: ggml_type = 43;
+pub const ggml_type_GGML_TYPE_F8_E4M3: ggml_type = 43;
+pub const ggml_type_GGML_TYPE_COUNT: ggml_type = 44;
 pub type ggml_type = ::std::os::raw::c_uint;
 pub const ggml_op_GGML_OP_NONE: ggml_op = 0;
 pub const ggml_op_GGML_OP_DUP: ggml_op = 1;
@@ -329,6 +330,7 @@ pub const llama_ftype_LLAMA_FTYPE_MOSTLY_MXFP4_MOE: llama_ftype = 38;
 pub const llama_ftype_LLAMA_FTYPE_MOSTLY_NVFP4: llama_ftype = 39;
 pub const llama_ftype_LLAMA_FTYPE_MOSTLY_Q1_0: llama_ftype = 40;
 pub const llama_ftype_LLAMA_FTYPE_MOSTLY_Q2_0: llama_ftype = 41;
+pub const llama_ftype_LLAMA_FTYPE_MOSTLY_F8_E4M3: llama_ftype = 42;
 pub const llama_ftype_LLAMA_FTYPE_GUESSED: llama_ftype = 1024;
 pub type llama_ftype = ::std::os::raw::c_uint;
 pub const llama_rope_scaling_type_LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED: llama_rope_scaling_type = -1;
@@ -690,6 +692,7 @@ pub type mtmd_input_chunk_type = ::std::os::raw::c_uint;
 pub const mtmd_video_template_MTMD_VIDEO_TEMPLATE_DEFAULT: mtmd_video_template = 0;
 pub const mtmd_video_template_MTMD_VIDEO_TEMPLATE_LFM3: mtmd_video_template = 1;
 pub const mtmd_video_template_MTMD_VIDEO_TEMPLATE_LFM3_OMNI: mtmd_video_template = 2;
+pub const mtmd_video_template_MTMD_VIDEO_TEMPLATE_QWEN3VL: mtmd_video_template = 3;
 pub type mtmd_video_template = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -811,6 +814,7 @@ pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_QWEN3TTS: mtmd_gen_audio_type 
 pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_POCKETTTS: mtmd_gen_audio_type = 2;
 pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_SOPRANO: mtmd_gen_audio_type = 3;
 pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_LFM3A: mtmd_gen_audio_type = 4;
+pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_CHATTERBOX: mtmd_gen_audio_type = 5;
 pub type mtmd_gen_audio_type = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -818,6 +822,7 @@ pub struct mtmd_gen_audio_info {
     pub type_: mtmd_gen_audio_type,
     pub sample_rate: i32,
     pub model_variant: *const ::std::os::raw::c_char,
+    pub n_voices: i32,
 }
 pub const mtmd_gen_process_type_MTMD_GEN_PROCESS_TYPE_GEN_CODE: mtmd_gen_process_type = 0;
 pub const mtmd_gen_process_type_MTMD_GEN_PROCESS_TYPE_GEN_WAV: mtmd_gen_process_type = 1;
@@ -945,7 +950,6 @@ pub struct mtmd_helper_gen_audio_inp {
     pub out_mode: mtmd_helper_gen_audio_out_mode,
     pub speaker_ref: *mut mtmd_bitmap,
     pub lang: *const ::std::os::raw::c_char,
-    pub voice: *const ::std::os::raw::c_char,
     pub top_k: i32,
     pub top_p: f32,
     pub seed: u32,

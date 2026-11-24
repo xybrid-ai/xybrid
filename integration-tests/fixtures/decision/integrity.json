@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "llama_cpp_commit": "8642541b255bfb5dc39cd351a178be09013a55d6",
+  "llama_cpp_commit": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
   "files": {
     "artifacts.json": "b3516c52567a3ea72a7218bf16fc740f90841f74075955cecfb59ee003c092c9",
     "cases/budget-at-limit.json": "22062d99d975e8c154c0f146ed4eb0164b13bab22bce691ca30c6677d7f64e6e",
@@ -148,6 +148,6 @@
     "cases/upstream-test-payload.json": "1a5ca029ba47082083654b3080fdfc3501b2c4aa6475346594462f38b3fe535d",
     "hf/assets.json": "cd32d20b562ab576a95b84880f37897308335ea501db5f78fce2fb1cb67d9208",
     "hf/corpus.json": "726f9d3debc652a44f17bfac0ef32f4057c48bb4a14961e36afffdb9880a750c",
-    "oracle.json": "af60e7ce7e7f0362c9d1a5dbaeb4f6b20bfe180cd796ed9c9f6fcbdd3927c11e"
+    "oracle.json": "1b2c25c6e9eea89caad4a3b6f7eee428bf4c48d535587fe323a71e062df0e7dc"
   }
 }

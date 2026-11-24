@@ -98,6 +98,14 @@ fixture's F16 input digest are updated together from macOS arm64 rebuilds,
 with the embedded chat templates verified against the committed template.
 Reference goldens and scoring bounds are preserved.
 
+The v0.9.0 migration changes no artifact. Its converter changes for Qwen only
+map FP8 checkpoints, it writes no new metadata for this model, and
+`llama-quantize` keeps the same K-quant kernels and Qwen3.5 type rules. The
+source revision, converter digest and both GGUF recipes move to v0.9.0; the
+artifact digests are carried forward, and the recipe change makes CI rebuild
+both GGUFs on macOS arm64 and check them against those digests. Templates,
+reference goldens and scoring bounds are preserved.
+
 ## Environments
 
 Each environment is Python 3.12 plus a full lock. `requirements-<env>.in` holds
