@@ -1,7 +1,7 @@
 Xybrid llama.cpp native bridge: third-party notices
 
 Production decision rendering compiles the following unmodified files from
-llama.cpp at commit cd959bae99ff4bed22bef2604f45241c09bbb8c8:
+llama.cpp at commit b1b770d90d94cad9e9ea5b993bdbc383a522fb28:
 
   common/jinja/{lexer,parser,runtime,value,string}.cpp and their headers
   common/{json,unicode}.cpp and their headers
