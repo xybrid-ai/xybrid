@@ -1071,27 +1071,27 @@
       "files": [
         {
           "output": "Qwen3.5-0.8B-F16.gguf",
-          "sha256": "3c483d57dd2d78672f29218c5d933e6fa4025f8e91db1e31cb5c16260794fba4"
+          "sha256": "2c7155aea546db6830d24fa68f42c6700cc713052f85d7cb778aa291f36a6270"
         }
       ]
     },
     "qwen3.5-0.8b-q4km-cf": {
       "description": "Qwen3.5 0.8B Q4_K_M GGUF quantized from qwen3.5-0.8b-f16-cf with vendor/llama-cpp (choice-scoring conformance; regenerated, not downloaded)",
       "source": "derived",
-      "size_mb": 505,
+      "size_mb": 510,
       "task": "text-generation",
       "feature_gate": "llm-llamacpp",
       "inputs": [
         {
           "model": "qwen3.5-0.8b-f16-cf",
           "output": "Qwen3.5-0.8B-F16.gguf",
-          "sha256": "3c483d57dd2d78672f29218c5d933e6fa4025f8e91db1e31cb5c16260794fba4"
+          "sha256": "2c7155aea546db6830d24fa68f42c6700cc713052f85d7cb778aa291f36a6270"
         }
       ],
       "files": [
         {
           "output": "Qwen3.5-0.8B-Q4_K_M.gguf",
-          "sha256": "3dde4a34fc13354fa15a9931dc29025de48cc5ecd9515224b14e8d1cfbbed684"
+          "sha256": "1a359e5caec49df203a9a199d45c9ad854540bb804f50b0452f692b91494bf76"
         }
       ]
     },

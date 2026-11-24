@@ -106,6 +106,19 @@ artifact digests are carried forward, and the recipe change makes CI rebuild
 both GGUFs on macOS arm64 and check them against those digests. Templates,
 reference goldens and scoring bounds are preserved.
 
+The v1.0.0 migration changes both artifacts. Its converter fuses the
+projections of every linear-attention layer (llama.cpp #32102, no flag keeps
+them apart): each of the 18 stores `attn_qkv_gate` instead of `attn_qkv` and
+`attn_gate`, and `ssm_beta_alpha` instead of `ssm_beta` and `ssm_alpha`. The
+F16 holds 284 tensors instead of 320 and is 2,048 bytes smaller; llama.cpp
+still loads the unfused layout. `llama-quantize` types the fused projection by
+its QKV rows, so in the Q4_K_M the gate rows take the QKV type, Q6_K in 10 of
+the 18 layers, and the file grows by 5,404,672 bytes. Both GGUFs were rebuilt
+on CI's macOS arm64 runner; their digests, sizes and the Q4_K_M fixture's F16
+input digest are updated together, with the embedded chat templates verified
+against the committed template. Templates, reference goldens and scoring
+bounds are preserved.
+
 ## Environments
 
 Each environment is Python 3.12 plus a full lock. `requirements-<env>.in` holds

@@ -66,105 +66,102 @@ pub const ggml_op_GGML_OP_NONE: ggml_op = 0;
 pub const ggml_op_GGML_OP_DUP: ggml_op = 1;
 pub const ggml_op_GGML_OP_ADD: ggml_op = 2;
 pub const ggml_op_GGML_OP_ADD_ID: ggml_op = 3;
-pub const ggml_op_GGML_OP_ADD1: ggml_op = 4;
-pub const ggml_op_GGML_OP_ACC: ggml_op = 5;
-pub const ggml_op_GGML_OP_SUB: ggml_op = 6;
-pub const ggml_op_GGML_OP_MUL: ggml_op = 7;
-pub const ggml_op_GGML_OP_DIV: ggml_op = 8;
-pub const ggml_op_GGML_OP_SQR: ggml_op = 9;
-pub const ggml_op_GGML_OP_SQRT: ggml_op = 10;
-pub const ggml_op_GGML_OP_LOG: ggml_op = 11;
-pub const ggml_op_GGML_OP_SIN: ggml_op = 12;
-pub const ggml_op_GGML_OP_COS: ggml_op = 13;
-pub const ggml_op_GGML_OP_SUM: ggml_op = 14;
-pub const ggml_op_GGML_OP_SUM_ROWS: ggml_op = 15;
-pub const ggml_op_GGML_OP_CUMSUM: ggml_op = 16;
-pub const ggml_op_GGML_OP_MEAN: ggml_op = 17;
-pub const ggml_op_GGML_OP_ARGMAX: ggml_op = 18;
-pub const ggml_op_GGML_OP_COUNT_EQUAL: ggml_op = 19;
-pub const ggml_op_GGML_OP_REPEAT: ggml_op = 20;
-pub const ggml_op_GGML_OP_REPEAT_BACK: ggml_op = 21;
-pub const ggml_op_GGML_OP_CONCAT: ggml_op = 22;
-pub const ggml_op_GGML_OP_SILU_BACK: ggml_op = 23;
-pub const ggml_op_GGML_OP_NORM: ggml_op = 24;
-pub const ggml_op_GGML_OP_RMS_NORM: ggml_op = 25;
-pub const ggml_op_GGML_OP_RMS_NORM_BACK: ggml_op = 26;
-pub const ggml_op_GGML_OP_GROUP_NORM: ggml_op = 27;
-pub const ggml_op_GGML_OP_L2_NORM: ggml_op = 28;
-pub const ggml_op_GGML_OP_MUL_MAT: ggml_op = 29;
-pub const ggml_op_GGML_OP_MUL_MAT_ID: ggml_op = 30;
-pub const ggml_op_GGML_OP_OUT_PROD: ggml_op = 31;
-pub const ggml_op_GGML_OP_SCALE: ggml_op = 32;
-pub const ggml_op_GGML_OP_SET: ggml_op = 33;
-pub const ggml_op_GGML_OP_CPY: ggml_op = 34;
-pub const ggml_op_GGML_OP_CONT: ggml_op = 35;
-pub const ggml_op_GGML_OP_RESHAPE: ggml_op = 36;
-pub const ggml_op_GGML_OP_VIEW: ggml_op = 37;
-pub const ggml_op_GGML_OP_PERMUTE: ggml_op = 38;
-pub const ggml_op_GGML_OP_TRANSPOSE: ggml_op = 39;
-pub const ggml_op_GGML_OP_GET_ROWS: ggml_op = 40;
-pub const ggml_op_GGML_OP_GET_ROWS_BACK: ggml_op = 41;
-pub const ggml_op_GGML_OP_SET_ROWS: ggml_op = 42;
-pub const ggml_op_GGML_OP_DIAG: ggml_op = 43;
-pub const ggml_op_GGML_OP_DIAG_MASK_INF: ggml_op = 44;
-pub const ggml_op_GGML_OP_DIAG_MASK_ZERO: ggml_op = 45;
-pub const ggml_op_GGML_OP_SOFT_MAX: ggml_op = 46;
-pub const ggml_op_GGML_OP_SOFT_MAX_BACK: ggml_op = 47;
-pub const ggml_op_GGML_OP_ROPE: ggml_op = 48;
-pub const ggml_op_GGML_OP_ROPE_BACK: ggml_op = 49;
-pub const ggml_op_GGML_OP_CLAMP: ggml_op = 50;
-pub const ggml_op_GGML_OP_CONV_TRANSPOSE_1D: ggml_op = 51;
-pub const ggml_op_GGML_OP_IM2COL: ggml_op = 52;
-pub const ggml_op_GGML_OP_IM2COL_BACK: ggml_op = 53;
-pub const ggml_op_GGML_OP_IM2COL_3D: ggml_op = 54;
-pub const ggml_op_GGML_OP_COL2IM_1D: ggml_op = 55;
-pub const ggml_op_GGML_OP_CONV_2D: ggml_op = 56;
-pub const ggml_op_GGML_OP_CONV_3D: ggml_op = 57;
-pub const ggml_op_GGML_OP_CONV_2D_DW: ggml_op = 58;
-pub const ggml_op_GGML_OP_CONV_TRANSPOSE_2D: ggml_op = 59;
-pub const ggml_op_GGML_OP_POOL_1D: ggml_op = 60;
-pub const ggml_op_GGML_OP_POOL_2D: ggml_op = 61;
-pub const ggml_op_GGML_OP_POOL_2D_BACK: ggml_op = 62;
-pub const ggml_op_GGML_OP_UPSCALE: ggml_op = 63;
-pub const ggml_op_GGML_OP_PAD: ggml_op = 64;
-pub const ggml_op_GGML_OP_PAD_REFLECT_1D: ggml_op = 65;
-pub const ggml_op_GGML_OP_ROLL: ggml_op = 66;
-pub const ggml_op_GGML_OP_ARANGE: ggml_op = 67;
-pub const ggml_op_GGML_OP_TIMESTEP_EMBEDDING: ggml_op = 68;
-pub const ggml_op_GGML_OP_ARGSORT: ggml_op = 69;
-pub const ggml_op_GGML_OP_TOP_K: ggml_op = 70;
-pub const ggml_op_GGML_OP_LEAKY_RELU: ggml_op = 71;
-pub const ggml_op_GGML_OP_TRI: ggml_op = 72;
-pub const ggml_op_GGML_OP_FILL: ggml_op = 73;
-pub const ggml_op_GGML_OP_FLASH_ATTN_EXT: ggml_op = 74;
-pub const ggml_op_GGML_OP_FLASH_ATTN_BACK: ggml_op = 75;
-pub const ggml_op_GGML_OP_SSM_CONV: ggml_op = 76;
-pub const ggml_op_GGML_OP_SSM_SCAN: ggml_op = 77;
-pub const ggml_op_GGML_OP_WIN_PART: ggml_op = 78;
-pub const ggml_op_GGML_OP_WIN_UNPART: ggml_op = 79;
-pub const ggml_op_GGML_OP_GET_REL_POS: ggml_op = 80;
-pub const ggml_op_GGML_OP_ADD_REL_POS: ggml_op = 81;
-pub const ggml_op_GGML_OP_RWKV_WKV6: ggml_op = 82;
-pub const ggml_op_GGML_OP_GATED_LINEAR_ATTN: ggml_op = 83;
-pub const ggml_op_GGML_OP_RWKV_WKV7: ggml_op = 84;
-pub const ggml_op_GGML_OP_SOLVE_TRI: ggml_op = 85;
-pub const ggml_op_GGML_OP_GATED_DELTA_NET: ggml_op = 86;
-pub const ggml_op_GGML_OP_LIGHTNING_INDEXER: ggml_op = 87;
-pub const ggml_op_GGML_OP_DSV4_HC_COMB: ggml_op = 88;
-pub const ggml_op_GGML_OP_DSV4_HC_PRE: ggml_op = 89;
-pub const ggml_op_GGML_OP_DSV4_HC_POST: ggml_op = 90;
-pub const ggml_op_GGML_OP_TOP_K_MASK: ggml_op = 91;
-pub const ggml_op_GGML_OP_UNARY: ggml_op = 92;
-pub const ggml_op_GGML_OP_MAP_CUSTOM1: ggml_op = 93;
-pub const ggml_op_GGML_OP_MAP_CUSTOM2: ggml_op = 94;
-pub const ggml_op_GGML_OP_MAP_CUSTOM3: ggml_op = 95;
-pub const ggml_op_GGML_OP_CUSTOM: ggml_op = 96;
-pub const ggml_op_GGML_OP_CROSS_ENTROPY_LOSS: ggml_op = 97;
-pub const ggml_op_GGML_OP_CROSS_ENTROPY_LOSS_BACK: ggml_op = 98;
-pub const ggml_op_GGML_OP_OPT_STEP_ADAMW: ggml_op = 99;
-pub const ggml_op_GGML_OP_OPT_STEP_SGD: ggml_op = 100;
-pub const ggml_op_GGML_OP_GLU: ggml_op = 101;
-pub const ggml_op_GGML_OP_COUNT: ggml_op = 102;
+pub const ggml_op_GGML_OP_ACC: ggml_op = 4;
+pub const ggml_op_GGML_OP_SUB: ggml_op = 5;
+pub const ggml_op_GGML_OP_MUL: ggml_op = 6;
+pub const ggml_op_GGML_OP_DIV: ggml_op = 7;
+pub const ggml_op_GGML_OP_SQR: ggml_op = 8;
+pub const ggml_op_GGML_OP_SQRT: ggml_op = 9;
+pub const ggml_op_GGML_OP_LOG: ggml_op = 10;
+pub const ggml_op_GGML_OP_SIN: ggml_op = 11;
+pub const ggml_op_GGML_OP_COS: ggml_op = 12;
+pub const ggml_op_GGML_OP_SUM: ggml_op = 13;
+pub const ggml_op_GGML_OP_SUM_ROWS: ggml_op = 14;
+pub const ggml_op_GGML_OP_CUMSUM: ggml_op = 15;
+pub const ggml_op_GGML_OP_MEAN: ggml_op = 16;
+pub const ggml_op_GGML_OP_ARGMAX: ggml_op = 17;
+pub const ggml_op_GGML_OP_COUNT_EQUAL: ggml_op = 18;
+pub const ggml_op_GGML_OP_REPEAT: ggml_op = 19;
+pub const ggml_op_GGML_OP_REPEAT_BACK: ggml_op = 20;
+pub const ggml_op_GGML_OP_CONCAT: ggml_op = 21;
+pub const ggml_op_GGML_OP_SILU_BACK: ggml_op = 22;
+pub const ggml_op_GGML_OP_NORM: ggml_op = 23;
+pub const ggml_op_GGML_OP_RMS_NORM: ggml_op = 24;
+pub const ggml_op_GGML_OP_RMS_NORM_BACK: ggml_op = 25;
+pub const ggml_op_GGML_OP_GROUP_NORM: ggml_op = 26;
+pub const ggml_op_GGML_OP_L2_NORM: ggml_op = 27;
+pub const ggml_op_GGML_OP_MUL_MAT: ggml_op = 28;
+pub const ggml_op_GGML_OP_MUL_MAT_ID: ggml_op = 29;
+pub const ggml_op_GGML_OP_OUT_PROD: ggml_op = 30;
+pub const ggml_op_GGML_OP_SCALE: ggml_op = 31;
+pub const ggml_op_GGML_OP_SET: ggml_op = 32;
+pub const ggml_op_GGML_OP_CPY: ggml_op = 33;
+pub const ggml_op_GGML_OP_CONT: ggml_op = 34;
+pub const ggml_op_GGML_OP_RESHAPE: ggml_op = 35;
+pub const ggml_op_GGML_OP_VIEW: ggml_op = 36;
+pub const ggml_op_GGML_OP_PERMUTE: ggml_op = 37;
+pub const ggml_op_GGML_OP_TRANSPOSE: ggml_op = 38;
+pub const ggml_op_GGML_OP_GET_ROWS: ggml_op = 39;
+pub const ggml_op_GGML_OP_GET_ROWS_BACK: ggml_op = 40;
+pub const ggml_op_GGML_OP_SET_ROWS: ggml_op = 41;
+pub const ggml_op_GGML_OP_DIAG: ggml_op = 42;
+pub const ggml_op_GGML_OP_SOFT_MAX: ggml_op = 43;
+pub const ggml_op_GGML_OP_SOFT_MAX_BACK: ggml_op = 44;
+pub const ggml_op_GGML_OP_ROPE: ggml_op = 45;
+pub const ggml_op_GGML_OP_ROPE_BACK: ggml_op = 46;
+pub const ggml_op_GGML_OP_CLAMP: ggml_op = 47;
+pub const ggml_op_GGML_OP_CONV_TRANSPOSE_1D: ggml_op = 48;
+pub const ggml_op_GGML_OP_IM2COL: ggml_op = 49;
+pub const ggml_op_GGML_OP_IM2COL_BACK: ggml_op = 50;
+pub const ggml_op_GGML_OP_IM2COL_3D: ggml_op = 51;
+pub const ggml_op_GGML_OP_COL2IM_1D: ggml_op = 52;
+pub const ggml_op_GGML_OP_CONV_2D: ggml_op = 53;
+pub const ggml_op_GGML_OP_CONV_3D: ggml_op = 54;
+pub const ggml_op_GGML_OP_CONV_2D_DW: ggml_op = 55;
+pub const ggml_op_GGML_OP_CONV_TRANSPOSE_2D: ggml_op = 56;
+pub const ggml_op_GGML_OP_POOL_1D: ggml_op = 57;
+pub const ggml_op_GGML_OP_POOL_2D: ggml_op = 58;
+pub const ggml_op_GGML_OP_POOL_2D_BACK: ggml_op = 59;
+pub const ggml_op_GGML_OP_UPSCALE: ggml_op = 60;
+pub const ggml_op_GGML_OP_PAD: ggml_op = 61;
+pub const ggml_op_GGML_OP_PAD_REFLECT_1D: ggml_op = 62;
+pub const ggml_op_GGML_OP_ROLL: ggml_op = 63;
+pub const ggml_op_GGML_OP_ARANGE: ggml_op = 64;
+pub const ggml_op_GGML_OP_TIMESTEP_EMBEDDING: ggml_op = 65;
+pub const ggml_op_GGML_OP_ARGSORT: ggml_op = 66;
+pub const ggml_op_GGML_OP_TOP_K: ggml_op = 67;
+pub const ggml_op_GGML_OP_LEAKY_RELU: ggml_op = 68;
+pub const ggml_op_GGML_OP_TRI: ggml_op = 69;
+pub const ggml_op_GGML_OP_FILL: ggml_op = 70;
+pub const ggml_op_GGML_OP_FLASH_ATTN_EXT: ggml_op = 71;
+pub const ggml_op_GGML_OP_FLASH_ATTN_BACK: ggml_op = 72;
+pub const ggml_op_GGML_OP_SSM_CONV: ggml_op = 73;
+pub const ggml_op_GGML_OP_SSM_SCAN: ggml_op = 74;
+pub const ggml_op_GGML_OP_WIN_PART: ggml_op = 75;
+pub const ggml_op_GGML_OP_WIN_UNPART: ggml_op = 76;
+pub const ggml_op_GGML_OP_GET_REL_POS: ggml_op = 77;
+pub const ggml_op_GGML_OP_ADD_REL_POS: ggml_op = 78;
+pub const ggml_op_GGML_OP_RWKV_WKV6: ggml_op = 79;
+pub const ggml_op_GGML_OP_GATED_LINEAR_ATTN: ggml_op = 80;
+pub const ggml_op_GGML_OP_RWKV_WKV7: ggml_op = 81;
+pub const ggml_op_GGML_OP_SOLVE_TRI: ggml_op = 82;
+pub const ggml_op_GGML_OP_GATED_DELTA_NET: ggml_op = 83;
+pub const ggml_op_GGML_OP_LIGHTNING_INDEXER: ggml_op = 84;
+pub const ggml_op_GGML_OP_DSV4_HC_COMB: ggml_op = 85;
+pub const ggml_op_GGML_OP_DSV4_HC_PRE: ggml_op = 86;
+pub const ggml_op_GGML_OP_DSV4_HC_POST: ggml_op = 87;
+pub const ggml_op_GGML_OP_TOP_K_MASK: ggml_op = 88;
+pub const ggml_op_GGML_OP_UNARY: ggml_op = 89;
+pub const ggml_op_GGML_OP_MAP_CUSTOM1: ggml_op = 90;
+pub const ggml_op_GGML_OP_MAP_CUSTOM2: ggml_op = 91;
+pub const ggml_op_GGML_OP_MAP_CUSTOM3: ggml_op = 92;
+pub const ggml_op_GGML_OP_CUSTOM: ggml_op = 93;
+pub const ggml_op_GGML_OP_CROSS_ENTROPY_LOSS: ggml_op = 94;
+pub const ggml_op_GGML_OP_CROSS_ENTROPY_LOSS_BACK: ggml_op = 95;
+pub const ggml_op_GGML_OP_OPT_STEP_ADAMW: ggml_op = 96;
+pub const ggml_op_GGML_OP_OPT_STEP_SGD: ggml_op = 97;
+pub const ggml_op_GGML_OP_GLU: ggml_op = 98;
+pub const ggml_op_GGML_OP_COUNT: ggml_op = 99;
 pub type ggml_op = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -504,12 +501,12 @@ pub struct llama_context_params {
     pub yarn_beta_fast: f32,
     pub yarn_beta_slow: f32,
     pub yarn_orig_ctx: u32,
-    pub defrag_thold: f32,
     pub cb_eval: ggml_backend_sched_eval_callback,
     pub cb_eval_user_data: *mut ::std::os::raw::c_void,
     pub type_k: ggml_type,
     pub type_v: ggml_type,
     pub moe_cache_size: usize,
+    pub moe_cache_cpu_share: f32,
     pub abort_callback: ggml_abort_callback,
     pub abort_callback_data: *mut ::std::os::raw::c_void,
     pub embeddings: bool,
@@ -815,6 +812,7 @@ pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_POCKETTTS: mtmd_gen_audio_type
 pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_SOPRANO: mtmd_gen_audio_type = 3;
 pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_LFM3A: mtmd_gen_audio_type = 4;
 pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_CHATTERBOX: mtmd_gen_audio_type = 5;
+pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_DRAMA3: mtmd_gen_audio_type = 6;
 pub type mtmd_gen_audio_type = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -886,6 +884,11 @@ pub struct mtmd_helper_bitmap_wrapper {
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_resampler {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct mtmd_helper_embd_batch {
     pub n_tokens: i32,
     pub embd: *const f32,
@@ -952,6 +955,7 @@ pub struct mtmd_helper_gen_audio_inp {
     pub lang: *const ::std::os::raw::c_char,
     pub top_k: i32,
     pub top_p: f32,
+    pub temp: f32,
     pub seed: u32,
     pub out_type: mtmd_helper_gen_audio_outtype,
 }

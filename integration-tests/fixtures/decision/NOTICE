@@ -5,7 +5,7 @@ template of LiquidAI/d1-2B-GGUF. It is the template llama.cpp's converter
 writes: the LFM2 d1 prompt of conversion/lfm2.py (the _systemone_template
 function, line 104) followed by the "<think></think>" suffix that
 conversion/lfm3.py adds (line 157), in llama.cpp at commit
-cd959bae99ff4bed22bef2604f45241c09bbb8c8 (vendor/llama-cpp). The prompts in
+b1b770d90d94cad9e9ea5b993bdbc383a522fb28 (vendor/llama-cpp). The prompts in
 cases/*.json are renderings of that template.
 
 llama.cpp is distributed under the MIT License:

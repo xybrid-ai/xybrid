@@ -68,9 +68,9 @@ checks, and the refusal cases the status mapping.
 
 | Mirror | Upstream |
 |---|---|
-| The prompt-size checks before decoding (`n_tokens > n_ubatch`: 500, `> n_ctx`: 400) and their messages | `update_slots`, the `!slot.can_split()` branch (`server-context.cpp:4058`) |
-| Each group's score is the max of its label logits | `send_decision` (`server-context.cpp:2526`) |
-| An exception's HTTP status: `invalid_argument` and JSON errors 400, others 500 | `ex_wrapper` (`server.cpp:61`) |
+| The prompt-size checks before decoding (`n_tokens > n_ubatch`: 500, `> n_ctx`: 400) and their messages | `update_slots`, the `!slot.can_split()` branch (`server-context.cpp:4077`) |
+| Each group's score is the max of its label logits | `send_decision` (`server-context.cpp:2530`) |
+| An exception's HTTP status: `invalid_argument` and JSON errors 400, others 500 | `ex_wrapper` (`server.cpp:64`) |
 
 `NOTICE` lists these fragments with upstream's license.
 
