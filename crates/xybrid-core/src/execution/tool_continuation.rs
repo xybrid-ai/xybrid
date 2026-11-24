@@ -23,10 +23,11 @@ use crate::runtime_adapter::llm::GenerationOutput;
 // requests outright, so a continuation can never execute there.
 #[cfg(feature = "llm-llamacpp")]
 use crate::runtime_adapter::streaming_postprocess::{
-    is_reasoning_primed, strip_and_capture_thinking_tags_primed,
+    is_reasoning_primed, truncate_at_first_stop, OutputFraming,
 };
 use crate::runtime_adapter::tool_call::{
-    compose_tool_continuation, truncate_at_turn_marker, TURN_MARKERS,
+    compose_tool_continuation, is_inkling_prompt, truncate_at_turn_marker,
+    INKLING_TURN_END_MARKERS, TURN_MARKERS,
 };
 use crate::runtime_adapter::{
     AdapterError, ChatMessage, GenerationConfig, LlmBackend, MultimodalChatMessage,
@@ -65,7 +66,7 @@ pub(crate) fn run_tool_continuation(
     let (prompt, raw_config) =
         compose_continuation_prompt(backend, messages, gen_config, input, responses_json)?;
     let out = backend.generate_raw(&prompt, &raw_config)?;
-    Ok(finish_continuation_output(out, Some(&prompt)))
+    Ok(finish_continuation_output(out, &prompt, false))
 }
 
 /// Streaming sibling of [`run_tool_continuation`].
@@ -89,7 +90,7 @@ pub(crate) fn run_tool_continuation_streaming(
         compose_continuation_prompt(backend, messages, gen_config, input, responses_json)?;
     let out = backend.generate_raw_streaming(&prompt, &raw_config, on_token)?;
     // The backend split the reasoning off its text with the same priming.
-    Ok(finish_continuation_output(out, None))
+    Ok(finish_continuation_output(out, &prompt, true))
 }
 
 /// Render the chat prefix, append the replayed assistant turn plus the tool
@@ -119,9 +120,15 @@ fn compose_continuation_prompt(
     // ends at the next turn marker of whichever protocol the template
     // speaks; supported families do not legitimately emit one another's
     // markers, so the shared set is safe. Belt-and-braces alongside each
-    // model's own end-of-turn token.
+    // model's own end-of-turn token. Inkling's turn ends join only for an
+    // Inkling prompt: they are plain strings other families may quote.
     let mut raw_config = gen_config.clone();
-    for stop in TURN_MARKERS {
+    let framing_turn_ends: &[&str] = if is_inkling_prompt(&base) {
+        INKLING_TURN_END_MARKERS
+    } else {
+        &[]
+    };
+    for stop in TURN_MARKERS.iter().chain(framing_turn_ends) {
         if !raw_config.stop_sequences.iter().any(|s| s == stop) {
             raw_config.stop_sequences.push((*stop).to_string());
         }
@@ -131,12 +138,14 @@ fn compose_continuation_prompt(
 
 /// Final cleanup shared by the batch and streaming continuation paths.
 ///
-/// `raw_prompt` is the prompt `out.text` was generated from while that text
-/// is still the model's output as generated (`generate_raw`), and `None` once
-/// the backend has split the reasoning off (`generate_raw_streaming` does).
+/// `prompt` is the composed continuation the output was generated from.
+/// `backend_split` says the backend already cut the output at its stops and
+/// split its reasoning off (`generate_raw_streaming` does); the batch path's
+/// text is still the model's output as generated (`generate_raw`).
 fn finish_continuation_output(
     mut out: GenerationOutput,
-    raw_prompt: Option<&str>,
+    prompt: &str,
+    backend_split: bool,
 ) -> GenerationOutput {
     // The raw path keeps stop-marker text in the output (the chat path
     // truncates it). Cut it so the answer is clean and a further
@@ -146,16 +155,32 @@ fn finish_continuation_output(
     // non-reasoning models (no tags → text unchanged, reasoning `None`).
     // After a prompt that ends inside `<think>`, a thought the budget cut
     // short has no marker at all. Priming text that is already split would
-    // instead turn a truncated answer into reasoning.
+    // instead turn a truncated answer into reasoning. An Inkling turn is
+    // split by its blocks instead, and its calls are parsed from them; the
+    // streaming backend did both already.
     #[cfg(feature = "llm-llamacpp")]
     {
-        let primed = raw_prompt.is_some_and(is_reasoning_primed);
-        let truncated_by_budget = out.finish_reason == "length";
-        let (clean, reasoning) =
-            strip_and_capture_thinking_tags_primed(&out.text, primed, truncated_by_budget);
-        out.text = clean;
-        out.reasoning_content = reasoning.or(out.reasoning_content);
+        let framing = OutputFraming::of_prompt(prompt);
+        if !(backend_split && framing == OutputFraming::Inkling) {
+            // Inkling's turn ends cut only Inkling output.
+            truncate_at_first_stop(&mut out.text, framing.stop_patterns());
+            let primed = !backend_split && is_reasoning_primed(prompt);
+            let truncated_by_budget = out.finish_reason == "length";
+            let (clean, reasoning) =
+                framing.split_reasoning(&out.text, primed, truncated_by_budget);
+            out.text = match framing {
+                OutputFraming::Plain => clean,
+                OutputFraming::Inkling => clean.trim().to_string(),
+            };
+            out.reasoning_content = reasoning.or(out.reasoning_content);
+            out.tool_calls = out
+                .tool_calls
+                .take()
+                .or_else(|| framing.output_tool_calls(&out.text, &[]));
+        }
     }
+    #[cfg(not(feature = "llm-llamacpp"))]
+    let _ = (prompt, backend_split);
     out
 }
 
@@ -285,11 +310,12 @@ mod tests {
     const LFM2_CALL: &str = "<|tool_call_start|>[get_weather(city=\"Paris\")]<|tool_call_end|>";
 
     /// Backend with a fixed chat render and a fixed raw output, which records
-    /// the raw prompts it is handed.
+    /// the raw prompts it is handed and the stops they run with.
     struct RawOutputBackend {
         rendered: String,
         output: GenerationOutput,
         raw_prompts: Mutex<Vec<String>>,
+        raw_stops: Mutex<Vec<String>>,
     }
 
     impl RawOutputBackend {
@@ -302,7 +328,15 @@ mod tests {
                 rendered: rendered.to_string(),
                 output,
                 raw_prompts: Mutex::new(Vec::new()),
+                raw_stops: Mutex::new(Vec::new()),
             }
+        }
+
+        fn raw_stops(&self) -> Vec<String> {
+            self.raw_stops
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
         }
 
         fn raw_prompt(&self) -> String {
@@ -355,12 +389,16 @@ mod tests {
         fn generate_raw(
             &self,
             prompt: &str,
-            _config: &GenerationConfig,
+            config: &GenerationConfig,
         ) -> LlmResult<GenerationOutput> {
             self.raw_prompts
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .push(prompt.to_string());
+            *self
+                .raw_stops
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = config.stop_sequences.clone();
             Ok(self.output.clone())
         }
     }
@@ -381,6 +419,7 @@ mod tests {
             prefill_tps: None,
             image_preprocess_ms: None,
             reasoning_content: reasoning.map(str::to_string),
+            tool_calls: None,
         }
     }
 
@@ -490,6 +529,104 @@ mod tests {
         assert_eq!(out.reasoning_content, None);
     }
 
+    /// Inkling's template render of the weather question with a
+    /// `get_weather` tool, at the default thinking effort.
+    const INKLING_PROMPT: &str = "<|message_system|>tool_declare<|content_xml|>[{\"description\":\"Get the current weather for a city\",\"name\":\"get_weather\",\"parameters\":{\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"],\"type\":\"object\"},\"type\":\"function\"}]<|end_message|><|message_system|><|content_text|>Thinking effort level: 0.9<|end_message|><|message_user|><|content_text|>What's the weather in Paris?<|end_message|>";
+    /// An Inkling call for that question, decoded as xybrid returns it.
+    const INKLING_CALL: &str = "<|message_model|>get_weather<|content_invoke_tool_json|>{\"name\":\"get_weather\",\"args\":{\"city\":\"Paris\"}}<|end_message|>";
+
+    /// Inkling's continuation answers in message blocks and ends on its
+    /// end-of-sampling token, which the raw path keeps: the batch cleanup
+    /// decodes the blocks, cuts the token and splits the thought off.
+    #[test]
+    fn inkling_continuation_decodes_the_blocks_and_splits_the_thought() {
+        let backend = RawOutputBackend::new(
+            INKLING_PROMPT,
+            "<|message_model|><|content_thinking|>The tool says 21.<|end_message|>\
+             <|message_model|><|content_text|>It is sunny and 21°C in Paris.<|end_message|>\
+             <|content_model_end_sampling|>",
+            "stop",
+        );
+
+        let out = run_batch(&backend, INKLING_CALL);
+
+        let prompt = backend.raw_prompt();
+        assert!(
+            prompt.starts_with(&format!("{INKLING_PROMPT}{INKLING_CALL}<|content_model_end_sampling|><|message_tool|>get_weather<|content_text|>")),
+            "the continuation replays the call and frames the result: {prompt}"
+        );
+        assert!(prompt.ends_with("<|end_message|>"), "{prompt}");
+        assert_eq!(out.text, "It is sunny and 21°C in Paris.");
+        assert_eq!(out.reasoning_content.as_deref(), Some("The tool says 21."));
+        assert_eq!(out.tool_calls.map(|calls| calls.len()), Some(0));
+        let stops = backend.raw_stops();
+        for marker in INKLING_TURN_END_MARKERS {
+            assert!(
+                stops.iter().any(|stop| stop == marker),
+                "{marker}: {stops:?}"
+            );
+        }
+    }
+
+    /// Inkling's turn ends stop only Inkling continuations: other families'
+    /// output may quote them.
+    #[test]
+    fn inkling_turn_ends_stop_only_inkling_continuations() {
+        let backend = RawOutputBackend::new(CHATML_PRIMED_PROMPT, "It is sunny.", "stop");
+
+        run_batch(&backend, LFM2_CALL);
+
+        let stops = backend.raw_stops();
+        for marker in INKLING_TURN_END_MARKERS {
+            assert!(
+                !stops.iter().any(|stop| stop == marker),
+                "{marker}: {stops:?}"
+            );
+        }
+    }
+
+    /// A continuation that calls again reports only Inkling's own call
+    /// blocks: an answer quoting another family's notation is text.
+    #[test]
+    fn inkling_continuation_calls_are_its_own_blocks_only() {
+        let lfm3_example = "<tool_call>\n<function=get_weather>\n<parameter=city>\nLyon\n</parameter>\n</function>\n</tool_call>";
+        for (raw, calls) in [
+            (
+                format!("<|message_model|><|content_text|>LFM3 would write {lfm3_example}<|end_message|>"),
+                0,
+            ),
+            (
+                format!("<|message_model|><|content_text|>And Lyon?<|end_message|>{INKLING_CALL}<|content_model_end_sampling|>"),
+                1,
+            ),
+        ] {
+            let backend = RawOutputBackend::new(INKLING_PROMPT, &raw, "stop");
+
+            let out = run_batch(&backend, INKLING_CALL);
+
+            assert_eq!(out.tool_calls.map(|found| found.len()), Some(calls), "{raw}");
+        }
+    }
+
+    /// A thought the budget cut short is reasoning, not the answer, even
+    /// unprimed: the decoded block carries its own `<think>`.
+    #[test]
+    fn inkling_continuation_out_of_budget_mid_thought_has_no_answer() {
+        let backend = RawOutputBackend::new(
+            INKLING_PROMPT,
+            "<|message_model|><|content_thinking|>The tool says it is sunny and",
+            "length",
+        );
+
+        let out = run_batch(&backend, INKLING_CALL);
+
+        assert_eq!(out.text, "");
+        assert_eq!(
+            out.reasoning_content.as_deref(),
+            Some("The tool says it is sunny and")
+        );
+    }
+
     /// The streaming backend splits the reasoning itself; priming its split
     /// text again would turn a truncated answer into reasoning.
     #[test]
@@ -572,5 +709,99 @@ mod tests {
 
         assert_eq!(out.text, "It is sunny and");
         assert_eq!(out.reasoning_content.as_deref(), Some("The tool says 21."));
+    }
+
+    /// The streaming backend already split an Inkling turn by its blocks;
+    /// the cleanup must not read the answer's `<think>` text as a thought.
+    #[test]
+    fn streamed_inkling_continuation_keeps_think_text_in_the_answer() {
+        struct DecodedStreamBackend(RawOutputBackend);
+
+        impl LlmBackend for DecodedStreamBackend {
+            fn name(&self) -> &str {
+                self.0.name()
+            }
+
+            fn supported_formats(&self) -> Vec<&'static str> {
+                self.0.supported_formats()
+            }
+
+            fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
+                Ok(())
+            }
+
+            fn is_loaded(&self) -> bool {
+                true
+            }
+
+            fn unload(&mut self) -> LlmResult<()> {
+                Ok(())
+            }
+
+            fn generate(
+                &self,
+                messages: &[ChatMessage],
+                config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                self.0.generate(messages, config)
+            }
+
+            fn render_chat_prompt(
+                &self,
+                messages: &[ChatMessage],
+                config: &GenerationConfig,
+            ) -> LlmResult<String> {
+                self.0.render_chat_prompt(messages, config)
+            }
+
+            fn generate_raw(
+                &self,
+                prompt: &str,
+                config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                self.0.generate_raw(prompt, config)
+            }
+
+            fn generate_raw_streaming(
+                &self,
+                prompt: &str,
+                config: &GenerationConfig,
+                _on_token: StreamingCallback<'_>,
+            ) -> LlmResult<GenerationOutput> {
+                self.0.generate_raw(prompt, config)
+            }
+        }
+
+        // What the llama.cpp backend returns for an Inkling answer that
+        // spells a `<think>` tag.
+        let backend = DecodedStreamBackend(RawOutputBackend::with_output(
+            INKLING_PROMPT,
+            GenerationOutput {
+                tool_calls: Some(Vec::new()),
+                ..output(
+                    "Wrap it in <think> tags.",
+                    "stop",
+                    Some("The user asks about tags."),
+                )
+            },
+        ));
+        let input = weather_results(INKLING_CALL);
+        let continuation = ToolContinuation::from_input(&input).expect("a continuation");
+
+        let out = run_tool_continuation_streaming(
+            &backend,
+            &[ChatMessage::user("What's the weather in Paris?")],
+            &GenerationConfig::default(),
+            continuation.input,
+            continuation.responses_json,
+            Box::new(|_token| Ok(())),
+        )
+        .expect("the continuation runs");
+
+        assert_eq!(out.text, "Wrap it in <think> tags.");
+        assert_eq!(
+            out.reasoning_content.as_deref(),
+            Some("The user asks about tags.")
+        );
     }
 }

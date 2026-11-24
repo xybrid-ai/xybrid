@@ -26,7 +26,7 @@ use minijinja::value::Kwargs;
 use minijinja::{context, Environment, Value};
 use minijinja_contrib::pycompat::unknown_method_callback;
 
-use crate::runtime_adapter::ChatMessage;
+use crate::runtime_adapter::{ChatMessage, ReasoningEffort};
 
 /// Error from compiling or rendering a GGUF's embedded Jinja chat template.
 #[derive(Debug, thiserror::Error)]
@@ -60,15 +60,20 @@ pub(super) struct RenderOptions {
     /// an empty array would also be falsy, but omission matches the
     /// HuggingFace `apply_chat_template` contract.
     pub tools: Option<serde_json::Value>,
+    /// The `reasoning_effort` template variable (Inkling's thinking switch).
+    /// `None` omits the key, so the template applies its own default.
+    pub reasoning_effort: Option<ReasoningEffort>,
 }
 
 impl Default for RenderOptions {
-    /// Generation prompt on, thinking explicitly on, no tools.
+    /// Generation prompt on, thinking explicitly on, no tools, the template's
+    /// own reasoning effort.
     fn default() -> Self {
         Self {
             add_generation_prompt: true,
             enable_thinking: Some(true),
             tools: None,
+            reasoning_effort: None,
         }
     }
 }
@@ -130,6 +135,10 @@ impl JinjaChatTemplate {
         // with plain `json.dumps` for the same reason; we register the
         // plain-JSON equivalent so prompts match what models trained on.
         env.add_filter("tojson", tojson_plain);
+        // Templates validate their inputs with HF's `raise_exception`; without
+        // it a bad value would fail as an unknown function instead of with
+        // the template's own message.
+        env.add_function("raise_exception", raise_exception);
         env.add_template("chat", &self.template)
             .map_err(|e| JinjaTemplateError::Render(format!("compile: {e}")))?;
 
@@ -163,6 +172,13 @@ impl JinjaChatTemplate {
         };
         let ctx = match &options.tools {
             Some(tools) => context! { tools => Value::from_serialize(tools), ..ctx },
+            None => ctx,
+        };
+        let ctx = match &options.reasoning_effort {
+            Some(ReasoningEffort::Level(level)) => {
+                context! { reasoning_effort => level.as_str(), ..ctx }
+            }
+            Some(ReasoningEffort::Value(value)) => context! { reasoning_effort => *value, ..ctx },
             None => ctx,
         };
 
@@ -240,6 +256,15 @@ fn neutralize_generation_tags(template: &str) -> String {
     out
 }
 
+/// HF's `raise_exception(message)`: fails the render with the template's own
+/// message.
+fn raise_exception(message: String) -> Result<Value, minijinja::Error> {
+    Err(minijinja::Error::new(
+        minijinja::ErrorKind::InvalidOperation,
+        message,
+    ))
+}
+
 /// Plain-JSON `tojson` filter, registered in place of minijinja's builtin.
 ///
 /// The builtin (cargo feature `json`, not enabled here) escapes `<`, `>`,
@@ -251,6 +276,14 @@ fn neutralize_generation_tags(template: &str) -> String {
 /// Argument handling mirrors the builtin — `indent` positional or keyword,
 /// integer width or `true` for 2 spaces — so templates written for either
 /// engine (LFM2's bare `tojson`, Llama-3.1's `tojson(indent=4)`) render.
+///
+/// HF's `sort_keys` and `separators` keywords are honored too (Inkling
+/// declares tools with `tojson(sort_keys=true, separators=(",", ":"))`):
+/// `sort_keys` orders every object's keys, and `separators` sets the item and
+/// key separators as `json.dumps` does, a newline and the indent following
+/// the item separator when `indent` is set. Without `separators` the output
+/// keeps this filter's existing form: compact, or `serde_json`'s pretty form
+/// with `indent`.
 fn tojson_plain(
     value: Value,
     indent: Option<Value>,
@@ -268,6 +301,8 @@ fn tojson_plain(
         Some(indent) => Some(indent),
         None => kwargs.get("indent")?,
     };
+    let sort_keys: Option<bool> = kwargs.get("sort_keys")?;
+    let separators: Option<Value> = kwargs.get("separators")?;
     kwargs.assert_all_used()?;
     let indent_width = match indent {
         None => None,
@@ -277,6 +312,25 @@ fn tojson_plain(
             None => Some(usize::try_from(val.clone())?),
         },
     };
+
+    if separators.is_some() || sort_keys == Some(true) {
+        let (item, key) = match separators {
+            Some(separators) => separator_pair(&separators)?,
+            // This filter's existing forms: compact, or pretty with indent.
+            None if indent_width.is_some() => (",".to_string(), ": ".to_string()),
+            None => (",".to_string(), ":".to_string()),
+        };
+        let style = JsonStyle {
+            item_separator: &item,
+            key_separator: &key,
+            sort_keys: sort_keys.unwrap_or(false),
+            indent: indent_width,
+        };
+        let json = serde_json::to_value(&value).map_err(invalid_op)?;
+        let mut out = String::new();
+        write_json(&json, &style, 0, &mut out).map_err(invalid_op)?;
+        return Ok(out);
+    }
 
     match indent_width {
         Some(width) => {
@@ -289,6 +343,85 @@ fn tojson_plain(
         }
         None => serde_json::to_string(&value).map_err(invalid_op),
     }
+}
+
+/// The `(item, key)` pair a `separators` argument names.
+fn separator_pair(separators: &Value) -> Result<(String, String), minijinja::Error> {
+    let invalid = || {
+        minijinja::Error::new(
+            minijinja::ErrorKind::InvalidOperation,
+            "tojson separators must be a pair of strings",
+        )
+    };
+    let parts = separators
+        .try_iter()
+        .map_err(|_| invalid())?
+        .map(|part| part.as_str().map(str::to_string).ok_or_else(invalid))
+        .collect::<Result<Vec<_>, _>>()?;
+    match <[String; 2]>::try_from(parts) {
+        Ok([item, key]) => Ok((item, key)),
+        Err(_) => Err(invalid()),
+    }
+}
+
+/// How [`write_json`] lays out JSON: `json.dumps`' `separators`, `sort_keys`
+/// and `indent`.
+struct JsonStyle<'a> {
+    item_separator: &'a str,
+    key_separator: &'a str,
+    sort_keys: bool,
+    indent: Option<usize>,
+}
+
+/// Writes `value` the way Python's `json.dumps` does with `style`: with an
+/// indent, each item goes on its own line after the item separator, and an
+/// empty array or object stays `[]` / `{}`.
+fn write_json(
+    value: &serde_json::Value,
+    style: &JsonStyle<'_>,
+    depth: usize,
+    out: &mut String,
+) -> Result<(), serde_json::Error> {
+    let newline = |out: &mut String, depth: usize| {
+        if let Some(width) = style.indent {
+            out.push('\n');
+            out.push_str(&" ".repeat(width * depth));
+        }
+    };
+    match value {
+        serde_json::Value::Array(items) if !items.is_empty() => {
+            out.push('[');
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(style.item_separator);
+                }
+                newline(out, depth + 1);
+                write_json(item, style, depth + 1, out)?;
+            }
+            newline(out, depth);
+            out.push(']');
+        }
+        serde_json::Value::Object(map) if !map.is_empty() => {
+            let mut entries: Vec<_> = map.iter().collect();
+            if style.sort_keys {
+                entries.sort_by_key(|(key, _)| *key);
+            }
+            out.push('{');
+            for (index, (key, item)) in entries.into_iter().enumerate() {
+                if index > 0 {
+                    out.push_str(style.item_separator);
+                }
+                newline(out, depth + 1);
+                out.push_str(&serde_json::to_string(key)?);
+                out.push_str(style.key_separator);
+                write_json(item, style, depth + 1, out)?;
+            }
+            newline(out, depth);
+            out.push('}');
+        }
+        other => out.push_str(&serde_json::to_string(other)?),
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -358,6 +491,7 @@ mod tests {
             add_generation_prompt: false,
             enable_thinking: Some(true),
             tools: None,
+            reasoning_effort: None,
         };
         let out = tmpl.render(&[ChatMessage::user("hello")], &opts).unwrap();
         assert!(!out.contains("<start_of_turn>assistant"));
@@ -388,6 +522,7 @@ mod tests {
                     add_generation_prompt: true,
                     enable_thinking: Some(false),
                     tools: None,
+                    reasoning_effort: None,
                 },
             )
             .unwrap();
@@ -410,6 +545,7 @@ mod tests {
                     add_generation_prompt: true,
                     enable_thinking: Some(true),
                     tools: None,
+                    reasoning_effort: None,
                 },
             )
             .unwrap();
@@ -567,6 +703,110 @@ mod tests {
         );
     }
 
+    /// Inkling declares tools with `tojson(sort_keys=true,
+    /// separators=(",", ":"))`; `json.dumps` reads both keywords, and so must
+    /// this filter, or the render fails on an unknown keyword.
+    #[test]
+    fn tojson_honors_sort_keys_and_separators_like_json_dumps() {
+        let opts = RenderOptions {
+            tools: Some(serde_json::json!([{"b": 1, "a": [1, 2], "c": {"z": null, "y": "<&>"}}])),
+            ..RenderOptions::default()
+        };
+        let render = |filter: &str| {
+            JinjaChatTemplate::new(format!("{{{{ tools[0] | {filter} }}}}"), None, None)
+                .render(&[], &opts)
+                .unwrap_or_else(|e| panic!("{filter}: {e}"))
+        };
+
+        assert_eq!(
+            render(r#"tojson(sort_keys=true, separators=(",", ":"))"#),
+            r#"{"a":[1,2],"b":1,"c":{"y":"<&>","z":null}}"#
+        );
+        assert_eq!(
+            render(r#"tojson(separators=(", ", ": "), sort_keys=true)"#),
+            r#"{"a": [1, 2], "b": 1, "c": {"y": "<&>", "z": null}}"#
+        );
+        // `json.dumps(x, indent=2, separators=(",", ": "), sort_keys=True)`.
+        assert_eq!(
+            render(r#"tojson(indent=2, separators=(",", ": "), sort_keys=true)"#),
+            "{\n  \"a\": [\n    1,\n    2\n  ],\n  \"b\": 1,\n  \"c\": {\n    \"y\": \"<&>\",\n    \"z\": null\n  }\n}"
+        );
+        // Without the keywords the output keeps its existing forms.
+        assert_eq!(
+            render("tojson"),
+            r#"{"a":[1,2],"b":1,"c":{"y":"<&>","z":null}}"#
+        );
+        assert_eq!(render("tojson(sort_keys=true)"), render("tojson"));
+        assert_eq!(
+            render("tojson(indent=2, sort_keys=true)"),
+            render("tojson(indent=2)")
+        );
+    }
+
+    #[test]
+    fn tojson_rejects_separators_that_are_not_a_pair_of_strings() {
+        for separators in [r#"(",",)"#, r#"(",", ":", ";")"#, r#"(1, 2)"#, r#"",""#] {
+            let tmpl = JinjaChatTemplate::new(
+                format!("{{{{ 1 | tojson(separators={separators}) }}}}"),
+                None,
+                None,
+            );
+            assert!(
+                tmpl.render(&[], &RenderOptions::default()).is_err(),
+                "{separators}"
+            );
+        }
+    }
+
+    /// Templates validate their inputs through HF's `raise_exception`; the
+    /// render fails with the template's own message.
+    #[test]
+    fn raise_exception_fails_the_render_with_the_template_message() {
+        let tmpl = JinjaChatTemplate::new(
+            r#"{{ raise_exception("Unknown message role: " ~ messages[0].role) }}"#,
+            None,
+            None,
+        );
+
+        let err = tmpl
+            .render(&[ChatMessage::user("x")], &RenderOptions::default())
+            .expect_err("the template raised");
+
+        assert!(
+            err.to_string().contains("Unknown message role: user"),
+            "{err}"
+        );
+    }
+
+    /// The effort reaches the template as a string or a number, and an unset
+    /// one leaves the variable undefined so the template's default applies.
+    #[test]
+    fn reasoning_effort_reaches_the_template_only_when_set() {
+        let tmpl = JinjaChatTemplate::new(
+            "{% if reasoning_effort is defined %}{{ reasoning_effort }} {{ reasoning_effort is string }}{% else %}undefined{% endif %}",
+            None,
+            None,
+        );
+        let render = |reasoning_effort| {
+            tmpl.render(
+                &[],
+                &RenderOptions {
+                    reasoning_effort,
+                    ..RenderOptions::default()
+                },
+            )
+            .unwrap()
+        };
+
+        // Booleans print as Jinja2 prints them.
+        assert_eq!(render(None), "undefined");
+        assert_eq!(
+            render(Some(ReasoningEffort::Level("low".to_string()))),
+            "low True"
+        );
+        assert_eq!(render(Some(ReasoningEffort::Value(0.5))), "0.5 False");
+    }
+
     /// LFM2.5-230M's template wraps assistant spans in HF
     /// `{%- generation -%}` / `{%- endgeneration -%}` tags. They must be
     /// neutralized so the template compiles, with whitespace-control
@@ -669,6 +909,7 @@ mod tests {
             add_generation_prompt: true,
             enable_thinking: None,
             tools: None,
+            reasoning_effort: None,
         };
         for case in &goldens.cases {
             assert_eq!(

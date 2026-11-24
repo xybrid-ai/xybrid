@@ -1,4 +1,5 @@
-//! LFM2-family, LFM3, gemma-4-family, and FunctionGemma tool-call protocols.
+//! LFM2-family, LFM3, gemma-4-family, FunctionGemma and Inkling tool-call
+//! protocols.
 //!
 //! LFM2-family GGUF models emit pythonic function-call text between special
 //! markers. LFM3 emits one `<tool_call>` block per call, holding a
@@ -6,9 +7,14 @@
 //! (the notation Qwen3-Coder and Qwen3.5 use too). Gemma-4-family GGUF models
 //! emit `call:name{args}` blocks inside their model turn. FunctionGemma uses
 //! the same structured call grammar with different markers and a different
-//! string delimiter. This module is always compiled because every protocol is
-//! plain text: parsing and continuation composition do not depend on a
-//! specific runtime, feature flag, or I/O surface.
+//! string delimiter. Inkling writes every part of its turn as a message block
+//! and a call as a `<|message_model|>NAME<|content_invoke_tool_json|>` block
+//! holding JSON; the `inkling` module's decoder splits a turn into the
+//! reasoning and the visible text, and Inkling output counts only its own
+//! call blocks as calls ([`parse_tool_calls_in`]). This module is always
+//! compiled because every protocol is plain text: parsing and continuation
+//! composition do not depend on a specific runtime, feature flag, or I/O
+//! surface.
 //!
 //! Model output is untrusted. Malformed candidates are skipped instead of
 //! surfaced as fatal errors so callers can still use surrounding prose or
@@ -19,15 +25,21 @@
 //! schemas when [`parse_tool_calls_with_tools`] has them.
 //!
 //! The cross-protocol scanner and continuation dispatcher live here.
-//! Grammar-specific parsing and response formatting live in `lfm2`, `lfm3`
-//! and `gemma`, with shared cursor primitives isolated in `cursor`.
+//! Grammar-specific parsing and response formatting live in `lfm2`, `lfm3`,
+//! `gemma` and `inkling`, with shared cursor primitives isolated in `cursor`.
 
 mod cursor;
 #[cfg(test)]
 mod functiongemma_tests;
 mod gemma;
+mod inkling;
 mod lfm2;
 mod lfm3;
+
+pub(crate) use inkling::{is_inkling_prompt, is_inkling_template};
+// The output decoder serves the llama.cpp backend's post-processing.
+#[cfg(feature = "llm-llamacpp")]
+pub(crate) use inkling::{decode_inkling_blocks, InklingBlockDecoder};
 
 use crate::gateway::{FunctionCall, Tool, ToolCall};
 use crate::runtime_adapter::AdapterError;
@@ -52,6 +64,50 @@ const LFM3_TOOL_CALL_START: &str = "<tool_call>";
 const LFM3_TOOL_CALL_END: &str = "</tool_call>";
 const LFM3_TOOL_RESPONSE_START: &str = "<tool_response>";
 const LFM3_TOOL_RESPONSE_END: &str = "</tool_response>";
+// Inkling's role headers, content markers and closes; see `inkling`.
+const INKLING_MESSAGE_MODEL: &str = "<|message_model|>";
+const INKLING_MESSAGE_USER: &str = "<|message_user|>";
+const INKLING_MESSAGE_SYSTEM: &str = "<|message_system|>";
+const INKLING_MESSAGE_TOOL: &str = "<|message_tool|>";
+const INKLING_CONTENT_THINKING: &str = "<|content_thinking|>";
+const INKLING_CONTENT_TEXT: &str = "<|content_text|>";
+const INKLING_CONTENT_TOOL_JSON: &str = "<|content_invoke_tool_json|>";
+const INKLING_CONTENT_XML: &str = "<|content_xml|>";
+const INKLING_CONTENT_IMAGE: &str = "<|content_image|>";
+const INKLING_END_MESSAGE: &str = "<|end_message|>";
+/// Inkling's end-of-generation token, written after every model turn.
+const INKLING_END_SAMPLING: &str = "<|content_model_end_sampling|>";
+/// What ends an Inkling model turn: its end-of-sampling token, or another
+/// role's header. Its own `<|message_model|>` and `<|end_message|>` do not,
+/// since one model turn is several blocks. Stops for Inkling prompts only:
+/// other families' output may quote these strings.
+pub(crate) const INKLING_TURN_END_MARKERS: &[&str] = &[
+    INKLING_END_SAMPLING,
+    INKLING_MESSAGE_USER,
+    INKLING_MESSAGE_SYSTEM,
+    INKLING_MESSAGE_TOOL,
+];
+/// The tool-call block of decoded Inkling output, where a model header
+/// survives only on a named block: the only block Inkling output may
+/// suppress or call with (see [`parse_tool_calls_in`]).
+pub(crate) const INKLING_TOOL_BLOCK_MARKERS: &[(&str, &str, bool)] =
+    &[(INKLING_MESSAGE_MODEL, INKLING_END_MESSAGE, true)];
+/// Every Inkling marker a tool result must not smuggle into a continuation,
+/// with the plain text it is neutralized to. Applied alongside
+/// [`RESERVED_PROTOCOL_MARKERS`].
+const INKLING_RESERVED_MARKERS: &[(&str, &str)] = &[
+    (INKLING_MESSAGE_MODEL, "message_model"),
+    (INKLING_MESSAGE_USER, "message_user"),
+    (INKLING_MESSAGE_SYSTEM, "message_system"),
+    (INKLING_MESSAGE_TOOL, "message_tool"),
+    (INKLING_CONTENT_THINKING, "content_thinking"),
+    (INKLING_CONTENT_TEXT, "content_text"),
+    (INKLING_CONTENT_TOOL_JSON, "content_invoke_tool_json"),
+    (INKLING_CONTENT_XML, "content_xml"),
+    (INKLING_CONTENT_IMAGE, "content_image"),
+    (INKLING_END_MESSAGE, "end_message"),
+    (INKLING_END_SAMPLING, "content_model_end_sampling"),
+];
 const FAMILY_MARKERS: &[&str] = &[
     TOOL_CALL_START,
     TOOL_CALL_END,
@@ -71,6 +127,10 @@ const FAMILY_MARKERS: &[&str] = &[
     LFM3_TOOL_CALL_END,
     LFM3_TOOL_RESPONSE_START,
     LFM3_TOOL_RESPONSE_END,
+    // In decoded Inkling output a model header survives only on a named
+    // block, which is a tool call.
+    INKLING_MESSAGE_MODEL,
+    INKLING_CONTENT_TOOL_JSON,
 ];
 const RESERVED_PROTOCOL_MARKERS: &[&str] = &[
     TOOL_CALL_START,
@@ -115,7 +175,8 @@ const RESERVED_PROTOCOL_MARKERS: &[&str] = &[
 ];
 
 /// Shared turn markers used by continuation stop configuration and
-/// [`truncate_at_turn_marker`].
+/// [`truncate_at_turn_marker`]. Inkling's ([`INKLING_TURN_END_MARKERS`]) are
+/// added only for Inkling prompts.
 pub(crate) const TURN_MARKERS: &[&str] = &[
     "<|im_end|>",
     "<|im_start|>",
@@ -130,7 +191,10 @@ pub(crate) const TURN_MARKERS: &[&str] = &[
 /// for streaming suppression and any consumer that must recognize whole
 /// blocks. Includes each family's calls plus structured Gemma and LFM3
 /// response blocks and Gemma declarations. Declarations and responses are
-/// suppressible protocol traffic but not tool calls, hence the flag.
+/// suppressible protocol traffic but not tool calls, hence the flag. The
+/// Inkling entry matches decoded output, where a model header survives only
+/// on a tool-call block; Inkling output itself suppresses only that entry
+/// ([`INKLING_TOOL_BLOCK_MARKERS`]).
 pub(crate) const TOOL_BLOCK_MARKERS: &[(&str, &str, bool)] = &[
     (TOOL_CALL_START, TOOL_CALL_END, true),
     (GEMMA_TOOL_CALL_START, GEMMA_TOOL_CALL_END, true),
@@ -152,6 +216,7 @@ pub(crate) const TOOL_BLOCK_MARKERS: &[(&str, &str, bool)] = &[
     ),
     (LFM3_TOOL_CALL_START, LFM3_TOOL_CALL_END, true),
     (LFM3_TOOL_RESPONSE_START, LFM3_TOOL_RESPONSE_END, false),
+    (INKLING_MESSAGE_MODEL, INKLING_END_MESSAGE, true),
 ];
 
 /// Which tool-call text protocol a model speaks. Owned here so every
@@ -175,13 +240,17 @@ pub(crate) enum ToolCallProtocol {
     /// FunctionGemma: Gemma turns, `call:name{...}` notation with
     /// `<escape>`-delimited strings, wrapper-shaped tool declarations.
     FunctionGemma,
+    /// Inkling: message blocks for every part of a turn, JSON calls in
+    /// `<|content_invoke_tool_json|>` blocks, JSON tool declarations, results
+    /// in `<|message_tool|>` blocks. See [`inkling`].
+    Inkling,
 }
 
 impl ToolCallProtocol {
     /// Detect from an embedded chat template's source text.
     /// Structured Gemma templates carry distinct declaration markers; the
-    /// LFM2/ChatML marker family contains neither marker, and LFM3 is told
-    /// apart by [`is_lfm3_template`].
+    /// LFM2/ChatML marker family contains neither marker, LFM3 is told apart
+    /// by [`is_lfm3_template`] and Inkling by [`is_inkling_template`].
     pub(crate) fn detect_from_template(template: &str) -> Self {
         if template.contains(FUNCTION_GEMMA_DECLARATION_START) {
             Self::FunctionGemma
@@ -189,13 +258,20 @@ impl ToolCallProtocol {
             Self::Gemma
         } else if is_lfm3_template(template) {
             Self::Lfm3
+        } else if is_inkling_template(template) {
+            Self::Inkling
         } else {
             Self::Lfm2
         }
     }
 
+    /// Detect from a rendered prompt. Inkling is read from how the prompt
+    /// starts, so it is checked first: the others look for markers anywhere,
+    /// and an Inkling conversation can quote them.
     pub(crate) fn detect_from_prompt(prompt: &str) -> Option<Self> {
-        if prompt.contains(FUNCTION_GEMMA_DECLARATION_START)
+        if is_inkling_prompt(prompt) {
+            Some(Self::Inkling)
+        } else if prompt.contains(FUNCTION_GEMMA_DECLARATION_START)
             || prompt.contains(FUNCTION_GEMMA_DECLARATION_END)
         {
             Some(Self::FunctionGemma)
@@ -216,6 +292,7 @@ impl ToolCallProtocol {
             Self::Lfm3 => LFM3_TOOL_CALL_START,
             Self::Gemma => GEMMA_TOOL_CALL_START,
             Self::FunctionGemma => FUNCTION_GEMMA_TOOL_CALL_START,
+            Self::Inkling => INKLING_MESSAGE_MODEL,
         }
     }
 
@@ -225,6 +302,7 @@ impl ToolCallProtocol {
             Self::Lfm3 => LFM3_TOOL_CALL_END,
             Self::Gemma => GEMMA_TOOL_CALL_END,
             Self::FunctionGemma => FUNCTION_GEMMA_TOOL_CALL_END,
+            Self::Inkling => INKLING_END_MESSAGE,
         }
     }
 }
@@ -322,10 +400,47 @@ pub fn parse_tool_calls(text: &str) -> Vec<ToolCall> {
 /// assert_eq!(calls[0].function.arguments, r#"{"postcode":"75001","verified":true}"#);
 /// ```
 pub fn parse_tool_calls_with_tools(text: &str, tools: &[Tool]) -> Vec<ToolCall> {
+    scan_tool_calls(text, tools, ALL_PROTOCOLS)
+        .into_iter()
+        .map(|(_, call)| call)
+        .collect()
+}
+
+/// [`parse_tool_calls_with_tools`] limited to one protocol's call blocks.
+///
+/// Inkling output uses it: its text blocks may quote another family's call
+/// notation, which is answer text, not a call.
+pub(crate) fn parse_tool_calls_in(
+    protocol: ToolCallProtocol,
+    text: &str,
+    tools: &[Tool],
+) -> Vec<ToolCall> {
+    scan_tool_calls(text, tools, &[protocol])
+        .into_iter()
+        .map(|(_, call)| call)
+        .collect()
+}
+
+/// Every protocol the cross-family scan reads.
+const ALL_PROTOCOLS: &[ToolCallProtocol] = &[
+    ToolCallProtocol::Lfm2,
+    ToolCallProtocol::Lfm3,
+    ToolCallProtocol::Gemma,
+    ToolCallProtocol::FunctionGemma,
+    ToolCallProtocol::Inkling,
+];
+
+/// The calls in `text` from `protocols`' blocks, each with the protocol whose
+/// block it came from, numbered `call_0`, `call_1`, … in order.
+fn scan_tool_calls(
+    text: &str,
+    tools: &[Tool],
+    protocols: &[ToolCallProtocol],
+) -> Vec<(ToolCallProtocol, ToolCall)> {
     let mut parsed = Vec::new();
     let mut rest = text;
 
-    while let Some((protocol, start)) = find_next_call_marker(rest) {
+    while let Some((protocol, start)) = find_next_call_marker(rest, protocols) {
         let after_start = &rest[start + protocol.call_start().len()..];
         let Some(end) = after_start.find(protocol.call_end()) else {
             break;
@@ -344,17 +459,27 @@ pub fn parse_tool_calls_with_tools(text: &str, tools: &[Tool]) -> Vec<ToolCall> 
                     .into_iter()
                     .collect()
             }
+            // Untrimmed: the name hint runs up to the JSON marker. Reasoning
+            // and text blocks of raw (undecoded) output land here too and
+            // parse to nothing.
+            ToolCallProtocol::Inkling => inkling::parse_inkling_block(&after_start[..end])
+                .into_iter()
+                .collect(),
         };
 
         for call in calls {
-            parsed.push(ToolCall {
-                id: format!("call_{}", parsed.len()),
-                tool_type: "function".into(),
-                function: FunctionCall {
-                    name: call.name,
-                    arguments: call.arguments,
+            let id = format!("call_{}", parsed.len());
+            parsed.push((
+                protocol,
+                ToolCall {
+                    id,
+                    tool_type: "function".into(),
+                    function: FunctionCall {
+                        name: call.name,
+                        arguments: call.arguments,
+                    },
                 },
-            });
+            ));
         }
 
         rest = &after_start[end + protocol.call_end().len()..];
@@ -371,6 +496,10 @@ pub fn parse_tool_calls_with_tools(text: &str, tools: &[Tool]) -> Vec<ToolCall> 
 /// models only emit response markers as protocol scaffolding — gemma-4 in
 /// particular is trained to end a call turn with a bare `<|tool_response>`
 /// opener for the runtime to fill in — never as answer text.
+///
+/// Inkling output is expected decoded, as xybrid returns it: there a model
+/// header survives only on a tool-call block. Raw Inkling blocks would be
+/// stripped whole, answer text included.
 ///
 /// # Examples
 ///
@@ -406,6 +535,7 @@ pub fn strip_tool_calls(text: &str) -> String {
         ),
         (LFM3_TOOL_CALL_START, LFM3_TOOL_CALL_END),
         (LFM3_TOOL_RESPONSE_START, LFM3_TOOL_RESPONSE_END),
+        (INKLING_MESSAGE_MODEL, INKLING_END_MESSAGE),
     ];
 
     let mut output = String::new();
@@ -459,6 +589,10 @@ pub fn has_tool_markers(text: &str) -> bool {
 /// prompts are detected from their declaration or turn markers; their tool
 /// responses are appended directly after `prior_assistant_text` because
 /// their templates emit no new model-turn header after a tool response.
+/// Inkling prompts, detected from their opening system block, get the prior
+/// turn written back as blocks, its end-of-sampling token and one
+/// `<|message_tool|>` block per response; the model opens its next block
+/// itself.
 ///
 /// Crate-internal on purpose: callers drive continuations through
 /// [`Envelope::tool_results`](crate::ir::Envelope::tool_results), not by
@@ -467,9 +601,11 @@ pub fn has_tool_markers(text: &str) -> bool {
 /// # Errors
 ///
 /// Returns [`AdapterError::InvalidInput`] when responses do not exactly answer
-/// the prior calls, `base_prompt` has no supported protocol markers, or the
+/// the prior calls, `base_prompt` has no supported protocol markers, the
 /// prior calls use LFM3's notation on a prompt that is not LFM3's (Qwen3.5
-/// writes the same notation but frames tool results differently).
+/// writes the same notation but frames tool results differently), or the
+/// prior calls are Inkling's on a prompt that is not. An Inkling prompt
+/// counts only Inkling call blocks as the prior calls.
 pub(crate) fn compose_tool_continuation(
     base_prompt: &str,
     prior_assistant_text: &str,
@@ -478,21 +614,43 @@ pub(crate) fn compose_tool_continuation(
     let value: Value = serde_json::from_str(tool_responses_json).map_err(|err| {
         AdapterError::InvalidInput(format!("tool_responses_json must be valid json: {err}"))
     })?;
-    let calls = parse_tool_calls(prior_assistant_text);
+    let protocol = ToolCallProtocol::detect_from_prompt(base_prompt);
+    // An Inkling turn's calls are its own call blocks only: its text blocks
+    // may quote another family's notation.
+    let scanned = scan_tool_calls(
+        prior_assistant_text,
+        &[],
+        match protocol {
+            Some(ToolCallProtocol::Inkling) => &[ToolCallProtocol::Inkling],
+            _ => ALL_PROTOCOLS,
+        },
+    );
+    let call_protocols: Vec<ToolCallProtocol> = scanned.iter().map(|(p, _)| *p).collect();
+    let calls: Vec<ToolCall> = scanned.into_iter().map(|(_, call)| call).collect();
     let responses = validate_tool_responses(&value, &calls)?;
 
-    let protocol = ToolCallProtocol::detect_from_prompt(base_prompt).ok_or_else(|| {
+    let protocol = protocol.ok_or_else(|| {
         AdapterError::InvalidInput(
             "could not detect a supported tool-call protocol in the rendered prompt; refusing \
              to substitute a ChatML continuation"
                 .to_string(),
         )
     })?;
-    if protocol != ToolCallProtocol::Lfm3 && prior_assistant_text.contains(LFM3_TOOL_CALL_START) {
+    // Which family wrote a call is read from the block it parsed from, not
+    // from marker text the turn may quote (in an argument, say).
+    if protocol != ToolCallProtocol::Lfm3 && call_protocols.contains(&ToolCallProtocol::Lfm3) {
         return Err(AdapterError::InvalidInput(
             "the prior turn's <tool_call> calls come from a template whose tool-result framing \
              xybrid does not implement (only LFM3's); refusing to substitute another family's \
              continuation"
+                .to_string(),
+        ));
+    }
+    if protocol != ToolCallProtocol::Inkling && call_protocols.contains(&ToolCallProtocol::Inkling)
+    {
+        return Err(AdapterError::InvalidInput(
+            "the prior turn's calls are Inkling's but the rendered prompt is not; refusing to \
+             substitute another family's continuation"
                 .to_string(),
         ));
     }
@@ -512,6 +670,9 @@ pub(crate) fn compose_tool_continuation(
             prior_assistant_text,
             &responses,
         ),
+        ToolCallProtocol::Inkling => {
+            inkling::compose_inkling_continuation(base_prompt, prior_assistant_text, &responses)
+        }
     }
 }
 
@@ -650,6 +811,9 @@ fn neutralize_reserved_markers(value: &str) -> String {
     for marker in RESERVED_PROTOCOL_MARKERS {
         sanitized = sanitized.replace(marker, neutralized_marker(marker));
     }
+    for (marker, neutral) in INKLING_RESERVED_MARKERS {
+        sanitized = sanitized.replace(marker, neutral);
+    }
     sanitized
 }
 
@@ -729,19 +893,17 @@ pub(crate) fn truncate_at_turn_marker(text: &mut String) {
     }
 }
 
-fn find_next_call_marker(text: &str) -> Option<(ToolCallProtocol, usize)> {
-    [
-        (ToolCallProtocol::Lfm2, TOOL_CALL_START),
-        (ToolCallProtocol::Lfm3, LFM3_TOOL_CALL_START),
-        (ToolCallProtocol::Gemma, GEMMA_TOOL_CALL_START),
-        (
-            ToolCallProtocol::FunctionGemma,
-            FUNCTION_GEMMA_TOOL_CALL_START,
-        ),
-    ]
-    .into_iter()
-    .filter_map(|(protocol, marker)| text.find(marker).map(|index| (protocol, index)))
-    .min_by_key(|(_, index)| *index)
+fn find_next_call_marker(
+    text: &str,
+    protocols: &[ToolCallProtocol],
+) -> Option<(ToolCallProtocol, usize)> {
+    protocols
+        .iter()
+        .filter_map(|&protocol| {
+            text.find(protocol.call_start())
+                .map(|index| (protocol, index))
+        })
+        .min_by_key(|(_, index)| *index)
 }
 
 #[cfg(test)]

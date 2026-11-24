@@ -1,6 +1,6 @@
 {
-  "description": "Byte fixtures for the llama.cpp adapter's embedded chat-template render: chat::render_embedded_template, the model-free half of render_embedded (add_generation_prompt true). Cases with tools null take a tool-less template path (the fallback, or LFM3's template-only render); cases with tools take the tools path, with the definitions in the shape render_with_tools passes for these templates (bare function objects). bos_token is absent (suppressed) unless the case models a vocabulary that does not add BOS itself (LFM3), and enable_thinking is false unless set. template is inline text or a file relative to the workspace root. The renders must stay byte-identical.",
-  "generator": "Captured on master 89400752 (before enable_thinking became Option<bool>) by a throwaway test that called render_embedded_template on each case's inputs and wrote the results with serde_json; the rendered fields were copied in unchanged. The lfm3 cases were added with templates/lfm3.jinja, byte-identical to LiquidAI/LFM3-1.7B's chat_template.jinja (revision 40ebe0aa6662c9d40389c2f5d565b6a2c6aebacd), the template embedded in its GGUFs and llama.cpp's models/templates/LFM3.jinja (v0.8.0, 8642541b): their tool-less renders come from Hugging Face transformers' chat-template environment (Jinja2 3.1.6) and match render_embedded_template byte for byte; the tools case is render_embedded_template's own output, because its tool JSON (sorted keys, compact nesting) differs from transformers' json.dumps. Regenerate only for an intended render change.",
+  "description": "Byte fixtures for the llama.cpp adapter's embedded chat-template render: chat::render_embedded_template, the model-free half of render_embedded (add_generation_prompt true). Cases with tools null take a tool-less template path (the fallback, or LFM3's and Inkling's template-only render); cases with tools take the tools path, with the definitions in the shape render_with_tools passes for these templates (bare function objects, or the OpenAI wrapper for Inkling). bos_token is absent (suppressed) unless the case models a vocabulary that does not add BOS itself (LFM3), enable_thinking is false unless set, and reasoning_effort is omitted unless set. template is inline text or a file relative to the workspace root. The renders must stay byte-identical.",
+  "generator": "Captured on master 89400752 (before enable_thinking became Option<bool>) by a throwaway test that called render_embedded_template on each case's inputs and wrote the results with serde_json; the rendered fields were copied in unchanged. The lfm3 cases were added with templates/lfm3.jinja, byte-identical to LiquidAI/LFM3-1.7B's chat_template.jinja (revision 40ebe0aa6662c9d40389c2f5d565b6a2c6aebacd), the template embedded in its GGUFs and llama.cpp's models/templates/LFM3.jinja (v0.8.0, 8642541b): their tool-less renders come from Hugging Face transformers' chat-template environment (Jinja2 3.1.6) and match render_embedded_template byte for byte; the tools case is render_embedded_template's own output, because its tool JSON (sorted keys, compact nesting) differs from transformers' json.dumps. Regenerate only for an intended render change. The inkling2 cases were added with templates/inkling2.jinja, byte-identical to thinkingmachines/Inkling-2-Mini's chat_template.jinja (revision 7a67ae2314b44ef05c87fd1d4d311c58aaeb18f6, sha256 53a9035f3255945704b5857657cfb00c1165090c0641c4f782a0cbf268cc16dc), the template embedded in ggml-org/Inkling-2-Mini-GGUF and shared by thinkingmachines/Inkling-2-Small: all four renders, the tools case included, come from Hugging Face transformers' chat-template environment (Jinja2 3.1.6) and match render_embedded_template byte for byte, since the template asks tojson for sorted keys and compact separators.",
   "cases": [
     {
       "id": "fallback-mistral-v0.1-multi-turn",
@@ -247,6 +247,127 @@
       ],
       "enable_thinking": false,
       "rendered": "<|startoftext|><|im_start|>system\nUse the tools when they help.\n\n<tools>\n{\"description\": \"Get the current weather for a city\", \"name\": \"get_weather\", \"parameters\": {\"properties\":{\"city\":{\"description\":\"City name, for example Paris\",\"type\":\"string\"}},\"required\":[\"city\"],\"type\":\"object\"}}\n{\"description\": \"Get the local time in an IANA time zone\", \"name\": \"get_time\", \"parameters\": {\"properties\":{\"timezone\":{\"type\":\"string\"}},\"required\":[\"timezone\"],\"type\":\"object\"}}\n</tools><|im_end|>\n<|im_start|>user\nWhat is the weather in Paris right now?<|im_end|>\n<|im_start|>assistant\n<think></think>"
+    },
+    {
+      "id": "template-inkling2-system-multi-turn-thinking-on",
+      "template": {
+        "file": "integration-tests/fixtures/chat_render/templates/inkling2.jinja"
+      },
+      "eos_token": "<|content_model_end_sampling|>",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a concise assistant."
+        },
+        {
+          "role": "user",
+          "content": "What is 84 * 3 / 2?"
+        },
+        {
+          "role": "assistant",
+          "content": "126"
+        },
+        {
+          "role": "user",
+          "content": "And halved again?"
+        }
+      ],
+      "tools": null,
+      "enable_thinking": true,
+      "rendered": "<|message_system|><|content_text|>You are a concise assistant.<|end_message|><|message_system|><|content_text|>Thinking effort level: 0.9<|end_message|><|message_user|><|content_text|>What is 84 * 3 / 2?<|end_message|><|message_model|><|content_text|>126<|end_message|><|content_model_end_sampling|><|message_user|><|content_text|>And halved again?<|end_message|>"
+    },
+    {
+      "id": "template-inkling2-thinking-off",
+      "template": {
+        "file": "integration-tests/fixtures/chat_render/templates/inkling2.jinja"
+      },
+      "eos_token": "<|content_model_end_sampling|>",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Hi"
+        }
+      ],
+      "tools": null,
+      "enable_thinking": false,
+      "reasoning_effort": "none",
+      "rendered": "<|message_system|><|content_text|>Thinking effort level: 0<|end_message|><|message_user|><|content_text|>Hi<|end_message|>"
+    },
+    {
+      "id": "template-inkling2-numeric-effort",
+      "template": {
+        "file": "integration-tests/fixtures/chat_render/templates/inkling2.jinja"
+      },
+      "eos_token": "<|content_model_end_sampling|>",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Plan a picnic for four."
+        }
+      ],
+      "tools": null,
+      "enable_thinking": true,
+      "reasoning_effort": 0.5,
+      "rendered": "<|message_system|><|content_text|>Thinking effort level: 0.5<|end_message|><|message_user|><|content_text|>Plan a picnic for four.<|end_message|>"
+    },
+    {
+      "id": "tools-inkling2-system",
+      "template": {
+        "file": "integration-tests/fixtures/chat_render/templates/inkling2.jinja"
+      },
+      "eos_token": "<|content_model_end_sampling|>",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Use the tools when they help."
+        },
+        {
+          "role": "user",
+          "content": "What is the weather in Paris right now?"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "description": "Get the current weather for a city",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "city": {
+                  "type": "string",
+                  "description": "City name, for example Paris"
+                }
+              },
+              "required": [
+                "city"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "get_time",
+            "description": "Get the local time in an IANA time zone",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "timezone": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "timezone"
+              ]
+            }
+          }
+        }
+      ],
+      "enable_thinking": true,
+      "reasoning_effort": "medium",
+      "rendered": "<|message_system|>tool_declare<|content_xml|>[{\"description\":\"Get the current weather for a city\",\"name\":\"get_weather\",\"parameters\":{\"properties\":{\"city\":{\"description\":\"City name, for example Paris\",\"type\":\"string\"}},\"required\":[\"city\"],\"type\":\"object\"},\"type\":\"function\"},{\"description\":\"Get the local time in an IANA time zone\",\"name\":\"get_time\",\"parameters\":{\"properties\":{\"timezone\":{\"type\":\"string\"}},\"required\":[\"timezone\"],\"type\":\"object\"},\"type\":\"function\"}]<|end_message|><|message_system|><|content_text|>Use the tools when they help.<|end_message|><|message_system|><|content_text|>Thinking effort level: 0.7<|end_message|><|message_user|><|content_text|>What is the weather in Paris right now?<|end_message|>"
     }
   ]
 }

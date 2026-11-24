@@ -76,6 +76,11 @@ struct LlmAdapterCacheKey {
     context_length: usize,
     backend_hint: Option<String>,
     vision_encoder_path: Option<String>,
+    /// The metadata's thinking settings (`reasoning`, and `reasoning_effort`
+    /// as its raw JSON). The loaded backend renders every prompt with them,
+    /// so an adapter loaded under other settings is not reused.
+    reasoning: bool,
+    reasoning_effort: Option<String>,
 }
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -93,7 +98,19 @@ impl LlmAdapterCacheKey {
             context_length,
             backend_hint: backend_hint.map(ToOwned::to_owned),
             vision_encoder_path,
+            reasoning: false,
+            reasoning_effort: None,
         }
+    }
+
+    /// Key on the thinking settings `metadata` declares as well.
+    fn with_thinking(mut self, metadata: &ModelMetadata) -> Self {
+        self.reasoning = metadata_reasoning(metadata);
+        self.reasoning_effort = metadata
+            .metadata
+            .get("reasoning_effort")
+            .map(ToString::to_string);
+        self
     }
 }
 
@@ -143,6 +160,26 @@ fn metadata_reasoning(metadata: &ModelMetadata) -> bool {
         .unwrap_or(false)
 }
 
+/// How long the model reasons, per its metadata `reasoning_effort`: a named
+/// level (`"low"`) or a number (`0.5`), passed to chat templates that take
+/// one. Any other value is ignored with a warning, leaving the template's
+/// default.
+fn metadata_reasoning_effort(metadata: &ModelMetadata) -> Option<ReasoningEffort> {
+    let value = metadata.metadata.get("reasoning_effort")?;
+    match serde_json::from_value::<ReasoningEffort>(value.clone()) {
+        Ok(effort) => Some(effort),
+        Err(_) => {
+            log::warn!(
+                target: "xybrid_core",
+                "model {} metadata reasoning_effort must be a string or a number, got {value}; \
+                 using the chat template's default",
+                metadata.model_id
+            );
+            None
+        }
+    }
+}
+
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 fn ensure_backend_supports_vision(
     metadata: &ModelMetadata,
@@ -172,7 +209,7 @@ use crate::runtime_adapter::candle::CandleRuntime;
 // Always-available LLM types (defined in runtime_adapter/types.rs)
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use crate::runtime_adapter::types::{ChatMessage, LlmConfig};
-use crate::runtime_adapter::types::{GenerationConfig, StreamingCallback};
+use crate::runtime_adapter::types::{GenerationConfig, ReasoningEffort, StreamingCallback};
 use crate::runtime_adapter::{MultimodalChatMessage, MultimodalMessagePart, VisionEncoder};
 
 // LLM adapter implementation (only available with LLM features)
@@ -1918,7 +1955,8 @@ impl TemplateExecutor {
             context_length,
             backend_hint,
             None,
-        );
+        )
+        .with_thinking(metadata);
 
         // Check if we have a cached adapter for this exact load config.
         let need_load = match &self.llm_adapter_cache {
@@ -1930,7 +1968,8 @@ impl TemplateExecutor {
         if need_load {
             let mut config = LlmConfig::new(model_path_str.clone())
                 .with_context_length(context_length)
-                .with_reasoning(metadata_reasoning(metadata));
+                .with_reasoning(metadata_reasoning(metadata))
+                .with_reasoning_effort(metadata_reasoning_effort(metadata));
 
             if let Some(template_path) = chat_template_path {
                 config = config.with_chat_template(template_path);
@@ -2056,7 +2095,8 @@ impl TemplateExecutor {
             context_length,
             backend_hint,
             None,
-        );
+        )
+        .with_thinking(metadata);
 
         // Check if we have a cached adapter for this exact load config.
         let need_load = match &self.llm_adapter_cache {
@@ -2068,7 +2108,8 @@ impl TemplateExecutor {
         if need_load {
             let mut config = LlmConfig::new(model_path_str.clone())
                 .with_context_length(context_length)
-                .with_reasoning(metadata_reasoning(metadata));
+                .with_reasoning(metadata_reasoning(metadata))
+                .with_reasoning_effort(metadata_reasoning_effort(metadata));
 
             if let Some(template_path) = chat_template_path {
                 config = config.with_chat_template(template_path);
@@ -2314,7 +2355,8 @@ impl TemplateExecutor {
     ) -> LlmConfig {
         let mut llm_config = LlmConfig::new(model_path_str)
             .with_context_length(context_length)
-            .with_reasoning(metadata_reasoning(metadata));
+            .with_reasoning(metadata_reasoning(metadata))
+            .with_reasoning_effort(metadata_reasoning_effort(metadata));
         if let Some(template) = chat_template {
             let template_path = Path::new(&self.base_path).join(template);
             llm_config = llm_config.with_chat_template(template_path.to_string_lossy().to_string());
@@ -2359,7 +2401,8 @@ impl TemplateExecutor {
             context_length,
             backend_hint,
             vision_encoder_path,
-        );
+        )
+        .with_thinking(metadata);
 
         let need_load = match &self.llm_adapter_cache {
             Some((cached_key, _)) if cached_key == &cache_key => false,
@@ -2550,7 +2593,8 @@ impl TemplateExecutor {
             context_length,
             backend_hint,
             vision_encoder_path,
-        );
+        )
+        .with_thinking(metadata);
 
         let gen_config = config
             .cloned()
@@ -2660,7 +2704,8 @@ impl TemplateExecutor {
             context_length,
             backend_hint,
             None,
-        );
+        )
+        .with_thinking(metadata);
 
         // Check if we have a cached adapter for this exact load config.
         let need_load = match &self.llm_adapter_cache {
@@ -2672,7 +2717,8 @@ impl TemplateExecutor {
         if need_load {
             let mut config = LlmConfig::new(model_path_str.clone())
                 .with_context_length(context_length)
-                .with_reasoning(metadata_reasoning(metadata));
+                .with_reasoning(metadata_reasoning(metadata))
+                .with_reasoning_effort(metadata_reasoning_effort(metadata));
 
             if let Some(template_path) = chat_template_path {
                 config = config.with_chat_template(template_path);
@@ -2778,7 +2824,8 @@ impl TemplateExecutor {
             context_length,
             backend_hint,
             None,
-        );
+        )
+        .with_thinking(metadata);
 
         // Check if we have a cached adapter for this exact load config.
         let need_load = match &self.llm_adapter_cache {
@@ -2806,7 +2853,8 @@ impl TemplateExecutor {
             // Create LLM config
             let mut config = LlmConfig::new(model_path_str.clone())
                 .with_context_length(context_length)
-                .with_reasoning(metadata_reasoning(metadata));
+                .with_reasoning(metadata_reasoning(metadata))
+                .with_reasoning_effort(metadata_reasoning_effort(metadata));
 
             if let Some(template_path) = chat_template_path {
                 config = config.with_chat_template(template_path);
@@ -4006,9 +4054,11 @@ fn insert_image_preprocess_metric(
 ///
 /// `tools` are the request's `GenerationConfig.tools`. When there are any,
 /// the output text is scanned for tool-call blocks (every supported
-/// protocol, LFM3 arguments typed against these tools' schemas) and any
-/// parsed calls ride the metadata side-channel as a `tool_calls` JSON array
-/// (same channel as `finish_reason`). The text itself stays intact —
+/// protocol, LFM3 arguments typed against these tools' schemas), unless the
+/// backend already parsed the calls from its own framing
+/// (`GenerationOutput::tool_calls`), and any calls ride the metadata
+/// side-channel as a `tool_calls` JSON array (same channel as
+/// `finish_reason`). The text itself stays intact —
 /// callers strip the blocks for display via `tool_call::strip_tool_calls`.
 /// Malformed blocks are untrusted model output and simply parse to nothing.
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -4038,8 +4088,11 @@ fn build_llm_response_envelope(
 
     let mut emitted_tool_calls = false;
     if !tools.is_empty() {
-        let calls =
-            crate::runtime_adapter::tool_call::parse_tool_calls_with_tools(&output.text, tools);
+        // Calls the backend read from its own framing (Inkling's blocks) win:
+        // the text alone cannot tell them from call notation it quotes.
+        let calls = output.tool_calls.clone().unwrap_or_else(|| {
+            crate::runtime_adapter::tool_call::parse_tool_calls_with_tools(&output.text, tools)
+        });
         if !calls.is_empty() {
             emitted_tool_calls = true;
             response_metadata.insert(
@@ -4194,6 +4247,7 @@ mod tests {
             prefill_tps: None,
             image_preprocess_ms: None,
             reasoning_content: None,
+            tool_calls: None,
         }
     }
 
@@ -4279,6 +4333,50 @@ mod tests {
                 expected_max_tokens
             );
         }
+    }
+
+    /// A cached adapter renders prompts with the thinking settings it was
+    /// loaded under, so metadata that changes them must miss the cache.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn llm_adapter_cache_key_tracks_thinking_settings() {
+        let metadata = |settings: &[(&str, serde_json::Value)]| {
+            let mut metadata = test_model_metadata(ExecutionTemplate::Gguf {
+                model_file: "model.gguf".to_string(),
+                chat_template: None,
+                context_length: 4096,
+                generation_params: None,
+            });
+            for (key, value) in settings {
+                metadata.metadata.insert(key.to_string(), value.clone());
+            }
+            metadata
+        };
+        let key = |metadata: &ModelMetadata| {
+            LlmAdapterCacheKey::new("/models/model.gguf".to_string(), None, 4096, None, None)
+                .with_thinking(metadata)
+        };
+        let plain = key(&metadata(&[]));
+        let reasoning = key(&metadata(&[("reasoning", serde_json::json!(true))]));
+        let low = key(&metadata(&[
+            ("reasoning", serde_json::json!(true)),
+            ("reasoning_effort", serde_json::json!("low")),
+        ]));
+        let high = key(&metadata(&[
+            ("reasoning", serde_json::json!(true)),
+            ("reasoning_effort", serde_json::json!("high")),
+        ]));
+
+        assert_ne!(plain, reasoning);
+        assert_ne!(reasoning, low);
+        assert_ne!(low, high);
+        assert_eq!(
+            low,
+            key(&metadata(&[
+                ("reasoning", serde_json::json!(true)),
+                ("reasoning_effort", serde_json::json!("low")),
+            ]))
+        );
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -5834,6 +5932,7 @@ mod tests {
                     prefill_tps: None,
                     image_preprocess_ms: None,
                     reasoning_content: None,
+                    tool_calls: None,
                 })
             }
         }
