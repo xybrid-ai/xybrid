@@ -36,7 +36,7 @@ For commercial licensing inquiries, contact: licensing@xybrid.dev
 Xybrid llama.cpp native bridge: third-party notices
 
 Production decision rendering compiles the following unmodified files from
-llama.cpp at commit 8642541b255bfb5dc39cd351a178be09013a55d6:
+llama.cpp at commit cd959bae99ff4bed22bef2604f45241c09bbb8c8:
 
   common/jinja/{lexer,parser,runtime,value,string}.cpp and their headers
   common/{json,unicode}.cpp and their headers
