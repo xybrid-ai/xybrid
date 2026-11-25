@@ -40,13 +40,15 @@ const USER_AGENT: &str = concat!(
 /// Where `web_search` sends its queries.
 ///
 /// Wikipedia is the default because it needs no key and does not bot-block;
-/// keyed providers give open-web coverage. All providers return the same
+/// keyed providers (and keyless Keenable, whose optional key raises limits)
+/// give open-web coverage. All providers return the same
 /// shape, so the loop and the model are provider-agnostic.
 #[derive(Debug, Clone)]
 pub(crate) enum SearchProvider {
     Wikipedia,
     Tavily { key: String },
     Brave { key: String },
+    Keenable { key: Option<String> },
 }
 
 /// One search hit, provider-normalized.
@@ -65,16 +67,27 @@ struct SearchResults {
 impl SearchProvider {
     /// Resolve the provider from the environment.
     ///
-    /// `XYBRID_SEARCH_PROVIDER` selects (`wikipedia` | `tavily` | `brave`);
-    /// keyed providers read `TAVILY_API_KEY` / `BRAVE_API_KEY`. Anything
+    /// `XYBRID_SEARCH_PROVIDER` selects (`wikipedia` | `tavily` | `brave` |
+    /// `keenable`); keyed providers read `TAVILY_API_KEY` / `BRAVE_API_KEY`,
+    /// and `keenable` optionally reads `KEENABLE_API_KEY`. Anything
     /// missing or unknown falls back to Wikipedia, with a warning string the
     /// caller can surface.
     pub(crate) fn from_env() -> (Self, Option<String>) {
-        Self::resolve(
+        let (provider, warning) = Self::resolve(
             std::env::var("XYBRID_SEARCH_PROVIDER").ok().as_deref(),
             std::env::var("TAVILY_API_KEY").ok().as_deref(),
             std::env::var("BRAVE_API_KEY").ok().as_deref(),
-        )
+        );
+        match provider {
+            Self::Keenable { .. } => {
+                let key = std::env::var("KEENABLE_API_KEY")
+                    .ok()
+                    .map(|k| k.trim().to_string())
+                    .filter(|k| !k.is_empty());
+                (Self::Keenable { key }, warning)
+            }
+            other => (other, warning),
+        }
     }
 
     fn resolve(
@@ -101,10 +114,12 @@ impl SearchProvider {
                     Some("XYBRID_SEARCH_PROVIDER=brave but BRAVE_API_KEY is not set; using wikipedia".to_string()),
                 ),
             },
+            // Keyless: the optional key is attached by `from_env`.
+            Some("keenable") => (Self::Keenable { key: None }, None),
             Some(other) => (
                 Self::Wikipedia,
                 Some(format!(
-                    "unknown XYBRID_SEARCH_PROVIDER '{other}' (expected wikipedia|tavily|brave); using wikipedia"
+                    "unknown XYBRID_SEARCH_PROVIDER '{other}' (expected wikipedia|tavily|brave|keenable); using wikipedia"
                 )),
             ),
         }
@@ -116,6 +131,7 @@ impl SearchProvider {
             Self::Wikipedia => "wikipedia (keyless)",
             Self::Tavily { .. } => "tavily",
             Self::Brave { .. } => "brave",
+            Self::Keenable { .. } => "keenable",
         }
     }
 
@@ -124,6 +140,7 @@ impl SearchProvider {
             Self::Wikipedia => wikipedia_search(query, max),
             Self::Tavily { key } => tavily_search(key, query, max),
             Self::Brave { key } => brave_search(key, query, max),
+            Self::Keenable { key } => keenable_search(key.as_deref(), query, max),
         }
     }
 }
@@ -264,6 +281,61 @@ fn brave_search(key: &str, query: &str, max: usize) -> Result<SearchResults, Str
         summary: None,
         hits,
     })
+}
+
+/// Keenable's `snippet` can hold a whole page; keep each hit short.
+const KEENABLE_SNIPPET_CHARS: usize = 600;
+
+/// Keenable search: the public endpoint needs no key; with one, the keyed
+/// endpoint is used.
+fn keenable_search(key: Option<&str>, query: &str, max: usize) -> Result<SearchResults, String> {
+    let url = if key.is_some() {
+        "https://api.keenable.ai/v1/search"
+    } else {
+        "https://api.keenable.ai/v1/search/public"
+    };
+    let mut request = ureq::builder()
+        .timeout(SEARCH_TIMEOUT)
+        .build()
+        .post(url)
+        .set("User-Agent", USER_AGENT)
+        .set("X-Keenable-Title", "xybrid");
+    if let Some(key) = key {
+        request = request.set("X-API-Key", key);
+    }
+    let response: serde_json::Value = request
+        .send_json(serde_json::json!({ "query": query, "max_results": max }))
+        .map_err(|e| format!("keenable request failed: {e}"))?
+        .into_json()
+        .map_err(|e| format!("keenable parse failed: {e}"))?;
+
+    Ok(SearchResults {
+        summary: None,
+        hits: keenable_hits(&response),
+    })
+}
+
+/// Prefer `description`; fall back to `snippet` (truncated) when it is empty.
+fn keenable_hits(response: &serde_json::Value) -> Vec<SearchHit> {
+    response["results"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|hit| {
+            let description = hit["description"].as_str().unwrap_or_default().trim();
+            let text = if description.is_empty() {
+                hit["snippet"].as_str().unwrap_or_default().trim()
+            } else {
+                description
+            };
+            Some(SearchHit {
+                title: hit["title"].as_str()?.to_string(),
+                snippet: text.chars().take(KEENABLE_SNIPPET_CHARS).collect(),
+                url: hit["url"].as_str().map(str::to_string),
+            })
+        })
+        .collect()
 }
 
 // =============================================================================
@@ -1016,9 +1088,27 @@ mod tests {
         assert!(matches!(provider, SearchProvider::Wikipedia));
         assert!(warning.unwrap().contains("TAVILY_API_KEY"));
 
+        // Keenable needs no key.
+        assert!(matches!(
+            SearchProvider::resolve(Some("keenable"), None, None),
+            (SearchProvider::Keenable { key: None }, None)
+        ));
+
         let (provider, warning) = SearchProvider::resolve(Some("altavista"), None, None);
         assert!(matches!(provider, SearchProvider::Wikipedia));
         assert!(warning.unwrap().contains("altavista"));
+    }
+
+    #[test]
+    fn keenable_hits_prefer_description_and_truncate_snippets() {
+        let response = serde_json::json!({ "results": [
+            { "title": "A", "url": "https://a.example", "description": "", "snippet": "x".repeat(2000) },
+            { "title": "B", "url": "https://b.example", "description": "desc b", "snippet": "s" },
+        ]});
+        let hits = keenable_hits(&response);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].snippet.chars().count(), KEENABLE_SNIPPET_CHARS);
+        assert_eq!(hits[1].snippet, "desc b");
     }
 
     #[test]
