@@ -648,6 +648,23 @@ jobs:
           case "$VERSION" in *-*) DIST_TAG=next ;; esac
           npm stage publish --provenance --access public --tag "$DIST_TAG"
 
+      # The staged version is private until a maintainer approves it, so the
+      # published-package smoke cannot start from here. Point at it instead.
+      - name: Point at the published-package smoke
+        env:
+          VERSION: ${{ needs.publish-release.outputs.version }}
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ### Qualify @xybrid/react-native ${VERSION} after approving it on npm
+
+          Once the staged version is approved on npmjs.com, run the Expo
+          consumer smoke against it (Android emulator + iOS Simulator):
+
+          \`\`\`
+          gh workflow run verify-react-native-published.yml -f version=${VERSION}
+          \`\`\`
+          EOF
+
   # =========================================================================
   # Stage the shared JS instrumentation before its web consumer. Enabling web
   # also enables this dependency publisher; neither job rebuilds approved bytes.

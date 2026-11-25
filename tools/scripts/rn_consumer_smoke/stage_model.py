@@ -39,7 +39,7 @@ def stage_android(
     model_dir = require_model_dir(model_dir)
     _run([adb, "root"])
     _run([adb, "wait-for-device"])
-    remote_tmp = f"/data/local/tmp/xybrid-consumer-smoke-model"
+    remote_tmp = "/data/local/tmp/xybrid-consumer-smoke-model"
     _run([adb, "shell", "rm", "-rf", remote_tmp])
     _run([adb, "shell", "mkdir", "-p", remote_tmp])
     for path in sorted(model_dir.iterdir()):
@@ -51,14 +51,15 @@ def stage_android(
     dest = f"{app_files}/{MODEL_DIR_RELATIVE}"
     # Ensure the package has been installed at least once so its data dir exists.
     _run([adb, "shell", "mkdir", "-p", dest])
-    _run([adb, "shell", f"cp -a {remote_tmp}/. {dest}/"])
+    _run([adb, "shell", f"cp -R {remote_tmp}/. {dest}/"])
     # App uid must own the files.
     _run(
         [
             adb,
             "shell",
             f"uid=$(stat -c %u /data/data/{package}) && "
-            f"chown -R $uid:$uid {app_files}/models && chmod -R 755 {app_files}/models",
+            f"chown $uid:$uid {app_files} {app_files}/models && chmod 700 {app_files} && "
+            f"chown -R $uid:$uid {dest} && restorecon -DR {app_files}",
         ]
     )
 

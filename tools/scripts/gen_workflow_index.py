@@ -88,6 +88,7 @@ WORKFLOW_FILES = frozenset(
         "trusted-zzz-sdk.yml",
         "unity-activation.yml",
         "unity-editor.yml",
+        "verify-react-native-published.yml",
         "web-webgpu.yml",
         "welcome.yml",
     }
@@ -123,10 +124,7 @@ PULL_REQUEST_FILES = frozenset(
 # the Apple build, React Native's iOS build, and the choice lane's Qwen GGUF
 # job, which ran on every matching pull request from its own workflow before
 # ci.yml called it and now runs only when the paths it reads change.
-# 7 retained lanes + React Native published-package consumer-smoke (Release
-# simulator launch with FunctionGemma). That qualification cannot share the
-# Expo 56 source-build job without serializing two long macOS phases.
-MACOS_JOB_BUDGET = 8
+MACOS_JOB_BUDGET = 7
 
 _PULL_REQUEST_EVENTS = ("pull_request", "pull_request_target")
 

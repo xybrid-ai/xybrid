@@ -188,14 +188,10 @@ LANE_PATHS: Dict[str, List[str]] = {
         "bindings/kotlin/**",
         "crates/xybrid-bolt/**",
         "crates/xybrid-ffi-facade/**",
-        # Published-package qualification stages FunctionGemma; a pin or
-        # download-script change must re-run that lane. (.github/actions/** is
-        # already a pipeline path and selects every lane.)
-        "integration-tests/fixtures/models/models.json",
-        "integration-tests/fixtures/models/functiongemma-270m-it/**",
-        "integration-tests/download.sh",
-        "tools/scripts/rn_consumer_smoke/**",
         ".github/workflows/build-react-native.yml",
+        # The published-package app; verify-react-native-published.yml runs
+        # it, and no job here builds it.
+        "!bindings/react-native/consumer-smoke/**",
         "!**.md",
     ],
     "unity_editor": [

@@ -1,0 +1,283 @@
+# Purpose: Qualify a published @xybrid/react-native release on current Expo by running FunctionGemma in Release apps on an Android emulator and an iOS Simulator; weekly against npm latest.
+name: "Release: React Native published-package smoke"
+
+# What this checks is the public install path, not a pull request: the npm
+# package, the Kotlin SDK it resolves from Maven Central and the XCFramework it
+# downloads from the GitHub release. No line of a branch reaches these apps,
+# so this is deliberately not a ci.yml lane (and holds no slot of
+# MACOS_JOB_BUDGET). The source builds stay in build-react-native.yml.
+#
+# Run it after approving a release's staged npm version (release-publish's
+# Publish React Native job prints the command):
+#
+#   gh workflow run verify-react-native-published.yml -f version=<version>
+#
+# The weekly run qualifies whatever `latest` is then, so a release nobody
+# dispatched for is still covered within a week, and a public artifact that
+# disappears (Maven, release asset, npm) turns red.
+#
+# The app itself (bindings/react-native/consumer-smoke) pins Expo 58.0.25 /
+# React Native 0.88.1; bump those deliberately. Release builds embed the JS
+# bundle so no Metro server is needed; inference runs in the native SDK.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "@xybrid/react-native version or npm dist-tag to qualify"
+        required: false
+        default: latest
+  schedule:
+    # Weekly, Monday 05:00 UTC.
+    - cron: "0 5 * * 1"
+
+permissions: read-all
+
+concurrency:
+  group: verify-react-native-published-${{ inputs.version || 'latest' }}
+  cancel-in-progress: false
+
+jobs:
+  # Resolve a dist-tag to one version so both platforms test the same one.
+  resolve:
+    name: Resolve the version under test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Use Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        with:
+          node-version: '22'
+
+      - name: Resolve
+        id: resolve
+        env:
+          REQUESTED: ${{ inputs.version || 'latest' }}
+        run: |
+          set -euo pipefail
+          VERSION="$(npm view "@xybrid/react-native@${REQUESTED}" version | tail -1)"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::@xybrid/react-native@${REQUESTED} resolved to '${VERSION}', not one published version. If it was just staged, approve it on npmjs.com first."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Qualifying @xybrid/react-native@${VERSION} (requested: ${REQUESTED})." >> "$GITHUB_STEP_SUMMARY"
+
+  # npm package + Maven Central AAR + a Release APK with an embedded Hermes
+  # bundle, on an API 35 x86_64 emulator against pinned FunctionGemma 270M.
+  # No Bazel, no mavenLocal, no Metro.
+  consumer-smoke-android:
+    name: Android (published package, Expo 58)
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Free disk space
+        uses: ./.github/actions/free-disk-space
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Use Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: bindings/react-native/consumer-smoke/package-lock.json
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+
+      - name: Install NDK
+        run: sdkmanager --install "ndk;27.1.12297006"
+
+      - name: Set NDK environment
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> $GITHUB_ENV
+
+      - name: Fetch FunctionGemma 270M
+        uses: ./.github/actions/fetch-model
+        with:
+          model: functiongemma-270m-it
+          sha256: 83940d4dd9676710856f43523bed096164a595a96f6b34771610a03937de5270
+          file: functiongemma-270m-it-q8_0.gguf
+
+      # The lockfile pins a baseline for local runs; CI swaps in the version
+      # under test. That package pins its Kotlin SDK (android/build.gradle) and
+      # its XCFramework (package.json), so this install selects both natives.
+      - name: Install consumer-smoke deps with the version under test
+        working-directory: bindings/react-native/consumer-smoke
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm install --no-save --no-audit --no-fund "@xybrid/react-native@${VERSION}"
+          test "$(node -p "require('@xybrid/react-native/package.json').version")" = "$VERSION"
+
+      - name: Expo prebuild (android)
+        working-directory: bindings/react-native/consumer-smoke
+        run: CI=1 npx expo prebuild --platform android --no-install
+
+      # x86_64 only: the KVM emulator ABI. Release embeds the Hermes bundle.
+      - name: Assemble Release APK
+        working-directory: bindings/react-native/consumer-smoke/android
+        env:
+          ORG_GRADLE_PROJECT_reactNativeArchitectures: x86_64
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Pre-install Android Emulator (retry corrupt downloads)
+        run: |
+          set -u
+          sdk="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          sdkmanager="$(command -v sdkmanager || true)"
+          if [ -z "$sdkmanager" ]; then
+            sdkmanager="$(ls "$sdk"/cmdline-tools/latest/bin/sdkmanager \
+              "$sdk"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1 || true)"
+          fi
+          if [ -z "$sdkmanager" ]; then
+            echo "::error::sdkmanager not found under $sdk"; exit 1
+          fi
+          echo "using sdkmanager: $sdkmanager"
+          for i in $(seq 1 3); do
+            if yes | "$sdkmanager" --install emulator --channel=0; then
+              echo "emulator installed (attempt $i)"
+              exit 0
+            fi
+            echo "::warning::emulator install attempt $i failed; clearing partial download and retrying"
+            rm -rf "$sdk/emulator" "$sdk/.temp" "$sdk/.downloadIntermediates" || true
+            sleep 10
+          done
+          echo "::error::emulator install failed after 3 attempts"
+          exit 1
+
+      - name: Run consumer smoke on the emulator
+        uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: >-
+            python3 tools/scripts/rn_consumer_smoke/run_android.py
+            --apk bindings/react-native/consumer-smoke/android/app/build/outputs/apk/release/app-release.apk
+            --model-dir integration-tests/fixtures/models/functiongemma-270m-it
+            --out-dir consumer-smoke-android
+            --timeout 600
+
+      - name: Upload consumer-smoke Android artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: xybrid-consumer-smoke-android-${{ needs.resolve.outputs.version }}
+          path: |
+            consumer-smoke-android/
+            bindings/react-native/consumer-smoke/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
+          retention-days: 7
+
+  # The same qualification on an arm64 iOS Simulator (macos-26). Pods resolve
+  # the release XCFramework from GitHub releases; no Bazel zip.
+  consumer-smoke-ios:
+    name: iOS (published package, Expo 58)
+    needs: resolve
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: bindings/react-native/consumer-smoke/package-lock.json
+
+      - name: Fetch FunctionGemma 270M
+        uses: ./.github/actions/fetch-model
+        with:
+          model: functiongemma-270m-it
+          sha256: 83940d4dd9676710856f43523bed096164a595a96f6b34771610a03937de5270
+          file: functiongemma-270m-it-q8_0.gguf
+
+      # The lockfile pins a baseline for local runs; CI swaps in the version
+      # under test. That package pins its Kotlin SDK (android/build.gradle) and
+      # its XCFramework (package.json), so this install selects both natives.
+      - name: Install consumer-smoke deps with the version under test
+        working-directory: bindings/react-native/consumer-smoke
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm install --no-save --no-audit --no-fund "@xybrid/react-native@${VERSION}"
+          test "$(node -p "require('@xybrid/react-native/package.json').version")" = "$VERSION"
+
+      - name: Expo prebuild (ios)
+        working-directory: bindings/react-native/consumer-smoke
+        run: CI=1 npx expo prebuild --platform ios --no-install
+
+      - name: pod install
+        working-directory: bindings/react-native/consumer-smoke/ios
+        run: pod install
+
+      - name: Boot simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          SIM_ID="$(bindings/apple/scripts/boot-ci-simulator.sh 'Xybrid RN consumer smoke')"
+          echo "udid=$SIM_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Build Release for the simulator
+        working-directory: bindings/react-native/consumer-smoke/ios
+        run: |
+          set -euo pipefail
+          JSI=../node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh
+          if [ -x "$JSI" ]; then
+            PODS_ROOT="$PWD/Pods" RN_ROOT="$PWD/../node_modules/react-native" \
+              PLATFORM_NAME=iphonesimulator "$JSI"
+          fi
+          DERIVED="$RUNNER_TEMP/consumer-smoke-derived"
+          xcodebuild build \
+            -workspace consumersmoke.xcworkspace \
+            -scheme consumersmoke \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$DERIVED" \
+            CODE_SIGNING_ALLOWED=NO
+          APP="$DERIVED/Build/Products/Release-iphonesimulator/consumersmoke.app"
+          test -d "$APP"
+          echo "APP=$APP" >> "$GITHUB_ENV"
+
+      - name: Run consumer smoke on the simulator
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/rn_consumer_smoke/run_ios.py \
+            --app "$APP" \
+            --udid "${{ steps.sim.outputs.udid }}" \
+            --model-dir integration-tests/fixtures/models/functiongemma-270m-it \
+            --out-dir consumer-smoke-ios \
+            --timeout 600
+
+      - name: Upload consumer-smoke iOS artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: xybrid-consumer-smoke-ios-${{ needs.resolve.outputs.version }}
+          path: consumer-smoke-ios/
+          if-no-files-found: warn
+          retention-days: 7

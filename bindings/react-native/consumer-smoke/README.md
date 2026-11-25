@@ -10,7 +10,23 @@ Pinned versions (update deliberately after new releases):
 | Expo | 58.0.25 |
 | React Native | 0.88.1 |
 | React | 19.3.0 |
-| `@xybrid/react-native` | 0.18.0 |
+
+The `@xybrid/react-native` version in `package.json` and the lockfile is only
+the baseline for local runs. CI installs the version under test over it.
+
+## When it runs
+
+This app checks a **published** release, so no pull request can change its
+result, and it is not part of the pull-request pipeline.
+`.github/workflows/verify-react-native-published.yml` runs it:
+
+- after a release, once its staged npm version is approved
+  (`gh workflow run verify-react-native-published.yml -f version=<version>`;
+  release-publish's job summary prints this command);
+- weekly, against npm `latest`.
+
+Changes to this directory do not start the React Native PR lane. Dispatch the
+workflow on your branch (`--ref <branch>`) to check them.
 
 On launch the app loads FunctionGemma 270M from a staged documents path, runs
 version / load / info / warmup / inference / streaming / cancel / conversation /

@@ -101,12 +101,18 @@ class ReactNativePodInstallTests(unittest.TestCase):
         self.assertEqual(len((self.root / "pod.log").read_text().splitlines()), 3)
         self.assertFalse((self.ios / "Podfile.lock").exists())
 
-    def test_both_ios_lanes_use_the_installer(self):
+    def test_source_ios_lanes_use_the_installer(self):
         for path in (".github/workflows/build-react-native.yml",
                      "tools/scripts/observability_staging/react-native-lane.sh"):
             source = (ROOT / path).read_text()
             self.assertIn("scripts/pod-install.sh", source)
             self.assertNotRegex(source, r"(?:run:\s+|\bcd ios && |\$xcframework\" )pod install\b")
+
+    def test_published_smoke_uses_plain_pod_install(self):
+        # A consumer app has no repo installer; it must resolve the release zip.
+        source = (ROOT / ".github/workflows/verify-react-native-published.yml").read_text()
+        self.assertIn("run: pod install", source)
+        self.assertNotIn("scripts/pod-install.sh", source)
 
 
 if __name__ == "__main__":

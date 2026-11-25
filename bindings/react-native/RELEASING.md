@@ -35,6 +35,11 @@ version and the Kotlin SDK pin (`tools/scripts/version-sync.sh`).
      approves the staged version on npmjs.com with 2FA. Versions with a
      prerelease suffix (`0.10.0-rc1`) go to the `next` dist-tag, others to
      `latest` after approval. Re-runs skip a version already live on npm.
+   - After approving, run the published-package smoke against that version
+     (`gh workflow run verify-react-native-published.yml -f version=<version>`;
+     the job summary prints it). It installs the npm package into the Expo
+     app in `consumer-smoke/` and runs FunctionGemma on an Android emulator and
+     an iOS Simulator. It also runs weekly against `latest`.
    - After the first stable release following a prerelease, remove `next` (`npm dist-tag rm @xybrid/react-native next`) or move it to that stable version so it cannot keep installing the old prerelease.
 
 If the wait times out, the Kotlin deployment is usually sitting unreleased in

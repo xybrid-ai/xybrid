@@ -109,6 +109,27 @@ class WaitForReportTests(unittest.TestCase):
             with self.assertRaisesRegex(ReportError, "timed out"):
                 wait_for_report(pull, dest, timeout_s=0.05, poll_s=0.01)
 
+    def test_retries_empty_and_partially_written_reports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "report.json"
+            complete = json.dumps(ok_report())
+            snapshots = iter(("", complete[:-1], complete))
+
+            def pull():
+                dest.write_text(next(snapshots), encoding="utf-8")
+
+            self.assertEqual(wait_for_report(pull, dest, timeout_s=5, poll_s=0.01), dest)
+
+    def test_timeout_includes_last_parse_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "report.json"
+
+            def pull():
+                dest.write_text("{", encoding="utf-8")
+
+            with self.assertRaisesRegex(ReportError, "timed out.*not valid JSON"):
+                wait_for_report(pull, dest, timeout_s=0.05, poll_s=0.01)
+
     def test_finished_failure_stops_immediately(self):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / "report.json"
@@ -116,22 +137,23 @@ class WaitForReportTests(unittest.TestCase):
             for entry in failed["results"]:
                 if entry["id"] == "inference":
                     entry["ok"] = False
+            pulls = iter((json.dumps(failed),))
 
             def pull():
-                dest.write_text(json.dumps(failed), encoding="utf-8")
+                dest.write_text(next(pulls), encoding="utf-8")
 
-            with self.assertRaisesRegex(ReportError, "qualification failed|failed steps"):
+            with self.assertRaisesRegex(ReportError, "^qualification failed: failed steps"):
                 wait_for_report(pull, dest, timeout_s=5, poll_s=0.01)
 
     def test_stale_started_at_is_rejected_until_timeout(self):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / "report.json"
-            stale = ok_report(startedAt="2020-01-01T00:00:00+00:00")
+            stale = ok_report(startedAt="2020-01-01T00:00:00+00:00", success=False)
 
             def pull():
                 dest.write_text(json.dumps(stale), encoding="utf-8")
 
-            with self.assertRaisesRegex(ReportError, "timed out|stale"):
+            with self.assertRaisesRegex(ReportError, "timed out.*stale"):
                 wait_for_report(
                     pull,
                     dest,

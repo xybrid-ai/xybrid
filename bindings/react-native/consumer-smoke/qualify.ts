@@ -91,42 +91,51 @@ export async function runQualification(): Promise<SmokeReport> {
     record('inference', text.length > 0, text.slice(0, 80), Date.now() - inferStarted);
     if (!text) throw new Error('batch inference returned empty text');
 
-    // Streaming: collect tokens, then cancel mid-stream and confirm it settles.
-    const streamController = new AbortController();
-    let streamed = '';
-    let tokens = 0;
     const streamStarted = Date.now();
-    let streamError: unknown;
+    const stream = model.runStreaming(Envelope.text('Reply with the single word: ok'), {
+      generationConfig: GenerationConfigs.greedy({ maxTokens: 16 }),
+    });
+    let streamed = '';
+    let next = await stream.next();
+    while (!next.done) {
+      streamed += next.value.token;
+      next = await stream.next();
+    }
+    const finalText = (next.value?.text ?? '').trim();
+    const streamOk = streamed.trim().length > 0 && finalText.length > 0;
+    record(
+      'streaming',
+      streamOk,
+      `token text=${streamed.length} chars, final=${finalText.length} chars`,
+      Date.now() - streamStarted,
+    );
+    if (!streamOk) throw new Error('streaming did not produce both token text and a final result');
+
+    const streamController = new AbortController();
+    const cancelStarted = Date.now();
+    let cancelled = false;
+    let cancelDetail = 'stream ended before it yielded a token';
     try {
-      for await (const token of model.runStreaming(Envelope.text('Count from one to fifty.'), {
-        generationConfig: { maxTokens: 64 },
+      for await (const token of model.runStreaming(Envelope.text('Repeat the word one.'), {
+        generationConfig: {
+          grammar: `root ::= "${'one '.repeat(256)}one"`,
+          maxTokens: 128,
+        },
         signal: streamController.signal,
       })) {
-        streamed += token.token;
-        tokens += 1;
-        if (tokens === 4) streamController.abort();
+        if (token.token && !streamController.signal.aborted) {
+          streamController.abort();
+          cancelDetail = 'stream completed normally after abort';
+        }
       }
     } catch (error) {
-      streamError = error;
+      cancelled =
+        streamController.signal.aborted && isXybridError(error) && error.code === 'xybrid_cancelled';
+      if (!cancelled) throw error;
+      cancelDetail = 'xybrid_cancelled';
     }
-    const streamOk = tokens >= 1 && streamed.length > 0;
-    record('streaming', streamOk, `tokens=${tokens}`, Date.now() - streamStarted);
-    if (!streamOk) throw new Error('streaming produced no content');
-
-    const cancelled =
-      streamError === undefined ||
-      (isXybridError(streamError) && streamError.code === 'xybrid_cancelled') ||
-      streamController.signal.aborted;
-    record(
-      'cancel_settles',
-      cancelled,
-      streamError === undefined
-        ? 'stream ended after abort'
-        : isXybridError(streamError)
-          ? streamError.code
-          : String(streamError),
-    );
-    if (!cancelled) throw streamError instanceof Error ? streamError : new Error(String(streamError));
+    record('cancel_settles', cancelled, cancelDetail, Date.now() - cancelStarted);
+    if (!cancelled) throw new Error(cancelDetail);
 
     const postStarted = Date.now();
     const afterCancel = await model.run(Envelope.text('Reply with the single word: ok'), {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
 
@@ -36,11 +37,14 @@ class ReportError(Exception):
 
 def load_report(path: Path) -> Dict[str, Any]:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        report = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise ReportError(f"report missing: {path}") from exc
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ReportError(f"report is not valid JSON: {path}: {exc}") from exc
+    if not isinstance(report, dict):
+        raise ReportError(f"report must be a JSON object: {path}")
+    return report
 
 
 def validate_report(
@@ -166,8 +170,6 @@ def wait_for_report(
                 if isinstance(started_at, str):
                     # Accept ISO-8601; if parsing fails, still validate below.
                     try:
-                        from datetime import datetime
-
                         started_ts = datetime.fromisoformat(
                             started_at.replace("Z", "+00:00")
                         ).timestamp()
@@ -177,21 +179,19 @@ def wait_for_report(
                             )
                     except ValueError:
                         pass
-            validate_report(report)
-            return dest
         except ReportError as exc:
             last_error = exc
-            # A finished-but-failed report should fail immediately.
-            try:
-                report = load_report(dest)
-                if report.get("finishedAt") and report.get("success") is False:
-                    raise ReportError(f"qualification failed: {exc}") from exc
-            except ReportError:
-                raise
-            except Exception:
-                pass
             time.sleep(poll_s)
             continue
+        try:
+            validate_report(report)
+        except ReportError as exc:
+            if report.get("finishedAt") and report.get("success") is False:
+                raise ReportError(f"qualification failed: {exc}") from exc
+            last_error = exc
+            time.sleep(poll_s)
+        else:
+            return dest
     message = f"timed out after {timeout_s:.0f}s waiting for a valid report"
     if last_error is not None:
         raise ReportError(f"{message}: {last_error}") from last_error
