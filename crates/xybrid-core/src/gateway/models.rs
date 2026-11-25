@@ -111,8 +111,10 @@ pub struct ModelInfo {
 
 impl ModelInfo {
     /// Get predefined model information for common models.
+    /// Token prices come from `llm-prices` when it lists the model, so they track
+    /// the provider's current pricing page instead of this table.
     pub fn for_model(model_id: &str) -> Option<Self> {
-        match model_id {
+        let mut info = match model_id {
             // OpenAI models
             "gpt-4o" => Some(Self {
                 id: "gpt-4o".to_string(),
@@ -228,7 +230,14 @@ impl ModelInfo {
             }),
 
             _ => None,
+        }?;
+        if let Some(price) = llm_prices::lookup_provider(info.provider.to_string(), model_id) {
+            if let (Some(input), Some(output)) = (price.input, price.output) {
+                info.input_cost_per_million = input;
+                info.output_cost_per_million = output;
+            }
         }
+        Some(info)
     }
 
     /// Estimate cost for a request.
@@ -293,5 +302,14 @@ mod tests {
         // = 0.00015 + 0.00006
         // = 0.00021
         assert!((cost - 0.00021).abs() < 0.00001);
+    }
+
+    #[test]
+    fn test_gpt_4o_uses_current_price() {
+        let info = ModelInfo::for_model("gpt-4o").unwrap();
+        assert_eq!(info.input_cost_per_million, 2.5);
+        assert_eq!(info.output_cost_per_million, 10.0);
+        // 1M input + 1M output tokens
+        assert!((info.estimate_cost(1_000_000, 1_000_000) - 12.5).abs() < 1e-9);
     }
 }
