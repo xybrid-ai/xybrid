@@ -222,6 +222,7 @@ def notice_entries():
 
 def aar_entries(speech=True):
     entries = {"AndroidManifest.xml": MANIFEST, "classes.jar": b"jar", "R.txt": b""}
+    entries[GATE.LLAMA_NOTICE] = GATE.LLAMA_NOTICE_SOURCE.read_bytes()
     entries.update(natives(speech))
     if speech:
         entries.update(notice_entries())
@@ -230,6 +231,7 @@ def aar_entries(speech=True):
 
 def dist_entries():
     entries = natives(True, prefix="")
+    entries[GATE.LLAMA_NOTICE] = GATE.LLAMA_NOTICE_SOURCE.read_bytes()
     entries.update(notice_entries())
     return entries
 
@@ -433,10 +435,11 @@ class AarTests(GateCase):
         for entries, message in cases:
             with self.subTest(message=message):
                 self.assertFails(self.aar(entries), message)
-        # Directory entries: only the notice tree, and none without speech.
+        # Directory entries: only the native and enabled speech notice trees.
         self.assertPasses(self.aar(dict(aar_entries(), **{"assets/": b"", "assets/xybrid/zzz/LICENSES/": b""})))
         self.assertFails(self.aar(dict(aar_entries(), **{"assets/fonts/": b""})), "unexpected asset directory")
-        self.assertFails(self.aar(dict(aar_entries(False), **{"assets/": b""}), False),
+        self.assertPasses(self.aar(dict(aar_entries(False), **{"assets/": b""}), False))
+        self.assertFails(self.aar(dict(aar_entries(False), **{"assets/xybrid/zzz/": b""}), False),
                          "unexpected asset directory")
 
     def test_manifest_is_a_text_manifest_with_the_min_sdk(self):
@@ -666,6 +669,7 @@ class StageGradleTests(GateCase):
         self.assertPasses(self.stage())
         expected = {f"libs/{abi}/{name}" for abi in GATE.ABIS for name in EXPECTED[abi]}
         expected |= {"src/main/" + GATE.NOTICE_ROOT + name for name in NOTICES}
+        expected.add("src/main/" + GATE.LLAMA_NOTICE)
         self.assertEqual(self.tree() - before, expected)
         self.assertEqual((self.kotlin / "src/main/assets/xybrid/zzz/LICENSES/Zig-MIT.txt").read_bytes(),
                          NOTICES["LICENSES/Zig-MIT.txt"])

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "state-unicode-escapes",
+  "profile": "lfm3-d1/text/v1",
+  "title": "\\u escapes in the request text, a surrogate pair among them, decode to the same UTF-8",
+  "covers": [
+    "json-unicode",
+    "json-escapes"
+  ],
+  "request_text": "{\"state\": \"caf\\u00e9 \\ud83d\\ude00 \\u4e2d\\u6587 \\/ \\b\\f\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": {\"caf\\u00e9\": \"\\ud83d\\ude00\"}}}}",
+  "artifact": "d1-2b-hf"
+}

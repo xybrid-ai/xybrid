@@ -22,7 +22,8 @@ class StreamToken {
   final bool isFinal;
 
   /// Finish reason if this is the final token (e.g., "stop", "length",
-  /// "tool_calls", "error").
+  /// "tool_calls"). A failed run ends the stream with a token whose reason is
+  /// `"error: <message>"`; see [isError] and [errorMessage].
   final String? finishReason;
 
   /// Final inference metrics supplied by native completion.
@@ -30,6 +31,9 @@ class StreamToken {
 
   /// Trace reference supplied by native completion.
   final ObservationRef? observation;
+
+  /// Cloud error on the final token when this run recovered on-device.
+  final String? speculativeCloudError;
 
   /// Tool calls the model asked for this turn — final token only.
   ///
@@ -59,6 +63,7 @@ class StreamToken {
     this.finishReason,
     this.metrics,
     this.observation,
+    this.speculativeCloudError,
     this.toolCalls = const [],
     this.rawText,
   });

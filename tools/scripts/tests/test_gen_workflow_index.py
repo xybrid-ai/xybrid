@@ -62,15 +62,22 @@ def write(directory: Path, file: str, text: str) -> Path:
     return path
 
 
-def make(file="a.yml", name="CI: A", purpose="Does A.", concurrency=()):
+def make(file="a.yml", name="CI: A", purpose="Does A.", concurrency=(), events=("push",), calls=()):
     return gen.Workflow(
         file=file,
         name=name,
         purpose=purpose,
-        triggers=("push to `master`",),
+        triggers=tuple("workflow_call" if event == "workflow_call" else f"{event} to `master`" for event in events),
         writes=(),
         concurrency=tuple(concurrency),
+        events=tuple(events),
+        calls=tuple(calls),
     )
+
+
+def allowed(*workflows, pull_request=()):
+    """problems() with every given file allowed and `pull_request` allowed to declare PR events."""
+    return gen.problems(list(workflows), {w.file for w in workflows}, set(pull_request))
 
 
 class ParseTests(unittest.TestCase):
@@ -147,12 +154,92 @@ class ParseTests(unittest.TestCase):
         workflow = self.parse('name: "CI: X"\non: push\n# Purpose: trailing\n')
         self.assertIsNone(workflow.purpose)
 
+    def test_reads_a_lane_file_and_the_jobs_that_call_it(self):
+        lane = self.parse(
+            """\
+            # Purpose: x
+            name: "SDK: Lane"
+            on:
+              workflow_call:
+                inputs:
+                  lanes:
+                    type: string
+                    required: false
+                secrets:
+                  TOKEN:
+                    required: false
+                outputs:
+                  digest:
+                    value: ${{ jobs.build.outputs.digest }}
+              schedule:
+                - cron: '0 1 * * *'
+              workflow_dispatch:
+            """
+        )
+        self.assertEqual(lane.events, ("workflow_call", "schedule", "workflow_dispatch"))
+        self.assertEqual(lane.triggers, ("workflow_call", "schedule (`0 1 * * *`)", "workflow_dispatch"))
+        caller = self.parse(
+            """\
+            # Purpose: x
+            name: "CI: Caller"
+            on: pull_request
+            jobs:
+              lane:
+                uses: ./.github/workflows/lane.yml   # the lane
+                secrets: inherit
+              quoted:
+                uses: "./.github/workflows/other.yml"
+              again:
+                uses: ./.github/workflows/lane.yml
+              step:
+                runs-on: ubuntu-latest
+                steps:
+                  - uses: ./.github/actions/setup-rust
+                  - run: |
+                      echo "uses: ./.github/workflows/script.yml"
+                    uses: ./.github/workflows/not-a-job.yml
+            """
+        )
+        self.assertEqual(caller.calls, ("lane.yml", "other.yml"))
+
+    def test_reads_calls_at_any_indentation_width(self):
+        caller = self.parse(
+            """\
+            # Purpose: x
+            name: "CI: Caller"
+            on: pull_request
+            jobs: # every lane
+                lane:
+                    name: Lane
+                    uses: ./.github/workflows/lane.yml
+                build:
+                    runs-on: ubuntu-latest
+                    steps:
+                        -   run: |
+                                echo "uses: ./.github/workflows/not-a-job.yml"
+            """
+        )
+        self.assertEqual(caller.calls, ("lane.yml",))
+        lane = gen.Workflow("lane.yml", "SDK: Lane", "x", ("workflow_call",), (), (), events=("workflow_call",))
+        self.assertEqual(gen.problems([caller, lane], {"w.yml", "lane.yml"}, {"w.yml"}), [])
+
+    def test_refuses_keys_an_event_does_not_take(self):
+        cases = {
+            "secrets outside workflow_call": 'name: "CI: X"\non:\n  push:\n    secrets: {}\n',
+            "filters on workflow_call": 'name: "CI: X"\non:\n  workflow_call:\n    paths: [a]\n',
+        }
+        for label, text in cases.items():
+            with self.subTest(label):
+                with self.assertRaises(gen.Unsupported):
+                    gen.parse_workflow(write(self.dir, "w.yml", text))
+
     def test_refuses_shapes_it_cannot_read(self):
         cases = {
             "an ignore filter changes what a row means": 'name: "CI: X"\non:\n  push:\n    branches-ignore: [docs]\n',
             "a schedule with no cron": 'name: "CI: X"\non:\n  schedule:\n    - foo: bar\n',
             "an escaped quote in a scalar": 'name: "CI: \\"X\\""\non: push\n',
             "no on:": 'name: "CI: X"\n',
+            "a flow-mapping on: hides its events": 'name: "CI: X"\non: { pull_request: { branches: [master] } }\n',
         }
         for label, text in cases.items():
             with self.subTest(label):
@@ -163,18 +250,16 @@ class ParseTests(unittest.TestCase):
 
 class ProblemsTests(unittest.TestCase):
     def test_accepts_conforming_workflows(self):
-        self.assertEqual(gen.problems([make("a.yml", "CI: A"), make("b.yml", "SDK: B")]), [])
+        self.assertEqual(allowed(make("a.yml", "CI: A"), make("b.yml", "SDK: B")), [])
 
     def test_flags_each_rule(self):
-        found = gen.problems(
-            [
-                make("no-group.yml", name="Just a name"),
-                make("wrong-group.yml", name="Docs: Site"),
-                make("no-purpose.yml", name="CI: C", purpose=None),
-                make("keyed-by-name.yml", name="CI: D", concurrency=["${{ github.workflow }}-${{ github.ref }}"]),
-                make("dup-1.yml", name="CI: E"),
-                make("dup-2.yml", name="CI: E"),
-            ]
+        found = allowed(
+            make("no-group.yml", name="Just a name"),
+            make("wrong-group.yml", name="Docs: Site"),
+            make("no-purpose.yml", name="CI: C", purpose=None),
+            make("keyed-by-name.yml", name="CI: D", concurrency=["${{ github.workflow }}-${{ github.ref }}"]),
+            make("dup-1.yml", name="CI: E"),
+            make("dup-2.yml", name="CI: E"),
         )
         joined = "\n".join(found)
         self.assertIn("no-group.yml: name 'Just a name' must be 'Group: Subject'", joined)
@@ -183,6 +268,190 @@ class ProblemsTests(unittest.TestCase):
         self.assertIn("keyed-by-name.yml: concurrency group", joined)
         self.assertIn("dup-2.yml: name 'CI: E' is already used by dup-1.yml", joined)
         self.assertEqual(len(found), 5)
+
+
+class AllowlistTests(unittest.TestCase):
+    def test_a_file_missing_from_the_allowlist_fails(self):
+        found = gen.problems([make("ci.yml", "CI: Workspace"), make("new-lane.yml", "CI: New")], {"ci.yml"}, set())
+        self.assertEqual(len(found), 1)
+        self.assertIn("new-lane.yml: not an allowed workflow file", found[0])
+        self.assertIn("Adding CI", found[0])
+
+    def test_an_allowed_file_that_is_gone_fails_so_the_list_shrinks(self):
+        found = gen.problems([make("ci.yml", "CI: Workspace")], {"ci.yml", "retired.yml"}, set())
+        self.assertEqual(found, ["WORKFLOW_FILES lists retired.yml, which does not exist; remove it"])
+
+    def test_only_listed_files_declare_pull_request_events(self):
+        workflows = [
+            make("ci.yml", "CI: Workspace", events=("push", "pull_request")),
+            make("lane.yml", "CI: Lane", events=("push", "pull_request")),
+            make("bot.yml", "Community: Bot", events=("pull_request_target",)),
+        ]
+        found = allowed(*workflows, pull_request={"ci.yml"})
+        self.assertEqual(len(found), 2)
+        self.assertIn("lane.yml: declares pull_request, but only ci.yml and bazel.yml validate", found[0])
+        self.assertIn("bot.yml: declares pull_request_target", found[1])
+        self.assertEqual(allowed(*workflows, pull_request={"ci.yml", "lane.yml", "bot.yml"}), [])
+
+    def test_a_pull_request_entry_without_the_event_fails_so_the_list_shrinks(self):
+        workflows = [make("ci.yml", "CI: Workspace", events=("pull_request",)), make("lane.yml", "CI: Lane")]
+        self.assertEqual(
+            allowed(*workflows, pull_request={"ci.yml", "lane.yml"}),
+            ["PULL_REQUEST_FILES lists lane.yml, which declares no pull-request event; remove it"],
+        )
+        found = gen.problems(workflows, {"ci.yml", "lane.yml"}, {"ci.yml", "gone.yml"})
+        self.assertIn("WORKFLOW_FILES does not allow", "\n".join(found))
+
+    def test_a_lane_file_is_called_and_declares_no_push_or_pull_request(self):
+        caller = make("ci.yml", "CI: Workspace", events=("pull_request",), calls=("lane.yml",))
+        good = make("lane.yml", "SDK: Lane", events=("workflow_call", "schedule", "workflow_dispatch"))
+        self.assertEqual(allowed(caller, good, pull_request={"ci.yml"}), [])
+
+        pushed = make("lane.yml", "SDK: Lane", events=("push", "workflow_call"))
+        found = allowed(caller, pushed, pull_request={"ci.yml"})
+        self.assertEqual(len(found), 1)
+        self.assertIn("lane.yml: a lane file (workflow_call)", found[0])
+        self.assertIn("not push", found[0])
+
+        orphan = make("orphan.yml", "SDK: Orphan", events=("workflow_call",))
+        self.assertEqual(
+            allowed(caller, good, orphan, pull_request={"ci.yml"}),
+            ["orphan.yml: declares workflow_call, but no workflow calls it"],
+        )
+
+    def test_a_call_names_an_existing_lane_file(self):
+        caller = make("ci.yml", "CI: Workspace", calls=("missing.yml", "plain.yml"))
+        found = allowed(caller, make("plain.yml", "CI: Plain"))
+        self.assertEqual(
+            found,
+            [
+                "ci.yml: calls missing.yml, which does not exist",
+                "ci.yml: calls plain.yml, which does not declare workflow_call",
+            ],
+        )
+
+    def test_the_repository_allowlists_are_consistent(self):
+        self.assertLessEqual(gen.PULL_REQUEST_FILES, gen.WORKFLOW_FILES)
+        self.assertIn("ci.yml", gen.PULL_REQUEST_FILES)
+        self.assertIn("bazel.yml", gen.PULL_REQUEST_FILES)
+
+
+class MacosBudgetTests(unittest.TestCase):
+    CI = textwrap.dedent(
+        """\
+        # Purpose: x
+        name: "CI: Workspace"
+        on: pull_request
+        jobs:
+          linux:
+            runs-on: ubuntu-latest
+          mac:
+            runs-on: macos-15
+          legs:
+            name: legs (${{ matrix.name }})
+            runs-on: ${{ matrix.os }}
+            strategy:
+              fail-fast: false
+              matrix:
+                include:
+                  - name: linux
+                    os: ubuntu-latest
+                  - name: mac
+                    os: macos-latest
+                  - name: windows
+                    os: windows-latest
+          lane:
+            name: Lane
+            uses: ./.github/workflows/lane.yml
+        """
+    )
+    LANE = textwrap.dedent(
+        """\
+        # Purpose: x
+        name: "SDK: Lane"
+        on:
+          workflow_call:
+        jobs:
+          ios:
+            runs-on: macos-26
+          android:
+            runs-on: ubuntu-latest
+        """
+    )
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        write(self.dir, "ci.yml", self.CI)
+        write(self.dir, "lane.yml", self.LANE)
+
+    def test_counts_jobs_matrix_legs_and_called_lanes(self):
+        self.assertEqual(
+            gen.macos_jobs(self.dir),
+            ["ci.yml:mac", "ci.yml:legs (macos-latest)", "lane.yml:ios"],
+        )
+
+    def test_the_budget_is_exact_both_ways(self):
+        self.assertEqual(gen.macos_problems(self.dir, 3), [])
+        over = gen.macos_problems(self.dir, 2)
+        self.assertEqual(len(over), 1)
+        self.assertIn("3 macOS jobs", over[0])
+        self.assertIn("over MACOS_JOB_BUDGET (2)", over[0])
+        under = gen.macos_problems(self.dir, 4)
+        self.assertIn("lower MACOS_JOB_BUDGET from 4 to 3", under[0])
+
+    def test_labels_match_case_insensitively(self):
+        write(self.dir, "lane.yml", self.LANE.replace("macos-26", "macOS-latest"))
+        self.assertIn("lane.yml:ios", gen.macos_jobs(self.dir))
+
+    def test_a_runner_it_cannot_count_is_refused(self):
+        # Each shape would otherwise count zero and slip past the budget.
+        shapes = {
+            "an expression": "runs-on: ${{ inputs.runner }}",
+            "a label list": "runs-on: [macos-15]",
+            "a group mapping": "runs-on:\n      group: mac\n      labels: macos-15",
+            "a matrix axis": "runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n"
+            "        os: [ubuntu-latest, macos-latest]\n        include:\n          - os: ubuntu-latest\n            extra: one",
+            "a flow-mapping leg": "runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n"
+            "        include:\n          - { os: macos-latest }",
+            "an axis on a literal macOS runner": "runs-on: macos-26\n    strategy:\n      matrix:\n"
+            "        version: [stable, beta]",
+            "an inline matrix": "runs-on: macos-26\n    strategy:\n      matrix: ${{ fromJSON(inputs.legs) }}",
+            "an axis under commented headers": "runs-on: macos-26\n    strategy: # legs\n      matrix: # variants\n"
+            "        version: [stable, beta]",
+        }
+        for label, runner in shapes.items():
+            with self.subTest(label):
+                write(self.dir, "lane.yml", self.LANE.replace("runs-on: macos-26", runner))
+                with self.assertRaises(gen.Unsupported):
+                    gen.macos_jobs(self.dir)
+
+    def test_include_legs_on_a_literal_macos_runner_each_count(self):
+        legs = "runs-on: macos-26\n    strategy: # x\n      matrix: # y\n        include: # z\n          - name: a\n          - name: b"
+        write(self.dir, "lane.yml", self.LANE.replace("runs-on: macos-26", legs))
+        self.assertEqual([job for job in gen.macos_jobs(self.dir) if job.startswith("lane.yml")],
+                         ["lane.yml:ios (leg 1)", "lane.yml:ios (leg 2)"])
+
+    def test_a_lane_called_from_a_matrix_is_refused(self):
+        write(self.dir, "ci.yml", self.CI.replace(
+            "    uses: ./.github/workflows/lane.yml\n",
+            "    uses: ./.github/workflows/lane.yml\n    strategy:\n      matrix:\n        target: [one, two]\n"))
+        with self.assertRaises(gen.Unsupported):
+            gen.macos_jobs(self.dir)
+
+    def test_jobs_at_another_indent_or_remote_calls_are_refused(self):
+        head, jobs = self.LANE.split("jobs:\n")
+        write(self.dir, "lane.yml", head + "jobs:\n" + "".join("  " + line for line in jobs.splitlines(True)))
+        with self.assertRaises(gen.Unsupported):
+            gen.macos_jobs(self.dir)
+        write(self.dir, "lane.yml", self.LANE)
+        write(self.dir, "ci.yml", self.CI + "  remote:\n    uses: org/repo/.github/workflows/x.yml@main\n")
+        with self.assertRaises(gen.Unsupported):
+            gen.macos_jobs(self.dir)
+
+    def test_the_repository_pipeline_is_within_budget(self):
+        self.assertEqual(gen.macos_problems(gen.WORKFLOWS_DIR), [])
 
 
 class RenderTests(unittest.TestCase):
@@ -199,6 +468,17 @@ class RenderTests(unittest.TestCase):
         self.assertIn("Left \\| right.", table)
         self.assertNotIn("### Release", table)  # empty groups are omitted
         self.assertTrue(table.endswith("\n"))
+
+    def test_a_lane_file_row_names_its_callers(self):
+        table = gen.render(
+            [
+                make("ci.yml", "CI: Workspace", events=("pull_request",), calls=("lane.yml",)),
+                make("lane.yml", "SDK: Lane", events=("workflow_call", "workflow_dispatch")),
+                make("idle.yml", "SDK: Idle", events=("workflow_call",)),
+            ]
+        )
+        self.assertIn("| [`lane.yml`](lane.yml) | SDK: Lane | called by `ci.yml`, workflow_dispatch to `master` |", table)
+        self.assertIn("| [`idle.yml`](idle.yml) | SDK: Idle | workflow_call |", table)
 
 
 class SpliceTests(unittest.TestCase):
@@ -227,7 +507,13 @@ class MainTests(unittest.TestCase):
         self.readme = self.dir / "README.md"
         self.readme.write_text(f"# Workflows\n\n{gen.BEGIN}\n{gen.END}\n", encoding="utf-8")
         write(self.dir, "sample.yml", SAMPLE)
-        for target, value in (("WORKFLOWS_DIR", self.dir), ("README", self.readme)):
+        for target, value in (
+            ("WORKFLOWS_DIR", self.dir),
+            ("README", self.readme),
+            ("WORKFLOW_FILES", frozenset({"sample.yml"})),
+            ("PULL_REQUEST_FILES", frozenset({"sample.yml"})),
+            ("MACOS_JOB_BUDGET", 0),
+        ):
             patcher = patch.object(gen, target, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -262,6 +548,13 @@ class MainTests(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertIn("bad.yml: name 'Bad name'", err)
         self.assertEqual(self.readme.read_text(encoding="utf-8"), before)
+
+    def test_an_unlisted_file_fails_the_check(self):
+        write(self.dir, "new-lane.yml", '# Purpose: x\nname: "CI: New lane"\non: pull_request\n')
+        code, _, err = self.run_main("--check")
+        self.assertEqual(code, 1)
+        self.assertIn("new-lane.yml: not an allowed workflow file", err)
+        self.assertIn("new-lane.yml: declares pull_request", err)
 
     def test_unreadable_yaml_fails_with_the_file_name(self):
         write(self.dir, "odd.yml", 'name: "CI: Odd"\non:\n  push:\n    tags-ignore: [v0]\n')

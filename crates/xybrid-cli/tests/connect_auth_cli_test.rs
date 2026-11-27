@@ -6,6 +6,11 @@
 //! opt-outs, proxies, keys and OTLP variables removed unless a case sets them.
 //! The platform is a custom loopback host, so `--allow-custom-host` is passed
 //! and the console comes from `XYBRID_CONSOLE_URL`.
+//!
+//! The binary is this build's, or the executable named by
+//! `XYBRID_CLI_TEST_BIN`, so a released CLI can be checked against these
+//! cases, e.g. `XYBRID_CLI_TEST_BIN=$PWD/xybrid-v<version>-linux-x86_64 cargo
+//! test -p xybrid-cli --test connect_auth_cli_test claim_by_`.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -161,7 +166,7 @@ fn sends_no_identifying_fields(request: &HttpMockRequest) -> bool {
         "challenge",
         "nonce",
     ];
-    let info = ["cli_version", "os", "arch", "binding"];
+    let info = ["cli_version", "os", "arch", "binding", "via"];
     body.keys().all(|k| top.contains(&k.as_str()))
         && body
             .get("client_info")
@@ -170,18 +175,31 @@ fn sends_no_identifying_fields(request: &HttpMockRequest) -> bool {
 }
 
 fn mock_challenge(server: &MockServer) -> Mock<'_> {
+    mock_challenge_with_via(server, None)
+}
+
+fn mock_challenge_with_via(server: &MockServer, collect_via: Option<Value>) -> Mock<'_> {
     server.mock(|when, then| {
         when.method(GET).path("/v1/agent/challenge");
-        then.status(200).json_body(json!({
+        let mut body = json!({
             "challenge": CHALLENGE,
             "difficulty": 8,
             "expires_at": iso(0),
             "algorithm": "sha256-leading-zero-bits",
-        }));
+        });
+        if let Some(collect_via) = collect_via {
+            body["collect_via"] = collect_via;
+        }
+        then.status(200).json_body(body);
     })
 }
 
 fn mock_connect(server: &MockServer) -> Mock<'_> {
+    mock_connect_with(server, provision(KEY, Some(CLAIM_TOKEN), 7, false))
+}
+
+/// [`mock_connect`] answering with `body`.
+fn mock_connect_with(server: &MockServer, body: Value) -> Mock<'_> {
     server.mock(|when, then| {
         when.method(POST)
             .path("/v1/agent/connect")
@@ -193,7 +211,7 @@ fn mock_connect(server: &MockServer) -> Mock<'_> {
             .matches(sends_no_identifying_fields);
         then.status(201)
             .header("Cache-Control", "no-store")
-            .json_body(provision(KEY, Some(CLAIM_TOKEN), 7, false));
+            .json_body(body);
     })
 }
 
@@ -387,14 +405,30 @@ impl Sandbox {
     }
 }
 
-/// The CLI binary as an absolute path. Cargo sets `CARGO_BIN_EXE_xybrid` to an
-/// absolute path, but Bazel sets it to a runfiles-relative one, which stops
-/// resolving once a command runs in a project directory. Resolved once, against
-/// the directory the test binary started in.
+/// Runs these cases against another `xybrid` executable, such as a released
+/// one, instead of the one this build made. Test-only: the CLI never reads it.
+const TEST_BIN_ENV: &str = "XYBRID_CLI_TEST_BIN";
+
+/// The CLI binary as an absolute path: [`TEST_BIN_ENV`] when set, else this
+/// build's. Cargo sets `CARGO_BIN_EXE_xybrid` to an absolute path, but Bazel
+/// sets it to a runfiles-relative one, which stops resolving once a command
+/// runs in a project directory. Resolved once, against the directory the test
+/// binary started in.
 fn xybrid_bin() -> &'static Path {
     static BIN: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     BIN.get_or_init(|| {
-        let path = PathBuf::from(env!("CARGO_BIN_EXE_xybrid"));
+        let path = match std::env::var_os(TEST_BIN_ENV).filter(|p| !p.is_empty()) {
+            Some(path) => {
+                let path = PathBuf::from(path);
+                assert!(
+                    path.is_file(),
+                    "{TEST_BIN_ENV}={} is not a file",
+                    path.display()
+                );
+                path
+            }
+            None => PathBuf::from(env!("CARGO_BIN_EXE_xybrid")),
+        };
         if path.is_absolute() {
             path
         } else {
@@ -603,7 +637,9 @@ fn a_new_env_file_is_created_private_and_reused_on_the_next_connect() {
     );
 
     // Same project again: the saved credential is checked and reused.
-    let again = sandbox.run(&connect_args(&url));
+    let mut args = connect_args(&url);
+    args.extend(["--via", "docs"]);
+    let again = sandbox.run(&args);
     assert_eq!(again.code, Some(0), "{again}");
     again.assert_no_secret(KEY);
     let report = again.json();
@@ -618,6 +654,161 @@ fn a_new_env_file_is_created_private_and_reused_on_the_next_connect() {
     status.assert_hits(1);
     let env = std::fs::read_to_string(sandbox.project.join(".env")).unwrap();
     assert_eq!(env.matches("XYBRID_API_KEY=").count(), 1, "{env}");
+}
+
+/// The deadline `field` of a platform answer.
+fn deadline(answer: &Value, field: &str) -> chrono::DateTime<Utc> {
+    let raw = answer[field]
+        .as_str()
+        .unwrap_or_else(|| panic!("{field} in {answer}"));
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .unwrap_or_else(|err| panic!("{field} {raw:?}: {err}"))
+        .with_timezone(&Utc)
+}
+
+/// `answer`'s key and claim deadlines as `tell_the_user` words dates: the
+/// local date (the CLI runs in this process's time zone).
+fn told_deadlines(answer: &Value) -> (String, String) {
+    let day = |field| {
+        deadline(answer, field)
+            .with_timezone(&chrono::Local)
+            .format("%a, %b %-d %Y")
+            .to_string()
+    };
+    (day("key_expires_at"), day("claim_expires_at"))
+}
+
+/// How `tell_the_user` says to claim the workspace.
+enum ClaimBy<'a> {
+    /// With this private link.
+    Link(&'a str),
+    /// With `xybrid auth claim`, when no console is known to build a link.
+    Command,
+}
+
+/// `tell_the_user` says to claim by `answer`'s claim deadline (when an
+/// unclaimed workspace is deleted), and gives the earlier key deadline only as
+/// when the key, and with it platform access, stops: never as the date to
+/// claim by.
+fn assert_told_to_claim_by_the_claim_deadline(tell: &str, answer: &Value, how: ClaimBy<'_>) {
+    let (key, claim) = told_deadlines(answer);
+    assert_ne!(key, claim, "the deadlines must differ to tell them apart");
+    let how = match how {
+        ClaimBy::Link(link) => format!(": {link} (this link is private"),
+        ClaimBy::Command => " with `xybrid auth claim`.".to_string(),
+    };
+    assert!(
+        tell.contains(&format!(" Claim it with GitHub by {claim}{how}")),
+        "{tell}"
+    );
+    assert!(
+        tell.contains(&format!(
+            " Until it is claimed, platform access stops on {key} and the workspace is \
+             scheduled for deletion on {claim}."
+        )),
+        "{tell}"
+    );
+    assert!(!tell.contains(&format!("by {key}")), "{tell}");
+}
+
+/// The project file's comment does the same with UTC dates, and names the
+/// claim command, never the private link or its token.
+fn assert_commented_to_claim_by_the_claim_deadline(env: &str, answer: &Value) {
+    let date = |field| deadline(answer, field).format("%Y-%m-%d").to_string();
+    let (key, claim) = (date("key_expires_at"), date("claim_expires_at"));
+    assert!(
+        env.contains(&format!(
+            "\n# Claim it with GitHub by {claim} to keep it: run `xybrid auth claim`.\n"
+        )),
+        "{env}"
+    );
+    assert!(
+        env.contains(&format!(
+            "\n# Unclaimed, the key stops on {key} (UTC) and the workspace is deleted on {claim}.\n"
+        )),
+        "{env}"
+    );
+    assert!(!env.contains(&format!("by {key}")), "{env}");
+    assert!(
+        !env.contains(CLAIM_TOKEN) && !env.contains("/claim/"),
+        "{env}"
+    );
+}
+
+/// "Claim by" is the claim deadline, not the key deadline a week before it, in
+/// `tell_the_user` with a claim link and in the project file, on creation and
+/// on reuse (INF-295).
+#[test]
+fn claim_by_is_the_claim_deadline_with_a_claim_link() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    mock_challenge(&server);
+    let provisioned = provision(KEY, Some(CLAIM_TOKEN), 7, false);
+    let connect = mock_connect_with(&server, provisioned.clone());
+    let url = server.base_url();
+    let console = [("XYBRID_CONSOLE_URL", CONSOLE)];
+    let link = format!("{CONSOLE}/claim/{CLAIM_TOKEN}");
+
+    let run = sandbox.run_with(&connect_args(&url), &console);
+    assert_eq!(run.code, Some(0), "{run}");
+    run.assert_no_secret(KEY);
+    let report = run.json();
+    assert_eq!(report["status"], "created");
+    assert_eq!(report["claim_url"], link);
+    let tell = report["tell_the_user"].as_str().unwrap();
+    assert_told_to_claim_by_the_claim_deadline(tell, &provisioned, ClaimBy::Link(&link));
+    let env = std::fs::read_to_string(sandbox.project.join(".env")).unwrap();
+    assert_commented_to_claim_by_the_claim_deadline(&env, &provisioned);
+
+    // Reused, with the deadlines the platform reports for the saved key.
+    let answer = workspace(false, false, "none");
+    let status = mock_workspace(&server, KEY, answer.clone());
+    let run = sandbox.run_with(&connect_args(&url), &console);
+    assert_eq!(run.code, Some(0), "{run}");
+    let report = run.json();
+    assert_eq!(report["status"], "existing");
+    assert_eq!(report["claim_url"], link);
+    let tell = report["tell_the_user"].as_str().unwrap();
+    assert_told_to_claim_by_the_claim_deadline(tell, &answer, ClaimBy::Link(&link));
+    status.assert_hits(1);
+    connect.assert_hits(1);
+}
+
+/// As [`claim_by_is_the_claim_deadline_with_a_claim_link`], without a console
+/// to build the link from: the copy names the recovery command instead.
+#[test]
+fn claim_by_is_the_claim_deadline_with_the_claim_command() {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    mock_challenge(&server);
+    let provisioned = provision(KEY, Some(CLAIM_TOKEN), 7, false);
+    let connect = mock_connect_with(&server, provisioned.clone());
+    let url = server.base_url();
+
+    let run = sandbox.run(&connect_args(&url));
+    assert_eq!(run.code, Some(0), "{run}");
+    run.assert_no_secret(KEY);
+    let report = run.json();
+    assert_eq!(report["status"], "created");
+    assert_eq!(report["claim_url"], Value::Null);
+    let tell = report["tell_the_user"].as_str().unwrap();
+    assert_told_to_claim_by_the_claim_deadline(tell, &provisioned, ClaimBy::Command);
+    let env = std::fs::read_to_string(sandbox.project.join(".env")).unwrap();
+    assert_commented_to_claim_by_the_claim_deadline(&env, &provisioned);
+
+    let answer = workspace(false, false, "none");
+    let status = mock_workspace(&server, KEY, answer.clone());
+    let run = sandbox.run(&connect_args(&url));
+    assert_eq!(run.code, Some(0), "{run}");
+    let report = run.json();
+    assert_eq!(report["status"], "existing");
+    assert_eq!(report["claim_url"], Value::Null);
+    let tell = report["tell_the_user"].as_str().unwrap();
+    assert_told_to_claim_by_the_claim_deadline(tell, &answer, ClaimBy::Command);
+    status.assert_hits(1);
+    connect.assert_hits(1);
 }
 
 #[test]
@@ -787,7 +978,17 @@ fn an_unreachable_platform_exits_4() {
     };
     let url = format!("http://127.0.0.1:{port}");
 
-    let run = sandbox.run(&connect_args(&url));
+    let run = sandbox.run(&platform_args(
+        &url,
+        &[
+            "connect",
+            "--json",
+            "--write-env",
+            ".env",
+            "--via",
+            "web-copy",
+        ],
+    ));
     assert_eq!(run.code, Some(4), "{run}");
     let report = run.json();
     assert_eq!(report["status"], "offline");
@@ -797,7 +998,7 @@ fn an_unreachable_platform_exits_4() {
     assert!(tell.contains("no workspace was created"), "{tell}");
     assert!(
         tell.contains(&format!(
-            "`xybrid --platform-url {url} connect --write-env .env --allow-custom-host`"
+            "`xybrid --platform-url {url} connect --via web-copy --write-env .env --allow-custom-host`"
         )),
         "{tell}"
     );
@@ -1793,11 +1994,12 @@ fn a_project_file_that_fails_after_provisioning_still_reports_the_workspace() {
     let sandbox = Sandbox::new();
     let server = MockServer::start();
     let challenge = mock_challenge(&server);
+    let provisioned = provision(KEY, Some(CLAIM_TOKEN), 7, false);
     let slow = server.mock(|when, then| {
         when.method(POST).path("/v1/agent/connect");
         then.status(201)
             .delay(Duration::from_secs(2))
-            .json_body(provision(KEY, Some(CLAIM_TOKEN), 7, false));
+            .json_body(provisioned.clone());
     });
     let url = server.base_url();
 
@@ -1825,7 +2027,7 @@ fn a_project_file_that_fails_after_provisioning_still_reports_the_workspace() {
         tell.contains("Created the provisional Xybrid workspace"),
         "{tell}"
     );
-    assert!(tell.contains(&link), "{tell}");
+    assert_told_to_claim_by_the_claim_deadline(tell, &provisioned, ClaimBy::Link(&link));
     assert!(tell.contains("reuses the saved key"), "{tell}");
 
     // Once fixed, the next run reuses the saved key: no second workspace.
@@ -2303,6 +2505,133 @@ fn mock_connect_unanswered(server: &MockServer) -> Mock<'_> {
     })
 }
 
+#[test]
+fn connect_omits_via_without_an_explicit_grant_and_keeps_omission_on_retry() {
+    require_git!();
+    for gate in [None, Some(json!(false)), Some(json!("true"))] {
+        let sandbox = Sandbox::new();
+        let server = MockServer::start();
+        let mut challenge = mock_challenge_with_via(&server, gate);
+        let mut failing = mock_connect_unanswered(&server);
+        let url = server.base_url();
+        let run = sandbox.run(&platform_args(
+            &url,
+            &["connect", "--json", "--via", "web-copy"],
+        ));
+        assert_eq!(run.code, Some(1), "{run}");
+        challenge.assert_hits(1);
+        challenge.delete();
+        failing.assert_hits(1);
+        failing.delete();
+
+        let pending = sandbox.credentials()["pending"][0].clone();
+        let info = &pending["client_info"];
+        assert!(info.get("via").is_none());
+        let enabled = mock_challenge_with_via(&server, Some(json!(true)));
+        let retry = server.mock(|when, then| {
+            when.method(POST)
+                .path("/v1/agent/connect")
+                .header(
+                    "Idempotency-Key",
+                    pending["idempotency_key"].as_str().unwrap(),
+                )
+                .matches(|request| {
+                    let body = request.body.as_ref().unwrap();
+                    let body: Value = serde_json::from_slice(body).unwrap();
+                    body["client_info"].get("via").is_none()
+                })
+                .json_body_partial(json!({"client_info": info}).to_string());
+            then.status(200)
+                .json_body(provision(KEY, Some(CLAIM_TOKEN), 7, true));
+        });
+        let run = sandbox.run(&platform_args(
+            &url,
+            &["connect", "--json", "--via", "docs"],
+        ));
+        assert_eq!(run.code, Some(0), "{run}");
+        enabled.assert_hits(0);
+        retry.assert_hits(1);
+    }
+}
+
+#[test]
+fn a_replacement_challenge_can_revoke_attribution_on_the_same_request() {
+    check_attribution_revocation(8);
+}
+
+#[test]
+fn a_failing_replacement_challenge_still_persists_revocation() {
+    check_attribution_revocation(255);
+}
+
+fn check_attribution_revocation(replacement_difficulty: u8) {
+    require_git!();
+    let sandbox = Sandbox::new();
+    let server = MockServer::start();
+    let url = server.base_url();
+    let mut granted = mock_challenge_with_via(&server, Some(json!(true)));
+    let mut unanswered = mock_connect_unanswered(&server);
+    let run = sandbox.run(&platform_args(
+        &url,
+        &["connect", "--json", "--via", "web-copy"],
+    ));
+    assert_eq!(run.code, Some(1), "{run}");
+    granted.assert_hits(1);
+    unanswered.assert_hits(1);
+    granted.delete();
+    unanswered.delete();
+
+    let pending = sandbox.credentials()["pending"][0].clone();
+    assert_eq!(pending["client_info"]["via"], "web-copy");
+    let key = pending["idempotency_key"].as_str().unwrap();
+    let revoked = server.mock(|when, then| {
+        when.method(GET).path("/v1/agent/challenge");
+        then.status(200).json_body(json!({
+            "challenge": CHALLENGE,
+            "difficulty": replacement_difficulty,
+            "collect_via": false,
+        }));
+    });
+    let expired = server.mock(|when, then| {
+        when.method(POST)
+            .path("/v1/agent/connect")
+            .header("Idempotency-Key", key)
+            .json_body_partial(json!({"client_info": {"via": "web-copy"}}).to_string());
+        then.status(400)
+            .json_body(json!({"error": "challenge_expired"}));
+    });
+    let retry = server.mock(|when, then| {
+        when.method(POST)
+            .path("/v1/agent/connect")
+            .header("Idempotency-Key", key)
+            .matches(|request| {
+                let body: Value = serde_json::from_slice(request.body.as_ref().unwrap()).unwrap();
+                body["client_info"].get("via").is_none()
+            });
+        then.status(502).body("bad gateway");
+    });
+    let run = sandbox.run(&platform_args(
+        &url,
+        &["connect", "--json", "--via", "docs"],
+    ));
+    assert_eq!(run.code, Some(1), "{run}");
+    expired.assert_hits(1);
+    revoked.assert_hits(1);
+    let saved = sandbox.credentials()["pending"][0].clone();
+    assert_eq!(saved["idempotency_key"], key);
+    assert!(saved["client_info"].get("via").is_none());
+    if replacement_difficulty == 255 {
+        retry.assert_hits(0);
+        let run = sandbox.run(&platform_args(
+            &url,
+            &["connect", "--json", "--via", "docs"],
+        ));
+        assert_eq!(run.code, Some(1), "{run}");
+        revoked.assert_hits(1);
+    }
+    retry.assert_hits(1);
+}
+
 /// After a lost `connect --new` answer the suggested command repeats that
 /// request: it keeps `--new`, so the saved key of the old workspace is not
 /// reused instead, and `--allow-ci`, so CI doesn't skip it.
@@ -2311,7 +2640,7 @@ fn the_suggested_rerun_repeats_a_lost_new_workspace_request() {
     require_git!();
     let sandbox = Sandbox::new();
     let server = MockServer::start();
-    let challenge = mock_challenge(&server);
+    let challenge = mock_challenge_with_via(&server, Some(json!(true)));
     let mut first = mock_connect(&server);
     let url = server.base_url();
     let run = sandbox.run(&platform_args(&url, &["connect", "--json"]));
@@ -2322,7 +2651,17 @@ fn the_suggested_rerun_repeats_a_lost_new_workspace_request() {
     let mut failing = mock_connect_unanswered(&server);
     let ci = [("CI", "true")];
     let run = sandbox.run_with(
-        &platform_args(&url, &["connect", "--new", "--allow-ci", "--json"]),
+        &platform_args(
+            &url,
+            &[
+                "connect",
+                "--new",
+                "--allow-ci",
+                "--via",
+                "web-copy",
+                "--json",
+            ],
+        ),
         &ci,
     );
     assert_eq!(run.code, Some(1), "{run}");
@@ -2332,12 +2671,13 @@ fn the_suggested_rerun_repeats_a_lost_new_workspace_request() {
     let rerun = suggested_rerun(tell);
     assert_eq!(
         rerun.join(" "),
-        format!("--platform-url {url} connect --new --allow-ci --allow-custom-host")
+        format!("--platform-url {url} connect --new --via web-copy --allow-ci --allow-custom-host")
     );
     failing.assert_hits(1);
     failing.delete();
     let pending = sandbox.credentials()["pending"][0].clone();
     assert_eq!(pending["kind"], "connect");
+    assert_eq!(pending["client_info"]["via"], "web-copy");
     let idempotency_key = pending["idempotency_key"].as_str().unwrap().to_string();
 
     // The platform had created the workspace: the suggested command gets it
@@ -2345,7 +2685,9 @@ fn the_suggested_rerun_repeats_a_lost_new_workspace_request() {
     let retry = server.mock(|when, then| {
         when.method(POST)
             .path("/v1/agent/connect")
-            .header("Idempotency-Key", idempotency_key.as_str());
+            .header("Idempotency-Key", idempotency_key.as_str())
+            .matches(sends_no_identifying_fields)
+            .json_body_partial(json!({"client_info": {"via": "web-copy"}}).to_string());
         then.status(200)
             .json_body(provision(SECOND_KEY, Some(SECOND_CLAIM_TOKEN), 7, true));
     });

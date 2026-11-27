@@ -159,7 +159,11 @@ export const Observability = {
     return NativeXybrid.observabilityDefaultTracesEndpoint();
   },
 
-  /** Delivery counters; all zero while export is off. */
+  /**
+   * Delivery counters: live while export runs; after `shutdown`, the final ones
+   * (what the shutdown failed or dropped included) until the next `init`; all
+   * zero before any.
+   */
   async stats(): Promise<ObservabilityStats> {
     return (await NativeXybrid.observabilityStats()) as ObservabilityStats;
   },

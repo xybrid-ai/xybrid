@@ -21,12 +21,12 @@ class _Pipeline implements FfiPipeline {
   Object? error;
 
   @override
-  Future<FfiResult> run(
+  Future<FfiRunResult> run(
       {required FfiEnvelope envelope,
       FfiObservationOptions? observation}) async {
     this.observation = observation;
     if (error != null) throw error!;
-    return const FfiResult(
+    return const FfiRunResult.legacy(FfiResult(
       observation: _workflow,
       success: true,
       text: 'answer',
@@ -36,7 +36,7 @@ class _Pipeline implements FfiPipeline {
         FfiStageLatency(stageId: 'draft', latencyMs: 8, observation: _stage),
       ]),
       toolCalls: [],
-    );
+    ));
   }
 
   @override

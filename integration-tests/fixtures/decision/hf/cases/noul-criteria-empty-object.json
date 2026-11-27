@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "noul-criteria-empty-object",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Empty criteria: no Yes/No lines",
+  "covers": [
+    "noul-no-criteria"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\", \"criteria\": {}}}}",
+  "artifact": "d1-2b-hf"
+}

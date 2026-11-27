@@ -164,6 +164,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let response = executor.execute(&metadata, &envelope, Some(&config))?;
         let text = match &response.kind {
+            EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+                return Err("Unexpected decision output".into());
+            }
             EnvelopeKind::Text(t) => t.clone(),
             other => return Err(format!("expected Text output, got {other:?}").into()),
         };

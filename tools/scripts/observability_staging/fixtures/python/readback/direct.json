@@ -1,0 +1,1146 @@
+{
+  "contents": {},
+  "errors": [],
+  "evaluations": {
+    "items": [],
+    "trace_id": "8f25e8437f84d311d8af4e1177122905",
+    "truncated": false
+  },
+  "spans": {
+    "spans": [
+      {
+        "attributes": {
+          "gen_ai.operation.name": {
+            "stringValue": "invoke_workflow"
+          },
+          "gen_ai.workflow.name": {
+            "stringValue": "staging-workflow"
+          }
+        },
+        "content": null,
+        "counted_request": false,
+        "dropped_attributes_count": 0,
+        "dropped_events_count": 0,
+        "dropped_links_count": 0,
+        "duration_ns": "225992666",
+        "end_time": "2026-11-11T14:30:48.208957750Z",
+        "end_time_unix_nano": "1794407448208957750",
+        "events": [],
+        "flags": 769,
+        "gateway_payloads": {
+          "request": false,
+          "response": false
+        },
+        "genai": {
+          "attempt_count": null,
+          "attempt_index": null,
+          "cache_read_input_tokens": null,
+          "cache_write_input_tokens": null,
+          "error_type": null,
+          "execution_location": null,
+          "input_tokens": null,
+          "operation_name": "invoke_workflow",
+          "output_tokens": null,
+          "provider_name": null,
+          "reasoning_output_tokens": null,
+          "request_model": null,
+          "response_model": null,
+          "runtime_name": null,
+          "server_address": null,
+          "task": null,
+          "time_to_first_chunk_s": null,
+          "time_to_first_token_s": null
+        },
+        "is_request": false,
+        "kind": "INTERNAL",
+        "links": [],
+        "name": "invoke_workflow staging-workflow",
+        "parent_span_id": "2bb5632aba620022",
+        "resource": {
+          "attributes": {
+            "device.id": {
+              "stringValue": "staging-device-python-mac"
+            },
+            "host.arch": {
+              "stringValue": "aarch64"
+            },
+            "os.type": {
+              "stringValue": "Darwin"
+            },
+            "os.version": {
+              "stringValue": "27.2"
+            },
+            "service.name": {
+              "stringValue": "xybrid-staging-python"
+            },
+            "service.version": {
+              "stringValue": "1.0.0"
+            },
+            "telemetry.sdk.language": {
+              "stringValue": "rust"
+            },
+            "telemetry.sdk.name": {
+              "stringValue": "xybrid"
+            },
+            "telemetry.sdk.version": {
+              "stringValue": "0.33.1"
+            },
+            "xybrid.acceptance.commit": {
+              "stringValue": "00e617102bc77ca0602115669cf62a68e56a92bb"
+            },
+            "xybrid.acceptance.lane": {
+              "stringValue": "python-mac"
+            },
+            "xybrid.acceptance.run": {
+              "stringValue": "s6-20261111t143025z-python-mac"
+            },
+            "xybrid.acceptance.session": {
+              "stringValue": "direct"
+            },
+            "xybrid.device.chip": {
+              "stringValue": "Apple M5 Max"
+            },
+            "xybrid.device.ram_gb": {
+              "intValue": 64
+            },
+            "xybrid.sdk.binding": {
+              "stringValue": "python"
+            },
+            "xybrid.sdk.version": {
+              "stringValue": "0.17.0"
+            }
+          },
+          "dropped_attributes_count": 0,
+          "schema_url": ""
+        },
+        "scope": {
+          "attributes": {},
+          "dropped_attributes_count": 0,
+          "name": "xybrid-observability",
+          "schema_url": "",
+          "version": "0.17.0"
+        },
+        "service_name": "xybrid-staging-python",
+        "source": "otlp",
+        "span_id": "47b15d561151eda7",
+        "span_type": "genai.workflow",
+        "start_time": "2026-11-11T14:30:47.982965084Z",
+        "start_time_unix_nano": "1794407447982965084",
+        "status": {
+          "code": "UNSET",
+          "message": ""
+        },
+        "trace_id": "8f25e8437f84d311d8af4e1177122905",
+        "trace_state": ""
+      },
+      {
+        "attributes": {
+          "gen_ai.conversation.id": {
+            "stringValue": "staging-conversation-s6-20261111t143025z-python-mac-direct"
+          },
+          "gen_ai.operation.name": {
+            "stringValue": "load_model"
+          },
+          "gen_ai.request.model": {
+            "stringValue": "lfm2.5-230m"
+          },
+          "xybrid.genai.model.cache_hit": {
+            "boolValue": true
+          },
+          "xybrid.genai.model.format": {
+            "stringValue": "gguf"
+          },
+          "xybrid.genai.model.size_bytes": {
+            "intValue": 153406304
+          },
+          "xybrid.genai.runtime.name": {
+            "stringValue": "llama.cpp"
+          },
+          "xybrid.load.trigger": {
+            "stringValue": "load"
+          }
+        },
+        "content": null,
+        "counted_request": false,
+        "dropped_attributes_count": 0,
+        "dropped_events_count": 0,
+        "dropped_links_count": 0,
+        "duration_ns": "3940750",
+        "end_time": "2026-11-11T14:30:47.987465750Z",
+        "end_time_unix_nano": "1794407447987465750",
+        "events": [],
+        "flags": 769,
+        "gateway_payloads": {
+          "request": false,
+          "response": false
+        },
+        "genai": {
+          "attempt_count": null,
+          "attempt_index": null,
+          "cache_read_input_tokens": null,
+          "cache_write_input_tokens": null,
+          "error_type": null,
+          "execution_location": null,
+          "input_tokens": null,
+          "operation_name": "load_model",
+          "output_tokens": null,
+          "provider_name": null,
+          "reasoning_output_tokens": null,
+          "request_model": "lfm2.5-230m",
+          "response_model": null,
+          "runtime_name": "llama.cpp",
+          "server_address": null,
+          "task": null,
+          "time_to_first_chunk_s": null,
+          "time_to_first_token_s": null
+        },
+        "is_request": false,
+        "kind": "INTERNAL",
+        "links": [],
+        "name": "load_model lfm2.5-230m",
+        "parent_span_id": "47b15d561151eda7",
+        "resource": {
+          "attributes": {
+            "device.id": {
+              "stringValue": "staging-device-python-mac"
+            },
+            "host.arch": {
+              "stringValue": "aarch64"
+            },
+            "os.type": {
+              "stringValue": "Darwin"
+            },
+            "os.version": {
+              "stringValue": "27.2"
+            },
+            "service.name": {
+              "stringValue": "xybrid-staging-python"
+            },
+            "service.version": {
+              "stringValue": "1.0.0"
+            },
+            "telemetry.sdk.language": {
+              "stringValue": "rust"
+            },
+            "telemetry.sdk.name": {
+              "stringValue": "xybrid"
+            },
+            "telemetry.sdk.version": {
+              "stringValue": "0.33.1"
+            },
+            "xybrid.acceptance.commit": {
+              "stringValue": "00e617102bc77ca0602115669cf62a68e56a92bb"
+            },
+            "xybrid.acceptance.lane": {
+              "stringValue": "python-mac"
+            },
+            "xybrid.acceptance.run": {
+              "stringValue": "s6-20261111t143025z-python-mac"
+            },
+            "xybrid.acceptance.session": {
+              "stringValue": "direct"
+            },
+            "xybrid.device.chip": {
+              "stringValue": "Apple M5 Max"
+            },
+            "xybrid.device.ram_gb": {
+              "intValue": 64
+            },
+            "xybrid.sdk.binding": {
+              "stringValue": "python"
+            },
+            "xybrid.sdk.version": {
+              "stringValue": "0.17.0"
+            }
+          },
+          "dropped_attributes_count": 0,
+          "schema_url": ""
+        },
+        "scope": {
+          "attributes": {},
+          "dropped_attributes_count": 0,
+          "name": "xybrid-observability",
+          "schema_url": "",
+          "version": "0.17.0"
+        },
+        "service_name": "xybrid-staging-python",
+        "source": "otlp",
+        "span_id": "ba5f59e28ebe2c8f",
+        "span_type": "genai.load_model",
+        "start_time": "2026-11-11T14:30:47.983525000Z",
+        "start_time_unix_nano": "1794407447983525000",
+        "status": {
+          "code": "UNSET",
+          "message": ""
+        },
+        "trace_id": "8f25e8437f84d311d8af4e1177122905",
+        "trace_state": ""
+      },
+      {
+        "attributes": {
+          "error.type": {
+            "stringValue": "cancelled"
+          },
+          "gen_ai.conversation.id": {
+            "stringValue": "staging-conversation-s6-20261111t143025z-python-mac-direct"
+          },
+          "gen_ai.operation.name": {
+            "stringValue": "chat"
+          },
+          "gen_ai.provider.name": {
+            "stringValue": "llama.cpp"
+          },
+          "gen_ai.request.max_tokens": {
+            "intValue": 256
+          },
+          "gen_ai.request.model": {
+            "stringValue": "lfm2.5-230m"
+          },
+          "gen_ai.request.stream": {
+            "boolValue": true
+          },
+          "gen_ai.request.temperature": {
+            "doubleValue": 0.0
+          },
+          "gen_ai.request.top_k": {
+            "intValue": 40
+          },
+          "gen_ai.request.top_p": {
+            "doubleValue": 0.8999999761581421
+          },
+          "gen_ai.response.time_to_first_chunk": {
+            "doubleValue": 0.190228708
+          },
+          "gen_ai.usage.input_tokens": {
+            "intValue": 33
+          },
+          "gen_ai.usage.text.input_tokens": {
+            "intValue": 33
+          },
+          "xybrid.genai.execution.location": {
+            "stringValue": "local"
+          },
+          "xybrid.genai.input.modalities": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "text"
+                }
+              ]
+            }
+          },
+          "xybrid.genai.model.format": {
+            "stringValue": "gguf"
+          },
+          "xybrid.genai.model.quantization": {
+            "stringValue": "q4_k_m"
+          },
+          "xybrid.genai.output.modalities": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "text"
+                }
+              ]
+            }
+          },
+          "xybrid.genai.response.chunk_count": {
+            "intValue": 3
+          },
+          "xybrid.genai.runtime.name": {
+            "stringValue": "llama.cpp"
+          },
+          "xybrid.genai.task": {
+            "stringValue": "text_generation"
+          }
+        },
+        "content": null,
+        "counted_request": true,
+        "dropped_attributes_count": 0,
+        "dropped_events_count": 0,
+        "dropped_links_count": 0,
+        "duration_ns": "196545583",
+        "end_time": "2026-11-11T14:30:48.184912583Z",
+        "end_time_unix_nano": "1794407448184912583",
+        "events": [],
+        "flags": 769,
+        "gateway_payloads": {
+          "request": false,
+          "response": false
+        },
+        "genai": {
+          "attempt_count": null,
+          "attempt_index": null,
+          "cache_read_input_tokens": null,
+          "cache_write_input_tokens": null,
+          "error_type": "cancelled",
+          "execution_location": "local",
+          "input_tokens": 33,
+          "operation_name": "chat",
+          "output_tokens": null,
+          "provider_name": "llama.cpp",
+          "reasoning_output_tokens": null,
+          "request_model": "lfm2.5-230m",
+          "response_model": null,
+          "runtime_name": "llama.cpp",
+          "server_address": null,
+          "task": "text_generation",
+          "time_to_first_chunk_s": 0.190228708,
+          "time_to_first_token_s": null
+        },
+        "is_request": true,
+        "kind": "INTERNAL",
+        "links": [],
+        "name": "chat lfm2.5-230m",
+        "parent_span_id": "47b15d561151eda7",
+        "resource": {
+          "attributes": {
+            "device.id": {
+              "stringValue": "staging-device-python-mac"
+            },
+            "host.arch": {
+              "stringValue": "aarch64"
+            },
+            "os.type": {
+              "stringValue": "Darwin"
+            },
+            "os.version": {
+              "stringValue": "27.2"
+            },
+            "service.name": {
+              "stringValue": "xybrid-staging-python"
+            },
+            "service.version": {
+              "stringValue": "1.0.0"
+            },
+            "telemetry.sdk.language": {
+              "stringValue": "rust"
+            },
+            "telemetry.sdk.name": {
+              "stringValue": "xybrid"
+            },
+            "telemetry.sdk.version": {
+              "stringValue": "0.33.1"
+            },
+            "xybrid.acceptance.commit": {
+              "stringValue": "00e617102bc77ca0602115669cf62a68e56a92bb"
+            },
+            "xybrid.acceptance.lane": {
+              "stringValue": "python-mac"
+            },
+            "xybrid.acceptance.run": {
+              "stringValue": "s6-20261111t143025z-python-mac"
+            },
+            "xybrid.acceptance.session": {
+              "stringValue": "direct"
+            },
+            "xybrid.device.chip": {
+              "stringValue": "Apple M5 Max"
+            },
+            "xybrid.device.ram_gb": {
+              "intValue": 64
+            },
+            "xybrid.sdk.binding": {
+              "stringValue": "python"
+            },
+            "xybrid.sdk.version": {
+              "stringValue": "0.17.0"
+            }
+          },
+          "dropped_attributes_count": 0,
+          "schema_url": ""
+        },
+        "scope": {
+          "attributes": {},
+          "dropped_attributes_count": 0,
+          "name": "xybrid-observability",
+          "schema_url": "",
+          "version": "0.17.0"
+        },
+        "service_name": "xybrid-staging-python",
+        "source": "otlp",
+        "span_id": "25a3149da68aafdb",
+        "span_type": "genai.request",
+        "start_time": "2026-11-11T14:30:47.988367000Z",
+        "start_time_unix_nano": "1794407447988367000",
+        "status": {
+          "code": "ERROR",
+          "message": "cancelled"
+        },
+        "trace_id": "8f25e8437f84d311d8af4e1177122905",
+        "trace_state": ""
+      },
+      {
+        "attributes": {
+          "gen_ai.conversation.id": {
+            "stringValue": "staging-conversation-s6-20261111t143025z-python-mac-direct"
+          },
+          "xybrid.stage.backend": {
+            "stringValue": "llamacpp"
+          },
+          "xybrid.stage.name": {
+            "stringValue": "llm_inference_streaming"
+          },
+          "xybrid.stage.quantization": {
+            "stringValue": "q4_k_m"
+          },
+          "xybrid.stage.tokens_in": {
+            "stringValue": "33"
+          }
+        },
+        "content": null,
+        "counted_request": false,
+        "dropped_attributes_count": 0,
+        "dropped_events_count": 0,
+        "dropped_links_count": 0,
+        "duration_ns": "196453042",
+        "end_time": "2026-11-11T14:30:48.184884042Z",
+        "end_time_unix_nano": "1794407448184884042",
+        "events": [],
+        "flags": 257,
+        "gateway_payloads": {
+          "request": false,
+          "response": false
+        },
+        "genai": {
+          "attempt_count": null,
+          "attempt_index": null,
+          "cache_read_input_tokens": null,
+          "cache_write_input_tokens": null,
+          "error_type": null,
+          "execution_location": null,
+          "input_tokens": null,
+          "operation_name": null,
+          "output_tokens": null,
+          "provider_name": null,
+          "reasoning_output_tokens": null,
+          "request_model": null,
+          "response_model": null,
+          "runtime_name": null,
+          "server_address": null,
+          "task": null,
+          "time_to_first_chunk_s": null,
+          "time_to_first_token_s": null
+        },
+        "is_request": false,
+        "kind": "INTERNAL",
+        "links": [],
+        "name": "llm_inference_streaming",
+        "parent_span_id": "25a3149da68aafdb",
+        "resource": {
+          "attributes": {
+            "device.id": {
+              "stringValue": "staging-device-python-mac"
+            },
+            "host.arch": {
+              "stringValue": "aarch64"
+            },
+            "os.type": {
+              "stringValue": "Darwin"
+            },
+            "os.version": {
+              "stringValue": "27.2"
+            },
+            "service.name": {
+              "stringValue": "xybrid-staging-python"
+            },
+            "service.version": {
+              "stringValue": "1.0.0"
+            },
+            "telemetry.sdk.language": {
+              "stringValue": "rust"
+            },
+            "telemetry.sdk.name": {
+              "stringValue": "xybrid"
+            },
+            "telemetry.sdk.version": {
+              "stringValue": "0.33.1"
+            },
+            "xybrid.acceptance.commit": {
+              "stringValue": "00e617102bc77ca0602115669cf62a68e56a92bb"
+            },
+            "xybrid.acceptance.lane": {
+              "stringValue": "python-mac"
+            },
+            "xybrid.acceptance.run": {
+              "stringValue": "s6-20261111t143025z-python-mac"
+            },
+            "xybrid.acceptance.session": {
+              "stringValue": "direct"
+            },
+            "xybrid.device.chip": {
+              "stringValue": "Apple M5 Max"
+            },
+            "xybrid.device.ram_gb": {
+              "intValue": 64
+            },
+            "xybrid.sdk.binding": {
+              "stringValue": "python"
+            },
+            "xybrid.sdk.version": {
+              "stringValue": "0.17.0"
+            }
+          },
+          "dropped_attributes_count": 0,
+          "schema_url": ""
+        },
+        "scope": {
+          "attributes": {},
+          "dropped_attributes_count": 0,
+          "name": "xybrid-observability",
+          "schema_url": "",
+          "version": "0.17.0"
+        },
+        "service_name": "xybrid-staging-python",
+        "source": "otlp",
+        "span_id": "05ba2b2c37c7a4c9",
+        "span_type": "other",
+        "start_time": "2026-11-11T14:30:47.988431000Z",
+        "start_time_unix_nano": "1794407447988431000",
+        "status": {
+          "code": "UNSET",
+          "message": ""
+        },
+        "trace_id": "8f25e8437f84d311d8af4e1177122905",
+        "trace_state": ""
+      },
+      {
+        "attributes": {
+          "gen_ai.conversation.id": {
+            "stringValue": "staging-conversation-s6-20261111t143025z-python-mac-direct"
+          },
+          "gen_ai.operation.name": {
+            "stringValue": "load_model"
+          },
+          "gen_ai.provider.name": {
+            "stringValue": "llama.cpp"
+          },
+          "gen_ai.request.model": {
+            "stringValue": "lfm2.5-230m"
+          },
+          "xybrid.genai.model.format": {
+            "stringValue": "gguf"
+          },
+          "xybrid.genai.runtime.name": {
+            "stringValue": "llama.cpp"
+          },
+          "xybrid.load.trigger": {
+            "stringValue": "lazy"
+          }
+        },
+        "content": null,
+        "counted_request": false,
+        "dropped_attributes_count": 0,
+        "dropped_events_count": 0,
+        "dropped_links_count": 0,
+        "duration_ns": "79944958",
+        "end_time": "2026-11-11T14:30:48.159548958Z",
+        "end_time_unix_nano": "1794407448159548958",
+        "events": [],
+        "flags": 257,
+        "gateway_payloads": {
+          "request": false,
+          "response": false
+        },
+        "genai": {
+          "attempt_count": null,
+          "attempt_index": null,
+          "cache_read_input_tokens": null,
+          "cache_write_input_tokens": null,
+          "error_type": null,
+          "execution_location": null,
+          "input_tokens": null,
+          "operation_name": "load_model",
+          "output_tokens": null,
+          "provider_name": "llama.cpp",
+          "reasoning_output_tokens": null,
+          "request_model": "lfm2.5-230m",
+          "response_model": null,
+          "runtime_name": "llama.cpp",
+          "server_address": null,
+          "task": null,
+          "time_to_first_chunk_s": null,
+          "time_to_first_token_s": null
+        },
+        "is_request": false,
+        "kind": "INTERNAL",
+        "links": [],
+        "name": "load_model lfm2.5-230m",
+        "parent_span_id": "05ba2b2c37c7a4c9",
+        "resource": {
+          "attributes": {
+            "device.id": {
+              "stringValue": "staging-device-python-mac"
+            },
+            "host.arch": {
+              "stringValue": "aarch64"
+            },
+            "os.type": {
+              "stringValue": "Darwin"
+            },
+            "os.version": {
+              "stringValue": "27.2"
+            },
+            "service.name": {
+              "stringValue": "xybrid-staging-python"
+            },
+            "service.version": {
+              "stringValue": "1.0.0"
+            },
+            "telemetry.sdk.language": {
+              "stringValue": "rust"
+            },
+            "telemetry.sdk.name": {
+              "stringValue": "xybrid"
+            },
+            "telemetry.sdk.version": {
+              "stringValue": "0.33.1"
+            },
+            "xybrid.acceptance.commit": {
+              "stringValue": "00e617102bc77ca0602115669cf62a68e56a92bb"
+            },
+            "xybrid.acceptance.lane": {
+              "stringValue": "python-mac"
+            },
+            "xybrid.acceptance.run": {
+              "stringValue": "s6-20261111t143025z-python-mac"
+            },
+            "xybrid.acceptance.session": {
+              "stringValue": "direct"
+            },
+            "xybrid.device.chip": {
+              "stringValue": "Apple M5 Max"
+            },
+            "xybrid.device.ram_gb": {
+              "intValue": 64
+            },
+            "xybrid.sdk.binding": {
+              "stringValue": "python"
+            },
+            "xybrid.sdk.version": {
+              "stringValue": "0.17.0"
+            }
+          },
+          "dropped_attributes_count": 0,
+          "schema_url": ""
+        },
+        "scope": {
+          "attributes": {},
+          "dropped_attributes_count": 0,
+          "name": "xybrid-observability",
+          "schema_url": "",
+          "version": "0.17.0"
+        },
+        "service_name": "xybrid-staging-python",
+        "source": "otlp",
+        "span_id": "4c432e187d42ea8a",
+        "span_type": "genai.load_model",
+        "start_time": "2026-11-11T14:30:48.079604000Z",
+        "start_time_unix_nano": "1794407448079604000",
+        "status": {
+          "code": "UNSET",
+          "message": ""
+        },
+        "trace_id": "8f25e8437f84d311d8af4e1177122905",
+        "trace_state": ""
+      },
+      {
+        "attributes": {
+          "gen_ai.conversation.id": {
+            "stringValue": "staging-conversation-s6-20261111t143025z-python-mac-direct"
+          },
+          "gen_ai.operation.name": {
+            "stringValue": "chat"
+          },
+          "gen_ai.provider.name": {
+            "stringValue": "llama.cpp"
+          },
+          "gen_ai.request.max_tokens": {
+            "intValue": 32
+          },
+          "gen_ai.request.model": {
+            "stringValue": "lfm2.5-230m"
+          },
+          "gen_ai.request.stream": {
+            "boolValue": true
+          },
+          "gen_ai.request.temperature": {
+            "doubleValue": 0.0
+          },
+          "gen_ai.request.top_k": {
+            "intValue": 40
+          },
+          "gen_ai.request.top_p": {
+            "doubleValue": 0.8999999761581421
+          },
+          "gen_ai.response.finish_reasons": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "stop"
+                }
+              ]
+            }
+          },
+          "gen_ai.response.time_to_first_chunk": {
+            "doubleValue": 0.009923958
+          },
+          "gen_ai.usage.input_tokens": {
+            "intValue": 44
+          },
+          "gen_ai.usage.output_tokens": {
+            "intValue": 8
+          },
+          "gen_ai.usage.text.input_tokens": {
+            "intValue": 44
+          },
+          "gen_ai.usage.text.output_tokens": {
+            "intValue": 8
+          },
+          "xybrid.genai.accelerator": {
+            "stringValue": "metal"
+          },
+          "xybrid.genai.execution.location": {
+            "stringValue": "local"
+          },
+          "xybrid.genai.input.modalities": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "text"
+                }
+              ]
+            }
+          },
+          "xybrid.genai.model.format": {
+            "stringValue": "gguf"
+          },
+          "xybrid.genai.model.quantization": {
+            "stringValue": "q4_k_m"
+          },
+          "xybrid.genai.output.modalities": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "text"
+                }
+              ]
+            }
+          },
+          "xybrid.genai.response.chunk_count": {
+            "intValue": 8
+          },
+          "xybrid.genai.response.time_per_output_token": {
+            "stringValue": "[REDACTED]"
+          },
+          "xybrid.genai.response.time_to_first_token": {
+            "doubleValue": 0.008
+          },
+          "xybrid.genai.runtime.name": {
+            "stringValue": "llama.cpp"
+          },
+          "xybrid.genai.task": {
+            "stringValue": "text_generation"
+          }
+        },
+        "content": null,
+        "counted_request": true,
+        "dropped_attributes_count": 0,
+        "dropped_events_count": 0,
+        "dropped_links_count": 0,
+        "duration_ns": "20605208",
+        "end_time": "2026-11-11T14:30:48.205523208Z",
+        "end_time_unix_nano": "1794407448205523208",
+        "events": [],
+        "flags": 769,
+        "gateway_payloads": {
+          "request": false,
+          "response": false
+        },
+        "genai": {
+          "attempt_count": null,
+          "attempt_index": null,
+          "cache_read_input_tokens": null,
+          "cache_write_input_tokens": null,
+          "error_type": null,
+          "execution_location": "local",
+          "input_tokens": 44,
+          "operation_name": "chat",
+          "output_tokens": 8,
+          "provider_name": "llama.cpp",
+          "reasoning_output_tokens": null,
+          "request_model": "lfm2.5-230m",
+          "response_model": null,
+          "runtime_name": "llama.cpp",
+          "server_address": null,
+          "task": "text_generation",
+          "time_to_first_chunk_s": 0.009923958,
+          "time_to_first_token_s": 0.008
+        },
+        "is_request": true,
+        "kind": "INTERNAL",
+        "links": [],
+        "name": "chat lfm2.5-230m",
+        "parent_span_id": "47b15d561151eda7",
+        "resource": {
+          "attributes": {
+            "device.id": {
+              "stringValue": "staging-device-python-mac"
+            },
+            "host.arch": {
+              "stringValue": "aarch64"
+            },
+            "os.type": {
+              "stringValue": "Darwin"
+            },
+            "os.version": {
+              "stringValue": "27.2"
+            },
+            "service.name": {
+              "stringValue": "xybrid-staging-python"
+            },
+            "service.version": {
+              "stringValue": "1.0.0"
+            },
+            "telemetry.sdk.language": {
+              "stringValue": "rust"
+            },
+            "telemetry.sdk.name": {
+              "stringValue": "xybrid"
+            },
+            "telemetry.sdk.version": {
+              "stringValue": "0.33.1"
+            },
+            "xybrid.acceptance.commit": {
+              "stringValue": "00e617102bc77ca0602115669cf62a68e56a92bb"
+            },
+            "xybrid.acceptance.lane": {
+              "stringValue": "python-mac"
+            },
+            "xybrid.acceptance.run": {
+              "stringValue": "s6-20261111t143025z-python-mac"
+            },
+            "xybrid.acceptance.session": {
+              "stringValue": "direct"
+            },
+            "xybrid.device.chip": {
+              "stringValue": "Apple M5 Max"
+            },
+            "xybrid.device.ram_gb": {
+              "intValue": 64
+            },
+            "xybrid.sdk.binding": {
+              "stringValue": "python"
+            },
+            "xybrid.sdk.version": {
+              "stringValue": "0.17.0"
+            }
+          },
+          "dropped_attributes_count": 0,
+          "schema_url": ""
+        },
+        "scope": {
+          "attributes": {},
+          "dropped_attributes_count": 0,
+          "name": "xybrid-observability",
+          "schema_url": "",
+          "version": "0.17.0"
+        },
+        "service_name": "xybrid-staging-python",
+        "source": "otlp",
+        "span_id": "a621599a47d6a940",
+        "span_type": "genai.request",
+        "start_time": "2026-11-11T14:30:48.184918000Z",
+        "start_time_unix_nano": "1794407448184918000",
+        "status": {
+          "code": "UNSET",
+          "message": ""
+        },
+        "trace_id": "8f25e8437f84d311d8af4e1177122905",
+        "trace_state": ""
+      },
+      {
+        "attributes": {
+          "gen_ai.conversation.id": {
+            "stringValue": "staging-conversation-s6-20261111t143025z-python-mac-direct"
+          },
+          "xybrid.stage.backend": {
+            "stringValue": "llamacpp"
+          },
+          "xybrid.stage.decode_tps": {
+            "stringValue": "1000"
+          },
+          "xybrid.stage.emitted_chunks": {
+            "stringValue": "7"
+          },
+          "xybrid.stage.execution_provider": {
+            "stringValue": "metal"
+          },
+          "xybrid.stage.finish_reason": {
+            "stringValue": "stop"
+          },
+          "xybrid.stage.generation_time_ms": {
+            "stringValue": "18"
+          },
+          "xybrid.stage.mean_itl_ms": {
+            "stringValue": "1"
+          },
+          "xybrid.stage.name": {
+            "stringValue": "llm_inference_streaming"
+          },
+          "xybrid.stage.p95_itl_ms": {
+            "stringValue": "1"
+          },
+          "xybrid.stage.prefill_tps": {
+            "stringValue": "5500"
+          },
+          "xybrid.stage.quantization": {
+            "stringValue": "q4_k_m"
+          },
+          "xybrid.stage.tokens_generated": {
+            "stringValue": "8"
+          },
+          "xybrid.stage.tokens_in": {
+            "stringValue": "44"
+          },
+          "xybrid.stage.tokens_out": {
+            "stringValue": "8"
+          },
+          "xybrid.stage.tokens_per_second": {
+            "stringValue": "436"
+          },
+          "xybrid.stage.ttft_ms": {
+            "stringValue": "8"
+          }
+        },
+        "content": null,
+        "counted_request": false,
+        "dropped_attributes_count": 0,
+        "dropped_events_count": 0,
+        "dropped_links_count": 0,
+        "duration_ns": "20432666",
+        "end_time": "2026-11-11T14:30:48.205368666Z",
+        "end_time_unix_nano": "1794407448205368666",
+        "events": [],
+        "flags": 257,
+        "gateway_payloads": {
+          "request": false,
+          "response": false
+        },
+        "genai": {
+          "attempt_count": null,
+          "attempt_index": null,
+          "cache_read_input_tokens": null,
+          "cache_write_input_tokens": null,
+          "error_type": null,
+          "execution_location": null,
+          "input_tokens": null,
+          "operation_name": null,
+          "output_tokens": null,
+          "provider_name": null,
+          "reasoning_output_tokens": null,
+          "request_model": null,
+          "response_model": null,
+          "runtime_name": null,
+          "server_address": null,
+          "task": null,
+          "time_to_first_chunk_s": null,
+          "time_to_first_token_s": null
+        },
+        "is_request": false,
+        "kind": "INTERNAL",
+        "links": [],
+        "name": "llm_inference_streaming",
+        "parent_span_id": "a621599a47d6a940",
+        "resource": {
+          "attributes": {
+            "device.id": {
+              "stringValue": "staging-device-python-mac"
+            },
+            "host.arch": {
+              "stringValue": "aarch64"
+            },
+            "os.type": {
+              "stringValue": "Darwin"
+            },
+            "os.version": {
+              "stringValue": "27.2"
+            },
+            "service.name": {
+              "stringValue": "xybrid-staging-python"
+            },
+            "service.version": {
+              "stringValue": "1.0.0"
+            },
+            "telemetry.sdk.language": {
+              "stringValue": "rust"
+            },
+            "telemetry.sdk.name": {
+              "stringValue": "xybrid"
+            },
+            "telemetry.sdk.version": {
+              "stringValue": "0.33.1"
+            },
+            "xybrid.acceptance.commit": {
+              "stringValue": "00e617102bc77ca0602115669cf62a68e56a92bb"
+            },
+            "xybrid.acceptance.lane": {
+              "stringValue": "python-mac"
+            },
+            "xybrid.acceptance.run": {
+              "stringValue": "s6-20261111t143025z-python-mac"
+            },
+            "xybrid.acceptance.session": {
+              "stringValue": "direct"
+            },
+            "xybrid.device.chip": {
+              "stringValue": "Apple M5 Max"
+            },
+            "xybrid.device.ram_gb": {
+              "intValue": 64
+            },
+            "xybrid.sdk.binding": {
+              "stringValue": "python"
+            },
+            "xybrid.sdk.version": {
+              "stringValue": "0.17.0"
+            }
+          },
+          "dropped_attributes_count": 0,
+          "schema_url": ""
+        },
+        "scope": {
+          "attributes": {},
+          "dropped_attributes_count": 0,
+          "name": "xybrid-observability",
+          "schema_url": "",
+          "version": "0.17.0"
+        },
+        "service_name": "xybrid-staging-python",
+        "source": "otlp",
+        "span_id": "2cec91f8ff9893c3",
+        "span_type": "other",
+        "start_time": "2026-11-11T14:30:48.184936000Z",
+        "start_time_unix_nano": "1794407448184936000",
+        "status": {
+          "code": "UNSET",
+          "message": ""
+        },
+        "trace_id": "8f25e8437f84d311d8af4e1177122905",
+        "trace_state": ""
+      }
+    ],
+    "summary": {
+      "duration_ms": 225.992666,
+      "end_time_unix_nano": "1794407448208957750",
+      "input_tokens": 77,
+      "output_tokens": 8,
+      "request_count": 2,
+      "span_count": 7,
+      "start_time_unix_nano": "1794407447982965084",
+      "status": "unset"
+    },
+    "trace_id": "8f25e8437f84d311d8af4e1177122905",
+    "truncated": false
+  }
+}

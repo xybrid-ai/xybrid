@@ -1,12 +1,12 @@
 ---
-title: iOS / macOS
+title: iOS
 description: Native Swift SDK for on-device ML inference
 ---
 
-The Swift SDK provides native bindings to the Xybrid runtime via BoltFFI for iOS and macOS applications.
+The Swift SDK provides native bindings to the Xybrid runtime via BoltFFI for iOS applications.
 
 <Callout type="info">
-The Swift SDK is in early access. Releases ship a prebuilt `XybridFFI` xcframework via Swift Package Manager. Known issue: building for the iOS Simulator on Apple Silicon requires the `useLocalNatives = true` workaround — see [#179](https://github.com/xybrid-ai/xybrid/issues/179). For cross-platform development, see the [Flutter SDK](/docs/sdks/flutter).
+Releases ship a prebuilt `XybridFFI` xcframework via Swift Package Manager, with slices for iOS devices and the iOS Simulator (both arm64). For cross-platform development, see the [Flutter SDK](/docs/sdks/flutter).
 </Callout>
 
 ## Installation
@@ -15,13 +15,13 @@ Add the Xybrid package via Swift Package Manager:
 
 ```swift title="Package.swift"
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.17.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.21.0")
 ]
 ```
 
 Or in Xcode: **File > Add Package Dependencies** and enter the repository URL.
 
-**Supported platforms:** iOS 13.0+, macOS 10.15+
+**Supported platforms:** iOS 16.0+, on devices and the iOS Simulator on Apple Silicon Macs. Building needs Xcode 15.3+ (Swift 5.10). macOS is not supported; see [Platform Support](#platform-support).
 
 ## Quick Start
 
@@ -41,10 +41,8 @@ let model = try await Xybrid.model("kokoro-82m").load()
 let envelope = Envelope.text("Hello, world!")
 let result = try await model.runAsync(envelope: envelope)
 
-if result.success {
-    print("Output: \(result.text ?? "")")
-    print("Latency: \(result.latency)s")
-}
+print("Output: \(result.text ?? "")")
+print("Latency: \(result.latency)s")
 ```
 
 On iOS, `Xybrid.initialize()` enables `UIDevice` battery monitoring and subscribes to `UIDevice.batteryLevelDidChangeNotification`, forwarding readings to the routing engine. Thermal state on Apple platforms is sourced from `NSProcessInfo.thermalState` directly in `xybrid-core`.
@@ -59,12 +57,14 @@ Xybrid.initialize(
 )
 ```
 
+Key prefixes and scopes, what gets exported, and provisional workspaces: see [API keys](/docs/concepts/api-keys).
+
 ## Observability
 
 Trace export is off until you configure it — an API key alone does not enable it. Start it once, after `initialize()`, with one of two presets:
 
 ```swift
-// Traces to the Xybrid dashboard
+// Traces to Xybrid
 try Xybrid.Observability.xybrid(apiKey: key)
     .service("MyApp", version: "1.4.0")
     .start()
@@ -74,7 +74,7 @@ try Xybrid.Observability.otlp(endpoint: "http://collector:4318")
     .start()
 ```
 
-Prompts and outputs are captured by default; add `.metadataOnly()` to export metadata only. `.tracesEndpoint(_:)` points the dashboard preset at a self-hosted endpoint. Until export is configured, the first inference logs a one-shot hint (suppress with `XYBRID_QUIET=1`). Get a free key at [dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+Prompts and outputs are captured by default; add `.metadataOnly()` to export metadata only. `.tracesEndpoint(_:)` points the Xybrid preset at a self-hosted endpoint. Until export is configured, the first inference logs a one-shot hint (suppress with `XYBRID_QUIET=1`). Get a key at [console.xybrid.dev](https://console.xybrid.dev).
 
 Run options carry per-run trace context, and each result's `observation` identifies its trace:
 
@@ -89,7 +89,7 @@ if let observation = result.observation {
 try await Xybrid.Observability.flushAsync()
 ```
 
-Feedback and evaluations (`recordEvaluation(for:name:...)`) need a logs signal, so they return `false` with the dashboard preset, which sends traces only.
+Feedback and evaluations (`recordEvaluation(for:name:...)`) need a logs signal, so they return `false` with the Xybrid preset, which sends traces only.
 
 ---
 
@@ -107,11 +107,27 @@ let model = try await Xybrid.model("whisper-tiny-ggml").load()
 let model = try await Xybrid.model(.bundle(bundleURL)).load()
 ```
 
-`Xybrid.model(...)` creates a cheap, unloaded reference. Local bundle and
-directory sources use `URL` through `.bundle(url)` and `.directory(url)`;
-Hugging Face uses `.huggingFace("org/repo")`. Async `load()` is the explicit
+`Xybrid.model(...)` creates a cheap, unloaded reference. Local bundle,
+directory, and GGUF file sources use `URL` through `.bundle(url)`,
+`.directory(url)`, and `.modelFile(url)`; Hugging Face uses
+`.huggingFace("org/repo")`. Async `load()` is the explicit
 boundary for resolving, downloading, disk access, and runtime initialization.
 Use `loadSync()` only from an existing worker thread.
+
+### From a Local GGUF File
+
+```swift
+let model = try await Xybrid.model(.modelFile(ggufURL)).load()
+```
+
+A raw llama.cpp GGUF needs no `model_metadata.json`. `load()` generates one from
+the GGUF header and writes it next to the file, with the context capped at
+4,096 tokens (raise its `context_length` for longer chats). Put each GGUF in its
+own directory inside the app container, such as Application Support. The app
+bundle is read-only, so `model_metadata.json` cannot be written there, and a
+`model_metadata.json` already in the directory is used as is: a second GGUF in
+the same directory would load the first one's model. Copy a file the user picks
+into the app container before loading it.
 
 ---
 
@@ -160,7 +176,7 @@ print("Transcription: \(result.text ?? "")")
 let envelope = Envelope.text("Hello, how are you?")
 
 // With voice and speed
-let envelope = Envelope.text("Hello", voice: "af_heart", speed: 1.0)
+let voiced = Envelope.text("Hello", voice: "af_heart", speed: 1.0)
 
 let result = try model.run(envelope: envelope)
 if let audioBytes = result.audioBytes {
@@ -177,6 +193,26 @@ if let vector = result.embedding {
     // Process embedding vector
 }
 ```
+
+---
+
+## Streaming Tokens
+
+`runAsync` returns once the whole answer is ready. For a chat UI, stream the
+tokens as they are generated:
+
+```swift
+let model = try await Xybrid.model("qwen3-0.6b").load()
+
+for try await token in model.streamTokens(envelope: .text("Tell me a joke")) {
+    label.text = token.cumulativeText
+}
+```
+
+`streamTokens` returns an `AsyncSequence` of `XybridStreamToken`. Cancelling the
+task that consumes it, or breaking out of the loop, stops generation at the
+next token. Pass `options: .make(generationConfig: config)` for generation
+settings. See [Streaming](/docs/concepts/streaming) for the other SDKs.
 
 ---
 
@@ -230,39 +266,42 @@ SDK, and without one the engine falls back to fixed windows.
 
 ## Result Handling
 
+A failed run throws a `XybridError` instead of returning a result, so a result
+needs no success check (see [Error Handling](#error-handling)). Switch on
+`outputType` to read the output:
+
 ```swift
 let result = try model.run(envelope: envelope)
 
-if result.success {
-    switch result.outputType {
-    case "text":
-        print("Text: \(result.text!)")
-    case "audio":
-        playAudio(result.audioBytes!)
-    case "embedding":
-        process(result.embedding!)
-    default:
-        break
-    }
-    print("Latency: \(result.latency)s")  // TimeInterval in seconds
-} else {
-    print("Error: \(result.error ?? "Unknown")")
+switch result.outputType {
+case .text:
+    print("Text: \(result.text ?? "")")
+case .audio:
+    if let audio = result.audioBytes { playAudio(audio) }
+case .embedding:
+    if let vector = result.embedding { process(vector) }
+default:
+    break
 }
+print("Latency: \(result.latency)s")  // TimeInterval in seconds
 ```
 
 ### XybridResult Properties
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `success` | `Bool` | Whether inference succeeded |
-| `error` | `String?` | Error message if failed |
-| `outputType` | `String` | `"text"`, `"audio"`, or `"embedding"` |
+| `success` | `Bool` | Always `true`; a failed run throws instead |
+| `outputType` | `XybridOutputType` | `.text`, `.audio`, `.embedding`, `.decisions`, or `.unknown` |
 | `text` | `String?` | Text output (ASR, LLM) |
 | `audioBytes` | `Data?` | Audio output (TTS) |
 | `embedding` | `[Float]?` | Embedding vector |
 | `latencyMs` | `UInt32` | Inference latency in ms |
-| `isFailure` | `Bool` | Convenience: `!success` |
+| `isFailure` | `Bool` | `true` when the result carries no output (`outputType == .unknown`) |
 | `latency` | `TimeInterval` | Latency in seconds |
+| `modelId` | `String` | ID of the model that produced the result |
+| `reasoningContent` | `String?` | Model reasoning, kept apart from the answer text |
+| `toolCalls` | `[XybridToolCall]` | Tool calls the model emitted; empty unless the request offered tools |
+| `observation` | `XybridObservationRef?` | The run's trace reference, when it was traced |
 
 ---
 
@@ -274,18 +313,21 @@ The SDK uses a Swift error enum for type-safe error handling:
 do {
     let model = try await Xybrid.model("kokoro-82m").load()
     let result = try await model.runAsync(envelope: envelope)
-} catch XybridError.ModelNotFound(let modelId) {
-    print("Model not found: \(modelId)")
-} catch XybridError.InferenceFailed(let message) {
+} catch XybridError.modelNotFound(let id) {
+    print("Model not found: \(id)")
+} catch XybridError.inferenceError(let message) {
     print("Inference failed: \(message)")
-} catch XybridError.InvalidInput(let message) {
-    print("Invalid input: \(message)")
-} catch XybridError.IoError(let message) {
+} catch XybridError.ioError(let message) {
     print("I/O error: \(message)")
 } catch {
-    print("Unexpected error: \(error.localizedDescription)")
+    print(error.localizedDescription)
 }
 ```
+
+Cases are lowerCamelCase with labeled associated values, such as
+`modelNotFound(id:)` and `inferenceError(message:)`. `XybridError` conforms to
+`LocalizedError`, so `localizedDescription` gives a readable message for every
+case.
 
 ---
 
@@ -309,8 +351,18 @@ The SDK provides short aliases for convenience:
 
 ## Platform Support
 
-| Platform | Status | Accelerators |
-|----------|--------|--------------|
-| iOS | Supported | Metal, CoreML, ANE |
-| macOS (Apple Silicon) | Supported | Metal, CoreML, ANE |
-| macOS (Intel) | Supported | CPU |
+The Swift package supports iOS 16.0 and later only. The prebuilt `XybridFFI`
+xcframework ships two slices, iOS device (arm64) and iOS Simulator (arm64), and
+no macOS slice, so the package does not declare macOS. For a macOS app, use the
+[Flutter SDK](/docs/sdks/flutter) (macOS 14+ on Apple Silicon) or the Rust crate
+from the [Quick Start](/docs/quickstart).
+
+| Model format | iOS device | iOS Simulator |
+|--------------|------------|---------------|
+| GGUF (llama.cpp: LLMs, vision-language models) | Metal GPU | CPU |
+| Whisper (whisper.cpp) | CPU; the encoder runs on Core ML when a `<model>-encoder.mlmodelc` (e.g. `ggml-base.en-encoder.mlmodelc`) sits beside the model file | CPU; the same Core ML encoder path applies |
+| ONNX (ONNX Runtime) | CPU | CPU |
+
+GGUF inference runs on llama.cpp's Metal backend, which has no Apple Neural
+Engine path. Of the paths above, only the optional Core ML Whisper encoder can
+reach the Neural Engine, and Core ML decides at run time whether it does.

@@ -19,7 +19,7 @@
 //! stages:
 //!   - whisper-tiny
 //!
-//!   - model: gpt-4o-mini
+//!   - model: openai/gpt-4o-mini
 //!     target: cloud
 //!     provider: openai
 //!     system_prompt: "Be concise."
@@ -177,12 +177,34 @@ impl StageConfig {
         matches!(self.target(), Some("device"))
     }
 
-    /// Get the execution provider override (cpu, coreml, coreml-ane, coreml-gpu).
+    /// Get the requested ONNX Runtime execution provider (cpu, coreml,
+    /// coreml-ane, coreml-gpu).
+    ///
+    /// The value is parsed but not applied yet; see
+    /// `StageObjectConfig::execution_provider`.
     pub fn execution_provider(&self) -> Option<&str> {
         match self {
             StageConfig::Simple(_) => None,
             StageConfig::Object(obj) => obj.execution_provider.as_deref(),
         }
+    }
+
+    /// Warning text for a stage whose `execution_provider` will not be applied.
+    ///
+    /// The key is parsed but not applied: ONNX models run on ONNX Runtime's CPU
+    /// execution provider whatever it says. `cpu` asks for what already
+    /// happens, so it gets no warning. The SDK logs this text when it loads a
+    /// pipeline, and the CLI prints it.
+    pub fn unapplied_execution_provider_warning(&self) -> Option<String> {
+        let provider = self.execution_provider()?;
+        if provider.eq_ignore_ascii_case("cpu") {
+            return None;
+        }
+        Some(format!(
+            "stage '{}': execution_provider '{}' is not applied yet; ONNX models run on the CPU",
+            self.stage_id(),
+            provider
+        ))
     }
 
     /// Convert to StageObjectConfig for uniform handling.
@@ -236,9 +258,12 @@ pub struct StageObjectConfig {
     #[serde(default)]
     pub provider: Option<String>,
 
-    /// ONNX Runtime execution provider override.
-    /// If not set, auto-selection will be used based on model hints.
-    /// Valid values: "cpu", "coreml", "coreml-ane", "coreml-gpu"
+    /// ONNX Runtime execution provider requested for this stage: "cpu",
+    /// "coreml", "coreml-ane" or "coreml-gpu".
+    ///
+    /// Parsed but not applied yet. No runtime path reads this value: every
+    /// ONNX session runs on the CPU execution provider whatever it says, and
+    /// nothing is auto-selected when it is unset.
     #[serde(default)]
     pub execution_provider: Option<String>,
 
@@ -445,5 +470,33 @@ stages:
 "#;
         let config = PipelineConfig::from_yaml(yaml).unwrap();
         assert_eq!(config.stages[0].execution_provider(), None);
+    }
+
+    #[test]
+    fn stage_with_execution_provider_gets_a_not_applied_warning() {
+        let yaml = r#"
+stages:
+  - id: vision
+    model: mobilenet-v2
+    execution_provider: coreml-ane
+  - mobilenet-v2
+  - model: mobilenet-v2
+    execution_provider: CPU
+"#;
+        let config = PipelineConfig::from_yaml(yaml).unwrap();
+        let warning = config.stages[0]
+            .unapplied_execution_provider_warning()
+            .expect("a non-cpu provider is warned about");
+        assert!(warning.contains("stage 'vision'"), "{warning}");
+        assert!(warning.contains("coreml-ane"), "{warning}");
+        assert!(warning.contains("not applied"), "{warning}");
+        assert_eq!(
+            config.stages[1].unapplied_execution_provider_warning(),
+            None
+        );
+        assert_eq!(
+            config.stages[2].unapplied_execution_provider_warning(),
+            None
+        );
     }
 }

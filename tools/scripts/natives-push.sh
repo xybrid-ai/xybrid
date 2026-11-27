@@ -65,7 +65,10 @@ for a in "${archives[@]}"; do
   }
 done
 
-slice_dirs=(lib include)
+# Ship the complete licenses with every published native target, including
+# source builds whose install prefix contains only archives and headers.
+cp "$ROOT/crates/llama-cpp-sys/NOTICE" "$SLICE/NOTICE"
+slice_dirs=(lib include NOTICE)
 [ -d "$SLICE/lib64" ] && slice_dirs+=(lib64)
 
 # Everything below runs from INSIDE the slice dir so both tar and oras see

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "choice-non-letter-short-keys",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Single-character keys that are not ASCII letters (é, 1, Ω, _) get assigned codes",
+  "covers": [
+    "choice-letter-keys",
+    "json-unicode"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"é\": null, \"1\": \"One\", \"Ω\": \"Omega\", \"_\": null}}}}",
+  "artifact": "d1-2b-hf"
+}

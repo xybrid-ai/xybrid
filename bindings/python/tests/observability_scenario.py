@@ -156,7 +156,7 @@ def run_scenario(spec: Dict[str, Any], endpoint: str, workdir: Path, expectation
         run_options = xybrid.XybridRunOptions(
             generation_config=None, abort_on=[], fallback_to_cloud=False, max_grace_tokens=0,
             correlation_id=None, traceparent=context.traceparent, tracestate=context.tracestate,
-            conversation_id=conversation, suppress_trace=False)
+            conversation_id=conversation, suppress_trace=False, frame_session_id=None)
         try:
             result = model.run(xybrid.XybridEnvelope.text(spec["model"]["run_input_text"]), run_options)
         except xybrid.XybridError as error:

@@ -43,7 +43,14 @@ isolate the Xybrid preset's headers; delivery is bounded by item and byte
 budgets with per-signal counters; flush and shutdown have defined barriers and
 results; resource samples gained peak CPU utilization, minimum available memory
 and a closed memory-pressure vocabulary (see "Resource samples"); the fixture
-format gained steps and stricter normalization.
+format gained steps and stricter normalization. Content destined for a span
+that does not record is not processed; a redaction hook that panics (Rust)
+fails closed like one that throws, and a span processor that panics while a
+span ends is contained; the content budgets are clamped so one span's
+content fits the request bound as its exporter writes it (default
+retained-operation budget 416 KiB over OTLP/protobuf, 208 KiB over OTLP/JSON);
+per-signal stats report the bytes held against the byte budget
+(`buffered_bytes`).
 
 ## Scope and independence
 
@@ -246,7 +253,11 @@ times. JS ignores a non-finite explicit time. Durations are seconds as doubles.
 
 - The default clock is wall-clock anchored per operation and monotonic within
   it: the operation captures wall and monotonic time at start and later readings
-  add the monotonic elapsed time.
+  add the monotonic elapsed time. In Rust, `InferenceOperation::now()` returns
+  that reading, for a time taken before work and recorded through an
+  explicit-time call once the work is done (the SDK times a streamed chunk when
+  it hands it to the application's callback and records it once the callback
+  accepts it), so the recorded time does not follow a wall-clock step either.
 - Workers report epoch milliseconds anchored to `Date.now()` (anchor =
   `Date.now() − performance.now()` captured when the worker starts the
   operation, then `anchor + performance.now()`), never
@@ -383,7 +394,10 @@ Metrics are recorded for every operation whether or not its trace is sampled.
 
 Operations accept a `trace` hint. `Default` follows the tracer's sampler (the
 packages' own pipeline uses parent-based sampling with every new root
-recorded). `Suppress` creates no span — the handle still measures time and
+recorded, and takes no ratio or sampler option: metrics are recorded for
+every operation whatever is sampled, and an application that wants a ratio
+builds its own tracer provider with any sampler and hands it to the
+observer). `Suppress` creates no span — the handle still measures time and
 records metrics, and its `context()` and `observation_ref()` are empty.
 Live/continuous sessions use `Suppress` for frames they do not want traced so
 aggregate counts stay exact. Unsampled spans keep their references (see
@@ -410,8 +424,36 @@ aggregate counts stay exact. Unsampled spans keep their references (see
 
 Dropping (Rust) or garbage-collecting (JS) an un-ended handle never ends it
 implicitly in JS; in Rust `Drop` ends it as cancelled so spans are not leaked.
+A JS handle that is never ended, cancelled or released is lost: no span, no
+duration metric, no outcome. JS has no reliable finalization, so end handles
+in a `finally` block (or cancel them) on every path.
 Ending twice is a no-op; the first terminal call wins and later recording calls
 are ignored. Recording calls never throw.
+
+An operation's end (Rust) runs the error message through the content pipeline
+and ends the span while it holds the operation's state, so a `record_chunk`
+(or another recording call) racing with the end on another thread waits for it,
+including for a slow redaction hook; once the end has run, that call is
+ignored (chunks after the end are not counted). A caller that records chunks
+and ends the operation on one thread never waits on this; JS, single-threaded,
+never does.
+
+Ending a span runs the tracer's span processors (`on_end` / `onEnd`) on the
+calling thread. A processor that panics (Rust) or throws (JS) there is
+contained: the operation's end, metrics and events complete, the caller
+continues, and later spans still reach every processor (the Rust SDK leaves
+only that span's own lock poisoned, never the provider's). What the failing
+processor does with later spans is its own: a Rust processor that panics while
+it holds a lock of its own may handle no later span. The SDK's
+`SimpleSpanProcessor` (what `with_simple_exporter` installs) is one: it exports
+under its exporter mutex, so an exporter that panics once poisons that mutex
+for good and the processor drops every later span, while the other processors,
+the pipeline's export included, keep working. Processors registered after the
+failing one never see that span; behind
+`ObservabilityPipeline::build_with_span_processor` the application's processor
+runs before the pipeline's, so the span is neither exported nor counted. A
+failure in `on_start` / `onStart` is not contained: it propagates from the
+start call.
 
 ## Content capture
 
@@ -491,7 +533,19 @@ structured event content.
 Every governed value, schema value, prompt variable, error message and feedback
 comment is processed in this order:
 
-1. **Capture gate**: skipped entirely when no enabled signal receives it.
+1. **Capture gate**: skipped entirely when no enabled signal receives it. The
+   span destination counts only when the operation's span is recording: for
+   an unsampled span (sampler drop, unsampled parent), a suppressed operation
+   or one without a span of its own (no tracer, or an OpenTelemetry API
+   without an SDK), span-destined content does no work at all (no
+   omit check, preflight, clone, callback, rules or truncation) and is never
+   marked truncated. The event destination does not depend on the span: with
+   an enabled logger, event capture processes and emits every value whether
+   or not the span records; without one (no logger provider, a traces-only
+   pipeline) it counts as no destination. Output for recording spans is
+   unchanged. Error messages (which also feed the exception event) are
+   processed as before; a feedback comment is processed only when an enabled
+   logger receives the evaluation event, and does no work otherwise.
 2. **Omit rules**: an `omit_attribute` rule naming the key drops the value
    (not marked truncated).
 3. **Preflight, before cloning**: a bounded walk of the caller's value computes
@@ -530,9 +584,76 @@ comment is processed in this order:
 10. **Record** once at end: one attribute per key, last write wins.
 
 Budgets (catalog `defaults`; configurable, each >= 1): `max_content_attribute_bytes`
-16384, `max_retained_operation_bytes` 491520, `max_traversal_bytes` 491520;
+16384, `max_retained_operation_bytes` 425984, `max_traversal_bytes` 491520;
 `max_json_depth` 128 (fixed). They describe library-owned data, not process
 memory.
+
+The content budgets are clamped, at configuration and never with an error, so
+that one span's content cannot push its export request past
+`max_request_body_bytes` (`R`, 491520 by default) as the exporter writes it
+(`E`, the span content encoding: `json` by default, or `protobuf`):
+
+```
+allowance(R)                 = min(span_envelope_allowance_bytes, floor(R / 2))
+ceiling(R, E)                = max(1, floor((R - allowance(R)) / span_content_encoding_growth[E]))
+max_retained_operation_bytes = min(configured, ceiling(R, E))
+max_content_attribute_bytes  = min(configured, max_retained_operation_bytes)
+```
+
+`span_envelope_allowance_bytes` (65536) reserves room for the span's
+non-content data: ids, name, resource and scope, the package's metadata
+attributes, status and the truncation list (attributes an application adds, a
+large resource and many long prompt-variable names count against it). A bound
+under twice the allowance reserves half of itself instead, so a small bound
+still carries content. The allowance is reserved, not enforced: names in
+`xybrid.genai.content.truncated_attributes` are not charged to any budget (an
+omitted value's key is listed even when the retained budget is spent), so a
+span whose non-content data outgrows it (for example thousands of omitted
+prompt variables) can still exceed `R` and is then dropped whole as an
+oversized item.
+
+`span_content_encoding_growth` is how many encoded bytes one retained byte can
+become. OTLP/JSON (`json`, 2) writes each content attribute as a JSON string:
+escaping at most doubles a value that is already serialized JSON (`"` and `\`
+take two bytes), and plain-text values are charged at their escaped length
+(below). OTLP/protobuf (`protobuf`, 1) writes content as it is retained. So
+the same request carries twice the content as protobuf: with the default `R`
+the ceiling is 425984 (416 KiB), which is the default retained-operation
+budget, and 212992 (208 KiB) as JSON, which clamps that default.
+
+`E` is `json` unless it is named: the safe assumption for an exporter the
+package does not know (Rust `ContentPolicy::with_span_content_encoding`, JS
+`content.spanContentEncoding`). `R` is the policy's own bound (Rust
+`ContentPolicy::with_max_request_body_bytes`, JS `content.maxRequestBodyBytes`;
+default 491520). An observer built by a packaged pipeline with a traces signal
+takes `E` from the pipeline's protocols, whatever the policy names: `protobuf`
+when the traces signal, and the logs signal if there is one, both use
+`http/protobuf` (the default protocol), otherwise `json`. The logs signal
+counts because content sent as events rides it within the same retained
+budget. The observer takes the pipeline's `max_request_body_bytes` for `R`
+when it is smaller. Both packages
+expose the effective values (Rust `ContentPolicy::max_attribute_bytes`,
+`max_retained_operation_bytes`, `max_request_body_bytes`,
+`span_content_encoding`; JS `Observer.contentBudgets`). When one policy caps
+another (Rust `ContentPolicy::capped_by`), each budget of the result is the
+smaller of the two effective budgets. Its `R` and `E` come from one policy as
+a pair, never one from each: the smaller `R` when both have the same `E`,
+otherwise the pair with the lower ceiling. So the result is never fitted
+below either policy, and it fits the capped policy's own exporter. A ceiling
+that names no encoding is fitted as `json`, like any policy. The clamped
+attribute budget can equal the retained-operation budget; a value truncated to
+near it still charges its key (and, for `span_and_event` with a recording
+span, both copies) against the retained budget, so it can be omitted and
+listed rather than kept.
+
+The clamp fits spans. Event-destined content is bounded by the same
+retained-operation budget, and a packaged pipeline with a traces signal counts
+its logs protocol in `E` (above), so a details event fits a logs request of
+the same size. It is not fitted to a logs signal's own
+`max_request_body_bytes`: a packaged pipeline fits `R` to its traces bound
+only, and without a traces signal it leaves the policy's own bound and
+encoding. So a details event can still exceed a lower logs bound and be
+dropped whole as an oversized item.
 
 Preflight cost of the canonical JSON form (`preflight_node_bytes` = 16):
 
@@ -547,9 +668,13 @@ Nesting depth: a scalar has depth 0, a container 1 + the deepest child (an empty
 container has depth 1).
 
 Retained bytes per entry: span-destined `16 + utf8_len(key) +
-utf8_len(recorded JSON string or text)`; event-destined `16 + utf8_len(key) +
-cost(bounded value)`; both for `span_and_event`. Error messages and feedback
-comments are not retained per operation.
+utf8_len(recorded JSON string)` for structured values and `16 + utf8_len(key)
++ escaped_len(text)` for plain text (prompt variables), where `escaped_len` is
+the UTF-8 length of the text written inside a JSON string (`"`, `\` and the
+short escapes `\b \f \n \r \t` take two bytes, other control characters
+six, a JS lone surrogate six; quotes excluded); event-destined `16 +
+utf8_len(key) + cost(bounded value)`; both for `span_and_event` with a recording
+span. Error messages and feedback comments are not retained per operation.
 
 Fail-closed outcomes (the operation always continues; recording never throws):
 
@@ -574,7 +699,11 @@ canonical clone (a string for string kinds). It returns the value to record or
 `null`) records null. For string kinds a non-string result is invalid. Rust
 redactors may fail through `Redactor::try_redact` (default: infallible
 `redact`); JS catches exceptions and treats a returned promise as a failure.
-Panics are not caught. A failure affects only that value.
+A Rust hook that panics (in `redact` or `try_redact`) fails closed exactly
+like one that returns an error: the value is omitted and listed (an error
+message falls back to the error type), the operation continues, and the panic
+never reaches the caller; the process's panic hook still runs, and a binary
+built with `panic = "abort"` aborts. A failure affects only that value.
 
 **Declarative rules.** Both packages accept an ordered list of rules with this
 JSON shape:
@@ -667,12 +796,17 @@ nulls arrive as `bytesValue: ""` and JS whole-number doubles as `intValue`.
 - Operation hot paths (start, chunk, usage, end) never do network I/O, never
   block on export, and never flush.
 - No disk spool. Delivery is bounded per signal (traces, logs, metrics):
-  queued plus in-flight items never exceed `batch.max_queue_size`, and queued
-  plus in-flight bytes (a conservative per-item estimate computed at admission)
-  never exceed `max_buffered_bytes_per_signal` (32 MiB). Items over either limit
-  are dropped and counted.
+  queued plus in-flight bytes (a conservative per-item estimate computed at
+  admission) never exceed `max_buffered_bytes_per_signal` (32 MiB). For traces
+  and logs, queued plus in-flight items also never exceed
+  `batch.max_queue_size`. Metrics have no item queue: the periodic reader
+  exports one collection at a time, admitted whole against the byte budget, so
+  metric data points are bounded by that budget and by the instruments'
+  cardinality, not by `max_queue_size`. Items over a limit are dropped and
+  counted (a refused metrics collection counts all its data points).
 - Per-signal counters (`PipelineStats { traces, logs, metrics }`, each
-  `accepted`, `exported`, `dropped`, `failed`, `pending`):
+  `accepted`, `exported`, `dropped`, `failed`, `pending`, plus
+  `buffered_bytes` / `bufferedBytes`):
   - `accepted`: every item offered (sampled spans that ended, log records
     emitted to the pipeline, metric data points per collection), including items
     refused at admission;
@@ -680,12 +814,20 @@ nulls arrive as `bytesValue: ""` and JS whole-number doubles as `intValue`.
     rejections);
   - `dropped`: discarded by local policy without a deciding delivery attempt
     (admission refused, offered after shutdown began, oversized single item,
-    still queued when shutdown cancelled);
+    still queued when shutdown cancelled, pending or offered after a response
+    hook disabled the destination — Rust only, see "Transport");
   - `failed`: export ended without acknowledgement (rejection, retries
     exhausted, deadline or cancellation in flight, transport error, lost
     acknowledgement — delivery unknown —, partial-success rejection, encoding
     failure, oversized metrics collection);
-  - `pending`: accepted and not yet terminal.
+  - `pending`: accepted and not yet terminal;
+  - `buffered_bytes`: the bytes the pending items hold against
+    `max_buffered_bytes_per_signal`: the conservative per-item estimate
+    admitted for each queued or in-flight span and log record, and the encoded
+    body of a metrics collection in flight (standalone exporters: the items in
+    flight). It is the running total the 32 MiB budget admits against, not
+    process memory; refused items add nothing, it returns to zero whenever
+    nothing is pending, and so it is zero after shutdown.
   Every snapshot satisfies `accepted = exported + dropped + failed + pending`;
   each item reaches exactly one terminal outcome; retries and splits never count
   an item twice.
@@ -708,7 +850,21 @@ nulls arrive as `bytesValue: ""` and JS whole-number doubles as `intValue`.
 - Rust: `Result<()>` with `Error::Timeout` or `Error::Delivery`, plus
   `force_flush_async`/`shutdown_async`; sync calls are safe inside another Tokio
   runtime. JS: `Promise<boolean>`, `true` only for success, resolved after
-  counters settle.
+  counters settle. JS scheduling timers (batch delay, metric interval, flush,
+  export and shutdown deadlines) never keep a process alive; an export in
+  flight, retry backoff included, does until it completes or its deadline
+  aborts it, so a process that exits without shutdown can linger up to
+  `export_timeout` against an unresponsive endpoint.
+- Rust: dropping an `ObservabilityPipeline` without `shutdown` abandons its
+  work at once: queued spans and log records are dropped, exports in flight
+  are cancelled (failed) and nothing is flushed. Its providers are shut down
+  by the OpenTelemetry SDK when their last owner goes (the pipeline, the
+  observers built from it, and any provider clones the application holds), and
+  the SDK bounds each such drop-time shutdown by its own wait of about 5
+  seconds per provider (tracer, meter, logger). Against an unresponsive
+  endpoint, dropping the last owner therefore returns within roughly that bound
+  per provider, never by delivering what was abandoned. Call `shutdown(timeout)`
+  to bound the wait yourself and to deliver or count what is queued.
 - Exporter diagnostics never include payloads, headers, response bodies or
   content.
 
@@ -733,13 +889,33 @@ nulls arrive as `bytesValue: ""` and JS whole-number doubles as `intValue`.
   `max_retries` with backoff `min(initial_delay × 2^n, max_delay)` (no jitter).
   `Retry-After` replaces the backoff, even above `max_delay`, unless it would end
   at or after the deadline, in which case the items fail immediately. Other
-  statuses fail without retry.
+  statuses fail without retry. Each export retries on its own: a destination
+  that keeps answering 429 or 503 does not hold later exports back
+  (there is no circuit breaker and no `Retry-After` shared across exports).
+  What a struggling destination can receive stays bounded by `max_retries`,
+  the export deadline, one export in flight per signal and the
+  `max_buffered_bytes_per_signal` budget, beyond which items are dropped
+  and counted.
 - Redirects are never followed; a 3xx fails without retry.
 - Responses: the status decides. At most `max_response_body_bytes` (64 KiB) are
   read within the deadline; a body problem after a 2xx does not change the
   outcome. A decodable OTLP partial success counts its rejected items as failed.
 - Rust uses a pipeline-owned Tokio runtime with reqwest (rustls), behind the
   `otlp` feature; caller threads never do network I/O.
+- Rust response hooks (optional, per destination): a `SignalEndpoint` may
+  carry a `ResponseHook`, called exactly once for every HTTP response of that
+  destination (scheduled batches, flushes, retries, the shutdown drain; no call
+  for a transport error or timeout). With a hook, failure bodies are read too,
+  under the 64 KiB bound and for at most one second (never past the attempt's
+  timeout), so a stalled failure body cannot use up the retry budget; the hook
+  sees the status, headers, body and the decoded `google.rpc.Status`. It may
+  disable its destination for the rest of that pipeline's or exporter set's
+  life: the response itself is handled as usual (2xx acknowledges, anything
+  else fails at once, with no further retry or retry wait), no further request
+  is made, and items pending or offered later are dropped. Other destinations, other pipelines and local processors
+  are unaffected; a pipeline built again from the same configuration starts
+  enabled. The package interprets no vendor response itself; adapters attach
+  hooks to the destinations they trust (`SignalEndpoint::is_xybrid_preset`).
 
 ## Configuration sources
 
@@ -790,6 +966,11 @@ cumulative. Tests inject or disable the environment (Rust
   `@opentelemetry/api` logs global, then the `@opentelemetry/api-logs` global, at
   call time. Trace-only destinations do not receive evaluation events; route them
   through a Collector logs pipeline.
+- The records carry no id of their own. An export whose acknowledgement is
+  lost may be sent again, so a destination that must not store the record
+  twice deduplicates on what the record is: its target, timestamp, name,
+  score, response id and content. Xybrid's ingest derives its stable id from
+  exactly those, so a resend replaces the first copy.
 
 ## Export presets
 
@@ -800,7 +981,9 @@ cumulative. Tests inject or disable the environment (Rust
   `https://ingest.xybrid.dev/v1/traces`, `http/protobuf`, with exactly
   `Authorization: Bearer <key>` (`header_policy = isolated`; no environment
   header ever reaches the endpoint or replaces the key). It never sends metrics
-  or logs; route those through a Collector.
+  or logs; route those through a Collector. Rust marks the endpoint it builds
+  (`SignalEndpoint::is_xybrid_preset`), so an adapter can trust Xybrid's
+  workspace responses from it and from no generic endpoint.
 - Collector profiles for Langfuse and Phoenix live in
   [`collector/`](collector/) and translate at export time; instrumentation
   stays canonical.
@@ -832,7 +1015,10 @@ Each fixture in `contract/fixtures/*.json` is:
 
 Config fields (defaults in parentheses): `content_capture` (`span_only`; runners
 never read the environment), `max_content_attribute_bytes` (16384),
-`max_retained_operation_bytes` (491520), `max_traversal_bytes` (491520),
+`max_retained_operation_bytes` (425984), `max_request_body_bytes` (491520; the
+content policy's own bound, which the content budgets are clamped to fit),
+`span_content_encoding` (`json`; how that bound's exporter writes content),
+`max_traversal_bytes` (491520),
 `redact_substrings` (`[]`), `test_redactor` (absent), `redaction_rules` (`[]`),
 `logs` (`true`), `tracer` (`sdk`).
 

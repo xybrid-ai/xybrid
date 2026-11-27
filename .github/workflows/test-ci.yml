@@ -1,225 +1,16 @@
-# Purpose: Manual: precompile and upload Flutter binaries per platform, and dry-run the speech-free Kotlin packaging.
+# Purpose: Manual: dry-run the speech-free Kotlin packaging.
 name: "Maintenance: Packaging tools (manual)"
 
 on:
   workflow_dispatch:
-    inputs:
-      platform:
-        description: 'Platform to test'
-        required: true
-        type: choice
-        options:
-          - publish-kotlin
-          - darwin-precompile
-          - linux-precompile
-          - windows-precompile
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  NDK_VERSION: "26.1.10909125"
-  FLUTTER_VERSION: "3.35.7"
-  FRB_VERSION: "2.11.1"
 
 permissions: read-all
 
 jobs:
-  #
-  # Precompile Flutter (darwin)
-  #
-  precompile-darwin:
-    name: Precompile Flutter (darwin)
-    permissions:
-      contents: write   # cargokit precompile-binaries uploads release assets
-    if: inputs.platform == 'darwin-precompile'
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: true
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: >-
-            aarch64-apple-darwin,
-            aarch64-apple-ios,
-            aarch64-apple-ios-sim
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          key: test-precompile-darwin
-          # Per-image cache: ort-sys's build-script output records this image's
-          # Xcode clang-runtime path, which other images may lack.
-          env-vars: ImageOS
-
-      - uses: dart-lang/setup-dart@e51d8e571e22473a2ddebf0ef8a2123f0ab2c02c # v1
-
-      - name: Install LLVM
-        run: brew install llvm
-
-      - name: Install build tool dependencies
-        working-directory: bindings/flutter/cargokit/build_tool
-        run: dart pub get
-
-      - name: Precompile and upload binaries
-        working-directory: bindings/flutter/cargokit/build_tool
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          ARGS="--repository ${{ github.repository }} --manifest-dir ${{ github.workspace }}/bindings/flutter/rust --verbose"
-          dart run bin/build_tool.dart precompile-binaries $ARGS
-
-  #
-  # Precompile Flutter (linux + android)
-  #
-  precompile-linux:
-    name: Precompile Flutter (linux)
-    permissions:
-      contents: write   # cargokit precompile-binaries uploads release assets
-    if: inputs.platform == 'linux-precompile'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: true
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: >-
-            x86_64-unknown-linux-gnu,
-            aarch64-linux-android,
-            armv7-linux-androideabi,
-            x86_64-linux-android
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          key: test-precompile-linux
-
-      - uses: dart-lang/setup-dart@e51d8e571e22473a2ddebf0ef8a2123f0ab2c02c # v1
-
-      - name: Install LLVM
-        run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
-        with:
-          packages: platform-tools
-
-      - name: Install Android NDK
-        run: |
-          sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
-
-      - name: Install cargo-ndk
-        run: which cargo-ndk || cargo install cargo-ndk
-
-      - name: Install build tool dependencies
-        working-directory: bindings/flutter/cargokit/build_tool
-        run: dart pub get
-
-      - name: Precompile and upload binaries
-        working-directory: bindings/flutter/cargokit/build_tool
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          ARGS="--repository ${{ github.repository }} --manifest-dir ${{ github.workspace }}/bindings/flutter/rust --verbose --android-sdk-location $ANDROID_HOME --android-ndk-version ${{ env.NDK_VERSION }} --android-min-sdk-version 28"
-          dart run bin/build_tool.dart precompile-binaries $ARGS
-
-  #
-  # Precompile Flutter (windows)
-  #
-  precompile-windows:
-    name: Precompile Flutter (windows)
-    permissions:
-      contents: write   # cargokit precompile-binaries uploads release assets
-    if: inputs.platform == 'windows-precompile'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: true
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: x86_64-pc-windows-msvc
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          key: test-precompile-windows
-
-      - uses: dart-lang/setup-dart@e51d8e571e22473a2ddebf0ef8a2123f0ab2c02c # v1
-
-      - name: Install LLVM and NASM
-        run: choco install llvm nasm
-
-      - name: Add NASM to PATH
-        shell: bash
-        run: echo "C:\\Program Files\\NASM" >> $GITHUB_PATH
-
-      - name: Install build tool dependencies
-        working-directory: bindings/flutter/cargokit/build_tool
-        run: dart pub get
-
-      - name: Force dynamic CRT on Windows
-        shell: bash
-        run: |
-          # Use -MD not /MD — Git Bash mangles /MD to C:/Program Files/Git/MD
-          echo "CFLAGS=-MD" >> $GITHUB_ENV
-          echo "CXXFLAGS=-MD" >> $GITHUB_ENV
-
-      - name: Precompile and upload binaries
-        working-directory: bindings/flutter/cargokit/build_tool
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          ARGS="--repository ${{ github.repository }} --manifest-dir ${{ github.workspace }}/bindings/flutter/rust --verbose"
-          dart run bin/build_tool.dart precompile-binaries $ARGS
-
   #
   # Publish Kotlin SDK (dry-run: build Android + assemble AAR, no actual publish)
   #
@@ -231,12 +22,9 @@ jobs:
   # release-prep.yml's verify-android-gradle replays it on every release.
   publish-kotlin:
     name: Publish Kotlin SDK (dry-run)
-    if: inputs.platform == 'publish-kotlin'
     runs-on: ubuntu-latest
     # The bolt Android build needs NDK r27 (build-android-bolt.sh resolves
-    # its API-suffixed clang). Override the workflow-level NDK_VERSION
-    # (r26b) just for this job so the flutter precompile-linux job stays
-    # on its validated r26b.
+    # its API-suffixed clang).
     env:
       NDK_VERSION: "27.0.12077973"
     steps:

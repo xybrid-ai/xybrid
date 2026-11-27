@@ -1,6 +1,6 @@
 """The committed manifests and docs install pins match the Cargo version.
 
-CI's Version sync job runs `version-sync.sh --check` on every pull request, and
+CI's Repo checks job runs `version-sync.sh --check` on every pull request, and
 release-prep runs it again on the release branch. This keeps it in the tooling
 suite, so a change to version-sync.sh or install_pins.py that breaks the check
 on the committed tree fails locally too.

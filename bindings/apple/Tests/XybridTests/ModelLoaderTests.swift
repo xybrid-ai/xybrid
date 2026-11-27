@@ -18,6 +18,34 @@ final class ModelLoaderTests: XCTestCase {
         XCTAssertEqual(loader.source, source)
     }
 
+    func testModelFileSourceCreatesUnloadedReferenceWithNothingToDownload() {
+        let url = URL(fileURLWithPath: "/models/qwen3-0.6b-q4_k_m.gguf")
+
+        let loader = ModelLoader.fromModelFile(url)
+
+        XCTAssertEqual(loader.source, .modelFile(url))
+        XCTAssertEqual(Xybrid.model(.modelFile(url)).source, loader.source)
+        XCTAssertNil(loader.download())
+        XCTAssertFalse(loader.willSpeculate)
+    }
+
+    /// Reaches the native model-file loader: a directory loader would fail
+    /// differently, and a `file://` URL string would show up in the message.
+    func testModelFileLoadReportsAMissingFileByPath() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("missing.gguf")
+
+        XCTAssertThrowsError(try ModelLoader.fromModelFile(url).loadSync()) { error in
+            guard case XybridError.configError(let message) = error else {
+                return XCTFail("expected configError, got \(error)")
+            }
+            XCTAssertTrue(message.contains("GGUF file not found"), message)
+            XCTAssertTrue(message.contains(url.path), message)
+            XCTAssertFalse(message.contains("file://"), message)
+        }
+    }
+
     func testResultDecodesToolCallingWireWithoutReasoningTail() {
         let envelope = XybridEnvelope(
             kind: .text(text: "answer"),
@@ -107,6 +135,12 @@ final class ModelLoaderTests: XCTestCase {
         XCTAssertNil(options.tracestate)
         XCTAssertEqual(options.conversationId, "conv-1")
         XCTAssertTrue(options.suppressTrace)
+        XCTAssertNil(options.frameSessionId)
+
+        // A live-capture loop names its session; nothing else changes.
+        let live = XybridRunOptions.make(frameSessionId: "camera-7")
+        XCTAssertEqual(live.frameSessionId, "camera-7")
+        XCTAssertFalse(live.suppressTrace)
     }
 
     /// Guards the `hasToolCalls` conveniences. They exist so the branch a

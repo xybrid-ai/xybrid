@@ -1,0 +1,669 @@
+{
+ "spans": [
+  {
+   "attributes": {
+    "gen_ai.operation.name": {
+     "stringValue": "load_model"
+    },
+    "gen_ai.provider.name": {
+     "stringValue": "fake-runtime"
+    },
+    "gen_ai.request.model": {
+     "stringValue": "tiny-chat"
+    },
+    "xybrid.genai.model.cache_hit": {
+     "boolValue": true
+    },
+    "xybrid.genai.model.format": {
+     "stringValue": "gguf"
+    },
+    "xybrid.genai.model.size_bytes": {
+     "intValue": 1048576
+    },
+    "xybrid.genai.runtime.name": {
+     "stringValue": "fake-runtime"
+    }
+   },
+   "content": null,
+   "counted_request": false,
+   "dropped_attributes_count": 0,
+   "dropped_events_count": 0,
+   "dropped_links_count": 0,
+   "duration_ns": "5653",
+   "end_time": "2026-11-09T16:46:40.307012698Z",
+   "end_time_unix_nano": "1794242800307012698",
+   "events": [],
+   "flags": 257,
+   "gateway_payloads": {
+    "request": false,
+    "response": false
+   },
+   "genai": {
+    "attempt_count": null,
+    "attempt_index": null,
+    "cache_read_input_tokens": null,
+    "cache_write_input_tokens": null,
+    "error_type": null,
+    "execution_location": null,
+    "input_tokens": null,
+    "operation_name": "load_model",
+    "output_tokens": null,
+    "provider_name": "fake-runtime",
+    "reasoning_output_tokens": null,
+    "request_model": "tiny-chat",
+    "response_model": null,
+    "runtime_name": "fake-runtime",
+    "server_address": null,
+    "task": null,
+    "time_to_first_chunk_s": null,
+    "time_to_first_token_s": null
+   },
+   "is_request": false,
+   "kind": "INTERNAL",
+   "links": [],
+   "name": "load_model tiny-chat",
+   "parent_span_id": "f17460911705c1a5",
+   "resource": {
+    "attributes": {
+     "service.name": {
+      "stringValue": "xybrid-observability-standalone"
+     },
+     "telemetry.sdk.language": {
+      "stringValue": "rust"
+     },
+     "telemetry.sdk.name": {
+      "stringValue": "opentelemetry"
+     },
+     "telemetry.sdk.version": {
+      "stringValue": "0.33.1"
+     },
+     "xybrid.interop.workload": {
+      "stringValue": "rust"
+     }
+    },
+    "dropped_attributes_count": 0,
+    "schema_url": ""
+   },
+   "scope": {
+    "attributes": {},
+    "dropped_attributes_count": 0,
+    "name": "xybrid-observability",
+    "schema_url": "",
+    "version": "0.17.0"
+   },
+   "service_name": "xybrid-observability-standalone",
+   "source": "otlp",
+   "span_id": "967de46ca9d304c8",
+   "span_type": "genai.load_model",
+   "start_time": "2026-11-09T16:46:40.307007045Z",
+   "start_time_unix_nano": "1794242800307007045",
+   "status": {
+    "code": "UNSET",
+    "message": ""
+   },
+   "trace_id": "e65def71db67b57b768f59d149f76bbd",
+   "trace_state": ""
+  },
+  {
+   "attributes": {
+    "gen_ai.operation.name": {
+     "stringValue": "execute_tool"
+    },
+    "gen_ai.tool.call.id": {
+     "stringValue": "call_1"
+    },
+    "gen_ai.tool.name": {
+     "stringValue": "get_weather"
+    },
+    "gen_ai.tool.type": {
+     "stringValue": "function"
+    }
+   },
+   "content": {
+    "bytes": 181,
+    "keys": [
+     "gen_ai.tool.call.arguments",
+     "gen_ai.tool.call.result"
+    ],
+    "storage": "object",
+    "values": null
+   },
+   "counted_request": false,
+   "dropped_attributes_count": 0,
+   "dropped_events_count": 0,
+   "dropped_links_count": 0,
+   "duration_ns": "47923",
+   "end_time": "2026-11-09T16:46:40.307102257Z",
+   "end_time_unix_nano": "1794242800307102257",
+   "events": [],
+   "flags": 257,
+   "gateway_payloads": {
+    "request": false,
+    "response": false
+   },
+   "genai": {
+    "attempt_count": null,
+    "attempt_index": null,
+    "cache_read_input_tokens": null,
+    "cache_write_input_tokens": null,
+    "error_type": null,
+    "execution_location": null,
+    "input_tokens": null,
+    "operation_name": "execute_tool",
+    "output_tokens": null,
+    "provider_name": null,
+    "reasoning_output_tokens": null,
+    "request_model": null,
+    "response_model": null,
+    "runtime_name": null,
+    "server_address": null,
+    "task": null,
+    "time_to_first_chunk_s": null,
+    "time_to_first_token_s": null
+   },
+   "is_request": false,
+   "kind": "INTERNAL",
+   "links": [],
+   "name": "execute_tool get_weather",
+   "parent_span_id": "f17460911705c1a5",
+   "resource": {
+    "attributes": {
+     "service.name": {
+      "stringValue": "xybrid-observability-standalone"
+     },
+     "telemetry.sdk.language": {
+      "stringValue": "rust"
+     },
+     "telemetry.sdk.name": {
+      "stringValue": "opentelemetry"
+     },
+     "telemetry.sdk.version": {
+      "stringValue": "0.33.1"
+     },
+     "xybrid.interop.workload": {
+      "stringValue": "rust"
+     }
+    },
+    "dropped_attributes_count": 0,
+    "schema_url": ""
+   },
+   "scope": {
+    "attributes": {},
+    "dropped_attributes_count": 0,
+    "name": "xybrid-observability",
+    "schema_url": "",
+    "version": "0.17.0"
+   },
+   "service_name": "xybrid-observability-standalone",
+   "source": "otlp",
+   "span_id": "a2019d2d18afc332",
+   "span_type": "genai.tool",
+   "start_time": "2026-11-09T16:46:40.307054334Z",
+   "start_time_unix_nano": "1794242800307054334",
+   "status": {
+    "code": "UNSET",
+    "message": ""
+   },
+   "trace_id": "e65def71db67b57b768f59d149f76bbd",
+   "trace_state": ""
+  },
+  {
+   "attributes": {
+    "error.type": {
+     "stringValue": "timeout"
+    },
+    "gen_ai.provider.name": {
+     "stringValue": "fake-runtime"
+    },
+    "gen_ai.request.model": {
+     "stringValue": "tiny-chat"
+    },
+    "xybrid.genai.attempt.index": {
+     "intValue": 0
+    },
+    "xybrid.genai.attempt.reason": {
+     "stringValue": "initial"
+    },
+    "xybrid.genai.execution.location": {
+     "stringValue": "local"
+    },
+    "xybrid.genai.runtime.name": {
+     "stringValue": "fake-runtime"
+    }
+   },
+   "content": null,
+   "counted_request": false,
+   "dropped_attributes_count": 0,
+   "dropped_events_count": 0,
+   "dropped_links_count": 0,
+   "duration_ns": "5154",
+   "end_time": "2026-11-09T16:46:40.307213481Z",
+   "end_time_unix_nano": "1794242800307213481",
+   "events": [],
+   "flags": 257,
+   "gateway_payloads": {
+    "request": false,
+    "response": false
+   },
+   "genai": {
+    "attempt_count": null,
+    "attempt_index": 0,
+    "cache_read_input_tokens": null,
+    "cache_write_input_tokens": null,
+    "error_type": "timeout",
+    "execution_location": "local",
+    "input_tokens": null,
+    "operation_name": null,
+    "output_tokens": null,
+    "provider_name": "fake-runtime",
+    "reasoning_output_tokens": null,
+    "request_model": "tiny-chat",
+    "response_model": null,
+    "runtime_name": "fake-runtime",
+    "server_address": null,
+    "task": null,
+    "time_to_first_chunk_s": null,
+    "time_to_first_token_s": null
+   },
+   "is_request": false,
+   "kind": "INTERNAL",
+   "links": [],
+   "name": "attempt 0",
+   "parent_span_id": "80878d0eb62dd7da",
+   "resource": {
+    "attributes": {
+     "service.name": {
+      "stringValue": "xybrid-observability-standalone"
+     },
+     "telemetry.sdk.language": {
+      "stringValue": "rust"
+     },
+     "telemetry.sdk.name": {
+      "stringValue": "opentelemetry"
+     },
+     "telemetry.sdk.version": {
+      "stringValue": "0.33.1"
+     },
+     "xybrid.interop.workload": {
+      "stringValue": "rust"
+     }
+    },
+    "dropped_attributes_count": 0,
+    "schema_url": ""
+   },
+   "scope": {
+    "attributes": {},
+    "dropped_attributes_count": 0,
+    "name": "xybrid-observability",
+    "schema_url": "",
+    "version": "0.17.0"
+   },
+   "service_name": "xybrid-observability-standalone",
+   "source": "otlp",
+   "span_id": "57da3250cc8cd77e",
+   "span_type": "genai.attempt",
+   "start_time": "2026-11-09T16:46:40.307208327Z",
+   "start_time_unix_nano": "1794242800307208327",
+   "status": {
+    "code": "ERROR",
+    "message": "backend busy"
+   },
+   "trace_id": "e65def71db67b57b768f59d149f76bbd",
+   "trace_state": ""
+  },
+  {
+   "attributes": {
+    "gen_ai.provider.name": {
+     "stringValue": "fake-runtime"
+    },
+    "gen_ai.request.model": {
+     "stringValue": "tiny-chat"
+    },
+    "gen_ai.usage.input_tokens": {
+     "intValue": 24
+    },
+    "gen_ai.usage.output_tokens": {
+     "intValue": 7
+    },
+    "xybrid.genai.attempt.index": {
+     "intValue": 1
+    },
+    "xybrid.genai.attempt.reason": {
+     "stringValue": "retry"
+    },
+    "xybrid.genai.execution.location": {
+     "stringValue": "local"
+    },
+    "xybrid.genai.runtime.name": {
+     "stringValue": "fake-runtime"
+    }
+   },
+   "content": null,
+   "counted_request": false,
+   "dropped_attributes_count": 0,
+   "dropped_events_count": 0,
+   "dropped_links_count": 0,
+   "duration_ns": "21545871",
+   "end_time": "2026-11-09T16:46:40.328783795Z",
+   "end_time_unix_nano": "1794242800328783795",
+   "events": [],
+   "flags": 257,
+   "gateway_payloads": {
+    "request": false,
+    "response": false
+   },
+   "genai": {
+    "attempt_count": null,
+    "attempt_index": 1,
+    "cache_read_input_tokens": null,
+    "cache_write_input_tokens": null,
+    "error_type": null,
+    "execution_location": "local",
+    "input_tokens": 24,
+    "operation_name": null,
+    "output_tokens": 7,
+    "provider_name": "fake-runtime",
+    "reasoning_output_tokens": null,
+    "request_model": "tiny-chat",
+    "response_model": null,
+    "runtime_name": "fake-runtime",
+    "server_address": null,
+    "task": null,
+    "time_to_first_chunk_s": null,
+    "time_to_first_token_s": null
+   },
+   "is_request": false,
+   "kind": "INTERNAL",
+   "links": [],
+   "name": "attempt 1",
+   "parent_span_id": "80878d0eb62dd7da",
+   "resource": {
+    "attributes": {
+     "service.name": {
+      "stringValue": "xybrid-observability-standalone"
+     },
+     "telemetry.sdk.language": {
+      "stringValue": "rust"
+     },
+     "telemetry.sdk.name": {
+      "stringValue": "opentelemetry"
+     },
+     "telemetry.sdk.version": {
+      "stringValue": "0.33.1"
+     },
+     "xybrid.interop.workload": {
+      "stringValue": "rust"
+     }
+    },
+    "dropped_attributes_count": 0,
+    "schema_url": ""
+   },
+   "scope": {
+    "attributes": {},
+    "dropped_attributes_count": 0,
+    "name": "xybrid-observability",
+    "schema_url": "",
+    "version": "0.17.0"
+   },
+   "service_name": "xybrid-observability-standalone",
+   "source": "otlp",
+   "span_id": "c8c741433d3ad279",
+   "span_type": "genai.attempt",
+   "start_time": "2026-11-09T16:46:40.307237924Z",
+   "start_time_unix_nano": "1794242800307237924",
+   "status": {
+    "code": "UNSET",
+    "message": ""
+   },
+   "trace_id": "e65def71db67b57b768f59d149f76bbd",
+   "trace_state": ""
+  },
+  {
+   "attributes": {
+    "gen_ai.operation.name": {
+     "stringValue": "chat"
+    },
+    "gen_ai.provider.name": {
+     "stringValue": "fake-runtime"
+    },
+    "gen_ai.request.max_tokens": {
+     "intValue": 64
+    },
+    "gen_ai.request.model": {
+     "stringValue": "tiny-chat"
+    },
+    "gen_ai.request.stream": {
+     "boolValue": true
+    },
+    "gen_ai.request.temperature": {
+     "doubleValue": 0.0
+    },
+    "gen_ai.response.id": {
+     "stringValue": "resp-1"
+    },
+    "gen_ai.response.model": {
+     "stringValue": "tiny-chat-q4"
+    },
+    "gen_ai.response.time_to_first_chunk": {
+     "doubleValue": 0.006217478
+    },
+    "gen_ai.usage.input_tokens": {
+     "intValue": 24
+    },
+    "gen_ai.usage.output_tokens": {
+     "intValue": 7
+    },
+    "xybrid.genai.attempt.count": {
+     "intValue": 2
+    },
+    "xybrid.genai.execution.location": {
+     "stringValue": "local"
+    },
+    "xybrid.genai.response.chunk_count": {
+     "intValue": 4
+    },
+    "xybrid.genai.response.time_to_first_token": {
+     "doubleValue": 0.003142745
+    },
+    "xybrid.genai.runtime.name": {
+     "stringValue": "fake-runtime"
+    }
+   },
+   "content": {
+    "bytes": 411,
+    "keys": [
+     "gen_ai.input.messages",
+     "gen_ai.output.messages"
+    ],
+    "storage": "inline",
+    "values": {
+     "gen_ai.input.messages": {
+      "stringValue": "[{\"parts\":[{\"content\":\"You are terse.\",\"type\":\"text\"}],\"role\":\"system\"},{\"parts\":[{\"content\":\"Weather in Paris? My key is [KEY].\",\"type\":\"text\"}],\"role\":\"user\"}]"
+     },
+     "gen_ai.output.messages": {
+      "stringValue": "[{\"finish_reason\":\"stop\",\"parts\":[{\"content\":\"It is 18\u00b0C and cloudy.\",\"type\":\"text\"}],\"role\":\"assistant\"}]"
+     }
+    }
+   },
+   "counted_request": true,
+   "dropped_attributes_count": 0,
+   "dropped_events_count": 0,
+   "dropped_links_count": 0,
+   "duration_ns": "21729133",
+   "end_time": "2026-11-09T16:46:40.328893988Z",
+   "end_time_unix_nano": "1794242800328893988",
+   "events": [],
+   "flags": 257,
+   "gateway_payloads": {
+    "request": false,
+    "response": false
+   },
+   "genai": {
+    "attempt_count": 2,
+    "attempt_index": null,
+    "cache_read_input_tokens": null,
+    "cache_write_input_tokens": null,
+    "error_type": null,
+    "execution_location": "local",
+    "input_tokens": 24,
+    "operation_name": "chat",
+    "output_tokens": 7,
+    "provider_name": "fake-runtime",
+    "reasoning_output_tokens": null,
+    "request_model": "tiny-chat",
+    "response_model": "tiny-chat-q4",
+    "runtime_name": "fake-runtime",
+    "server_address": null,
+    "task": null,
+    "time_to_first_chunk_s": 0.006217478,
+    "time_to_first_token_s": 0.003142745
+   },
+   "is_request": true,
+   "kind": "INTERNAL",
+   "links": [],
+   "name": "chat tiny-chat",
+   "parent_span_id": "f17460911705c1a5",
+   "resource": {
+    "attributes": {
+     "service.name": {
+      "stringValue": "xybrid-observability-standalone"
+     },
+     "telemetry.sdk.language": {
+      "stringValue": "rust"
+     },
+     "telemetry.sdk.name": {
+      "stringValue": "opentelemetry"
+     },
+     "telemetry.sdk.version": {
+      "stringValue": "0.33.1"
+     },
+     "xybrid.interop.workload": {
+      "stringValue": "rust"
+     }
+    },
+    "dropped_attributes_count": 0,
+    "schema_url": ""
+   },
+   "scope": {
+    "attributes": {},
+    "dropped_attributes_count": 0,
+    "name": "xybrid-observability",
+    "schema_url": "",
+    "version": "0.17.0"
+   },
+   "service_name": "xybrid-observability-standalone",
+   "source": "otlp",
+   "span_id": "80878d0eb62dd7da",
+   "span_type": "genai.request",
+   "start_time": "2026-11-09T16:46:40.307164855Z",
+   "start_time_unix_nano": "1794242800307164855",
+   "status": {
+    "code": "UNSET",
+    "message": ""
+   },
+   "trace_id": "e65def71db67b57b768f59d149f76bbd",
+   "trace_state": ""
+  },
+  {
+   "attributes": {
+    "gen_ai.operation.name": {
+     "stringValue": "invoke_workflow"
+    },
+    "gen_ai.workflow.name": {
+     "stringValue": "answer_question"
+    }
+   },
+   "content": null,
+   "counted_request": false,
+   "dropped_attributes_count": 0,
+   "dropped_events_count": 0,
+   "dropped_links_count": 0,
+   "duration_ns": "22026164",
+   "end_time": "2026-11-09T16:46:40.329014284Z",
+   "end_time_unix_nano": "1794242800329014284",
+   "events": [],
+   "flags": 257,
+   "gateway_payloads": {
+    "request": false,
+    "response": false
+   },
+   "genai": {
+    "attempt_count": null,
+    "attempt_index": null,
+    "cache_read_input_tokens": null,
+    "cache_write_input_tokens": null,
+    "error_type": null,
+    "execution_location": null,
+    "input_tokens": null,
+    "operation_name": "invoke_workflow",
+    "output_tokens": null,
+    "provider_name": null,
+    "reasoning_output_tokens": null,
+    "request_model": null,
+    "response_model": null,
+    "runtime_name": null,
+    "server_address": null,
+    "task": null,
+    "time_to_first_chunk_s": null,
+    "time_to_first_token_s": null
+   },
+   "is_request": false,
+   "kind": "INTERNAL",
+   "links": [],
+   "name": "invoke_workflow answer_question",
+   "parent_span_id": "",
+   "resource": {
+    "attributes": {
+     "service.name": {
+      "stringValue": "xybrid-observability-standalone"
+     },
+     "telemetry.sdk.language": {
+      "stringValue": "rust"
+     },
+     "telemetry.sdk.name": {
+      "stringValue": "opentelemetry"
+     },
+     "telemetry.sdk.version": {
+      "stringValue": "0.33.1"
+     },
+     "xybrid.interop.workload": {
+      "stringValue": "rust"
+     }
+    },
+    "dropped_attributes_count": 0,
+    "schema_url": ""
+   },
+   "scope": {
+    "attributes": {},
+    "dropped_attributes_count": 0,
+    "name": "xybrid-observability",
+    "schema_url": "",
+    "version": "0.17.0"
+   },
+   "service_name": "xybrid-observability-standalone",
+   "source": "otlp",
+   "span_id": "f17460911705c1a5",
+   "span_type": "genai.workflow",
+   "start_time": "2026-11-09T16:46:40.306988120Z",
+   "start_time_unix_nano": "1794242800306988120",
+   "status": {
+    "code": "UNSET",
+    "message": ""
+   },
+   "trace_id": "e65def71db67b57b768f59d149f76bbd",
+   "trace_state": ""
+  }
+ ],
+ "summary": {
+  "duration_ms": 22.026164,
+  "end_time_unix_nano": "1794242800329014284",
+  "input_tokens": 24,
+  "output_tokens": 7,
+  "request_count": 1,
+  "span_count": 6,
+  "start_time_unix_nano": "1794242800306988120",
+  "status": "unset"
+ },
+ "trace_id": "e65def71db67b57b768f59d149f76bbd",
+ "truncated": false
+}

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "choice-36-options",
+  "profile": "lfm3-d1/text/v1",
+  "title": "36 options: code AJ is not one token, the first free pool entry (00) replaces it",
+  "covers": [
+    "choice-pool-fallback"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"option_000\": \"Option number 0\", \"option_001\": \"Option number 1\", \"option_002\": \"Option number 2\", \"option_003\": \"Option number 3\", \"option_004\": \"Option number 4\", \"option_005\": \"Option number 5\", \"option_006\": \"Option number 6\", \"option_007\": \"Option number 7\", \"option_008\": \"Option number 8\", \"option_009\": \"Option number 9\", \"option_010\": \"Option number 10\", \"option_011\": \"Option number 11\", \"option_012\": \"Option number 12\", \"option_013\": \"Option number 13\", \"option_014\": \"Option number 14\", \"option_015\": \"Option number 15\", \"option_016\": \"Option number 16\", \"option_017\": \"Option number 17\", \"option_018\": \"Option number 18\", \"option_019\": \"Option number 19\", \"option_020\": \"Option number 20\", \"option_021\": \"Option number 21\", \"option_022\": \"Option number 22\", \"option_023\": \"Option number 23\", \"option_024\": \"Option number 24\", \"option_025\": \"Option number 25\", \"option_026\": \"Option number 26\", \"option_027\": \"Option number 27\", \"option_028\": \"Option number 28\", \"option_029\": \"Option number 29\", \"option_030\": \"Option number 30\", \"option_031\": \"Option number 31\", \"option_032\": \"Option number 32\", \"option_033\": \"Option number 33\", \"option_034\": \"Option number 34\", \"option_035\": \"Option number 35\"}}}}",
+  "artifact": "d1-2b-hf"
+}

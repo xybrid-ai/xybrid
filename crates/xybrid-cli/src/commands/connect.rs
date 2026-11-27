@@ -28,8 +28,8 @@ use clap::Args;
 use uuid::Uuid;
 
 use crate::platform::client::{
-    safe_link, safe_name, ApiFailure, ClientInfo, ConnectBody, PlatformClient, Provision,
-    WorkspaceStatus,
+    connect_via, safe_link, safe_name, ApiFailure, ClientInfo, ConnectBody, PlatformClient,
+    Provision, WorkspaceStatus,
 };
 use crate::platform::credentials::{
     Credential, CredentialsFile, EnvFileRecord, NamedRef, PendingKind, PendingRequest, Secret,
@@ -60,6 +60,10 @@ pub(crate) struct ConnectArgs {
     /// Self-reported agent name, e.g. claude-code (detected from CLAUDECODE=1 when possible)
     #[arg(long, value_name = "NAME")]
     pub agent: Option<String>,
+
+    /// Setup entrypoint: web-copy, setup-prompt, llms-txt, skill, mcp, or docs; sent only when the platform enables collection
+    #[arg(long, value_name = "ENTRYPOINT")]
+    pub via: Option<String>,
 
     /// Write the key to this untracked project file (.env, .env.local,
     /// local.properties, Secrets.xcconfig, ...) and gitignore it
@@ -1094,6 +1098,9 @@ impl Session<'_> {
         Ok(true)
     }
 
+    /// How to claim the workspace, and both of its deadlines: it can be claimed
+    /// until the claim deadline (when it is deleted), while its key stops
+    /// working at the earlier key deadline.
     fn claim_sentences(&self, credential: &Credential) -> String {
         let now = Utc::now();
         if !credential.is_provisional() {
@@ -1108,11 +1115,11 @@ impl Session<'_> {
             Some(url) => format!(
                 " Claim it with GitHub by {}: {url} (this link is private: don't put it in \
                  commits, PRs or issues).",
-                human_date(key_deadline)
+                human_date(claim_deadline)
             ),
             None if credential.claim_token.is_some() => format!(
                 " Claim it with GitHub by {} with `xybrid auth claim`.",
-                human_date(key_deadline)
+                human_date(claim_deadline)
             ),
             None => format!(
                 " Its claim link was not saved on this machine, so it can't be claimed from \
@@ -1318,6 +1325,7 @@ impl Session<'_> {
             claim_token: None,
             project_name: self.project_name(),
             source: detect_source(self.args.agent.as_deref()),
+            client_info: None,
             started_at: Utc::now(),
         }
     }
@@ -1325,6 +1333,17 @@ impl Session<'_> {
     /// Fetch and solve a challenge into `pending`, then persist it.
     fn solve_into(&mut self, pending: &mut PendingRequest) -> Result<(), Failed> {
         let challenge = self.client.challenge()?;
+        if challenge.collect_via.as_bool() != Some(true)
+            && pending
+                .client_info
+                .as_mut()
+                .and_then(|info| info.via.take())
+                .is_some()
+            && pending.challenge.is_some()
+        {
+            self.file.set_pending(pending.clone());
+            self.save()?;
+        }
         if let Some(algorithm) = &challenge.algorithm {
             if algorithm != pow::ALGORITHM {
                 return Err(CliError::new(
@@ -1366,6 +1385,7 @@ impl Session<'_> {
             Some(pending) => pending,
             None => {
                 let mut pending = self.new_pending(PendingKind::Connect);
+                pending.client_info = Some(ClientInfo::current(self.args.via.as_deref()));
                 self.solve_into(&mut pending)?;
                 pending
             }
@@ -1373,11 +1393,17 @@ impl Session<'_> {
         let install_id = install_id::get();
         let (mut refreshed, mut restarted, mut busy) = (false, false, 0);
         loop {
+            let client_info = pending
+                .client_info
+                .get_or_insert_with(|| ClientInfo::current(None));
+            if connect_via(client_info.via.as_deref()).is_none() {
+                client_info.via = None;
+            }
             let body = ConnectBody {
                 source: pending.source.as_deref(),
                 project_name: pending.project_name.as_deref(),
                 install_id: Some(&install_id),
-                client_info: ClientInfo::current(),
+                client_info: client_info.clone(),
                 challenge: pending.challenge.as_deref().unwrap_or_default(),
                 nonce: pending.nonce.as_deref().unwrap_or_default(),
             };
@@ -1399,7 +1425,9 @@ impl Session<'_> {
                     | "workspace_unavailable",
                 ) if !restarted => {
                     restarted = true;
+                    let info = pending.client_info.take();
                     pending = self.new_pending(PendingKind::Connect);
+                    pending.client_info = info;
                     self.solve_into(&mut pending)?;
                 }
                 Some("agent_signup_busy") if busy < MAX_BUSY_RETRIES => {
@@ -1541,7 +1569,8 @@ fn org_name(credential: &Credential) -> String {
 }
 
 /// The comment written above the key: claim command and dates, never the
-/// token or link.
+/// token or link. The workspace can be claimed until the claim deadline; its
+/// key stops at the earlier key deadline.
 fn file_comment(credential: &Credential) -> Vec<String> {
     let name = org_name(credential);
     if !credential.is_provisional() {
@@ -1560,7 +1589,7 @@ fn file_comment(credential: &Credential) -> Vec<String> {
         ),
         format!(
             "Claim it with GitHub by {} to keep it: run `xybrid auth claim`.",
-            date(credential.key_expires_at)
+            date(credential.claim_expires_at)
         ),
         format!(
             "Unclaimed, the key stops on {} (UTC) and the workspace is deleted on {}.",
@@ -1809,6 +1838,9 @@ fn connect_command(
     if repeat_new && args.new {
         command.push_str(" --new");
     }
+    if let Some(via) = connect_via(args.via.as_deref()).filter(|_| repeat_new) {
+        push_flag(&mut command, "--via", via)?;
+    }
     if let Some(path) = write_env {
         // A path that isn't Unicode can't be shown without changing it.
         let path = path.to_str().ok_or(Unquotable("--write-env"))?;
@@ -1954,10 +1986,13 @@ mod tests {
         assert!(version_less("0.1.0-beta12", "0.2.0"));
     }
 
+    /// The comment also dates each deadline by what it means: claim by the
+    /// claim deadline, while the key stops at the earlier key deadline.
     #[test]
     fn file_comments_never_carry_the_claim_token() {
         let now = Utc::now();
         let token = "z".repeat(43);
+        let deadline = |raw: &str| raw.parse::<DateTime<Utc>>().unwrap();
         let credential = Credential {
             platform_origin: host::PRODUCTION_API.into(),
             repository_root: "/repo".into(),
@@ -1968,8 +2003,8 @@ mod tests {
                 name: "my-app".into(),
             }),
             project: None,
-            key_expires_at: Some(now),
-            claim_expires_at: Some(now),
+            key_expires_at: Some(deadline("2026-11-21T12:00:00Z")),
+            claim_expires_at: Some(deadline("2026-11-28T12:00:00Z")),
             claim_token: Some(Secret::new(token.clone())),
             source: None,
             console_origin: None,
@@ -1979,10 +2014,21 @@ mod tests {
             privacy_url: None,
             created_at: now,
         };
-        let comment = file_comment(&credential).join("\n");
+        let lines = file_comment(&credential);
+        let comment = lines.join("\n");
         assert!(!comment.contains(&token));
         assert!(!comment.contains("/claim/"));
         assert!(comment.contains("xybrid auth claim"));
+        assert_eq!(
+            lines[1],
+            "Claim it with GitHub by 2026-11-28 to keep it: run `xybrid auth claim`."
+        );
+        assert_eq!(
+            lines[2],
+            "Unclaimed, the key stops on 2026-11-21 (UTC) and the workspace is deleted on \
+             2026-11-28."
+        );
+        assert!(!comment.contains("by 2026-11-21"), "{comment}");
     }
 
     #[test]
@@ -1990,6 +2036,7 @@ mod tests {
         let host = PlatformHost::parse("http://127.0.0.1:8080").unwrap();
         let args = ConnectArgs {
             agent: Some("claude-code".into()),
+            via: None,
             write_env: Some(PathBuf::from("config/.env")),
             env_name: Some("EXPO_PUBLIC_XYBRID_API_KEY".into()),
             project_name: Some("demo".into()),

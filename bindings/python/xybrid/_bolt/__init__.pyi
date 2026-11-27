@@ -39,6 +39,67 @@ class XybridEnvelope:
 
 
 @dataclass(frozen=True, slots=True)
+class XybridDecisionOption:
+    """Foreign DecisionOption; field order is frozen."""
+    key: str
+    description: XybridDecisionContent | None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionLevel:
+    """Foreign DecisionLevel; field order is frozen."""
+    description: XybridDecisionContent | None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionQuestion:
+    """Foreign DecisionQuestion; field order is frozen."""
+    id: str
+    instructions: XybridDecisionContent | None
+    kind: XybridDecisionQuestionKind
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionRequest:
+    """Foreign DecisionRequest; field order is frozen."""
+    state: XybridDecisionContent | None
+    questions: list[XybridDecisionQuestion]
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionScore:
+    """Foreign DecisionScore; field order is frozen."""
+    key: str
+    raw_score: float
+    probability: float
+    origin: XybridDecisionOrigin
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionAnswer:
+    """Foreign DecisionAnswer; field order is frozen."""
+    question_id: str
+    distribution: list[XybridDecisionScore]
+    value: XybridDecisionValue
+    confidence: float | None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisions:
+    """Foreign Decisions; field order is frozen."""
+    answers: list[XybridDecisionAnswer]
+    passes: int
+    input_tokens: int
+
+
+
+@dataclass(frozen=True, slots=True)
 class XybridToolDefinition:
     """A tool (function) the model may ask to call.
 
@@ -113,6 +174,13 @@ class XybridRunOptions:
     """Caller-owned conversation id recorded on the run."""
     suppress_trace: bool
     """Skip the detailed trace for this run; metrics are still recorded."""
+    frame_session_id: str | None
+    """Your id for one continuous live-capture session (a camera or
+    microphone loop). Every run of the session is counted in metrics, and
+    detailed traces are kept for roughly one run per live trace interval
+    per session (`set_live_trace_interval_ms`). Blank values are ignored.
+    Applies to model runs: a pipeline run ignores it.
+    """
 
 
 
@@ -156,9 +224,7 @@ class XybridResult:
     model_id: str
     latency_ms: int
     execution_target: XybridExecutionTarget
-    """Where the answer actually came from. Cloud fallback keeps `model_id`
-    identical on both legs, so this is the only way to tell them apart.
-    """
+    """Where the answer actually came from, even when both legs requested the same model id."""
     metrics: XybridInferenceMetrics
     tool_calls: list[XybridToolCall]
     """Tool calls the model emitted this turn. Empty unless the request
@@ -648,12 +714,97 @@ class XybridEnvelopeKindMultiPart(XybridEnvelopeKind):
     parts: list[XybridEnvelope]
 
 
+@dataclass(frozen=True, slots=True)
+class XybridEnvelopeKindDecisionRequest(XybridEnvelopeKind):
+    request: XybridDecisionRequest
+
+
+@dataclass(frozen=True, slots=True)
+class XybridEnvelopeKindDecisions(XybridEnvelopeKind):
+    decisions: XybridDecisions
+
+
 
 
 class XybridMessageRole(IntEnum):
     SYSTEM = 0
     USER = 1
     ASSISTANT = 2
+
+
+class XybridDecisionContent:
+    """Foreign DecisionContent; variants are append-only."""
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionContentText(XybridDecisionContent):
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionContentJson(XybridDecisionContent):
+    json_text: str
+
+
+
+
+class XybridDecisionQuestionKind:
+    """Foreign DecisionQuestionKind; variants are append-only."""
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionQuestionKindChoice(XybridDecisionQuestionKind):
+    options: list[XybridDecisionOption]
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionQuestionKindYesNo(XybridDecisionQuestionKind):
+    yes: XybridDecisionContent | None
+    no: XybridDecisionContent | None
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionQuestionKindScore(XybridDecisionQuestionKind):
+    levels: list[XybridDecisionLevel]
+
+
+
+
+class XybridDecisionOrigin(IntEnum):
+    """Foreign DecisionOrigin; variants are append-only."""
+    CALLER = 0
+    FIXED = 1
+
+
+class XybridScoreStatistic(IntEnum):
+    """Foreign ScoreStatistic; variants are append-only."""
+    MEDIAN = 0
+    EXPECTED = 1
+
+
+class XybridDecisionValue:
+    """Foreign DecisionValue; variants are append-only."""
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionValueChoice(XybridDecisionValue):
+    key: str
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionValueYesNo(XybridDecisionValue):
+    p_yes: float
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDecisionValueScore(XybridDecisionValue):
+    value: float
+    statistic: XybridScoreStatistic
+
+
 
 
 class XybridAbortSignal(IntEnum):
@@ -668,6 +819,7 @@ class XybridOutputType(IntEnum):
     AUDIO = 1
     EMBEDDING = 2
     UNKNOWN = 3
+    DECISIONS = 4
 
 
 class XybridExecutionTarget(IntEnum):
@@ -930,15 +1082,15 @@ class XybridModel:
         """Load from the xybrid registry. Recommended path."""
     @classmethod
     def from_registry_speculative(cls, id: str) -> "XybridModel":
-        """Load from the registry, serving from the cloud gateway while the weights
-        download in the background.
+        """Try the registry id at the cloud gateway while the weights download.
+        Only ids also listed in the gateway catalog can be served remotely.
 
         Returns almost immediately instead of blocking on the download. Requires
         a resolvable API key, an uncached model, and a chat model the registry
         serves as a direct download (GGUF or vision-language, not a `.xyb`
         bundle); otherwise it behaves exactly like `from_registry`. Poll
-        `download_status` for progress and `is_cloud_serving` to know which leg
-        is answering.
+        `download_status` for progress and `is_cloud_serving` to see whether a
+        run would try the gateway.
         """
     @classmethod
     def from_directory(cls, path: str) -> "XybridModel":
@@ -964,9 +1116,7 @@ class XybridModel:
     def output_type(self) -> XybridOutputType: ...
     def is_loaded(self) -> bool: ...
     def is_cloud_serving(self) -> bool:
-        """Whether runs are currently answered by the cloud because the local
-        weights are not ready yet. `false` for ordinary local models.
-        """
+        """Whether a run would try the gateway because the local weights are not ready."""
     def download_status(self) -> XybridDownloadStatus:
         """Download progress + state in one read — poll this to drive a progress
         bar. Reports `Ready` at 1.0 for an ordinary local model, so hosts need
@@ -1017,7 +1167,12 @@ class XybridModel:
     def stream_result(self, stream_id: int) -> XybridResult:
         """Take the final result after receiving a `Complete` event."""
     def stream_close(self, stream_id: int) -> None:
-        """Forget a streaming session."""
+        """Forget a streaming session.
+
+        Closing a session before its terminal event cancels its run: the run
+        stops at its next token and is recorded as a user cancellation
+        (`error.type` `cancelled`), not as an error.
+        """
     def run_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> XybridResult:
         """Run inference seeded with a conversation `context` (multi-turn chat).
 
@@ -1159,7 +1314,11 @@ class XybridObservabilityConfig:
     def set_metadata_only(self, metadata_only: bool) -> None:
         """Record metadata only: no prompts, outputs, or tool payloads."""
     def set_max_content_bytes(self, bytes: int) -> None:
-        """Maximum bytes per captured content attribute."""
+        """Maximum bytes per captured content attribute, clamped to at most
+        416 KiB (208 KiB when exporting OTLP/JSON, which can double content)
+        so that a span's content leaves 64 KiB of the 480 KiB export request
+        for its other data.
+        """
     def allow_provider_context(self, origin: str) -> None:
         """Allows context propagation to one exact third-party HTTP(S) origin."""
     def set_device_id(self, id: str) -> None:
@@ -1354,6 +1513,10 @@ class XybridModelLoadObservation:
 
 
 
+def decision_request_envelope(request: XybridDecisionRequest) -> XybridEnvelope:
+    """Validate ordered typed decision data and build input for the existing run API."""
+def decision_request_json_envelope(json: str) -> XybridEnvelope:
+    """Decode bounded Liquid SystemOne JSON without foreign dictionary conversion."""
 def tool_results_envelope(user_text: str, prior_assistant_text: str, results: Sequence[XybridToolResult]) -> XybridEnvelope:
     """Build the continuation envelope for the turn after the model asked for
     tools.
@@ -1413,8 +1576,8 @@ def set_platform_url(url: str) -> None:
     Pass a bare base URL — the `/v1` suffix is applied internally.
     """
 def set_speculative_cloud(enabled: bool) -> None:
-    """Enable speculative cloud fallback globally: a registry chat model that
-    isn't downloaded yet is served from the gateway while the weights download.
+    """Try the registry chat model's id at the gateway while its weights download.
+    Only ids also listed in the gateway catalog can be served remotely.
 
     An uncached load asks the registry first, so other models (ASR, TTS,
     `.xyb` bundles) download and load as usual.
@@ -1455,7 +1618,7 @@ def is_auto_release_enabled() -> bool:
 def observability_default_traces_endpoint() -> str:
     """The default Xybrid OTLP trace endpoint."""
 def observability_stats() -> XybridObservabilityStats:
-    """Current delivery counters (all zero when observability is off)."""
+    """Delivery counters: live while export runs, the final ones after shutdown until the next init."""
 def observability_flush(timeout_ms: int) -> None:
     """Export queued telemetry, waiting at most `timeout_ms`.
 

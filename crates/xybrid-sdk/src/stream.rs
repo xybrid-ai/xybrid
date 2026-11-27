@@ -440,4 +440,172 @@ mod tests {
             "reset forgets the discarded utterance's failure"
         );
     }
+
+    /// Points of the metric `name` whose `key` is `value`, each point's count
+    /// keyed by its `error.type` (`None` for a success).
+    fn counted_by_error(
+        signals: &crate::observability::test_support::Signals,
+        name: &str,
+        key: &str,
+        value: &str,
+    ) -> std::collections::BTreeMap<Option<String>, u64> {
+        let mut counts = std::collections::BTreeMap::new();
+        for point in signals.points(name) {
+            if point.attr(key) == Some(value) {
+                *counts
+                    .entry(point.attr("error.type").map(str::to_owned))
+                    .or_default() += point.count;
+            }
+        }
+        counts
+    }
+
+    /// Every utterance outcome is one `gen_ai.invoke_workflow.duration` point
+    /// of `asr_session` under its `error.type`, and every real decoder
+    /// execution one `gen_ai.client.inference.duration` point under its own:
+    /// reset and drop count as cancelled, a failed decode as an inference
+    /// error, and cached partials and repeated flushes add nothing.
+    #[test]
+    fn utterance_and_decoder_outcomes_are_counted_by_error_type() {
+        use crate::observability::semconv::{attr, metric};
+        use crate::observability::test_support::memory_session_with_signals;
+        use crate::observability::{AsrObservation, ObservationOptions};
+        use std::collections::BTreeMap;
+        use xybrid_core::execution::ModelMetadata;
+        use xybrid_core::ir::{Envelope, EnvelopeKind};
+        use xybrid_core::streaming::{DecoderObserver, StreamError};
+
+        let signals = memory_session_with_signals();
+        let options = ObservationOptions::default().with_session(&signals.session);
+        let mut metadata = ModelMetadata::onnx("decoder", "1", "model.onnx");
+        metadata
+            .metadata
+            .insert("task".into(), serde_json::json!("speech-recognition"));
+        let asr = AsrObservation::for_model(Some(&options), Some(("decoder", &metadata)));
+
+        // A flush with nothing fed is no utterance.
+        {
+            let _scope = asr.enter();
+            assert_eq!(asr.finish(&Ok::<_, SdkError>(())), None);
+        }
+        // An utterance abandoned by reset.
+        drop(asr.enter_feed());
+        asr.reset();
+        // Two transcripts with cached partials between them, then a failed
+        // decode; the flush completes the utterance, a repeated one is cached.
+        let input = Envelope::new(EnvelopeKind::Audio(vec![0; 32]));
+        let output = Envelope::new(EnvelopeKind::Text("transcription".into()));
+        for _ in 0..2 {
+            let _scope = asr.enter_feed();
+            asr.start(&metadata, &input).finish(&Ok(output.clone()));
+            for _ in 0..5 {
+                assert!(asr.decoder_reference().is_some());
+            }
+        }
+        {
+            let _scope = asr.enter_feed();
+            asr.start(&metadata, &input)
+                .finish(&Err(StreamError::InferenceError("decode failed".into())));
+        }
+        {
+            let _scope = asr.enter();
+            assert!(asr.finish(&Ok::<_, SdkError>(())).is_some());
+        }
+        assert!(asr
+            .finish(&Err::<(), _>(SdkError::inference("late")))
+            .is_some());
+        // An utterance still open when the stream is dropped.
+        drop(asr.enter_feed());
+        drop(asr);
+
+        assert_eq!(
+            counted_by_error(
+                &signals,
+                metric::WORKFLOW_DURATION,
+                attr::WORKFLOW_NAME,
+                "asr_session"
+            ),
+            BTreeMap::from([(None, 1), (Some("cancelled".to_owned()), 2)]),
+            "completed, reset and dropped utterances"
+        );
+        assert_eq!(
+            counted_by_error(
+                &signals,
+                metric::INFERENCE_DURATION,
+                attr::REQUEST_MODEL,
+                "decoder"
+            ),
+            BTreeMap::from([(None, 2), (Some("inference_error".to_owned()), 1)]),
+            "real decoder executions only"
+        );
+    }
+
+    /// A real stream's lost chunk counts its utterance failed in the workflow
+    /// metric, next to the decode that lost it; the utterance after `reset`
+    /// counts as a success.
+    #[test]
+    fn a_lost_chunk_is_counted_as_a_failed_utterance() {
+        use crate::observability::semconv::{attr, metric};
+        use crate::observability::test_support::memory_session_with_signals;
+        use crate::observability::ObservationOptions;
+        use std::collections::BTreeMap;
+        use xybrid_core::execution::ModelMetadata;
+
+        let dir = tempfile::tempdir().unwrap();
+        // No weights on disk: a decode fails after its chunk left the buffer.
+        let mut metadata = ModelMetadata::onnx("asr", "1", "missing.onnx");
+        metadata
+            .metadata
+            .insert("task".into(), serde_json::json!("speech-recognition"));
+        std::fs::write(
+            dir.path().join("model_metadata.json"),
+            serde_json::to_vec(&metadata).unwrap(),
+        )
+        .unwrap();
+        let mut config = CoreStreamConfig::default();
+        // Without overlap, one whole chunk leaves nothing for flush to decode.
+        config.buffer_config.overlap_secs = 0.0;
+        let signals = memory_session_with_signals();
+        let options = ObservationOptions::default().with_session(&signals.session);
+        let executor = Arc::new(Mutex::new(TemplateExecutor::with_base_path(
+            dir.path().to_str().unwrap(),
+        )));
+        let stream = XybridStream::new(
+            dir.path(),
+            config,
+            "asr",
+            executor,
+            Some(&options),
+            Some(&metadata),
+        )
+        .unwrap();
+
+        // One 5 s chunk at 16 kHz is extracted, and its decode fails.
+        assert!(stream.feed(&[0.0; 80_000]).is_err());
+        stream.flush().expect("nothing is left to decode");
+        stream.reset().unwrap();
+        assert!(matches!(stream.feed(&[]), Ok(None)));
+        stream.flush().unwrap();
+
+        assert_eq!(
+            counted_by_error(
+                &signals,
+                metric::WORKFLOW_DURATION,
+                attr::WORKFLOW_NAME,
+                "asr_session"
+            ),
+            BTreeMap::from([(None, 1), (Some("inference_error".to_owned()), 1)]),
+            "the lost chunk's utterance failed, the next one completed"
+        );
+        assert_eq!(
+            counted_by_error(
+                &signals,
+                metric::INFERENCE_DURATION,
+                attr::REQUEST_MODEL,
+                "asr"
+            ),
+            BTreeMap::from([(Some("inference_error".to_owned()), 1)]),
+            "the failed decode"
+        );
+    }
 }

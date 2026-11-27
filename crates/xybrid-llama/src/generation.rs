@@ -261,6 +261,33 @@ fn stop_array_ptrs(stop_tokens: &[i32], stop_lens: &[c_int]) -> (*const i32, *co
     }
 }
 
+/// Raw `(tokens, count)` the C generate functions expect for the banned
+/// token list. An empty list passes `null / 0`, which bans nothing.
+///
+/// A token id outside the model's vocabulary is a caller bug rather than
+/// something to skip quietly, so it is rejected. The model is only read for
+/// a non-empty list.
+fn banned_token_ptrs(
+    model: &LlamaModel,
+    banned_tokens: &[i32],
+) -> LlamaResult<(*const i32, c_int)> {
+    if banned_tokens.is_empty() {
+        return Ok((ptr::null(), 0));
+    }
+    let n_vocab = model.n_vocab();
+    if let Some(token) = banned_tokens
+        .iter()
+        .find(|&&token| usize::try_from(token).map_or(true, |id| id >= n_vocab))
+    {
+        return Err(LlamaError::InvalidInput(format!(
+            "banned token id {token} is outside the vocabulary of {n_vocab} tokens"
+        )));
+    }
+    let count = c_int::try_from(banned_tokens.len())
+        .map_err(|_| LlamaError::InvalidInput("too many banned tokens".to_string()))?;
+    Ok((banned_tokens.as_ptr(), count))
+}
+
 /// Why a native generation loop ended.
 ///
 /// The loop stores each sampled token, then ends on the first check that
@@ -296,7 +323,7 @@ pub enum GenerationEnd {
 /// # Errors
 ///
 /// The errors the generate functions return for the same stop sequences:
-/// [`LlamaError::InvalidInput`] for one that holds a NUL byte, and
+/// [`LlamaError::InvalidInput`] for one exceeding the native length limit, and
 /// [`LlamaError::TokenizationFailed`] when llama.cpp cannot tokenize one.
 pub fn generation_end(
     model: &LlamaModel,
@@ -356,13 +383,6 @@ fn ends_with_stop_sequence(
     false
 }
 
-/// Autoregressive generation without streaming. Returns the generated
-/// token IDs.
-///
-/// `stop_sequences` are tokenised with special-token parsing enabled — a
-/// sequence that tokenises to zero tokens is silently dropped, matching
-/// the pre-refactor wrapper behavior. The count passed to the C side is
-/// the *filtered* length, not the original `stop_sequences.len()`.
 /// Build an owning `CString` for an optional GBNF grammar.
 ///
 /// The returned `CString` must be held alive by the caller for the duration of
@@ -379,6 +399,25 @@ fn grammar_cstring(grammar: Option<&str>) -> LlamaResult<Option<CString>> {
         .transpose()
 }
 
+/// Autoregressive generation without streaming. Returns the generated
+/// token IDs.
+///
+/// `stop_sequences` are tokenised with special-token parsing enabled — a
+/// sequence that tokenises to zero tokens is silently dropped, matching
+/// the pre-refactor wrapper behavior. The count passed to the C side is
+/// the *filtered* length, not the original `stop_sequences.len()`.
+///
+/// `banned_tokens` are token ids the sampler never picks, whatever the
+/// sampling settings or grammar; pass `&[]` for none. The streaming entry
+/// points take the same list.
+///
+/// # Errors
+///
+/// [`LlamaError::InvalidInput`] when `ctx` was not created from `model`,
+/// the input is empty, the grammar holds a NUL byte, or a banned token id
+/// is outside the model's vocabulary. [`LlamaError::TokenizationFailed`]
+/// when a stop sequence cannot be tokenized, and
+/// [`LlamaError::DecodeFailed`] when the native loop fails.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_with_stops(
     ctx: &LlamaContext,
@@ -392,6 +431,7 @@ pub fn generate_with_stops(
     repeat_penalty: f32,
     stop_sequences: &[String],
     grammar: Option<&str>,
+    banned_tokens: &[i32],
 ) -> LlamaResult<Vec<i32>> {
     ctx.ensure_created_from(model)?;
     let (stop_tokens, stop_lens, mut output_tokens) =
@@ -403,6 +443,7 @@ pub fn generate_with_stops(
     // "root" entry rule (which the JSON-Schema converter always emits).
     let grammar_cstr = grammar_cstring(grammar)?;
     let grammar_ptr = grammar_cstr.as_ref().map_or(ptr::null(), |c| c.as_ptr());
+    let (banned_ptr, n_banned) = banned_token_ptrs(model, banned_tokens)?;
 
     // SAFETY: all pointers checked / sourced from owned buffers; sizes
     // honest; ctx + model live for the call; grammar_cstr outlives it.
@@ -422,6 +463,8 @@ pub fn generate_with_stops(
             time_seed(),
             grammar_ptr,
             ptr::null(),
+            banned_ptr,
+            n_banned,
             stop_seqs_ptr,
             stop_lens_ptr,
             n_stop_seqs,
@@ -459,6 +502,7 @@ pub fn generate_streaming<F>(
     repeat_penalty: f32,
     stop_sequences: &[String],
     grammar: Option<&str>,
+    banned_tokens: &[i32],
     mut on_token: F,
     n_past_in: usize,
 ) -> LlamaResult<(Vec<i32>, bool)>
@@ -474,6 +518,7 @@ where
     // `generate_with_stops`).
     let grammar_cstr = grammar_cstring(grammar)?;
     let grammar_ptr = grammar_cstr.as_ref().map_or(ptr::null(), |c| c.as_ptr());
+    let (banned_ptr, n_banned) = banned_token_ptrs(model, banned_tokens)?;
 
     let mut streaming_ctx = StreamingContext::new(&mut on_token);
 
@@ -498,6 +543,8 @@ where
             time_seed(),
             grammar_ptr,
             ptr::null(),
+            banned_ptr,
+            n_banned,
             stop_seqs_ptr,
             stop_lens_ptr,
             n_stop_seqs,
@@ -536,6 +583,7 @@ pub fn generate_from_current_logits_streaming<F>(
     repeat_penalty: f32,
     stop_sequences: &[String],
     grammar: Option<&str>,
+    banned_tokens: &[i32],
     n_past: usize,
     mut on_token: F,
 ) -> LlamaResult<(Vec<i32>, bool)>
@@ -557,6 +605,7 @@ where
     // `generate_with_stops`).
     let grammar_cstr = grammar_cstring(grammar)?;
     let grammar_ptr = grammar_cstr.as_ref().map_or(ptr::null(), |c| c.as_ptr());
+    let (banned_ptr, n_banned) = banned_token_ptrs(model, banned_tokens)?;
 
     let mut streaming_ctx = StreamingContext::new(&mut on_token);
 
@@ -579,6 +628,8 @@ where
             time_seed(),
             grammar_ptr,
             ptr::null(),
+            banned_ptr,
+            n_banned,
             stop_seqs_ptr,
             stop_lens_ptr,
             n_stop_seqs,
@@ -771,8 +822,20 @@ mod tests {
         let ctx = LlamaContext::test_stub(&model);
         let stops = ["</s>".to_string()];
 
-        let batch =
-            super::generate_with_stops(&ctx, &other, &[1], 4, 0.0, 1.0, 0.0, 0, 1.0, &stops, None);
+        let batch = super::generate_with_stops(
+            &ctx,
+            &other,
+            &[1],
+            4,
+            0.0,
+            1.0,
+            0.0,
+            0,
+            1.0,
+            &stops,
+            None,
+            &[],
+        );
         assert!(is_model_mismatch(batch));
 
         let streaming = super::generate_streaming(
@@ -787,6 +850,7 @@ mod tests {
             1.0,
             &stops,
             None,
+            &[],
             |_, _| Ok(()),
             0,
         );
@@ -805,6 +869,7 @@ mod tests {
                 1.0,
                 &stops,
                 None,
+                &[],
                 0,
                 |_, _| Ok(()),
             );
@@ -815,10 +880,33 @@ mod tests {
         // Control: the matching model reaches the native wrapper, which
         // rejects the stubs' null handles. No stop sequences, because
         // tokenizing with a null model is not guarded.
-        let reached =
-            super::generate_with_stops(&ctx, &model, &[1], 4, 0.0, 1.0, 0.0, 0, 1.0, &[], None);
+        let reached = super::generate_with_stops(
+            &ctx,
+            &model,
+            &[1],
+            4,
+            0.0,
+            1.0,
+            0.0,
+            0,
+            1.0,
+            &[],
+            None,
+            &[],
+        );
         assert!(reached.is_err());
         assert_eq!(native_calls(), 1);
+    }
+
+    #[test]
+    fn banned_token_ptrs_null_when_empty_without_reading_the_model() {
+        // The stub's handle is null: reading its vocabulary would crash, so
+        // this also shows an empty list never touches the model.
+        let model = crate::LlamaModel::test_stub();
+        let (tokens, count) =
+            super::banned_token_ptrs(&model, &[]).expect("an empty list is valid");
+        assert!(tokens.is_null());
+        assert_eq!(count, 0);
     }
 
     #[test]

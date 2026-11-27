@@ -15,9 +15,19 @@ updates:
           - minor
           - patch
 
-  # GitHub Actions
+  # GitHub Actions. "/" covers .github/workflows/ only; each composite action
+  # under .github/actions/ is its own directory (test_ci_actions.py checks
+  # that every one is listed).
   - package-ecosystem: github-actions
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/bazel-repo-cache"
+      - "/.github/actions/empty-registry"
+      - "/.github/actions/fetch-model"
+      - "/.github/actions/free-disk-space"
+      - "/.github/actions/install-boltffi"
+      - "/.github/actions/setup-rust"
+      - "/.github/actions/setup-vulkan-sdk"
     schedule:
       interval: weekly
     open-pull-requests-limit: 3

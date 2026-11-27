@@ -35,7 +35,7 @@ namespace Xybrid
     /// <example>
     /// <code>
     /// XybridClient.InitializeObservability(
-    ///     ObservabilityConfig.Xybrid("xy_live_...")
+    ///     ObservabilityConfig.Xybrid("sk_live_...")
     ///         .WithService("my-game", Application.version));
     /// </code>
     /// </example>

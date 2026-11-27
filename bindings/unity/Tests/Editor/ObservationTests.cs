@@ -42,6 +42,19 @@ namespace Xybrid.Tests.Editor
             Assert.AreEqual("vendor=1", options.Tracestate);
             Assert.AreEqual("chat-42", options.ConversationId);
             Assert.IsTrue(options.SuppressTrace);
+            Assert.IsNull(options.FrameSessionId);
+        }
+
+        [Test]
+        public void RunOptions_CarryTheFrameSession()
+        {
+            // A live-capture loop names its session on every run.
+            var observation = new ObservationOptions { FrameSessionId = "camera-7" };
+            var options = ObservationOptions.ToRunOptions(null, observation).Value;
+
+            Assert.AreEqual("camera-7", options.FrameSessionId);
+            Assert.IsFalse(options.SuppressTrace);
+            Assert.IsNull(options.Traceparent);
         }
 
         [Test]

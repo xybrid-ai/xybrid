@@ -50,7 +50,9 @@ namespace Xybrid.Tests.Editor
             XybridClient.Initialize();
 
             Assert.IsFalse(XybridClient.IsObservabilityEnabled);
-            Assert.AreEqual(0UL, XybridClient.ObservabilityStats().Traces.Exported);
+            // After a shutdown the counters are the last session's final ones
+            // until the next initialization, so only Enabled says export is off.
+            Assert.IsFalse(XybridClient.ObservabilityStats().Enabled);
         }
 
         [Test]

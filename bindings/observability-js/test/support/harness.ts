@@ -14,7 +14,9 @@ import {
 import {
   InMemorySpanExporter,
   type ReadableSpan,
+  type Sampler,
   SimpleSpanProcessor,
+  type SpanProcessor,
   TracerProvider,
 } from "@opentelemetry/sdk-trace";
 import {
@@ -66,6 +68,10 @@ export const createHarness = (
     traces?: boolean;
     metrics?: boolean;
     tracer?: TracerKind;
+    /** The SDK tracer's sampler (default: parent-based, always on). */
+    sampler?: Sampler;
+    /** Application span processors, registered before the in-memory exporter's. */
+    spanProcessors?: readonly SpanProcessor[];
   } = {},
 ): Harness => {
   const clock = new ManualClock();
@@ -73,7 +79,11 @@ export const createHarness = (
   const logs = new InMemoryLogRecordExporter();
   const reader = new CollectingReader();
   const tracerProvider = new TracerProvider({
-    spanProcessors: [new SimpleSpanProcessor({ exporter: spans })],
+    spanProcessors: [
+      ...(options.spanProcessors ?? []),
+      new SimpleSpanProcessor({ exporter: spans }),
+    ],
+    ...(options.sampler === undefined ? {} : { sampler: options.sampler }),
   });
   const meterProvider = new MeterProvider({ readers: [reader] });
   const loggerProvider = new LoggerProvider({

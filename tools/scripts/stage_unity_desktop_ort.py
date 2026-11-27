@@ -7,7 +7,6 @@ import argparse
 import hashlib
 import shutil
 import sys
-import tarfile
 import tempfile
 import urllib.request
 import zipfile
@@ -28,35 +27,33 @@ class RuntimeSpec:
     runtime_name: str
 
 
-# These are Microsoft's CPU release archives. The digests are published by the
-# GitHub release API for v1.23.2 and deliberately match ort-sys 2.0.0-rc.11's
-# ONNX Runtime version.
+# Both runtimes come from Microsoft's NuGet package Microsoft.ML.OnnxRuntime,
+# the official native CPU distribution. The GitHub release archives this used
+# to download are gone: github.com/microsoft/onnxruntime answers 404. The
+# SHA-256 is of the .nupkg (a zip); its SHA-512 equals the packageHash that
+# nuget.org publishes in the package's catalog entry. The version deliberately
+# matches ort-sys 2.0.0-rc.11's ONNX Runtime.
+NUPKG_URL = (
+    "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/"
+    f"{ORT_VERSION}/microsoft.ml.onnxruntime.{ORT_VERSION}.nupkg"
+)
+NUPKG_SHA256 = "25fe172f7fcdf34f2b5b02c8b997f6b88abc282956849d4af4335af23d0c4e4a"
+
 RUNTIMES = {
     "linux": RuntimeSpec(
         platform="linux",
-        url=(
-            "https://github.com/microsoft/onnxruntime/releases/download/"
-            f"v{ORT_VERSION}/onnxruntime-linux-x64-{ORT_VERSION}.tgz"
-        ),
-        sha256="1fa4dcaef22f6f7d5cd81b28c2800414350c10116f5fdd46a2160082551c5f9b",
-        # Extract the real ELF payload, not the archive's libonnxruntime.so
-        # symlink, then install it under the name ort/load-dynamic opens.
-        archive_member=(
-            f"onnxruntime-linux-x64-{ORT_VERSION}/lib/"
-            f"libonnxruntime.so.{ORT_VERSION}"
-        ),
+        url=NUPKG_URL,
+        sha256=NUPKG_SHA256,
+        # The real ELF (SONAME libonnxruntime.so.1), installed under the name
+        # ort/load-dynamic opens.
+        archive_member="runtimes/linux-x64/native/libonnxruntime.so",
         runtime_name="libonnxruntime.so",
     ),
     "windows": RuntimeSpec(
         platform="windows",
-        url=(
-            "https://github.com/microsoft/onnxruntime/releases/download/"
-            f"v{ORT_VERSION}/onnxruntime-win-x64-{ORT_VERSION}.zip"
-        ),
-        sha256="0b38df9af21834e41e73d602d90db5cb06dbd1ca618948b8f1d66d607ac9f3cd",
-        archive_member=(
-            f"onnxruntime-win-x64-{ORT_VERSION}/lib/onnxruntime.dll"
-        ),
+        url=NUPKG_URL,
+        sha256=NUPKG_SHA256,
+        archive_member="runtimes/win-x64/native/onnxruntime.dll",
         runtime_name="onnxruntime.dll",
     ),
 }
@@ -82,16 +79,9 @@ def download(spec: RuntimeSpec, destination: Path) -> None:
 
 def read_runtime(spec: RuntimeSpec, archive: Path) -> bytes:
     try:
-        if spec.platform == "linux":
-            with tarfile.open(archive, "r:gz") as tar:
-                member = tar.extractfile(spec.archive_member)
-                if member is None:
-                    raise KeyError(spec.archive_member)
-                return member.read()
-
         with zipfile.ZipFile(archive) as zip_file:
             return zip_file.read(spec.archive_member)
-    except (KeyError, tarfile.TarError, zipfile.BadZipFile) as error:
+    except (KeyError, zipfile.BadZipFile) as error:
         raise ValueError(
             f"ONNX Runtime archive does not contain {spec.archive_member}"
         ) from error
@@ -210,10 +200,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     spec = RUNTIMES[args.platform]
-    suffix = ".tgz" if spec.platform == "linux" else ".zip"
     try:
         with tempfile.TemporaryDirectory(prefix="xybrid-unity-ort-") as temp:
-            archive = Path(temp) / f"onnxruntime-{spec.platform}{suffix}"
+            archive = Path(temp) / f"onnxruntime-{ORT_VERSION}.nupkg"
             print(f"Downloading ONNX Runtime {ORT_VERSION} for {spec.platform}...")
             download(spec, archive)
             destination = stage_from_archive(spec, archive, args.output_dir)

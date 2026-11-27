@@ -105,23 +105,23 @@
     "after_shutdown": {
       "enabled": false,
       "logs": {
-        "accepted": 0,
+        "accepted": 2,
         "dropped": 0,
-        "exported": 0,
+        "exported": 2,
         "failed": 0,
         "pending": 0
       },
       "metrics": {
-        "accepted": 0,
+        "accepted": 16,
         "dropped": 0,
-        "exported": 0,
+        "exported": 16,
         "failed": 0,
         "pending": 0
       },
       "traces": {
-        "accepted": 0,
+        "accepted": 9,
         "dropped": 0,
-        "exported": 0,
+        "exported": 9,
         "failed": 0,
         "pending": 0
       }

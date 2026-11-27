@@ -1,0 +1,1198 @@
+{
+ "spans": [
+  {
+   "attributes": {
+    "gen_ai.operation.name": {
+     "stringValue": "execute_tool"
+    },
+    "gen_ai.tool.call.id": {
+     "stringValue": "call-scenario-1"
+    },
+    "gen_ai.tool.name": {
+     "stringValue": "scenario_lookup"
+    },
+    "gen_ai.tool.type": {
+     "stringValue": "function"
+    }
+   },
+   "content": {
+    "bytes": 211,
+    "keys": [
+     "gen_ai.tool.call.arguments",
+     "gen_ai.tool.call.result"
+    ],
+    "storage": "object",
+    "values": null
+   },
+   "counted_request": false,
+   "dropped_attributes_count": 0,
+   "dropped_events_count": 0,
+   "dropped_links_count": 0,
+   "duration_ns": "104099",
+   "end_time": "2026-11-09T16:46:45.877402503Z",
+   "end_time_unix_nano": "1794242805877402503",
+   "events": [],
+   "flags": 257,
+   "gateway_payloads": {
+    "request": false,
+    "response": false
+   },
+   "genai": {
+    "attempt_count": null,
+    "attempt_index": null,
+    "cache_read_input_tokens": null,
+    "cache_write_input_tokens": null,
+    "error_type": null,
+    "execution_location": null,
+    "input_tokens": null,
+    "operation_name": "execute_tool",
+    "output_tokens": null,
+    "provider_name": null,
+    "reasoning_output_tokens": null,
+    "request_model": null,
+    "response_model": null,
+    "runtime_name": null,
+    "server_address": null,
+    "task": null,
+    "time_to_first_chunk_s": null,
+    "time_to_first_token_s": null
+   },
+   "is_request": false,
+   "kind": "INTERNAL",
+   "links": [],
+   "name": "execute_tool scenario_lookup",
+   "parent_span_id": "b640cb8c1c2849ee",
+   "resource": {
+    "attributes": {
+     "device.id": {
+      "stringValue": "scenario-device-python"
+     },
+     "host.arch": {
+      "stringValue": "x86_64"
+     },
+     "os.type": {
+      "stringValue": "Amazon Linux"
+     },
+     "os.version": {
+      "stringValue": "2023"
+     },
+     "service.name": {
+      "stringValue": "xybrid-scenario-python"
+     },
+     "service.version": {
+      "stringValue": "1.0.0"
+     },
+     "telemetry.sdk.language": {
+      "stringValue": "rust"
+     },
+     "telemetry.sdk.name": {
+      "stringValue": "xybrid"
+     },
+     "telemetry.sdk.version": {
+      "stringValue": "0.33.1"
+     },
+     "xybrid.device.chip": {
+      "stringValue": "Intel(R) Xeon(R) Processor @ 2.90GHz"
+     },
+     "xybrid.device.ram_gb": {
+      "intValue": 8
+     },
+     "xybrid.interop.workload": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.binding": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.version": {
+      "stringValue": "0.17.0"
+     }
+    },
+    "dropped_attributes_count": 0,
+    "schema_url": ""
+   },
+   "scope": {
+    "attributes": {},
+    "dropped_attributes_count": 0,
+    "name": "xybrid-observability",
+    "schema_url": "",
+    "version": "0.17.0"
+   },
+   "service_name": "xybrid-scenario-python",
+   "source": "otlp",
+   "span_id": "db1a749676e8acb3",
+   "span_type": "genai.tool",
+   "start_time": "2026-11-09T16:46:45.877298404Z",
+   "start_time_unix_nano": "1794242805877298404",
+   "status": {
+    "code": "UNSET",
+    "message": ""
+   },
+   "trace_id": "78793a707974686f6e00000000000000",
+   "trace_state": ""
+  },
+  {
+   "attributes": {
+    "gen_ai.operation.name": {
+     "stringValue": "chat"
+    },
+    "gen_ai.provider.name": {
+     "stringValue": "scenario-provider"
+    },
+    "gen_ai.request.model": {
+     "stringValue": "scenario-model"
+    },
+    "xybrid.genai.execution.location": {
+     "stringValue": "local"
+    },
+    "xybrid.genai.runtime.name": {
+     "stringValue": "scenario-runtime"
+    }
+   },
+   "content": {
+    "bytes": 333,
+    "keys": [
+     "gen_ai.input.messages",
+     "gen_ai.output.messages"
+    ],
+    "storage": "inline",
+    "values": {
+     "gen_ai.input.messages": {
+      "stringValue": "[{\"parts\":[{\"content\":\"my token is [scenario-redacted]\",\"type\":\"text\"}],\"role\":\"user\"}]"
+     },
+     "gen_ai.output.messages": {
+      "stringValue": "[{\"finish_reason\":\"stop\",\"parts\":[{\"content\":\"I will not repeat [scenario-redacted]\",\"type\":\"text\"}],\"role\":\"assistant\"}]"
+     }
+    }
+   },
+   "counted_request": true,
+   "dropped_attributes_count": 0,
+   "dropped_events_count": 0,
+   "dropped_links_count": 0,
+   "duration_ns": "215829",
+   "end_time": "2026-11-09T16:46:45.877772604Z",
+   "end_time_unix_nano": "1794242805877772604",
+   "events": [],
+   "flags": 257,
+   "gateway_payloads": {
+    "request": false,
+    "response": false
+   },
+   "genai": {
+    "attempt_count": null,
+    "attempt_index": null,
+    "cache_read_input_tokens": null,
+    "cache_write_input_tokens": null,
+    "error_type": null,
+    "execution_location": "local",
+    "input_tokens": null,
+    "operation_name": "chat",
+    "output_tokens": null,
+    "provider_name": "scenario-provider",
+    "reasoning_output_tokens": null,
+    "request_model": "scenario-model",
+    "response_model": null,
+    "runtime_name": "scenario-runtime",
+    "server_address": null,
+    "task": null,
+    "time_to_first_chunk_s": null,
+    "time_to_first_token_s": null
+   },
+   "is_request": true,
+   "kind": "INTERNAL",
+   "links": [],
+   "name": "chat scenario-model",
+   "parent_span_id": "b640cb8c1c2849ee",
+   "resource": {
+    "attributes": {
+     "device.id": {
+      "stringValue": "scenario-device-python"
+     },
+     "host.arch": {
+      "stringValue": "x86_64"
+     },
+     "os.type": {
+      "stringValue": "Amazon Linux"
+     },
+     "os.version": {
+      "stringValue": "2023"
+     },
+     "service.name": {
+      "stringValue": "xybrid-scenario-python"
+     },
+     "service.version": {
+      "stringValue": "1.0.0"
+     },
+     "telemetry.sdk.language": {
+      "stringValue": "rust"
+     },
+     "telemetry.sdk.name": {
+      "stringValue": "xybrid"
+     },
+     "telemetry.sdk.version": {
+      "stringValue": "0.33.1"
+     },
+     "xybrid.device.chip": {
+      "stringValue": "Intel(R) Xeon(R) Processor @ 2.90GHz"
+     },
+     "xybrid.device.ram_gb": {
+      "intValue": 8
+     },
+     "xybrid.interop.workload": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.binding": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.version": {
+      "stringValue": "0.17.0"
+     }
+    },
+    "dropped_attributes_count": 0,
+    "schema_url": ""
+   },
+   "scope": {
+    "attributes": {},
+    "dropped_attributes_count": 0,
+    "name": "xybrid-observability",
+    "schema_url": "",
+    "version": "0.17.0"
+   },
+   "service_name": "xybrid-scenario-python",
+   "source": "otlp",
+   "span_id": "e495596a7e3814ed",
+   "span_type": "genai.request",
+   "start_time": "2026-11-09T16:46:45.877556775Z",
+   "start_time_unix_nano": "1794242805877556775",
+   "status": {
+    "code": "UNSET",
+    "message": ""
+   },
+   "trace_id": "78793a707974686f6e00000000000000",
+   "trace_state": ""
+  },
+  {
+   "attributes": {
+    "error.type": {
+     "stringValue": "scenario_error"
+    },
+    "gen_ai.operation.name": {
+     "stringValue": "chat"
+    },
+    "gen_ai.provider.name": {
+     "stringValue": "scenario-provider"
+    },
+    "gen_ai.request.model": {
+     "stringValue": "scenario-model"
+    },
+    "xybrid.genai.execution.location": {
+     "stringValue": "local"
+    },
+    "xybrid.genai.runtime.name": {
+     "stringValue": "scenario-runtime"
+    }
+   },
+   "content": null,
+   "counted_request": true,
+   "dropped_attributes_count": 0,
+   "dropped_events_count": 0,
+   "dropped_links_count": 0,
+   "duration_ns": "28466",
+   "end_time": "2026-11-09T16:46:45.877869134Z",
+   "end_time_unix_nano": "1794242805877869134",
+   "events": [],
+   "flags": 257,
+   "gateway_payloads": {
+    "request": false,
+    "response": false
+   },
+   "genai": {
+    "attempt_count": null,
+    "attempt_index": null,
+    "cache_read_input_tokens": null,
+    "cache_write_input_tokens": null,
+    "error_type": "scenario_error",
+    "execution_location": "local",
+    "input_tokens": null,
+    "operation_name": "chat",
+    "output_tokens": null,
+    "provider_name": "scenario-provider",
+    "reasoning_output_tokens": null,
+    "request_model": "scenario-model",
+    "response_model": null,
+    "runtime_name": "scenario-runtime",
+    "server_address": null,
+    "task": null,
+    "time_to_first_chunk_s": null,
+    "time_to_first_token_s": null
+   },
+   "is_request": true,
+   "kind": "INTERNAL",
+   "links": [],
+   "name": "chat scenario-model",
+   "parent_span_id": "b640cb8c1c2849ee",
+   "resource": {
+    "attributes": {
+     "device.id": {
+      "stringValue": "scenario-device-python"
+     },
+     "host.arch": {
+      "stringValue": "x86_64"
+     },
+     "os.type": {
+      "stringValue": "Amazon Linux"
+     },
+     "os.version": {
+      "stringValue": "2023"
+     },
+     "service.name": {
+      "stringValue": "xybrid-scenario-python"
+     },
+     "service.version": {
+      "stringValue": "1.0.0"
+     },
+     "telemetry.sdk.language": {
+      "stringValue": "rust"
+     },
+     "telemetry.sdk.name": {
+      "stringValue": "xybrid"
+     },
+     "telemetry.sdk.version": {
+      "stringValue": "0.33.1"
+     },
+     "xybrid.device.chip": {
+      "stringValue": "Intel(R) Xeon(R) Processor @ 2.90GHz"
+     },
+     "xybrid.device.ram_gb": {
+      "intValue": 8
+     },
+     "xybrid.interop.workload": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.binding": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.version": {
+      "stringValue": "0.17.0"
+     }
+    },
+    "dropped_attributes_count": 0,
+    "schema_url": ""
+   },
+   "scope": {
+    "attributes": {},
+    "dropped_attributes_count": 0,
+    "name": "xybrid-observability",
+    "schema_url": "",
+    "version": "0.17.0"
+   },
+   "service_name": "xybrid-scenario-python",
+   "source": "otlp",
+   "span_id": "4486b88a464166a7",
+   "span_type": "genai.request",
+   "start_time": "2026-11-09T16:46:45.877840668Z",
+   "start_time_unix_nano": "1794242805877840668",
+   "status": {
+    "code": "ERROR",
+    "message": "upstream rejected [scenario-redacted]"
+   },
+   "trace_id": "78793a707974686f6e00000000000000",
+   "trace_state": ""
+  },
+  {
+   "attributes": {
+    "error.type": {
+     "stringValue": "cancelled"
+    },
+    "gen_ai.operation.name": {
+     "stringValue": "chat"
+    },
+    "gen_ai.provider.name": {
+     "stringValue": "scenario-provider"
+    },
+    "gen_ai.request.model": {
+     "stringValue": "scenario-model"
+    },
+    "xybrid.genai.execution.location": {
+     "stringValue": "local"
+    },
+    "xybrid.genai.runtime.name": {
+     "stringValue": "scenario-runtime"
+    }
+   },
+   "content": {
+    "bytes": 133,
+    "keys": [
+     "gen_ai.input.messages"
+    ],
+    "storage": "inline",
+    "values": {
+     "gen_ai.input.messages": {
+      "stringValue": "[{\"parts\":[{\"content\":\"abandoned request\",\"type\":\"text\"}],\"role\":\"user\"}]"
+     }
+    }
+   },
+   "counted_request": true,
+   "dropped_attributes_count": 0,
+   "dropped_events_count": 0,
+   "dropped_links_count": 0,
+   "duration_ns": "132490",
+   "end_time": "2026-11-09T16:46:45.878086002Z",
+   "end_time_unix_nano": "1794242805878086002",
+   "events": [],
+   "flags": 257,
+   "gateway_payloads": {
+    "request": false,
+    "response": false
+   },
+   "genai": {
+    "attempt_count": null,
+    "attempt_index": null,
+    "cache_read_input_tokens": null,
+    "cache_write_input_tokens": null,
+    "error_type": "cancelled",
+    "execution_location": "local",
+    "input_tokens": null,
+    "operation_name": "chat",
+    "output_tokens": null,
+    "provider_name": "scenario-provider",
+    "reasoning_output_tokens": null,
+    "request_model": "scenario-model",
+    "response_model": null,
+    "runtime_name": "scenario-runtime",
+    "server_address": null,
+    "task": null,
+    "time_to_first_chunk_s": null,
+    "time_to_first_token_s": null
+   },
+   "is_request": true,
+   "kind": "INTERNAL",
+   "links": [],
+   "name": "chat scenario-model",
+   "parent_span_id": "b640cb8c1c2849ee",
+   "resource": {
+    "attributes": {
+     "device.id": {
+      "stringValue": "scenario-device-python"
+     },
+     "host.arch": {
+      "stringValue": "x86_64"
+     },
+     "os.type": {
+      "stringValue": "Amazon Linux"
+     },
+     "os.version": {
+      "stringValue": "2023"
+     },
+     "service.name": {
+      "stringValue": "xybrid-scenario-python"
+     },
+     "service.version": {
+      "stringValue": "1.0.0"
+     },
+     "telemetry.sdk.language": {
+      "stringValue": "rust"
+     },
+     "telemetry.sdk.name": {
+      "stringValue": "xybrid"
+     },
+     "telemetry.sdk.version": {
+      "stringValue": "0.33.1"
+     },
+     "xybrid.device.chip": {
+      "stringValue": "Intel(R) Xeon(R) Processor @ 2.90GHz"
+     },
+     "xybrid.device.ram_gb": {
+      "intValue": 8
+     },
+     "xybrid.interop.workload": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.binding": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.version": {
+      "stringValue": "0.17.0"
+     }
+    },
+    "dropped_attributes_count": 0,
+    "schema_url": ""
+   },
+   "scope": {
+    "attributes": {},
+    "dropped_attributes_count": 0,
+    "name": "xybrid-observability",
+    "schema_url": "",
+    "version": "0.17.0"
+   },
+   "service_name": "xybrid-scenario-python",
+   "source": "otlp",
+   "span_id": "eaa62471ce145c30",
+   "span_type": "genai.request",
+   "start_time": "2026-11-09T16:46:45.877953512Z",
+   "start_time_unix_nano": "1794242805877953512",
+   "status": {
+    "code": "ERROR",
+    "message": "cancelled"
+   },
+   "trace_id": "78793a707974686f6e00000000000000",
+   "trace_state": ""
+  },
+  {
+   "attributes": {
+    "gen_ai.conversation.id": {
+     "stringValue": "scenario-conversation-python"
+    },
+    "gen_ai.operation.name": {
+     "stringValue": "load_model"
+    },
+    "gen_ai.request.model": {
+     "stringValue": "scenario-weightless"
+    },
+    "xybrid.genai.model.format": {
+     "stringValue": "onnx"
+    },
+    "xybrid.genai.runtime.name": {
+     "stringValue": "onnxruntime"
+    },
+    "xybrid.load.trigger": {
+     "stringValue": "load"
+    }
+   },
+   "content": null,
+   "counted_request": false,
+   "dropped_attributes_count": 0,
+   "dropped_events_count": 0,
+   "dropped_links_count": 0,
+   "duration_ns": "291981",
+   "end_time": "2026-11-09T16:46:45.878955127Z",
+   "end_time_unix_nano": "1794242805878955127",
+   "events": [],
+   "flags": 257,
+   "gateway_payloads": {
+    "request": false,
+    "response": false
+   },
+   "genai": {
+    "attempt_count": null,
+    "attempt_index": null,
+    "cache_read_input_tokens": null,
+    "cache_write_input_tokens": null,
+    "error_type": null,
+    "execution_location": null,
+    "input_tokens": null,
+    "operation_name": "load_model",
+    "output_tokens": null,
+    "provider_name": null,
+    "reasoning_output_tokens": null,
+    "request_model": "scenario-weightless",
+    "response_model": null,
+    "runtime_name": "onnxruntime",
+    "server_address": null,
+    "task": null,
+    "time_to_first_chunk_s": null,
+    "time_to_first_token_s": null
+   },
+   "is_request": false,
+   "kind": "INTERNAL",
+   "links": [],
+   "name": "load_model scenario-weightless",
+   "parent_span_id": "b640cb8c1c2849ee",
+   "resource": {
+    "attributes": {
+     "device.id": {
+      "stringValue": "scenario-device-python"
+     },
+     "host.arch": {
+      "stringValue": "x86_64"
+     },
+     "os.type": {
+      "stringValue": "Amazon Linux"
+     },
+     "os.version": {
+      "stringValue": "2023"
+     },
+     "service.name": {
+      "stringValue": "xybrid-scenario-python"
+     },
+     "service.version": {
+      "stringValue": "1.0.0"
+     },
+     "telemetry.sdk.language": {
+      "stringValue": "rust"
+     },
+     "telemetry.sdk.name": {
+      "stringValue": "xybrid"
+     },
+     "telemetry.sdk.version": {
+      "stringValue": "0.33.1"
+     },
+     "xybrid.device.chip": {
+      "stringValue": "Intel(R) Xeon(R) Processor @ 2.90GHz"
+     },
+     "xybrid.device.ram_gb": {
+      "intValue": 8
+     },
+     "xybrid.interop.workload": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.binding": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.version": {
+      "stringValue": "0.17.0"
+     }
+    },
+    "dropped_attributes_count": 0,
+    "schema_url": ""
+   },
+   "scope": {
+    "attributes": {},
+    "dropped_attributes_count": 0,
+    "name": "xybrid-observability",
+    "schema_url": "",
+    "version": "0.17.0"
+   },
+   "service_name": "xybrid-scenario-python",
+   "source": "otlp",
+   "span_id": "6720394789545b6c",
+   "span_type": "genai.load_model",
+   "start_time": "2026-11-09T16:46:45.878663146Z",
+   "start_time_unix_nano": "1794242805878663146",
+   "status": {
+    "code": "UNSET",
+    "message": ""
+   },
+   "trace_id": "78793a707974686f6e00000000000000",
+   "trace_state": ""
+  },
+  {
+   "attributes": {
+    "error.type": {
+     "stringValue": "load_error"
+    },
+    "gen_ai.conversation.id": {
+     "stringValue": "scenario-conversation-python"
+    },
+    "gen_ai.operation.name": {
+     "stringValue": "load_model"
+    },
+    "gen_ai.provider.name": {
+     "stringValue": "onnxruntime"
+    },
+    "gen_ai.request.model": {
+     "stringValue": "scenario-weightless"
+    },
+    "xybrid.genai.model.format": {
+     "stringValue": "onnx"
+    },
+    "xybrid.genai.runtime.name": {
+     "stringValue": "onnxruntime"
+    },
+    "xybrid.load.trigger": {
+     "stringValue": "lazy"
+    }
+   },
+   "content": null,
+   "counted_request": false,
+   "dropped_attributes_count": 0,
+   "dropped_events_count": 0,
+   "dropped_links_count": 0,
+   "duration_ns": "58819",
+   "end_time": "2026-11-09T16:46:45.879477060Z",
+   "end_time_unix_nano": "1794242805879477060",
+   "events": [],
+   "flags": 257,
+   "gateway_payloads": {
+    "request": false,
+    "response": false
+   },
+   "genai": {
+    "attempt_count": null,
+    "attempt_index": null,
+    "cache_read_input_tokens": null,
+    "cache_write_input_tokens": null,
+    "error_type": "load_error",
+    "execution_location": null,
+    "input_tokens": null,
+    "operation_name": "load_model",
+    "output_tokens": null,
+    "provider_name": "onnxruntime",
+    "reasoning_output_tokens": null,
+    "request_model": "scenario-weightless",
+    "response_model": null,
+    "runtime_name": "onnxruntime",
+    "server_address": null,
+    "task": null,
+    "time_to_first_chunk_s": null,
+    "time_to_first_token_s": null
+   },
+   "is_request": false,
+   "kind": "INTERNAL",
+   "links": [],
+   "name": "load_model scenario-weightless",
+   "parent_span_id": "8bbe65780d9afff0",
+   "resource": {
+    "attributes": {
+     "device.id": {
+      "stringValue": "scenario-device-python"
+     },
+     "host.arch": {
+      "stringValue": "x86_64"
+     },
+     "os.type": {
+      "stringValue": "Amazon Linux"
+     },
+     "os.version": {
+      "stringValue": "2023"
+     },
+     "service.name": {
+      "stringValue": "xybrid-scenario-python"
+     },
+     "service.version": {
+      "stringValue": "1.0.0"
+     },
+     "telemetry.sdk.language": {
+      "stringValue": "rust"
+     },
+     "telemetry.sdk.name": {
+      "stringValue": "xybrid"
+     },
+     "telemetry.sdk.version": {
+      "stringValue": "0.33.1"
+     },
+     "xybrid.device.chip": {
+      "stringValue": "Intel(R) Xeon(R) Processor @ 2.90GHz"
+     },
+     "xybrid.device.ram_gb": {
+      "intValue": 8
+     },
+     "xybrid.interop.workload": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.binding": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.version": {
+      "stringValue": "0.17.0"
+     }
+    },
+    "dropped_attributes_count": 0,
+    "schema_url": ""
+   },
+   "scope": {
+    "attributes": {},
+    "dropped_attributes_count": 0,
+    "name": "xybrid-observability",
+    "schema_url": "",
+    "version": "0.17.0"
+   },
+   "service_name": "xybrid-scenario-python",
+   "source": "otlp",
+   "span_id": "4609c5b592dffd26",
+   "span_type": "genai.load_model",
+   "start_time": "2026-11-09T16:46:45.879418241Z",
+   "start_time_unix_nano": "1794242805879418241",
+   "status": {
+    "code": "ERROR",
+    "message": "load_error"
+   },
+   "trace_id": "78793a707974686f6e00000000000000",
+   "trace_state": ""
+  },
+  {
+   "attributes": {
+    "gen_ai.conversation.id": {
+     "stringValue": "scenario-conversation-python"
+    },
+    "xybrid.stage.backend": {
+     "stringValue": "ort"
+    },
+    "xybrid.stage.name": {
+     "stringValue": "execute:scenario-weightless"
+    },
+    "xybrid.stage.span_kind": {
+     "stringValue": "cpu"
+    }
+   },
+   "content": null,
+   "counted_request": false,
+   "dropped_attributes_count": 0,
+   "dropped_events_count": 0,
+   "dropped_links_count": 0,
+   "duration_ns": "178834",
+   "end_time": "2026-11-09T16:46:45.879515975Z",
+   "end_time_unix_nano": "1794242805879515975",
+   "events": [],
+   "flags": 257,
+   "gateway_payloads": {
+    "request": false,
+    "response": false
+   },
+   "genai": {
+    "attempt_count": null,
+    "attempt_index": null,
+    "cache_read_input_tokens": null,
+    "cache_write_input_tokens": null,
+    "error_type": null,
+    "execution_location": null,
+    "input_tokens": null,
+    "operation_name": null,
+    "output_tokens": null,
+    "provider_name": null,
+    "reasoning_output_tokens": null,
+    "request_model": null,
+    "response_model": null,
+    "runtime_name": null,
+    "server_address": null,
+    "task": null,
+    "time_to_first_chunk_s": null,
+    "time_to_first_token_s": null
+   },
+   "is_request": false,
+   "kind": "INTERNAL",
+   "links": [],
+   "name": "execute:scenario-weightless",
+   "parent_span_id": "c496be9eec254c48",
+   "resource": {
+    "attributes": {
+     "device.id": {
+      "stringValue": "scenario-device-python"
+     },
+     "host.arch": {
+      "stringValue": "x86_64"
+     },
+     "os.type": {
+      "stringValue": "Amazon Linux"
+     },
+     "os.version": {
+      "stringValue": "2023"
+     },
+     "service.name": {
+      "stringValue": "xybrid-scenario-python"
+     },
+     "service.version": {
+      "stringValue": "1.0.0"
+     },
+     "telemetry.sdk.language": {
+      "stringValue": "rust"
+     },
+     "telemetry.sdk.name": {
+      "stringValue": "xybrid"
+     },
+     "telemetry.sdk.version": {
+      "stringValue": "0.33.1"
+     },
+     "xybrid.device.chip": {
+      "stringValue": "Intel(R) Xeon(R) Processor @ 2.90GHz"
+     },
+     "xybrid.device.ram_gb": {
+      "intValue": 8
+     },
+     "xybrid.interop.workload": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.binding": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.version": {
+      "stringValue": "0.17.0"
+     }
+    },
+    "dropped_attributes_count": 0,
+    "schema_url": ""
+   },
+   "scope": {
+    "attributes": {},
+    "dropped_attributes_count": 0,
+    "name": "xybrid-observability",
+    "schema_url": "",
+    "version": "0.17.0"
+   },
+   "service_name": "xybrid-scenario-python",
+   "source": "otlp",
+   "span_id": "8bbe65780d9afff0",
+   "span_type": "other",
+   "start_time": "2026-11-09T16:46:45.879337141Z",
+   "start_time_unix_nano": "1794242805879337141",
+   "status": {
+    "code": "UNSET",
+    "message": ""
+   },
+   "trace_id": "78793a707974686f6e00000000000000",
+   "trace_state": ""
+  },
+  {
+   "attributes": {
+    "error.type": {
+     "stringValue": "inference_error"
+    },
+    "gen_ai.conversation.id": {
+     "stringValue": "scenario-conversation-python"
+    },
+    "gen_ai.operation.name": {
+     "stringValue": "predict"
+    },
+    "gen_ai.provider.name": {
+     "stringValue": "onnxruntime"
+    },
+    "gen_ai.request.model": {
+     "stringValue": "scenario-weightless"
+    },
+    "xybrid.genai.execution.location": {
+     "stringValue": "local"
+    },
+    "xybrid.genai.model.format": {
+     "stringValue": "onnx"
+    },
+    "xybrid.genai.runtime.name": {
+     "stringValue": "onnxruntime"
+    }
+   },
+   "content": {
+    "bytes": 145,
+    "keys": [
+     "gen_ai.input.messages"
+    ],
+    "storage": "inline",
+    "values": {
+     "gen_ai.input.messages": {
+      "stringValue": "[{\"parts\":[{\"content\":\"run input [scenario-redacted]\",\"type\":\"text\"}],\"role\":\"user\"}]"
+     }
+    }
+   },
+   "counted_request": true,
+   "dropped_attributes_count": 0,
+   "dropped_events_count": 0,
+   "dropped_links_count": 0,
+   "duration_ns": "365135",
+   "end_time": "2026-11-09T16:46:45.879557158Z",
+   "end_time_unix_nano": "1794242805879557158",
+   "events": [],
+   "flags": 257,
+   "gateway_payloads": {
+    "request": false,
+    "response": false
+   },
+   "genai": {
+    "attempt_count": null,
+    "attempt_index": null,
+    "cache_read_input_tokens": null,
+    "cache_write_input_tokens": null,
+    "error_type": "inference_error",
+    "execution_location": "local",
+    "input_tokens": null,
+    "operation_name": "predict",
+    "output_tokens": null,
+    "provider_name": "onnxruntime",
+    "reasoning_output_tokens": null,
+    "request_model": "scenario-weightless",
+    "response_model": null,
+    "runtime_name": "onnxruntime",
+    "server_address": null,
+    "task": null,
+    "time_to_first_chunk_s": null,
+    "time_to_first_token_s": null
+   },
+   "is_request": true,
+   "kind": "INTERNAL",
+   "links": [],
+   "name": "predict scenario-weightless",
+   "parent_span_id": "b640cb8c1c2849ee",
+   "resource": {
+    "attributes": {
+     "device.id": {
+      "stringValue": "scenario-device-python"
+     },
+     "host.arch": {
+      "stringValue": "x86_64"
+     },
+     "os.type": {
+      "stringValue": "Amazon Linux"
+     },
+     "os.version": {
+      "stringValue": "2023"
+     },
+     "service.name": {
+      "stringValue": "xybrid-scenario-python"
+     },
+     "service.version": {
+      "stringValue": "1.0.0"
+     },
+     "telemetry.sdk.language": {
+      "stringValue": "rust"
+     },
+     "telemetry.sdk.name": {
+      "stringValue": "xybrid"
+     },
+     "telemetry.sdk.version": {
+      "stringValue": "0.33.1"
+     },
+     "xybrid.device.chip": {
+      "stringValue": "Intel(R) Xeon(R) Processor @ 2.90GHz"
+     },
+     "xybrid.device.ram_gb": {
+      "intValue": 8
+     },
+     "xybrid.interop.workload": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.binding": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.version": {
+      "stringValue": "0.17.0"
+     }
+    },
+    "dropped_attributes_count": 0,
+    "schema_url": ""
+   },
+   "scope": {
+    "attributes": {},
+    "dropped_attributes_count": 0,
+    "name": "xybrid-observability",
+    "schema_url": "",
+    "version": "0.17.0"
+   },
+   "service_name": "xybrid-scenario-python",
+   "source": "otlp",
+   "span_id": "c496be9eec254c48",
+   "span_type": "genai.request",
+   "start_time": "2026-11-09T16:46:45.879192023Z",
+   "start_time_unix_nano": "1794242805879192023",
+   "status": {
+    "code": "ERROR",
+    "message": "inference_error"
+   },
+   "trace_id": "78793a707974686f6e00000000000000",
+   "trace_state": ""
+  },
+  {
+   "attributes": {
+    "gen_ai.operation.name": {
+     "stringValue": "invoke_workflow"
+    },
+    "gen_ai.workflow.name": {
+     "stringValue": "scenario-workflow"
+    }
+   },
+   "content": null,
+   "counted_request": false,
+   "dropped_attributes_count": 0,
+   "dropped_events_count": 0,
+   "dropped_links_count": 0,
+   "duration_ns": "2755586",
+   "end_time": "2026-11-09T16:46:45.879754250Z",
+   "end_time_unix_nano": "1794242805879754250",
+   "events": [],
+   "flags": 257,
+   "gateway_payloads": {
+    "request": false,
+    "response": false
+   },
+   "genai": {
+    "attempt_count": null,
+    "attempt_index": null,
+    "cache_read_input_tokens": null,
+    "cache_write_input_tokens": null,
+    "error_type": null,
+    "execution_location": null,
+    "input_tokens": null,
+    "operation_name": "invoke_workflow",
+    "output_tokens": null,
+    "provider_name": null,
+    "reasoning_output_tokens": null,
+    "request_model": null,
+    "response_model": null,
+    "runtime_name": null,
+    "server_address": null,
+    "task": null,
+    "time_to_first_chunk_s": null,
+    "time_to_first_token_s": null
+   },
+   "is_request": false,
+   "kind": "INTERNAL",
+   "links": [],
+   "name": "invoke_workflow scenario-workflow",
+   "parent_span_id": "707974686f6e0000",
+   "resource": {
+    "attributes": {
+     "device.id": {
+      "stringValue": "scenario-device-python"
+     },
+     "host.arch": {
+      "stringValue": "x86_64"
+     },
+     "os.type": {
+      "stringValue": "Amazon Linux"
+     },
+     "os.version": {
+      "stringValue": "2023"
+     },
+     "service.name": {
+      "stringValue": "xybrid-scenario-python"
+     },
+     "service.version": {
+      "stringValue": "1.0.0"
+     },
+     "telemetry.sdk.language": {
+      "stringValue": "rust"
+     },
+     "telemetry.sdk.name": {
+      "stringValue": "xybrid"
+     },
+     "telemetry.sdk.version": {
+      "stringValue": "0.33.1"
+     },
+     "xybrid.device.chip": {
+      "stringValue": "Intel(R) Xeon(R) Processor @ 2.90GHz"
+     },
+     "xybrid.device.ram_gb": {
+      "intValue": 8
+     },
+     "xybrid.interop.workload": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.binding": {
+      "stringValue": "python"
+     },
+     "xybrid.sdk.version": {
+      "stringValue": "0.17.0"
+     }
+    },
+    "dropped_attributes_count": 0,
+    "schema_url": ""
+   },
+   "scope": {
+    "attributes": {},
+    "dropped_attributes_count": 0,
+    "name": "xybrid-observability",
+    "schema_url": "",
+    "version": "0.17.0"
+   },
+   "service_name": "xybrid-scenario-python",
+   "source": "otlp",
+   "span_id": "b640cb8c1c2849ee",
+   "span_type": "genai.workflow",
+   "start_time": "2026-11-09T16:46:45.876998664Z",
+   "start_time_unix_nano": "1794242805876998664",
+   "status": {
+    "code": "UNSET",
+    "message": ""
+   },
+   "trace_id": "78793a707974686f6e00000000000000",
+   "trace_state": ""
+  }
+ ],
+ "summary": {
+  "duration_ms": 2.755586,
+  "end_time_unix_nano": "1794242805879754250",
+  "input_tokens": null,
+  "output_tokens": null,
+  "request_count": 4,
+  "span_count": 9,
+  "start_time_unix_nano": "1794242805876998664",
+  "status": "unset"
+ },
+ "trace_id": "78793a707974686f6e00000000000000",
+ "truncated": false
+}

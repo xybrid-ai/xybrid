@@ -74,6 +74,9 @@ fn encode_sentence(
     let output = executor.execute(metadata, &input, None)?;
 
     match output.kind {
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            Err("Unexpected decision output".into())
+        }
         EnvelopeKind::Embedding(embedding) => Ok(embedding),
         _ => Err(io::Error::other("all-minilm returned a non-embedding output").into()),
     }

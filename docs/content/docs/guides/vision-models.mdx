@@ -52,17 +52,17 @@ Without `max_image_tokens`, the projector's own limit applies.
 
 ## Build With Vision Enabled
 
-The default platform presets remain text-only. Add `llm-llamacpp-vision` to the
-build that will run VLMs:
+Every platform preset already includes `llm-llamacpp-vision`, so a preset build
+runs VLMs with no extra feature:
 
 ```bash
-cargo build -p xybrid --features platform-macos,llm-llamacpp-vision
+cargo build -p xybrid-cli --features platform-macos
 ```
 
-For apps using the Rust crates directly, compose the target platform preset
-with `llm-llamacpp-vision`. For Flutter, Kotlin, Swift, and Unity packages, use
-the release artifact or local native build that was produced with the same
-feature.
+For apps using the Rust crates directly, a `platform-*` preset on `xybrid-sdk`
+already brings `llm-llamacpp-vision`; a custom feature set without a preset
+must add it. For Flutter, Kotlin, Swift, and Unity packages, use the release
+artifact or local native build that was produced with the same feature.
 
 ## CLI
 
@@ -296,8 +296,10 @@ mode it throttles or stops the local loop rather than spilling to cloud.
 A naive live loop would emit one telemetry row per fired frame and flood the
 traces backend. Instead, live-mode inferences are **tagged** (a `live_mode` flag
 plus a `frame_session_id` that groups one camera session) and **rate-limited** by
-a per-session sampler (roughly one row per second per session, TTL-bounded), so a
-live session produces a sampled rollup rather than per-frame spam.
+a per-session sampler (roughly one row per second per session), so a live
+session produces a sampled rollup rather than per-frame spam. The sampler is
+bounded: it remembers at most 1,024 sessions, evicting the least recently used,
+and forgets a session 300 s after its last frame.
 
 ## Troubleshooting
 

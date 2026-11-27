@@ -114,6 +114,9 @@ namespace Xybrid
         /// <summary>Gets the error message if inference failed, or null if successful.</summary>
         public string Error { get; }
 
+        /// <summary>Error from a speculative cloud attempt that recovered on-device.</summary>
+        public string SpeculativeCloudError { get; private set; }
+
         /// <summary>Gets the text output (for ASR or LLM models), or null if not applicable.</summary>
         public string Text { get; }
 
@@ -135,6 +138,15 @@ namespace Xybrid
         /// <summary>Gets the embedding vector (for embedding models), or null if not applicable.</summary>
         public float[] Embedding { get; }
 
+        /// <summary>Ordered typed decisions, retaining double precision probabilities.</summary>
+        public XybridBolt.XybridDecisions? Decisions { get; private set; }
+
+        /// <summary>Total input tokens evaluated across all decision passes.</summary>
+        public ulong? TokensIn { get; private set; }
+
+        /// <summary>Generated output tokens, always zero for decisions.</summary>
+        public ulong? TokensOut { get; private set; }
+
         /// <summary>Gets whether this result contains audio data.</summary>
         public bool HasAudio => AudioBytes != null && AudioBytes.Length > 0;
 
@@ -146,8 +158,7 @@ namespace Xybrid
 
         /// <summary>
         /// Gets whether this answer came from the device or the cloud gateway.
-        /// Cloud fallback keeps the model id identical on both legs, so this is
-        /// the only way to tell them apart. Defaults to
+        /// Defaults to
         /// <see cref="XybridBolt.XybridExecutionTarget.Local"/> for synthesized
         /// failures, which never reached the cloud.
         /// </summary>
@@ -237,10 +248,19 @@ namespace Xybrid
             var speech = TtsStreamResult.FromBolt(result);
             bool hasSpeechStatus = false;
             string phonemeTimingsJson = null;
+            string speculativeCloudError = null;
+            ulong? tokensIn = null;
+            ulong? tokensOut = null;
             foreach (var entry in result.Envelope.Metadata)
             {
-                if (entry.Key == "tts_status")
+                if (entry.Key == "tokens_in" && ulong.TryParse(entry.Value, out var parsedTokens))
+                    tokensIn = parsedTokens;
+                else if (entry.Key == "tokens_out" && ulong.TryParse(entry.Value, out var parsedOutputTokens))
+                    tokensOut = parsedOutputTokens;
+                else if (entry.Key == "tts_status")
                     hasSpeechStatus = true;
+                else if (entry.Key == "speculative_cloud_error")
+                    speculativeCloudError = entry.Value;
                 else if (entry.Key == PhonemeTimingParser.MetadataKey && phonemeTimingsJson == null)
                     phonemeTimingsJson = entry.Value;
             }
@@ -260,8 +280,12 @@ namespace Xybrid
                 phonemeTimings: PhonemeTimingParser.Parse(phonemeTimingsJson),
                 observation: result.Observation)
             {
+                Decisions = result.Envelope.Kind is XybridBolt.XybridEnvelopeKind.Decisions decisions ? decisions.Value : (XybridBolt.XybridDecisions?)null,
+                TokensIn = tokensIn,
+                TokensOut = tokensOut,
                 SpeechStatus = hasSpeechStatus ? speech.Status : (TtsStatus?)null,
                 LimitedChunks = hasSpeechStatus ? speech.LimitedChunks : (uint?)null,
+                SpeculativeCloudError = speculativeCloudError,
             };
         }
 
@@ -319,6 +343,8 @@ namespace Xybrid
                     return OutputType.Audio;
                 case XybridBolt.XybridOutputType.Embedding:
                     return OutputType.Embedding;
+                case XybridBolt.XybridOutputType.Decisions:
+                    return OutputType.Decisions;
                 default:
                     return OutputType.Unknown;
             }

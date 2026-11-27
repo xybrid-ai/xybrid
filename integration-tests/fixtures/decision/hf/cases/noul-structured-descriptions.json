@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "noul-structured-descriptions",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Object and array noul descriptions print with compact tojson",
+  "covers": [
+    "description-structured",
+    "noul-order"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Refund?\", \"criteria\": {\"true\": {\"refund\": true, \"amount\": 12.5}, \"false\": [\"no\", 0]}}}}",
+  "artifact": "d1-2b-hf"
+}

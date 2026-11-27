@@ -14,8 +14,7 @@ namespace XybridBolt
         Downloading = 0,
         Ready = 1,
         /// <summary>
-        /// Download failed; for a speculative load the cloud keeps serving and
-        /// `isLoaded` never flips.
+        /// Download failed; a speculative model never becomes local.
         /// </summary>
         Failed = 2,
         /// <summary>

@@ -66,7 +66,6 @@ class StandaloneBatchExporter<Item> {
   readonly #estimate: (item: Item) => number;
   readonly #limits: ResolvedLimits;
   readonly #inFlight = new Set<Promise<Outcome>>();
-  #bytes = 0;
   #shutdown: Promise<void> | undefined;
 
   constructor(sender: BatchSender<Item>, estimate: (item: Item) => number, limits: ResolvedLimits) {
@@ -88,22 +87,20 @@ class StandaloneBatchExporter<Item> {
     } catch {
       bytes = Number.POSITIVE_INFINITY;
     }
-    if (!(this.#bytes + bytes <= this.#limits.maxBufferedBytes)) {
+    if (!(this.counter.bufferedBytes + bytes <= this.#limits.maxBufferedBytes)) {
       diag.warn("xybrid-observability: export refused (in-flight byte budget)");
       this.counter.refuse(count);
       report(callback, false);
       return;
     }
-    this.counter.admit(count);
-    this.#bytes += bytes;
+    this.counter.admit(count, bytes);
     const scope = exportScope(this.#limits.exportTimeoutMs, []);
     const work = this.#sender
       .send([...items], scope)
       .catch(() => failedOutcome(count))
       .then((outcome) => {
         scope.release();
-        this.counter.settle(outcome);
-        this.#bytes -= bytes;
+        this.counter.settle(outcome, bytes);
         this.#inFlight.delete(work);
         report(callback, outcome.exported === count);
         return outcome;

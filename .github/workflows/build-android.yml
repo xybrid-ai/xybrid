@@ -1,84 +1,17 @@
 # Purpose: Build the Android .so files for every ABI, test the Kotlin wrapper, and gate dlopen and the observability scenario on an x86_64 emulator.
 name: "SDK: Android"
 
+# A lane: ci.yml's `Android` job calls this file when one of the paths in
+# LANE_PATHS["android"] (tools/scripts/ci_gate.py) changes, on pull requests and
+# on master pushes, which keep master's caches warm for new branches. Its
+# checks are named `Android / <job>`. Dispatch it here to run it alone.
 on:
-  pull_request:
-    branches: [master]
-    paths:
-      - 'bindings/kotlin/**'
-      - 'crates/xybrid-bolt/**'
-      - 'crates/xybrid-ffi-facade/**'
-      - 'crates/xybrid-core/**'
-      - 'crates/xybrid-sdk/**'
-      - 'crates/xybrid-observability/**'
-      - 'tools/scripts/android-dlopen-gate.sh'
-      - 'tools/scripts/android-dlopen-probe.c'
-      - 'tools/scripts/verify_android_jni.py'
-      - 'tools/scripts/verify_android_api_level.py'
-      # The shared observability scenario's receiver and checker (the
-      # observability-scenario job below).
-      - 'tools/scripts/observability_capture/**'
-      - 'xtask/**'
-      # llama.cpp's Android build config and sources (see //:llama_android_dl).
-      - 'BUILD.bazel'
-      - 'bazel/ggml/**'
-      # The Android NDK toolchains: @androidndk (API 28) and the AAR arm64
-      # slice's @androidndk_api29 (see //bazel/toolchains/android), the patch
-      # that generates both, and the .bazelrc NDK download pins.
-      - 'MODULE.bazel'
-      - 'bazel/toolchains/android/**'
-      - 'rules_android_ndk.patch'
-      - '.bazelrc'
-      - 'crates/llama-cpp-sys/**'
-      - 'vendor/llama-cpp'
-      - 'vendor/ort-android/**'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - '.github/workflows/build-android.yml'
-      # Docs-only changes under the paths above (READMEs, examples) never
-      # affect the native build — exclude markdown so they don't trigger it.
-      - '!**.md'
-  # Run on master merges too, so each merge saves a default-branch-scoped
-  # cache (sccache + rust-cache). GitHub Actions caches are branch-scoped:
-  # a PR run can only restore caches from its own branch or the default
-  # branch. Without this trigger master never builds, so master has no
-  # cache, so every new PR branch's first run is cold (~35 min). Warming
-  # master here lets new branches start warm (~5 min). Keep these paths in
-  # sync with the pull_request trigger above.
-  push:
-    branches: [master]
-    paths:
-      - 'bindings/kotlin/**'
-      - 'crates/xybrid-bolt/**'
-      - 'crates/xybrid-ffi-facade/**'
-      - 'crates/xybrid-core/**'
-      - 'crates/xybrid-sdk/**'
-      - 'crates/xybrid-observability/**'
-      - 'tools/scripts/android-dlopen-gate.sh'
-      - 'tools/scripts/android-dlopen-probe.c'
-      - 'tools/scripts/verify_android_jni.py'
-      - 'tools/scripts/verify_android_api_level.py'
-      - 'tools/scripts/observability_capture/**'
-      - 'xtask/**'
-      # llama.cpp's Android build config and sources (see //:llama_android_dl).
-      - 'BUILD.bazel'
-      - 'bazel/ggml/**'
-      - 'MODULE.bazel'
-      - 'bazel/toolchains/android/**'
-      - 'rules_android_ndk.patch'
-      - '.bazelrc'
-      - 'crates/llama-cpp-sys/**'
-      - 'vendor/llama-cpp'
-      - 'vendor/ort-android/**'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - '.github/workflows/build-android.yml'
-      - '!**.md'
+  workflow_call:
+    # Optional: forks and Dependabot pull requests receive none.
+    secrets:
+      BUILDBUDDY_API_KEY:
+        required: false
   workflow_dispatch:
-
-concurrency:
-  group: build-android-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions: read-all
 
@@ -105,16 +38,10 @@ jobs:
       # The 4-ABI llama.cpp compile can exhaust the ~14 GB free on ubuntu-latest
       # when the prebuilt-natives fast path misses (observed: the runner itself
       # died with "No space left on device", taking its logs with it). Reclaim
-      # space from preinstalled toolchains this build never touches — same step
-      # as ci.yml's test job, EXCEPT /usr/local/lib/android, which this job's
-      # Android SDK/NDK setup actually uses.
+      # space from preinstalled toolchains this build never touches; the action
+      # keeps /usr/local/lib/android, which this job's Android SDK/NDK setup uses.
       - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
-            /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force || true
-          df -h /
-
+        uses: ./.github/actions/free-disk-space
 
       # Cache Android NDK to avoid the ~1.5GB download on every build.
       - name: Cache Android NDK
@@ -451,7 +378,7 @@ jobs:
   # (tools/scripts/observability_capture/scenario.md) through the public Kotlin
   # wrapper, inside the dlopen gate's consumer APK and shipped x86_64 AAR on the
   # same emulator image. ObservabilityScenarioTest exports OTLP/JSON to
-  # capture_server.py on the runner (10.0.2.2 from the emulator) and writes
+  # capture_server.py on the runner (device loopback via adb reverse) and writes
   # expectations.json, which observability-scenario.sh copies off the device;
   # check_capture.py then compares the two. Its checks cover parent-in,
   # references out, manual operations, redaction and omission, release-cancels,
@@ -522,7 +449,7 @@ jobs:
           exit 1
 
       # run_scenario.py starts the receiver on a free port, fills {endpoint}
-      # (http://10.0.2.2:<port>) and {expectations}, runs the test through
+      # (http://127.0.0.1:<port>) and {expectations}, runs the test through
       # observability-scenario.sh, and fails unless every check passes.
       - name: Run the observability scenario on the emulator
         uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
@@ -534,7 +461,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
           script: |
-            python3 tools/scripts/observability_capture/run_scenario.py --binding kotlin --endpoint-host 10.0.2.2 --out-dir observability-scenario -- bash bindings/kotlin/consumer-smoke/observability-scenario.sh {endpoint} {expectations}
+            python3 tools/scripts/observability_capture/run_scenario.py --binding kotlin --endpoint-host 127.0.0.1 --out-dir observability-scenario -- bash bindings/kotlin/consumer-smoke/observability-scenario.sh {endpoint} {expectations}
 
       # capture.jsonl, expectations.json, report.json, the instrumentation
       # output and a logcat dump, for diagnosing a failed check.

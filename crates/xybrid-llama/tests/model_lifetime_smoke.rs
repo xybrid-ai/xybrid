@@ -49,7 +49,7 @@ fn shellexpand_tilde(s: &str) -> String {
 }
 
 fn greedy(ctx: &LlamaContext, model: &LlamaModel, prompt: &[i32]) -> Result<Vec<i32>, LlamaError> {
-    generate_with_stops(ctx, model, prompt, 4, 0.0, 1.0, 0.0, 1, 1.0, &[], None)
+    generate_with_stops(ctx, model, prompt, 4, 0.0, 1.0, 0.0, 1, 1.0, &[], None, &[])
 }
 
 #[test]

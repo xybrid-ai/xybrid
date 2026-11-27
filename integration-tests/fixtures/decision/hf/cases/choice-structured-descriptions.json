@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "choice-structured-descriptions",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Object, array and number descriptions print with compact tojson",
+  "covers": [
+    "description-structured",
+    "json-float"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"billing\": {\"team\": \"billing\", \"sla_hours\": 24}, \"technical\": [\"app\", \"site\", 2], \"fraud\": 3.5, \"other\": -1, \"nested\": {\"a\": {\"b\": [1.0, null]}}}}}}",
+  "artifact": "d1-2b-hf"
+}

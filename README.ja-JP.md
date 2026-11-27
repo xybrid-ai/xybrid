@@ -139,7 +139,7 @@ xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.17.0
+  xybrid_flutter: ^0.21.0
 ```
 
 **モデルを実行:**
@@ -156,7 +156,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.17.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.21.0")
 }
 ```
 
@@ -178,7 +178,7 @@ val result = model.runAsync(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.17.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.21.0")
 ]
 ```
 
@@ -227,7 +227,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.17.0"
+xybrid = "0.21.0"
 ```
 
 **モデルを実行:**
@@ -249,7 +249,8 @@ let result = model.run(&Envelope::text("Hello world"))?;
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny-ggml  # 音声 → テキスト
+  - id: asr
+    model: whisper-tiny-ggml  # 音声 → テキスト
   - model: qwen2.5-0.5b       # LLMで処理
   - model: kokoro-82m         # テキスト → 音声
 ```
@@ -267,17 +268,23 @@ final result = await pipeline.run(XybridEnvelope.audio(bytes: audioBytes, sample
 
 **Kotlin:**
 ```kotlin
-// マルチモデルパイプライン（MMP）サポートは近日対応予定 — 現在は単一モデルの読み込みを使用してください
+val pipeline = XybridPipeline.fromYamlAsync(yamlString)
+val result = pipeline.runAsync(inputEnvelope)
+val transcript = result.stage("asr")?.text  // 最後のステージだけでなく、すべてのステージの出力
 ```
 
 **Swift:**
 ```swift
-// マルチモデルパイプライン（MMP）サポートは近日対応予定 — 現在は単一モデルの読み込みを使用してください
+let pipeline = try await XybridPipeline.fromYamlAsync(yamlString)
+let result = try await pipeline.runAsync(envelope: inputEnvelope)
+let transcript = result.stage("asr")?.text  // 最後のステージだけでなく、すべてのステージの出力
 ```
 
 **Unity (C#):**
 ```csharp
-// マルチモデルパイプライン（MMP）サポートは近日対応予定 — 現在は単一モデルの読み込みを使用してください
+using var pipeline = Pipeline.FromYaml(yamlString);
+PipelineResult result = pipeline.Run(inputEnvelope);
+string transcript = result.Stage("asr")?.Text;  // 最後のステージだけでなく、すべてのステージの出力
 ```
 
 **Rust:**
@@ -351,13 +358,15 @@ Xybridは**任意の**ONNX、GGUF、またはSafeTensorsモデルで動作しま
 
 ```sh
 # プロジェクトにxybridスキルをインストール
-curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | sh
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | bash
 
 # HuggingFaceモデルからmodel_metadata.jsonを生成
 claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 ```
 
 スキルはエージェント非依存で、[`agents/skills/`](agents/skills/)に配置されます。インストーラーはClaude Code（`.claude/skills`）とCodex（`.codex/skills`）にシンボリックリンクを作成します。
+
+インストーラーは`/xybrid-connect`も追加します。サインアップなしでプロジェクトをXybridコンソールに接続するスキルです。`xybrid connect`（CLI 0.18.0以降）を実行して仮のワークスペースを作成し、制限付きキーをgitignore済みのファイルに保存し、GitHubでワークスペースをクレーム（引き継ぎ）するための非公開リンクを渡します。クレームしない場合、キーは7日後に停止し、ワークスペースは14日後に削除されます。詳しくは[APIキー](https://docs.xybrid.dev/en/docs/concepts/api-keys#provisional-workspaces)を参照してください。
 
 **手動の場合** — モデルディレクトリに`model_metadata.json`を作成:
 
@@ -373,7 +382,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 }
 ```
 
-完全なスキーマについては[モデルメタデータドキュメント](docs/sdk/API_REFERENCE.md)を参照するか、[`integration-tests/fixtures/models/`](integration-tests/fixtures/models/)の既存の例をご覧ください。
+完全なスキーマについては[モデルメタデータドキュメント](docs/sdk/MODEL_METADATA.md)を参照するか、[`integration-tests/fixtures/models/`](integration-tests/fixtures/models/)の既存の例をご覧ください。
 
 </details>
 
@@ -391,9 +400,9 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 | 埋め込み | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | マルチモデルパイプライン（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | モデルのダウンロードとキャッシュ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| ハードウェアアクセラレーション | Metal, ANE | CPU | Metal, ANE | CPU、オプトインのVulkan | CPU |
+| ハードウェアアクセラレーション | 実機は Metal（llama.cpp）、シミュレータは CPU | CPU | Metal | CPU、オプトインのVulkan | CPU |
 
-**SDK MMP サポート:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
+**SDK MMP サポート:** Flutter ✅ · Rust ✅ · Kotlin ✅ · Swift ✅ · React Native ✅ · Unity ✅
 
 **ツール呼び出し:** ローカルモデルが自分で定義した関数を呼び出せます。ツールは単なる
 データで、ループを回すのは自分のコードです。詳しくは
@@ -416,7 +425,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 - **アプリを再リリースせずにモデルを差し替え** — モデルは実行時にレジストリから解決され、デバイス上にキャッシュされます。
 - **クラウドフォールバック** — 実行ごとにオプトイン（[ドキュメント](https://docs.xybrid.dev/en/docs/concepts/hybrid-execution)）。
 - **制御できるテレメトリ** — APIキーによるオプトイン（[ドキュメント](docs/telemetry/registry.md)）。
-- **ハードウェアアクセラレーション** — Apple では Metal と Apple Neural Engine、Linux ではオプトインの Vulkan。Android と Windows は現時点では CPU（[ドキュメント](docs/INSTALLATION.md#platform-features)）。
+- **ハードウェアアクセラレーション** — Apple では Metal、Linux ではオプトインの Vulkan。Android と Windows は現時点では CPU（[ドキュメント](docs/INSTALLATION.md#platform-features)）。
 
 ### 比較
 

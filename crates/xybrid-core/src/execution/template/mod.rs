@@ -10,6 +10,7 @@
 //! | [`voice`] | `VoiceConfig`, `VoiceFormat`, `VoiceInfo`, `VoiceLoader` |
 
 mod choice;
+mod decision;
 mod metadata;
 mod steps;
 mod voice;
@@ -33,3 +34,6 @@ pub use steps::{
 
 // Re-export voice types
 pub use voice::{VoiceConfig, VoiceFormat, VoiceInfo, VoiceLoader, VoiceSelectionStrategy};
+
+// Versioned local decision execution.
+pub use decision::{DecisionTemplate, LIQUID_TEXT_V1};

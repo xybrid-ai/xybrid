@@ -1,16 +1,20 @@
-# OpenTelemetry Collector profile: traces → Xybrid, metrics and logs → your
-# own stores, plus optional fan-out of the same traces to Langfuse/Phoenix
-# (combine with langfuse.yaml / phoenix.yaml pipelines as needed).
+# OpenTelemetry Collector profile: traces and evaluation results → Xybrid.
 #
-# Xybrid stores AI traces only. Send metrics and log events (evaluation
-# results, content-detail events, exceptions) to a metrics/log backend of your
-# choice.
+# Xybrid stores AI traces and trace-linked quality results (the
+# gen_ai.evaluation.result log events, including user feedback). Other log
+# events (content-detail events, exceptions) and metrics are discarded unless
+# you add sinks.yaml, which sends them to your own stores:
+#
+#   otelcol-contrib --config xybrid.yaml                    # traces + evaluations
+#   otelcol-contrib --config xybrid.yaml --config sinks.yaml
+#
+# Combine with langfuse.yaml / phoenix.yaml pipelines to fan the same traces
+# out. Validated with the otelcol-contrib release pinned in collector/README.md.
 #
 # Environment:
 #   XYBRID_API_KEY          Xybrid API key
 #   XYBRID_TRACES_ENDPOINT  defaults to https://ingest.xybrid.dev/v1/traces
-#   METRICS_OTLP_ENDPOINT   e.g. Prometheus/Mimir OTLP, Grafana Cloud, Datadog
-#   LOGS_OTLP_ENDPOINT      e.g. Loki OTLP, Elastic, Datadog
+#   XYBRID_LOGS_ENDPOINT    defaults to https://ingest.xybrid.dev/v1/logs
 
 receivers:
   otlp:
@@ -19,18 +23,33 @@ receivers:
         endpoint: 0.0.0.0:4318
 
 processors:
+  # At most 256 spans per request, like the SDK's own batches (the max may not
+  # be below send_batch_size, whose default is 8192).
   batch:
+    send_batch_size: 256
     send_batch_max_size: 256
+  # Xybrid's /v1/logs accepts only gen_ai.evaluation.result records and
+  # rejects any other record, so the two log pipelines split on the event name.
+  filter/evaluations_only:
+    error_mode: ignore
+    logs:
+      log_record:
+        - 'log.event_name != "gen_ai.evaluation.result"'
+  filter/without_evaluations:
+    error_mode: ignore
+    logs:
+      log_record:
+        - 'log.event_name == "gen_ai.evaluation.result"'
 
 exporters:
   otlphttp/xybrid:
     traces_endpoint: ${env:XYBRID_TRACES_ENDPOINT:-https://ingest.xybrid.dev/v1/traces}
+    logs_endpoint: ${env:XYBRID_LOGS_ENDPOINT:-https://ingest.xybrid.dev/v1/logs}
     headers:
       Authorization: "Bearer ${env:XYBRID_API_KEY}"
-  otlphttp/metrics:
-    endpoint: ${env:METRICS_OTLP_ENDPOINT}
-  otlphttp/logs:
-    endpoint: ${env:LOGS_OTLP_ENDPOINT}
+  # Metrics and the remaining log events are discarded unless sinks.yaml is
+  # added (--config xybrid.yaml --config sinks.yaml).
+  nop: {}
 
 service:
   pipelines:
@@ -38,11 +57,15 @@ service:
       receivers: [otlp]
       processors: [batch]
       exporters: [otlphttp/xybrid]
+    logs/xybrid:
+      receivers: [otlp]
+      processors: [filter/evaluations_only, batch]
+      exporters: [otlphttp/xybrid]
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlphttp/metrics]
+      exporters: [nop]
     logs:
       receivers: [otlp]
-      processors: [batch]
-      exporters: [otlphttp/logs]
+      processors: [filter/without_evaluations, batch]
+      exporters: [nop]

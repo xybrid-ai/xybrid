@@ -43,15 +43,16 @@
 //! // Anonymous — local inference, nothing exported
 //! xybrid_sdk::init().run();
 //!
-//! // Cloud routing plus traces to the Xybrid dashboard
+//! // Cloud routing plus traces to the Xybrid console
 //! xybrid_sdk::init()
-//!     .api_key("xy_live_...")
-//!     .observability(ObservabilityConfig::xybrid("xy_live_..."))
+//!     .api_key("sk_live_...")
+//!     .observability(ObservabilityConfig::xybrid("sk_live_..."))
 //!     .run();
 //! ```
 //!
-//! Get a free key at <https://dashboard.xybrid.dev>. The first inference
-//! without observability configured emits a one-shot info log pointing at
+//! Get a project key with `xybrid connect` (a claimable workspace, no account
+//! needed) or from <https://console.xybrid.dev>. The first inference without
+//! observability configured emits a one-shot info log pointing at both and at
 //! the observability docs; set `XYBRID_QUIET=1` to suppress it.
 //!
 //! ## Batch Inference
@@ -157,6 +158,7 @@ use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
 
 pub mod benchmark;
 pub mod cache;
+mod ci;
 pub mod device;
 pub mod download;
 pub mod llm;
@@ -273,6 +275,15 @@ pub use result::{
 pub use source::ModelSource;
 pub use stream::{PartialResult, StreamState, StreamStats, TranscriptionResult, XybridStream};
 pub use xybrid_core::ir::{Choice, ChoiceRequest, ChoiceScore, ChoiceScores};
+
+/// Decode bounded Liquid SystemOne JSON without changing its order or numeric identity.
+///
+/// The optional wire `model` field never changes the explicitly loaded model.
+/// Errors contain no request text and are non-retryable.
+pub fn decode_decision_request(json: &str) -> SdkResult<DecisionRequest> {
+    xybrid_core::execution::decision::wire::decode(json)
+        .map_err(|error| SdkError::inference_src("Decision request refused", error))
+}
 // Decision models: a state plus typed questions, and one answer per question.
 pub use xybrid_core::ir::{
     AnswerInvariant, DecisionAnswer, DecisionContent, DecisionContentView, DecisionError,
@@ -582,13 +593,11 @@ pub fn set_provider_api_key(provider: &str, api_key: &str) {
 
 /// Enable or disable speculative cloud fallback globally.
 ///
-/// When enabled, a [`ModelLoader`] whose model isn't downloaded yet is served
-/// from the Xybrid gateway while the weights download in the background —
-/// provided a cloud API key is resolvable and the registry reports a chat
-/// model (see [`ModelLoader::will_speculate`]). This sets the process-global
-/// default; individual loads override it with
-/// [`ModelLoader::with_speculative_cloud`]. The flag persists in memory for the
-/// app lifetime.
+/// With an API key, uncached registry chat models try the Xybrid gateway while
+/// the weights download. Only ids also listed in the gateway catalog can be
+/// served remotely. This sets the process-global default; individual loads
+/// override it with [`ModelLoader::with_speculative_cloud`]. The flag persists
+/// in memory for the app lifetime.
 ///
 /// # Examples
 /// ```
@@ -694,16 +703,16 @@ pub fn init() -> XybridInit {
 /// xybrid_sdk::init().run();
 /// ```
 ///
-/// Cloud routing, traces to the Xybrid dashboard, resource sampling on:
+/// Cloud routing, traces to the Xybrid console, resource sampling on:
 ///
 /// ```no_run
 /// use xybrid_sdk::observability::ObservabilityConfig;
 /// use xybrid_sdk::ResourceTelemetryMode;
 ///
 /// xybrid_sdk::init()
-///     .api_key("xy_live_...")
+///     .api_key("sk_live_...")
 ///     .observability(
-///         ObservabilityConfig::xybrid("xy_live_...")
+///         ObservabilityConfig::xybrid("sk_live_...")
 ///             .resource_telemetry(ResourceTelemetryMode::Summary { interval_ms: 5000 }),
 ///     )
 ///     .run();

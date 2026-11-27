@@ -455,6 +455,10 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// Cargo package name of `crates/xybrid-bolt` (BoltFFI wants the underscore
+/// form; `cargo build -p xybrid-bolt` finds no workspace member).
+const BOLT_PACKAGE: &str = "xybrid_bolt";
+
 /// Build the xybrid-bolt native library (the Unity BoltFFI native).
 fn build_ffi(
     target: Option<String>,
@@ -463,7 +467,7 @@ fn build_ffi(
     deploy_unity: bool,
 ) -> Result<()> {
     // Unity loads `xybrid_bolt`; the pre-bolt `xybrid-ffi` C ABI was retired.
-    let crate_name = "xybrid-bolt";
+    let crate_name = BOLT_PACKAGE;
     let lib_stem = "xybrid_bolt";
 
     // Unity's Android library must link libc++ statically (the package ships no
@@ -1688,6 +1692,24 @@ fn package_unity_natives(version: &str, output_dir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bolt_package_name_matches_its_manifest() {
+        // The runtime CARGO_MANIFEST_DIR, not `env!`: under Bazel the test
+        // runs in a sandbox where the compile-time path points nowhere.
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+        let manifest = std::fs::read_to_string(
+            std::path::Path::new(&manifest_dir).join("../crates/xybrid-bolt/Cargo.toml"),
+        )
+        .expect("crates/xybrid-bolt/Cargo.toml is readable");
+        assert!(
+            manifest
+                .lines()
+                .any(|line| line.trim() == format!("name = \"{BOLT_PACKAGE}\"")),
+            "build-ffi passes `-p {BOLT_PACKAGE}`, which must be the package name in crates/xybrid-bolt/Cargo.toml"
+        );
+    }
 
     #[test]
     fn test_platform_preset_for_target_macos() {

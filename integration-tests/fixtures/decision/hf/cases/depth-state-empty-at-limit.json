@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "depth-state-empty-at-limit",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A state of 127 nested empty arrays, 127 levels deep: the deepest upstream renders",
+  "covers": [
+    "json-depth",
+    "state-array"
+  ],
+  "request_text": "{\"state\": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]], \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"x\"}}}",
+  "artifact": "d1-2b-hf"
+}

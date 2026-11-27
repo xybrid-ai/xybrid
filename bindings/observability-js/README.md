@@ -58,7 +58,13 @@ Also: `startWorkflow(name)`, `startTool({ name, callId, toolType, arguments })`
 with `recordResult(value)`, `startModelLoad({ model, provider, runtime, format, sizeBytes })`
 with `recordCacheHit(hit)`, and `op.startAttempt({ index, reason, provider, location })`
 for retries and fallbacks under one logical request. Hot paths never await,
-flush, or do I/O. Recording calls never throw.
+flush, or do I/O. Recording calls never throw, and neither does ending: a span
+processor of yours that throws in `onEnd` is contained (processors after it do
+not see that span).
+
+End every handle on every path (`try`/`finally`, or `cancel()` when the work
+is abandoned). Garbage collection never ends a handle, so one that is never
+ended, cancelled or released is lost: no span, no duration metric, no outcome.
 
 Measurements are truthful: what was not measured is absent, never zero.
 `recordChunk()` marks delivered output (time to first chunk, then the gap since
@@ -156,15 +162,33 @@ Every content value goes through one pipeline, in order:
    `undefined`, an own `__proto__` key stays a key);
 3. a canonical copy goes to your `redact(kind, value)` callback, which returns
    the value, `undefined` (drop) or `null` (JSON null); a throw, a promise or
-   non-JSON output fails closed;
+   non-JSON output fails closed (a Rust hook that panics does the same);
 4. `replace_literal` rules replace every occurrence of a literal in every string
    value (never keys), in order;
 5. truncation to `maxAttributeBytes` (default 16384): the longest strings are
    halved (at code point boundaries, with `…[truncated]`), then the oldest
    messages are dropped, then the attribute is omitted;
 6. content retained by one operation is bounded by `maxRetainedOperationBytes`
-   (default 480 KiB) and written once, at the end (a later record of the same
-   key replaces it).
+   (default 416 KiB) and written once, at the end (a later record of the same
+   key replaces it). The budget is clamped to what one export request can
+   carry: 416 KiB over OTLP/protobuf, the default protocol of
+   `createOtlpPipeline`, and 208 KiB over OTLP/JSON, which can double content
+   when it escapes it (a pipeline whose traces or logs signal is JSON uses the
+   JSON figure). An `Observer` over providers the application owns is
+   fitted as JSON until `content.spanContentEncoding: "protobuf"` says
+   otherwise.
+
+Content headed for a span that is not recording (a sampler drop, an unsampled
+parent, `trace: "suppress"`, no tracer) is not processed at all; event capture
+(`event_only`, `span_and_event`) still processes and emits it when the observer
+has a logger. Without one (`loggerProvider: null`, a traces-only pipeline, the
+Xybrid preset) nothing receives the content, so it is not processed either. The budgets are
+clamped so one span's content cannot push its export request past
+`maxRequestBodyBytes` (default 480 KiB; `pipeline.observer()` uses the
+pipeline's traces bound when it is smaller): `maxRetainedOperationBytes` is at most
+`(maxRequestBodyBytes - 65536) / 2`, and `maxAttributeBytes` at most
+`maxRetainedOperationBytes`. Raising a budget past that clamps it rather than
+throwing; `observer.contentBudgets` reports the effective values.
 
 ```ts
 new Observer({
@@ -221,7 +245,10 @@ backoff capped at 2 seconds; `Retry-After` can exceed that cap while fitting the
 single absolute export deadline. Nothing is persisted.
 
 Each signal's `SignalStats` contains `accepted`, `exported`, `dropped`, `failed`
-and `pending`. Every snapshot satisfies
+and `pending`, plus `bufferedBytes`: the bytes the pending items hold against
+the 32 MiB `batch.maxBufferedBytes` budget (the per-item estimate admitted, or a
+metrics collection's encoded body; not process memory; zero once nothing is
+pending, so always after shutdown). Every snapshot satisfies
 `accepted = exported + dropped + failed + pending`. Refused items count as
 accepted and dropped; lost acknowledgements and partial-success rejections
 count as failed. Retries never multiply item counts. Metrics count data points.
@@ -239,6 +266,14 @@ environment reads; a supplied environment map supports browsers and tests.
 `otlpConfigFromEnv()` honors `OTEL_SDK_DISABLED=true` and signal exporter
 settings. Tune `batch.maxBufferedBytes` and `batch.exportTimeoutMs` before
 construction; invalid limits throw before workers or timers start.
+
+The pipeline's scheduling timers (batch delay, metric interval, flush, export
+and shutdown deadlines) never keep a Node process alive, but an export in
+flight does, retry backoff included, until it completes or its deadline aborts
+it. Against an unresponsive endpoint a process that exits without `shutdown()`
+therefore lingers for up to `batch.exportTimeoutMs` (10 s by default). Call
+`shutdown(timeoutMs)` before exiting to bound that wait, and to deliver or
+count what is still queued.
 
 ### Application-owned providers
 
@@ -345,6 +380,7 @@ pnpm pack:release     # pack and verify the archive in an isolated consumer
 pnpm test:families   # real packed consumers: aligned 3.0 + 3.1; core-only; unsupported 2.x
 pnpm fixtures:dump    # normalized fixture output → .context/fixture-output/js/
 pnpm example          # examples/node-basic.ts (console, or OTLP when OTEL_EXPORTER_OTLP_* is set)
+pnpm bench            # overhead vs disabled, content pipeline cost (after pnpm build; see tools/scripts/observability_perf)
 ```
 
 ## Releases

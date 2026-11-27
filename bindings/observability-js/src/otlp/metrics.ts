@@ -29,7 +29,6 @@ export class MetricDelivery {
   /** Aborted by a pipeline shutdown deadline. */
   readonly #cancel = new AbortController();
   #tail: Promise<unknown> = Promise.resolve();
-  #bytes = 0;
   #closed = false;
 
   constructor(transport: OtlpTransport, encode: Encode<ResourceMetrics>, limits: ResolvedLimits) {
@@ -78,13 +77,12 @@ export class MetricDelivery {
       this.counter.fail(points);
       return Promise.resolve(failedOutcome(points));
     }
-    if (!(this.#bytes + body.length <= this.#limits.maxBufferedBytes)) {
+    if (!(this.counter.bufferedBytes + body.length <= this.#limits.maxBufferedBytes)) {
       this.counter.refuse(points);
       return Promise.resolve(droppedOutcome(points));
     }
-    this.counter.admit(points);
-    this.#bytes += body.length;
     const bytes = body.length;
+    this.counter.admit(points, bytes);
     const scope = exportScope(timeoutMs, [this.#cancel.signal]);
     const run = this.#tail
       .then(() =>
@@ -95,8 +93,7 @@ export class MetricDelivery {
       .catch(() => failedOutcome(points))
       .then((outcome) => {
         scope.release();
-        this.counter.settle(outcome);
-        this.#bytes -= bytes;
+        this.counter.settle(outcome, bytes);
         this.#pending.delete(run);
         return outcome;
       });

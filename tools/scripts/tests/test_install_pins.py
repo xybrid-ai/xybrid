@@ -4,7 +4,7 @@ PinTests run the real pin patterns over small docs in a temporary directory,
 each pin registered for the files a test writes. RepoPinsTests read the
 committed docs: a bump must change nothing but their pins, and every install
 snippet in them must belong to a pin, including one in a shape no template
-knows. CI's Version sync job runs this file on every pull request, docs-only
+knows. CI's Repo checks job runs this file on every pull request, docs-only
 ones included, since docs are where these snippets are edited.
 """
 

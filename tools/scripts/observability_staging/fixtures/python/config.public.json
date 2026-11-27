@@ -1,0 +1,76 @@
+{
+  "binding": "python",
+  "commit": "00e617102bc77ca0602115669cf62a68e56a92bb",
+  "constants": {
+    "cases": {
+      "asr_model": "whisper-tiny-ggml",
+      "cloud_model": "gpt-4o-mini",
+      "frames": 5,
+      "pipeline_stop_after_chunks": 2,
+      "tts_model": "kitten-tts-nano-0.8",
+      "tts_stop_after_chunks": 1
+    },
+    "completed": {
+      "max_tokens": 32,
+      "prompt": "My access code is xybrid-staging-secret-5e8b. Without repeating it, answer in one short sentence: what colour is a clear daytime sky?"
+    },
+    "evaluation": {
+      "explanation": "answer names the colour",
+      "name": "staging_relevance",
+      "score_label": "pass",
+      "score_value": 0.75
+    },
+    "feedback": {
+      "comment": "helpful; my access code is xybrid-staging-secret-5e8b",
+      "label": "thumbs_up",
+      "score": 1.0
+    },
+    "model": {
+      "fallback_id": "qwen2.5-0.5b-instruct",
+      "id": "lfm2.5-230m"
+    },
+    "per_lane": {
+      "conversation_id": "staging-conversation-{run}-{session}",
+      "device_id": "staging-device-{lane}",
+      "service_name": "xybrid-staging-{binding}",
+      "service_version": "1.0.0"
+    },
+    "replacement": "[staging-redacted]",
+    "resource_attributes": [
+      "xybrid.acceptance.run",
+      "xybrid.acceptance.lane",
+      "xybrid.acceptance.commit",
+      "xybrid.acceptance.session"
+    ],
+    "schema": "xybrid-staging-scenario/1",
+    "secret": "xybrid-staging-secret-5e8b",
+    "sessions": [
+      "direct",
+      "collector"
+    ],
+    "stopped": {
+      "max_tokens": 256,
+      "prompt": "Write a long, detailed story about a lighthouse keeper who talks to the sea. Keep writing for many paragraphs.",
+      "stop_after_chunks": 3
+    },
+    "timeout_ms": 20000,
+    "workflow_name": "staging-workflow"
+  },
+  "lane": "python-mac",
+  "model_id": "lfm2.5-230m",
+  "run": "s6-20261111t143025z-python-mac",
+  "schema": "xybrid-staging-scenario/1",
+  "sessions": {
+    "collector": {
+      "endpoint": "http://127.0.0.1:55477",
+      "parent_span_id": "0e8d2ed0fc949625",
+      "trace_id": "022ae33191b8339e9c19f12b6ed47f0e"
+    },
+    "direct": {
+      "api_key": "<removed>",
+      "parent_span_id": "2bb5632aba620022",
+      "trace_id": "8f25e8437f84d311d8af4e1177122905",
+      "traces_endpoint": "https://staging.ingest.xybrid.dev/v1/traces"
+    }
+  }
+}

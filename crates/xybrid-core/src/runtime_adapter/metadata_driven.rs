@@ -77,12 +77,17 @@ impl MetadataDrivenAdapter {
                 AdapterError::InvalidInput(format!("Failed to parse metadata JSON: {}", e))
             })?;
 
-        // Update base path to metadata file's directory
+        // Move to the metadata file's directory. A decision model loads here,
+        // into a new executor: if that fails, the adapter keeps the model,
+        // directory and executor it had.
         if let Some(parent) = path.parent() {
+            let mut executor = TemplateExecutor::with_base_path(&parent.to_string_lossy());
+            executor.load_decision(&metadata)?;
             self.base_path = parent.to_path_buf();
-            self.executor = TemplateExecutor::with_base_path(&parent.to_string_lossy());
+            self.executor = executor;
+        } else {
+            self.executor.load_decision(&metadata)?;
         }
-
         self.current_metadata = Some(metadata);
 
         Ok(())
@@ -94,6 +99,7 @@ impl MetadataDrivenAdapter {
             AdapterError::InvalidInput(format!("Failed to parse metadata JSON: {}", e))
         })?;
 
+        self.executor.load_decision(&metadata)?;
         self.current_metadata = Some(metadata);
 
         Ok(())
@@ -185,5 +191,35 @@ mod tests {
         let metadata = adapter.current_metadata().unwrap();
         assert_eq!(metadata.model_id, "test-model");
         assert_eq!(metadata.version, "1.0");
+    }
+
+    #[test]
+    fn a_failed_decision_load_keeps_the_previous_model_and_directory() {
+        let write = |model_id: &str, template: &str| {
+            let dir = tempfile::tempdir().unwrap();
+            let json = format!(
+                r#"{{"model_id":"{model_id}","version":"1.0","execution_template":{template},
+                    "preprocessing":[],"postprocessing":[],"files":[]}}"#
+            );
+            std::fs::write(dir.path().join("model_metadata.json"), json).unwrap();
+            dir
+        };
+        let previous = write("previous", r#"{"type":"Onnx","model_file":"model.onnx"}"#);
+        // No weights (and, without llm-llamacpp, no decision runtime).
+        let decision = write(
+            "decision",
+            r#"{"type":"Decision","protocol":"lfm3-d1/text/v1","model_file":"missing.gguf"}"#,
+        );
+        let mut adapter = MetadataDrivenAdapter::new();
+        adapter
+            .load_metadata(previous.path().join("model_metadata.json"))
+            .unwrap();
+
+        assert!(adapter
+            .load_metadata(decision.path().join("model_metadata.json"))
+            .is_err());
+
+        assert_eq!(adapter.base_path(), previous.path());
+        assert_eq!(adapter.current_metadata().unwrap().model_id, "previous");
     }
 }

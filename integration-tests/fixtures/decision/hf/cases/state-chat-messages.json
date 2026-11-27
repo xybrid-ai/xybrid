@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "state-chat-messages",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A state of chat messages without media: kept as JSON, text parts in place",
+  "covers": [
+    "state-messages",
+    "state-array"
+  ],
+  "request_text": "{\"state\": [{\"role\": \"user\", \"content\": \"I was charged twice.\"}, {\"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"Sorry to hear that.\"}]}, {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"Please refund one.\"}, {\"type\": \"text\", \"text\": \"Thanks.\"}]}], \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}}",
+  "artifact": "d1-2b-hf"
+}

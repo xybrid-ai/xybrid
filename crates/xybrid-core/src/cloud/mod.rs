@@ -70,4 +70,5 @@ pub use config::{
     xybrid_api_key, xybrid_gateway_url, xybrid_platform_url, CloudBackend, CloudConfig,
 };
 pub use config::{platform_gateway_url, resolve_api_key_for, same_origin, url_origin};
+pub(crate) use error::is_insufficient_quota;
 pub use error::CloudError;

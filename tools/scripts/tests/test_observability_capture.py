@@ -105,6 +105,20 @@ def log_records(entries):
                 yield scope["logRecords"]
 
 
+def metric_points(entries, name):
+    for entry in entries:
+        for resource in (entry.get("body") or {}).get("resourceMetrics", []):
+            for scope in resource["scopeMetrics"]:
+                for metric in scope["metrics"]:
+                    if metric["name"] == name:
+                        yield metric["histogram"]["dataPoints"]
+
+
+def is_cancelled(point):
+    return any(a["key"] == "error.type" and a["value"].get("stringValue") == "cancelled"
+               for a in point.get("attributes", []))
+
+
 def results(entries, expectations, binding=None):
     checker = check_capture.Checker(check_capture.Capture.from_entries(entries), expectations, SPEC, binding)
     return {result.name: result for result in checker.run()}
@@ -148,9 +162,10 @@ class PassingRunTests(CheckerTestCase):
         self.refs["load"] = None
         self.expected["automatic"] = {"load": {"outcome": "error", "error": "LoadError: x"},
                                       "run": {"outcome": "skipped", "error": None}}
-        flushed = self.expected["stats"]["after_flush"]
-        flushed["traces"].update(accepted=6, exported=6)
-        flushed["logs"].update(accepted=1, exported=1)
+        for snapshot in ("after_flush", "after_shutdown"):
+            counters = self.expected["stats"][snapshot]
+            counters["traces"].update(accepted=6, exported=6)
+            counters["logs"].update(accepted=1, exported=1)
         self.assertOnlyFails()
 
     def test_a_declared_sdk_binding_overrides_the_attribution_check(self):
@@ -275,6 +290,50 @@ class TerminalFaultTests(CheckerTestCase):
         stats["after_release"]["traces"] = dict(stats["before_release"]["traces"])
         self.assertOnlyFails("inference.released")
 
+    def cancelled_durations(self):
+        points = [point for points in metric_points(self.entries, "gen_ai.client.inference.duration")
+                  for point in points if is_cancelled(point)]
+        self.assertTrue(points, "the fixture records the release's cancelled duration")
+        return points
+
+    def test_release_without_a_cancelled_duration_point_fails(self):
+        # The span says cancelled, but the metric never recorded the outcome.
+        dropped = self.cancelled_durations()
+        for points in metric_points(self.entries, "gen_ai.client.inference.duration"):
+            points[:] = [point for point in points if point not in dropped]
+        # Points never recorded were never exported either.
+        final = self.expected["stats"]["after_shutdown"]["metrics"]
+        final.update(accepted=final["accepted"] - len(dropped), exported=final["exported"] - len(dropped))
+        outcome = self.assertOnlyFails("inference.released")
+        self.assertIn("error.type 'cancelled'", " ".join(outcome["inference.released"].failures))
+
+    def test_release_whose_duration_was_recorded_as_success_fails(self):
+        for point in self.cancelled_durations():
+            remove_attribute(point, "error.type")
+        self.assertOnlyFails("inference.released")
+
+    def test_release_recorded_twice_fails(self):
+        # Every cumulative export after the release says the cancellation was measured twice.
+        for point in self.cancelled_durations():
+            point["count"] = "2"
+        outcome = self.assertOnlyFails("inference.released")
+        self.assertIn("holds 2 measurement(s)", " ".join(outcome["inference.released"].failures))
+
+    def test_delta_exports_count_every_cancelled_point(self):
+        # The fixture's two exports each carry the cancelled point; as deltas they are two measurements.
+        for temporality in (1, "AGGREGATION_TEMPORALITY_DELTA"):
+            with self.subTest(temporality=temporality):
+                self.entries, self.expected = load_fixture()
+                self.assertEqual(len(self.cancelled_durations()), 2)
+                for entry in self.entries:
+                    for resource in (entry.get("body") or {}).get("resourceMetrics", []):
+                        for scope in resource["scopeMetrics"]:
+                            for metric in scope["metrics"]:
+                                if metric["name"] == "gen_ai.client.inference.duration":
+                                    metric["histogram"]["aggregationTemporality"] = temporality
+                outcome = self.assertOnlyFails("inference.released")
+                self.assertIn("holds 2 measurement(s)", " ".join(outcome["inference.released"].failures))
+
     def test_cancellation_reported_as_exception_fails(self):
         records = next(log_records(self.entries))
         cancelled = dict(records[0], spanId=self.refs["inference_released"]["span_id"])
@@ -327,8 +386,12 @@ class StatsAndLifecycleFaultTests(CheckerTestCase):
         self.assertOnlyFails("stats.consistent")
 
     def test_more_exported_than_received_fails(self):
-        self.expected["stats"]["after_flush"]["traces"].update(accepted=12, exported=12)
-        self.assertOnlyFails("stats.consistent")
+        # The final counters after shutdown claim as much, so only the
+        # receiver comparison fails.
+        for snapshot in ("after_flush", "after_shutdown"):
+            self.expected["stats"][snapshot]["traces"].update(accepted=12, exported=12)
+        outcome = self.assertOnlyFails("stats.consistent")
+        self.assertEqual(len(outcome["stats.consistent"].failures), 2)
 
     def test_non_idempotent_shutdown_fails(self):
         self.expected["lifecycle"]["shutdown"] = ["ok", "error: TelemetryDelivery: x"]
@@ -343,13 +406,49 @@ class StatsAndLifecycleFaultTests(CheckerTestCase):
         self.assertOnlyFails("lifecycle.shutdown")
 
     def test_stats_after_shutdown_without_counters_fail(self):
-        # "All zero" must not hold vacuously over counters that were never read.
+        # The final counters must not hold vacuously over counters never read.
         self.expected["stats"]["after_shutdown"] = {"enabled": False}
         outcome = self.assertOnlyFails("lifecycle.shutdown")
         self.assertEqual(len(outcome["lifecycle.shutdown"].failures), len(check_capture.SIGNAL_KEYS))
         self.expected["stats"]["after_shutdown"] = {
             "enabled": False, **{signal: {"accepted": 0} for signal in check_capture.SIGNAL_KEYS}}
         self.assertOnlyFails("lifecycle.shutdown")
+
+    def test_stats_reset_by_shutdown_fail(self):
+        # After shutdown the stats are the session's
+        # final counters until the next init, not zeros (the old behaviour).
+        self.expected["stats"]["after_shutdown"] = {
+            "enabled": False,
+            **{signal: dict.fromkeys(check_capture.COUNTER_KEYS, 0) for signal in check_capture.SIGNAL_KEYS}}
+        outcome = self.assertOnlyFails("lifecycle.shutdown")
+        failures = outcome["lifecycle.shutdown"].failures
+        self.assertTrue(all("not a reset" in failure for failure in failures), failures)
+        # Every signal's accepted and exported were above zero after the flush.
+        self.assertEqual(len(failures), 2 * len(check_capture.SIGNAL_KEYS))
+
+    def test_stats_after_shutdown_must_be_settled_and_lossless(self):
+        final = self.expected["stats"]["after_shutdown"]
+        cases = (
+            ("traces", {"pending": 1, "accepted": 10}, "pending is 1"),
+            ("logs", {"accepted": 3}, "accepted 3 != exported + dropped + failed"),
+            ("metrics", {"failed": 1, "accepted": 17}, "metrics.failed is 1"),
+            ("traces", {"dropped": 2, "accepted": 11}, "traces.dropped is 2"),
+        )
+        for signal, change, message in cases:
+            with self.subTest(signal=signal, change=change):
+                original = dict(final[signal])
+                final[signal].update(change)
+                outcome = self.assertOnlyFails("lifecycle.shutdown")
+                failures = outcome["lifecycle.shutdown"].failures
+                self.assertTrue(any(message in failure for failure in failures), failures)
+                final[signal] = original
+
+    def test_more_exported_after_shutdown_than_received_fails(self):
+        # The final counters are held against the receiver like the flush's.
+        self.expected["stats"]["after_shutdown"]["metrics"].update(accepted=24, exported=24)
+        outcome = self.assertOnlyFails("stats.consistent")
+        self.assertEqual(outcome["stats.consistent"].failures,
+                         ["after shutdown, metrics.exported 24 but the receiver holds 16 data points"])
 
     def test_export_after_shutdown_fails(self):
         late = copy.deepcopy(self.entries[0])

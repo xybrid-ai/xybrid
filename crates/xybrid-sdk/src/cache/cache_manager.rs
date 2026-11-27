@@ -138,6 +138,19 @@ impl CacheManager {
     /// 2. Platform-specific default (iOS/macOS/Linux/Windows)
     /// 3. On Android: REQUIRES SDK config - returns error if not set
     fn get_cache_dir() -> Result<PathBuf, SdkError> {
+        // Unit tests must not create or inspect the developer's model cache.
+        // Configure only the in-memory path; do not mutate process environment
+        // variables while the parallel test harness is running.
+        #[cfg(test)]
+        crate::SDK_CONFIG.get_or_init(|| {
+            static CACHE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+            let cache = CACHE.get_or_init(|| tempfile::tempdir().expect("create SDK test cache"));
+            crate::SdkConfig {
+                cache_dir: Some(cache.path().join("models")),
+                ..Default::default()
+            }
+        });
+
         // First, check if SDK config has a custom cache directory
         if let Some(cache_dir) = crate::get_sdk_cache_dir() {
             return Ok(cache_dir);

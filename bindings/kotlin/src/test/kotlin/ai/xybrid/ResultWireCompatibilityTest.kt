@@ -49,6 +49,12 @@ class ResultWireCompatibilityTest {
         assertNull(options.tracestate)
         assertEquals("conv-1", options.conversationId)
         assertTrue(options.suppressTrace)
+        assertNull(options.frameSessionId)
+
+        // A live-capture loop names its session; nothing else changes.
+        val live = runOptions(frameSessionId = "camera-7")
+        assertEquals("camera-7", live.frameSessionId)
+        assertFalse(live.suppressTrace)
     }
 
     private fun resultWire(

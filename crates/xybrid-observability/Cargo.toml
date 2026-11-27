@@ -10,7 +10,7 @@ readme = "README.md"
 documentation = "https://docs.rs/xybrid-observability"
 keywords = ["opentelemetry", "observability", "genai", "llm", "tracing"]
 categories = ["development-tools::debugging", "development-tools::profiling"]
-include = ["src/**", "contract/**", "collector/**", "examples/**", "tests/**", "README.md", "CONTRACT.md"]
+include = ["src/**", "contract/**", "collector/**", "examples/**", "tests/**", "benches/**", "README.md", "CONTRACT.md"]
 
 [lib]
 name = "xybrid_observability"
@@ -38,6 +38,12 @@ httpdate = { version = "1", optional = true }
 opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "metrics", "logs", "testing"] }
 httpmock = "0.7"
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "macros", "time"] }
+criterion = { version = "0.5", features = ["html_reports"] }  # Benchmarks (benches/)
+
+# The benches read process memory on macOS through proc_pidinfo/getrusage
+# (benches/support), which std does not expose.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+libc = "0.2"
 
 [features]
 default = ["otlp"]
@@ -61,6 +67,23 @@ required-features = ["test-util"]
 [[test]]
 name = "pipeline"
 path = "tests/pipeline.rs"
+required-features = ["otlp"]
+
+# Overhead and memory benchmarks (tools/scripts/observability_perf/README.md).
+# `cargo bench -p xybrid-observability` runs all three.
+[[bench]]
+name = "stream_overhead"
+harness = false
+required-features = ["otlp"]
+
+[[bench]]
+name = "content_pipeline"
+harness = false
+
+# Peak library-owned bytes come from `SignalStats::buffered_bytes`.
+[[bench]]
+name = "saturation"
+harness = false
 required-features = ["otlp"]
 
 [[example]]

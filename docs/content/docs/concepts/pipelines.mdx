@@ -51,7 +51,7 @@ stages:
 ```yaml
 stages:
   - id: assistant
-    model: gpt-4o-mini
+    model: openai/gpt-4o-mini
     target: cloud
     provider: openai
     system_prompt: "You are a helpful voice assistant. Keep responses concise."
@@ -62,15 +62,15 @@ stages:
 | Field | Description |
 |-------|-------------|
 | `id` | Stage identifier (defaults to the model ID) |
-| `model` | Model ID from the registry, or a provider model name for cloud stages |
+| `model` | Model ID from the registry, or the cloud model for cloud stages: a canonical ID such as `openai/gpt-4o-mini` through Xybrid Platform, the provider's own model name with `backend: direct` |
 | `version` | Model version (e.g. `"1.0"`) |
 | `target` | Where to run: `device`, `cloud`, or `auto` (default) — see [Hybrid Execution](/docs/concepts/hybrid-execution). `auto` **with** a `provider` is a hybrid stage: local model plus a cloud leg, chosen per request by policy and device state |
 | `provider` | Cloud provider for cloud or hybrid stages: `openai`, `anthropic`, `google`, `deepseek`, `elevenlabs`, `openrouter`, `custom` |
-| `cloud_model` | Model name sent to the provider on the cloud leg of a hybrid stage (defaults to `model`) |
+| `cloud_model` | Model sent on the cloud leg of a hybrid stage (defaults to `model`), named like a cloud stage's `model` |
 | `backend` | `gateway` (default) uses Xybrid Platform with `XYBRID_API_KEY`; `direct` with an OpenAI-compatible provider calls the provider's API with `$<PROVIDER>_API_KEY` |
 | `gateway_url`, `api_key` | Explicit endpoint and credential for the cloud leg (`api_key` accepts `$ENV_VAR`); credentials are never inherited across origins |
 | `thinking` | DeepSeek only: `enabled` or `disabled` (DeepSeek reasons by default; `disabled` keeps `max_tokens` for the answer) |
-| `execution_provider` | ONNX Runtime override: `cpu`, `coreml`, `coreml-ane`, `coreml-gpu` (auto-selected if unset) |
+| `execution_provider` | ONNX Runtime execution provider: `cpu`, `coreml`, `coreml-ane`, `coreml-gpu`. Parsed, not applied yet: ONNX models run on the CPU whatever the value, and nothing is auto-selected when it is unset. Loading a pipeline whose stage sets it to anything but `cpu` logs a warning (the iOS and Android SDKs write it to the system log; elsewhere it shows only where the host installs a Rust `log` logger), and `xybrid run`, `xybrid repl` and `xybrid prepare` print it |
 | *(any other key)* | Passed to the stage as an option — `system_prompt`, `max_tokens`, `temperature`, `top_p` apply to both legs of a hybrid stage |
 
 <Callout type="info">
@@ -89,7 +89,7 @@ name: voice-assistant
 stages:
   - whisper-tiny              # on-device ASR
 
-  - model: gpt-4o-mini        # cloud LLM
+  - model: openai/gpt-4o-mini # cloud LLM
     target: cloud
     provider: openai
     system_prompt: "You are a helpful voice assistant."
@@ -149,9 +149,10 @@ let result = pipeline.run(&input)?;
 |----------|-----------|
 | Dart (Flutter) | ✅ Available |
 | Rust | ✅ Available |
-| Kotlin | 🚧 Planned |
-| Swift | 🚧 Planned |
-| C# (Unity) | 🚧 Planned |
+| Kotlin | ✅ Available |
+| Swift | ✅ Available |
+| React Native | ✅ Available |
+| C# (Unity) | ✅ Available |
 
 ## Related
 

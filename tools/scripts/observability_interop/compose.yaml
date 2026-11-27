@@ -1,0 +1,195 @@
+# Self-hosted destinations for the observability interop harness.
+#
+#   ./up.sh langfuse | phoenix | all       (docker compose --env-file interop.env --profile ... up)
+#   ./down.sh [--volumes]
+#
+# Every image is pinned by tag and multi-arch index digest (Docker Hub /
+# cgr.dev, looked up 2026-11-09). Only the two UIs/APIs are published, on
+# loopback ports from interop.env; databases stay on the compose network.
+#
+# Langfuse: the six-service self-hosted stack of Langfuse's own
+# docker-compose.yml (web, worker, postgres, clickhouse, redis, minio), on the
+# current release line (v4; upstream's compose defaults to it and the
+# langfuse.yaml profile's `x-langfuse-ingestion-version: 4` header targets its
+# real-time OTel path). The optional ai-gateway service is left out. To run
+# the last v3 release instead, set in the shell before ./up.sh:
+#   LANGFUSE_WEB_IMAGE=docker.io/langfuse/langfuse:3.227.0@sha256:49411a0367e6aa8701df74ca97d67ad648e9b5fcc5b5f130cfdff90f5b80edcc
+#   LANGFUSE_WORKER_IMAGE=docker.io/langfuse/langfuse-worker:3.227.0@sha256:e61df79e7ee7b421099e876f6e9418ea8eee7e27b234acfb995ccf0fd4fcd3d0
+# (run_interop.py reads v4's v2 observations / v3 scores APIs and falls back
+# to v3's v1 observations / v2 scores on a 404).
+#
+# Phoenix 21 rejects unauthenticated OTLP by default; this local server runs
+# with PHOENIX_ENABLE_AUTH=false, matching phoenix.yaml (no Authorization
+# header). An authenticated server needs phoenix.yaml + phoenix-auth.yaml.
+
+name: xybrid-interop
+
+x-langfuse-env: &langfuse-env
+  NEXTAUTH_URL: http://localhost:${LANGFUSE_HOST_PORT}
+  DATABASE_URL: postgresql://postgres:${LANGFUSE_POSTGRES_PASSWORD}@postgres:5432/postgres
+  SALT: ${LANGFUSE_SALT}
+  ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}
+  TELEMETRY_ENABLED: "false"
+  LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+  CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+  CLICKHOUSE_URL: http://clickhouse:8123
+  CLICKHOUSE_USER: clickhouse
+  CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD}
+  CLICKHOUSE_CLUSTER_ENABLED: "false"
+  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD}
+  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+  LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+  LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
+  LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD}
+  LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:${LANGFUSE_MINIO_HOST_PORT}
+  LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_AUTH: ${LANGFUSE_REDIS_AUTH}
+  REDIS_TLS_ENABLED: "false"
+
+x-langfuse-depends: &langfuse-depends
+  postgres:
+    condition: service_healthy
+  minio:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  clickhouse:
+    condition: service_healthy
+
+services:
+  langfuse-worker:
+    profiles: [langfuse]
+    container_name: xybrid-interop-langfuse-worker
+    image: ${LANGFUSE_WORKER_IMAGE:-docker.io/langfuse/langfuse-worker:4.77.0@sha256:1bc3597ff4c953e98ff9ee474a7d634e97664e4df298fdf20f13ecc834c89438}
+    restart: unless-stopped
+    depends_on: *langfuse-depends
+    environment:
+      <<: *langfuse-env
+
+  langfuse-web:
+    profiles: [langfuse]
+    container_name: xybrid-interop-langfuse-web
+    image: ${LANGFUSE_WEB_IMAGE:-docker.io/langfuse/langfuse:4.77.0@sha256:2b47d0ae63ae737996a58cc03536a73230c809a2371c230c9bea4b7653a0b6a0}
+    restart: unless-stopped
+    depends_on: *langfuse-depends
+    ports:
+      - 127.0.0.1:${LANGFUSE_HOST_PORT}:3000
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET}
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD}
+
+  clickhouse:
+    profiles: [langfuse]
+    container_name: xybrid-interop-clickhouse
+    image: docker.io/clickhouse/clickhouse-server:26.3.62.3@sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a
+    restart: unless-stopped
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD}
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 1s
+
+  minio:
+    profiles: [langfuse]
+    container_name: xybrid-interop-minio
+    image: cgr.dev/chainguard/minio:latest@sha256:616286de6ef3a1892876b126e745e152d8e03add6357203f8a1f854bdd1dce76
+    restart: unless-stopped
+    entrypoint: sh
+    # Create the 'langfuse' bucket before starting the server.
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD}
+    ports:
+      - 127.0.0.1:${LANGFUSE_MINIO_HOST_PORT}:9000
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 1s
+
+  redis:
+    profiles: [langfuse]
+    container_name: xybrid-interop-redis
+    image: docker.io/library/redis:7.4.12@sha256:2e3eb11462c4e3759e6972678dd051d150ff54b1e60714b3c33b701260172a90
+    restart: unless-stopped
+    command: --requirepass ${LANGFUSE_REDIS_AUTH} --maxmemory-policy noeviction
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${LANGFUSE_REDIS_AUTH}", "--no-auth-warning", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+
+  postgres:
+    profiles: [langfuse]
+    container_name: xybrid-interop-postgres
+    image: docker.io/library/postgres:17.11@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  phoenix:
+    profiles: [phoenix]
+    container_name: xybrid-interop-phoenix
+    image: docker.io/arizephoenix/phoenix:version-21.0.0@sha256:1f9a144a5357b4973e93a15718f050247cb7a4ee7b7c6c06ecb91b5eed3fbaad
+    restart: unless-stopped
+    environment:
+      PHOENIX_ENABLE_AUTH: "false"
+      PHOENIX_TELEMETRY_ENABLED: "false"
+    # Storage is the container's own SQLite file: every `down.sh` starts the
+    # next run from an empty Phoenix.
+    ports:
+      # UI, REST API and OTLP/HTTP (/v1/traces) share the HTTP port; the gRPC
+      # port 4317 is not published (the Collector itself listens on 4318).
+      - 127.0.0.1:${PHOENIX_HOST_PORT}:6006
+
+volumes:
+  clickhouse_data:
+  clickhouse_logs:
+  minio_data:
+  redis_data:
+  postgres_data:

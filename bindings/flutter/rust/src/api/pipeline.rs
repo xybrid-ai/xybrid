@@ -5,7 +5,7 @@ use xybrid_sdk::{InferenceMetrics, Pipeline, PipelineExecutionResult, PipelineRe
 
 use super::envelope::FfiEnvelope;
 use super::observability::FfiObservationOptions;
-use super::result::{ensure_ffi_payload, FfiExecutionTarget, FfiResult};
+use super::result::{ensure_ffi_payload, FfiExecutionTarget, FfiResult, FfiRunResult};
 
 fn final_execution_target(target: Option<&str>) -> FfiExecutionTarget {
     match target {
@@ -135,14 +135,14 @@ impl FfiPipeline {
         &self,
         envelope: FfiEnvelope,
         observation: Option<FfiObservationOptions>,
-    ) -> Result<FfiResult, String> {
+    ) -> Result<FfiRunResult, String> {
         let options = pipeline_options(observation.as_ref())?;
         let input = envelope.into_envelope();
         let result = self
             .0
             .run_with_options(&input, &options)
             .map_err(|e| e.to_string())?;
-        pipeline_ffi_result(&result)
+        pipeline_ffi_result(&result).map(FfiRunResult::Legacy)
     }
 
     /// Get the pipeline name (if specified in YAML).

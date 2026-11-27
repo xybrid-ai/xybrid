@@ -25,7 +25,7 @@ config_setting(
 )
 
 # The macOS GPU lane toggle (Flip 2). Both darwin lanes share the SAME Rust
-# feature set (candle-metal/CoreML/vision are bindings — pure Rust, cross-
+# feature set (CoreML/vision are bindings — pure Rust, cross-
 # compilable, so keeping features identical maximizes rlib cache overlap
 # between the RBE CPU lane and the Mac Metal lane). The flag flips only what
 # physically differs: llama.cpp's GGML_METAL/ACCELERATE, which need Xcode —
@@ -86,6 +86,51 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+# Audited decision renderer closure from the same immutable upstream pin.
+# It links neither common/chat.cpp nor the server application. The model
+# runtime dependency remains selected by wrapper_cc (including Android DL).
+#
+# Only common/ reaches dependents (for jinja/*.h and json.h). wrapper_cc gets
+# ggml.h from the llama build it links; a second copy on its include path
+# redefines every ggml type, so ggml.h and nlohmann stay private below.
+# llama.cpp's src/ is never on the path: its unicode.h shadows common's.
+cc_library(
+    name = "llama_decision_jinja",
+    copts = ["-std=c++17"] + select({
+        "@rules_rs//rs/platforms/config:wasm32-unknown-emscripten": ["-fexceptions"],
+        "//conditions:default": [],
+    }),
+    srcs = [
+        "vendor/llama-cpp/common/jinja/lexer.cpp",
+        "vendor/llama-cpp/common/jinja/parser.cpp",
+        "vendor/llama-cpp/common/jinja/runtime.cpp",
+        "vendor/llama-cpp/common/jinja/value.cpp",
+        "vendor/llama-cpp/common/jinja/string.cpp",
+        "vendor/llama-cpp/common/json.cpp",
+        "vendor/llama-cpp/common/unicode.cpp",
+        "vendor/llama-cpp/common/unicode.h",
+    ],
+    hdrs = glob(["vendor/llama-cpp/common/jinja/*.h"]) + [
+        "vendor/llama-cpp/common/json.h",
+    ],
+    implementation_deps = [":llama_decision_jinja_private_headers"],
+    includes = ["vendor/llama-cpp/common"],
+    visibility = ["//visibility:public"],
+)
+
+# Headers only the Jinja closure's own sources compile against: ggml.h and
+# nlohmann, both for common/json.cpp.
+cc_library(
+    name = "llama_decision_jinja_private_headers",
+    hdrs = glob(["vendor/llama-cpp/vendor/nlohmann/*.hpp"]) + [
+        "vendor/llama-cpp/ggml/include/ggml.h",
+    ],
+    includes = [
+        "vendor/llama-cpp/ggml/include",
+        "vendor/llama-cpp/vendor",
+    ],
 )
 
 # The browser runtime uses the same pinned sources as //:llama. These sources
@@ -840,8 +885,9 @@ objc_library(
     ],
     copts = [
         "-std=c++17",
-        # Consumers may target older iOS than the bridge needs (the Flutter pod
-        # declares 13.0); every newer API must sit behind @available.
+        # Every shipped iOS config builds for 16.0 (--ios_minimum_os), but a
+        # cargo build of the same source can target an older iOS through
+        # IPHONEOS_DEPLOYMENT_TARGET; every newer API must sit behind @available.
         "-Werror=unguarded-availability-new",
     ],
     # The bridge includes upstream's ABI header as "coreml/whisper-encoder.h".

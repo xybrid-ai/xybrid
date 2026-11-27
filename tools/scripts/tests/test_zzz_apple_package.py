@@ -92,7 +92,7 @@ class ApplePackageTests(unittest.TestCase):
         with zipfile.ZipFile(self.output) as archive:
             expected = self.base | {PACK.NOTICE_ROOT + name: data for name, data in self.payload.items()}
             self.assertEqual(expected, {name: archive.read(name) for name in archive.namelist()})
-            self.assertEqual(23, len(archive.namelist()))
+            self.assertEqual(24, len(archive.namelist()))
         self.assertEqual(original, self.archive.read_bytes())
         self.assertEqual(0, PACK.main(["verify", "--archive", str(self.output)]))
 
@@ -150,7 +150,7 @@ class ApplePackageTests(unittest.TestCase):
         self.package()
         PACK.verify_archive(self.output)
         with zipfile.ZipFile(self.output) as archive:
-            self.assertEqual(23, len(archive.namelist()))
+            self.assertEqual(24, len(archive.namelist()))
 
     def test_partial_conflicting_and_extra_existing_notices_fail(self):
         notices = {PACK.NOTICE_ROOT + name: data for name, data in self.payload.items()}

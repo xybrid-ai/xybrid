@@ -1,14 +1,14 @@
-//! Benchmark types for execution provider performance comparison.
+//! Benchmark types for comparing inference timings.
 //!
-//! This module provides types for benchmarking model inference,
-//! comparing CPU vs hardware-accelerated execution providers (CoreML, CUDA, etc.).
+//! [`BenchmarkResult`] computes timing statistics from per-iteration times, and
+//! [`compare_benchmarks`] compares two runs. A result's `execution_provider` is
+//! a label the caller supplies; nothing here measures or selects a provider.
+//! [`ExecutionProviderInfo`] describes what ONNX Runtime sessions run on in
+//! this build.
 //!
-//! All platform bindings (Flutter, Kotlin, Swift) should use these SDK types
-//! to ensure consistent statistics calculation across platforms.
+//! ## Comparing Two Runs
 //!
-//! ## Comparing Execution Providers
-//!
-//! Use `compare_benchmarks()` to compare performance between different providers:
+//! Use `compare_benchmarks()` to compare two labelled runs:
 //!
 //! ```rust
 //! use xybrid_sdk::{BenchmarkResult, compare_benchmarks};
@@ -38,7 +38,7 @@ use serde::{Deserialize, Serialize};
 pub struct BenchmarkResult {
     /// Model identifier
     pub model_id: String,
-    /// Execution provider used (cpu, coreml-ane, cuda, etc.)
+    /// Execution provider label supplied by the caller (for example `cpu`)
     pub execution_provider: String,
     /// Number of iterations
     pub iterations: u32,
@@ -187,10 +187,14 @@ impl BenchmarkResult {
 // Execution Provider Info
 // ============================================================================
 
-/// Information about the current execution provider configuration.
+/// What ONNX Runtime sessions run on in this build.
 ///
-/// Provides compile-time platform detection to determine which hardware
-/// acceleration is available (CoreML on Apple, CUDA on NVIDIA, etc.).
+/// Every ONNX session the runtime builds uses ONNX Runtime's CPU execution
+/// provider, so `name` is `"cpu"` on every platform. `coreml_available` only
+/// says that ONNX Runtime's Core ML execution provider is linked into the
+/// build; no session selects it. Models that do not run on ONNX Runtime are
+/// not described here: GGUF models (llama.cpp), Whisper models (whisper.cpp),
+/// Core ML bundles (the native Core ML adapter) and Candle models.
 ///
 /// # Example
 ///
@@ -198,32 +202,35 @@ impl BenchmarkResult {
 /// use xybrid_sdk::ExecutionProviderInfo;
 ///
 /// let info = ExecutionProviderInfo::current();
-/// println!("Running on {} with {}", info.platform, info.name);
+/// assert_eq!(info.name, "cpu");
+/// println!("ONNX Runtime on {} runs on the {}", info.platform, info.name);
 /// if info.coreml_available {
-///     println!("CoreML acceleration available!");
+///     println!("The Core ML execution provider is linked, but not selected");
 /// }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionProviderInfo {
-    /// Name of the execution provider (cpu, coreml-ane, cuda, etc.)
+    /// Execution provider ONNX sessions run on. Always `"cpu"`.
     pub name: String,
-    /// Detailed description of the execution provider
+    /// One-line description of `name`; says when Core ML is linked but unused.
     pub description: String,
-    /// Whether CoreML execution provider is available
+    /// Whether ONNX Runtime's Core ML execution provider is linked into this
+    /// build: `xybrid-core`'s `ort-coreml` feature, which the `platform-ios`
+    /// and `platform-macos` presets enable. Linked, not in use. Unrelated to
+    /// the `coreml` feature (the native Core ML adapter).
     pub coreml_available: bool,
-    /// Whether running on Apple Silicon (aarch64 macOS/iOS)
+    /// Whether the build targets Apple Silicon (aarch64 macOS or iOS).
     pub apple_silicon: bool,
-    /// Platform identifier (ios, macos, android, linux, windows, other)
+    /// Target OS: `ios`, `macos`, `android`, `linux`, `windows` or `other`.
     pub platform: String,
 }
 
 impl ExecutionProviderInfo {
-    /// Create execution provider info for the current platform.
+    /// Describes the ONNX Runtime execution provider of the current build.
     ///
-    /// Uses compile-time platform detection to determine:
-    /// - Target OS (iOS, macOS, Android, Linux, Windows)
-    /// - Architecture (aarch64 for Apple Silicon detection)
-    /// - Feature flags (coreml-ep for CoreML availability)
+    /// The platform and architecture come from the compile target, and
+    /// `coreml_available` from [`xybrid_core::features::enabled`], so it is
+    /// right for Cargo presets, explicit features and Bazel builds alike.
     ///
     /// # Example
     ///
@@ -231,7 +238,7 @@ impl ExecutionProviderInfo {
     /// use xybrid_sdk::ExecutionProviderInfo;
     ///
     /// let info = ExecutionProviderInfo::current();
-    /// assert!(!info.name.is_empty());
+    /// assert_eq!(info.name, "cpu");
     /// assert!(!info.platform.is_empty());
     /// ```
     pub fn current() -> Self {
@@ -248,32 +255,27 @@ impl ExecutionProviderInfo {
         } else {
             "other"
         };
-
-        let coreml_available = cfg!(feature = "ort-coreml");
         let apple_silicon =
             cfg!(any(target_os = "ios", target_os = "macos")) && cfg!(target_arch = "aarch64");
+        let coreml_linked = xybrid_core::features::enabled().contains(&"ort-coreml");
+        Self::describe(platform, apple_silicon, coreml_linked)
+    }
 
-        let (name, description) = if coreml_available && apple_silicon {
-            (
-                "coreml-ane".to_string(),
-                "CoreML with Neural Engine acceleration (Apple Silicon)".to_string(),
-            )
-        } else if coreml_available {
-            (
-                "coreml".to_string(),
-                "CoreML execution provider available".to_string(),
-            )
+    /// [`Self::current`] for an explicit build, so every combination is
+    /// testable on one host.
+    fn describe(platform: &str, apple_silicon: bool, coreml_linked: bool) -> Self {
+        // Every ONNX session in xybrid-core is built with
+        // `ExecutionProviderKind::Cpu`. Change this label only together with
+        // those call sites.
+        let description = if coreml_linked {
+            "ONNX Runtime CPU execution provider (the Core ML execution provider is linked but not selected)"
         } else {
-            (
-                "cpu".to_string(),
-                "CPU execution (no hardware acceleration)".to_string(),
-            )
+            "ONNX Runtime CPU execution provider"
         };
-
         Self {
-            name,
-            description,
-            coreml_available,
+            name: "cpu".to_string(),
+            description: description.to_string(),
+            coreml_available: coreml_linked,
             apple_silicon,
             platform: platform.to_string(),
         }
@@ -287,12 +289,13 @@ impl ExecutionProviderInfo {
 /// Compare benchmark results between two runs.
 ///
 /// Calculates speedup factor, time difference, and percentage improvement.
-/// Useful for comparing CPU vs hardware-accelerated (CoreML, CUDA) performance.
+/// The two runs can differ in anything the caller labels, such as the model
+/// or the device.
 ///
 /// # Arguments
 ///
-/// * `baseline` - The baseline benchmark result (typically CPU)
-/// * `comparison` - The comparison benchmark result (typically hardware-accelerated)
+/// * `baseline` - The baseline benchmark result
+/// * `comparison` - The benchmark result compared against the baseline
 ///
 /// # Returns
 ///
@@ -453,6 +456,38 @@ mod tests {
         // Platform should be one of the known values
         assert!(["ios", "macos", "android", "linux", "windows", "other"]
             .contains(&info.platform.as_str()));
+
+        // ONNX sessions always run on the CPU provider; Core ML is only linked.
+        assert_eq!(info.name, "cpu");
+        assert_eq!(
+            info.coreml_available,
+            xybrid_core::features::enabled().contains(&"ort-coreml")
+        );
+    }
+
+    #[test]
+    fn execution_provider_info_names_cpu_for_every_build() {
+        for platform in ["ios", "macos", "android", "linux", "windows", "other"] {
+            for apple_silicon in [false, true] {
+                for coreml_linked in [false, true] {
+                    let info =
+                        ExecutionProviderInfo::describe(platform, apple_silicon, coreml_linked);
+                    assert_eq!(info.name, "cpu");
+                    assert!(!info.description.contains("Neural Engine"));
+                    assert_eq!(info.coreml_available, coreml_linked);
+                    assert_eq!(info.apple_silicon, apple_silicon);
+                    assert_eq!(info.platform, platform);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn execution_provider_info_says_core_ml_is_linked_not_selected() {
+        let linked = ExecutionProviderInfo::describe("macos", true, true);
+        assert!(linked.description.contains("linked but not selected"));
+        let plain = ExecutionProviderInfo::describe("linux", false, false);
+        assert!(!plain.description.contains("Core ML"));
     }
 
     #[test]

@@ -11,6 +11,21 @@ the following licenses.
 
 ================================================================================
 
+llama.cpp / ggml and the pinned Jinja decision renderer
+Copyright (c) 2023-2026 The ggml authors
+Licensed under the MIT License
+https://github.com/ggml-org/llama.cpp
+
+JSON for Modern C++ (used by the decision renderer)
+Copyright (c) 2013-2025 Niels Lohmann
+Licensed under the MIT License
+https://github.com/nlohmann/json
+
+Complete license texts and the production source closure are retained in
+crates/llama-cpp-sys/NOTICE. Native redistributions must carry those texts.
+
+--------------------------------------------------------------------------------
+
 ONNX Runtime
 Copyright (c) Microsoft Corporation
 Licensed under the MIT License

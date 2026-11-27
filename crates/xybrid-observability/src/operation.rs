@@ -10,6 +10,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::SystemTime;
 
@@ -20,7 +21,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::clock::{seconds_between, OperationClock};
-use crate::content::{InputMessage, Outcome, OutputMessage, Part, TextBound};
+use crate::content::{json_escaped_len, InputMessage, Outcome, OutputMessage, Part, TextBound};
 use crate::context::{ObservationContext, ObservationRef};
 use crate::observer::{push_any, Instruments, LogEvent, ObserverInner, SpanState};
 use crate::preflight;
@@ -191,9 +192,14 @@ impl Retained {
                 span,
                 event,
                 truncated,
+                text,
             } => {
                 let node = PREFLIGHT_NODE_BYTES + key.len();
-                let bytes = span.as_ref().map_or(0, |s| node + s.len())
+                // Plain text is charged as OTLP/JSON writes it (escapes
+                // counted), so no span value grows more than twofold when
+                // encoded (CONTRACT.md "Content pipeline", budgets).
+                let span_len = |s: &String| if text { json_escaped_len(s) } else { s.len() };
+                let bytes = span.as_ref().map_or(0, |s| node + span_len(s))
                     + event.as_ref().map_or(0, |v| {
                         node.saturating_add(
                             usize::try_from(preflight::cost_of(v)).unwrap_or(usize::MAX),
@@ -252,6 +258,8 @@ enum Recorded {
         span: Option<String>,
         event: Option<Value>,
         truncated: bool,
+        /// The span value is plain text, not serialized JSON.
+        text: bool,
     },
     Dropped,
     Failed,
@@ -334,21 +342,28 @@ impl Core {
         })
     }
 
-    /// Routes governed content through the capture gate.
+    /// Whether the operation's own span records. Content for a span that
+    /// does not record (unsampled, suppressed, no tracer) is never processed.
+    fn span_recording(&self) -> bool {
+        self.span.as_ref().is_some_and(|s| s.recording)
+    }
+
+    /// Routes governed content through the capture gate. The span
+    /// destination needs a recording span; the event destination does not.
     fn governed(&self, has_details_event: bool) -> Destinations {
         let capture = self.observer.content.capture();
         Destinations {
-            span: capture.on_spans(),
+            span: capture.on_spans() && self.span_recording(),
             event: has_details_event && capture.on_events() && self.observer.events.is_some(),
         }
     }
 
-    /// Schema content: recorded on spans in every mode, on events when event
-    /// capture is enabled.
+    /// Schema content: recorded on (recording) spans in every mode, on events
+    /// when event capture is enabled.
     fn schema(&self) -> Destinations {
         let capture = self.observer.content.capture();
         Destinations {
-            span: true,
+            span: self.span_recording(),
             event: capture.on_events() && self.observer.events.is_some(),
         }
     }
@@ -365,6 +380,7 @@ impl Core {
                 span: to.span.then_some(b.json),
                 event: to.event.then_some(b.value),
                 truncated: b.truncated,
+                text: false,
             },
             Outcome::Dropped => Recorded::Dropped,
             Outcome::Failed => Recorded::Failed,
@@ -379,6 +395,7 @@ impl Core {
                 event: to.event.then(|| Value::String(b.text.clone())),
                 span: to.span.then_some(b.text),
                 truncated: b.truncated,
+                text: true,
             },
             Outcome::Dropped => Recorded::Dropped,
             Outcome::Failed => Recorded::Failed,
@@ -414,9 +431,32 @@ impl Core {
     }
 
     /// Ends the span; it never ends before it starts.
+    ///
+    /// Ending a span runs every span processor's `on_end` on this thread. A
+    /// processor that panics there is contained (CONTRACT.md "Errors and
+    /// cancellation"): the operation still ends and the caller continues.
+    /// Unwind safety: the SDK takes the span's data before it calls the
+    /// processors and holds no provider lock while they run, so the panic
+    /// leaves only that span's own lock poisoned (the span has ended, so it is
+    /// never used again) and later spans still reach every processor. A lock
+    /// the panicking processor held itself stays poisoned: the SDK's
+    /// `SimpleSpanProcessor` exports under its exporter mutex, so after its
+    /// exporter panics once it drops every later span, while the other
+    /// processors keep working. Processors registered after the panicking one
+    /// never see this span: behind
+    /// `ObservabilityPipeline::build_with_span_processor` that includes the
+    /// export, so the span is neither exported nor counted. The panic stops
+    /// here, before it can unwind through the operation's state lock, which
+    /// the end holds.
     fn end_span(&self, at: SystemTime) {
         if let Some(s) = &self.span {
-            s.cx.span().end_with_timestamp(at.max(self.start));
+            let span = s.cx.span();
+            let ended = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                span.end_with_timestamp(at.max(self.start));
+            }));
+            if ended.is_err() {
+                log::debug!("xybrid-observability: a span processor panicked while a span ended");
+            }
         }
     }
 }
@@ -557,6 +597,18 @@ impl InferenceOperation {
         &self.request
     }
 
+    /// Current time on this operation's clock: the reading every default
+    /// timing call uses (CONTRACT.md "Timing"), anchored when the operation
+    /// started and monotonic since then, so a wall-clock step mid-operation
+    /// does not move it. Take it before work whose result is recorded later
+    /// with an explicit-time call, such as a chunk timed when it is handed to
+    /// a callback and passed to [`Self::record_chunk_at`] once the callback
+    /// accepts it.
+    #[must_use]
+    pub fn now(&self) -> SystemTime {
+        self.core.now()
+    }
+
     /// Whether the operation has reached its first terminal transition.
     #[must_use]
     pub fn is_finished(&self) -> bool {
@@ -635,7 +687,7 @@ impl InferenceOperation {
             return;
         }
         state.chunk_count += 1;
-        let instruments = self.core.observer.instruments.as_ref();
+        let instruments = self.core.observer.instruments.as_deref();
         match state.last_chunk {
             None => {
                 let ttfc = seconds_between(self.core.start, at);

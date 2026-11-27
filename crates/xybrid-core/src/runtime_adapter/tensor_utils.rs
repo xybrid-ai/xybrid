@@ -67,6 +67,9 @@ pub fn envelope_to_tensors(
                     .to_string(),
             ))
         }
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            return Err(crate::execution::decision::decision_kind_not_runtime_input())
+        }
         EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
             return Err(crate::execution::choice::choice_kind_not_runtime_input())
         }

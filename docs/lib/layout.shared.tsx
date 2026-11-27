@@ -1,13 +1,39 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
+import { uiTranslations } from 'fumadocs-ui/i18n';
+import { zhCN } from '@fumadocs/language/zh-cn';
 import { GlobeIcon } from 'lucide-react';
 import { i18n } from '@/lib/i18n';
+
+// The UI strings of every language: the zh-CN pack of Fumadocs, then our own
+// wording on top. Keys are the English label plus its context, like
+// `Search(search dialog)`; `add()` type-checks them.
+export const translations = i18n
+  .translations()
+  .extend(uiTranslations())
+  .preset('zh', zhCN())
+  .add({
+    en: {
+      displayName: 'English',
+    },
+    zh: {
+      displayName: '中文',
+      'Search(search trigger)': '搜索文档',
+      'Search(search dialog)': '搜索文档',
+      'No results found(search dialog)': '没有找到结果',
+      'On this page(table of contents)': '目录',
+      'Last updated on(page footer)': '最后更新',
+      // not in the pack yet; the menu button of the home page on mobile
+      'Toggle Menu(mobile menu)(aria-label)': '切换菜单',
+    },
+  });
 
 export function baseOptions(locale: string): BaseLayoutProps {
   return {
     nav: {
       title: 'Xybrid',
+      // the home page of the current language, `/` would redirect by Accept-Language
+      url: `/${locale}`,
     },
-    i18n,
     githubUrl: 'https://github.com/xybrid-ai/xybrid',
     links: [
       {

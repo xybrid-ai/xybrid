@@ -13,6 +13,10 @@
 //!   exporters and prints a summary of the spans, metric streams and log
 //!   events it produced.
 //!
+//! Either way it ends with one `observation refs: {...}` line: the
+//! `{trace_id, span_id}` reference of each operation by role, as JSON, which
+//! is what an application keeps to find its telemetry in a backend later.
+//!
 //! ```sh
 //! cargo run -p xybrid-observability --example standalone
 //! OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
@@ -43,10 +47,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let pipeline = ObservabilityPipeline::build(
             config.with_service("xybrid-observability-standalone", None),
         )?;
-        instrument(&pipeline.observer_with(content));
+        let refs = instrument(&pipeline.observer_with(content));
         let result = pipeline.shutdown(Duration::from_secs(5));
         println!("OTLP pipeline shut down: {result:?}");
         println!("delivery stats: {:?}", pipeline.stats());
+        println!("observation refs: {refs}");
         return Ok(());
     }
 
@@ -69,7 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .content_policy(content)
         .build();
 
-    instrument(&observer);
+    let refs = instrument(&observer);
 
     tracer_provider.force_flush()?;
     meter_provider.force_flush()?;
@@ -133,11 +138,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracer_provider.shutdown()?;
     meter_provider.shutdown()?;
     logger_provider.shutdown()?;
+    println!("observation refs: {refs}");
     Ok(())
 }
 
-/// A fake streaming model instrumented end to end.
-fn instrument(observer: &Observer) {
+/// A fake streaming model instrumented end to end. Returns the reference of
+/// each operation by role (`null` for an operation without a span).
+fn instrument(observer: &Observer) -> serde_json::Value {
     let workflow = observer.start_workflow("answer_question", StartOptions::default());
     let parent = workflow.context();
 
@@ -153,6 +160,7 @@ fn instrument(observer: &Observer) {
     );
     load.record_cache_hit(true);
     load.end();
+    let load_ref = load.observation_ref();
 
     let tool = observer.start_tool(
         ToolCallInfo {
@@ -165,6 +173,7 @@ fn instrument(observer: &Observer) {
     );
     tool.record_result(&json!({"temperature_c": 18, "conditions": "cloudy"}));
     tool.end();
+    let tool_ref = tool.observation_ref();
 
     let mut request = InferenceRequest::new("chat", "fake-runtime")
         .with_model("tiny-chat")
@@ -190,6 +199,7 @@ fn instrument(observer: &Observer) {
         server_port: None,
     });
     first.end_with_error(&ErrorInfo::new("timeout").with_message("backend busy"));
+    let first_ref = first.observation_ref();
 
     let retry = inference.start_attempt(AttemptInfo {
         index: 1,
@@ -217,6 +227,7 @@ fn instrument(observer: &Observer) {
     }
     retry.record_usage(&Usage::tokens(Some(24), Some(tokens.len() as u64)));
     retry.end();
+    let retry_ref = retry.observation_ref();
 
     inference.record_usage(&Usage::tokens(Some(24), Some(tokens.len() as u64)));
     inference.record_response(Some("resp-1"), Some("tiny-chat-q4"));
@@ -226,9 +237,9 @@ fn instrument(observer: &Observer) {
     let reference = inference.observation_ref();
     workflow.end();
 
-    if let Some(target) = reference {
+    if let Some(target) = &reference {
         let evaluated = observer.record_evaluation(
-            &target,
+            target,
             &Evaluation {
                 name: "relevance".into(),
                 score_value: Some(1.0),
@@ -236,7 +247,7 @@ fn instrument(observer: &Observer) {
             },
         );
         let rated = observer.record_feedback(
-            &target,
+            target,
             &Feedback {
                 score: Some(1.0),
                 label: Some("thumbs_up".into()),
@@ -245,4 +256,11 @@ fn instrument(observer: &Observer) {
         );
         println!("evaluation recorded: {evaluated}, feedback recorded: {rated}");
     }
+    json!({
+        "workflow": workflow.observation_ref(),
+        "load": load_ref,
+        "tool": tool_ref,
+        "inference": reference,
+        "attempts": [first_ref, retry_ref],
+    })
 }

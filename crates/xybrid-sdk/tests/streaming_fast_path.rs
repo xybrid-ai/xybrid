@@ -112,15 +112,15 @@ fn registry_resolve_mock(server: &MockServer) -> httpmock::Mock<'_> {
     })
 }
 
-fn pipeline_yaml(server: &MockServer, extra_stage: &str) -> String {
+/// `target` is the stage's `target:` line, empty for none.
+fn pipeline_yaml(server: &MockServer, target: &str, extra_stage: &str) -> String {
     format!(
         r#"name: sdk-streaming-options
 registry: {base}
 stages:
   - id: llm
     model: {MODEL_ID}
-    target: device
-{extra_stage}"#,
+{target}{extra_stage}"#,
         base = server.base_url()
     )
 }
@@ -172,8 +172,10 @@ fn yaml_max_tokens_caps_streaming_generation() {
     let server = MockServer::start();
     let _registry = registry_resolve_mock(&server);
 
+    // No `target:` and no provider: the stage must still run locally.
     let yaml = pipeline_yaml(
         &server,
+        "",
         "    max_tokens: 1\n    temperature: 0\n    top_p: 0.9\n    system_prompt: \"Be terse.\"\n",
     );
     let envelope = Envelope::new(EnvelopeKind::Text(PROMPT.to_string()));
@@ -198,7 +200,7 @@ fn envelope_metadata_overrides_yaml_in_streaming() {
     let server = MockServer::start();
     let _registry = registry_resolve_mock(&server);
 
-    let yaml = pipeline_yaml(&server, "    max_tokens: 4\n");
+    let yaml = pipeline_yaml(&server, "    target: device\n", "    max_tokens: 4\n");
     let mut envelope = Envelope::new(EnvelopeKind::Text(PROMPT.to_string()));
     envelope
         .metadata
@@ -223,7 +225,7 @@ fn invalid_yaml_option_fails_before_any_token() {
     let server = MockServer::start();
     let _registry = registry_resolve_mock(&server);
 
-    let yaml = pipeline_yaml(&server, "    max_tokens: 0\n");
+    let yaml = pipeline_yaml(&server, "    target: device\n", "    max_tokens: 0\n");
     let envelope = Envelope::new(EnvelopeKind::Text(PROMPT.to_string()));
 
     let tokens: Arc<Mutex<Vec<PartialToken>>> = Arc::new(Mutex::new(Vec::new()));

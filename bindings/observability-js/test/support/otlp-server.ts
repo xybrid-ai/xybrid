@@ -77,6 +77,8 @@ const head = (
 
 export const startServer = async (
   handler: Handler = () => ({ status: 200 }),
+  /** Listen on this port (for example one a test released earlier); default: any free port. */
+  port = 0,
 ): Promise<TestServer> => {
   const requests: ReceivedRequest[] = [];
   const sockets = new Set<Socket>();
@@ -158,7 +160,21 @@ export const startServer = async (
       });
     });
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  // A released port can stay busy for a moment; the bound only detects one that never frees up.
+  const until = performance.now() + 10_000;
+  for (;;) {
+    const error = await new Promise<NodeJS.ErrnoException | undefined>((resolve) => {
+      const failed = (e: NodeJS.ErrnoException): void => resolve(e);
+      server.once("error", failed);
+      server.listen(port, "127.0.0.1", () => {
+        server.off("error", failed);
+        resolve(undefined);
+      });
+    });
+    if (error === undefined) break;
+    if (error.code !== "EADDRINUSE" || performance.now() > until) throw error;
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("no server address");
   return {

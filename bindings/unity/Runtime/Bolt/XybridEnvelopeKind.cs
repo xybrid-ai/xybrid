@@ -15,6 +15,8 @@ namespace XybridBolt
                 2 => new Embedding(reader.ReadArray(reader => reader.ReadF32())),
                 3 => new Image(reader.ReadBytes(), reader.ReadString()),
                 4 => new MultiPart(reader.ReadArray(reader => global::XybridBolt.XybridEnvelope.Decode(reader))),
+                5 => new DecisionRequest(global::XybridBolt.XybridDecisionRequest.Decode(reader)),
+                6 => new Decisions(global::XybridBolt.XybridDecisions.Decode(reader)),
                 uint tag => throw new global::System.InvalidOperationException($"Invalid XybridEnvelopeKind tag: {tag}"),
             };
 
@@ -73,6 +75,22 @@ namespace XybridBolt
                     }
                     break;
                 }
+                case DecisionRequest value:
+                {
+                    writer.WriteU32(5);
+                    {
+                        value.Request.Encode(writer);
+                    }
+                    break;
+                }
+                case Decisions value:
+                {
+                    writer.WriteU32(6);
+                    {
+                        value.Value.Encode(writer);
+                    }
+                    break;
+                }
                 default:
                     throw new global::System.InvalidOperationException("Unknown XybridEnvelopeKind variant");
             }
@@ -87,6 +105,10 @@ namespace XybridBolt
         public sealed record Image(byte[] Bytes, string Format) : XybridEnvelopeKind;
 
         public sealed record MultiPart(global::XybridBolt.XybridEnvelope[] Parts) : XybridEnvelopeKind;
+
+        public sealed record DecisionRequest(global::XybridBolt.XybridDecisionRequest Request) : XybridEnvelopeKind;
+
+        public sealed record Decisions(global::XybridBolt.XybridDecisions Value) : XybridEnvelopeKind;
 
     }
 }

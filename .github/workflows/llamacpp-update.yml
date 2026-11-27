@@ -3,7 +3,7 @@ name: "Release: llama.cpp stable update"
 
 # Intake and release preparation are deliberately separate from validation.
 # This workflow only writes in the canonical repo on trusted master checkouts;
-# pull requests (including forks) run the read-only validation workflow.
+# pull requests (including forks) run the read-only validation lanes in ci.yml.
 on:
   schedule:
     - cron: '43 7 * * *' # Daily at 07:43 UTC.

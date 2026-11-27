@@ -73,7 +73,6 @@ export class BoundedBatchQueue<Item> {
   readonly #waiters = new Set<Waiter>();
   /** Aborted at the shutdown deadline: cancels in-flight work and stops the drain. */
   readonly #cancel = new AbortController();
-  #bytes = 0;
   /** Sequence number of the last admitted item. */
   #admitted = 0;
   /** Every item with a sequence number up to this one is terminal. */
@@ -103,13 +102,12 @@ export class BoundedBatchQueue<Item> {
     }
     if (
       this.counter.pending >= this.#limits.maxQueueSize ||
-      !(this.#bytes + bytes <= this.#limits.maxBufferedBytes)
+      !(this.counter.bufferedBytes + bytes <= this.#limits.maxBufferedBytes)
     ) {
       this.counter.refuse(1);
       return;
     }
-    this.counter.admit(1);
-    this.#bytes += bytes;
+    this.counter.admit(1, bytes);
     this.#admitted += 1;
     this.#queue.push({ item, bytes, seq: this.#admitted });
     this.#schedule(this.#queue.length >= this.#limits.maxExportBatchSize ? 0 : undefined);
@@ -175,8 +173,9 @@ export class BoundedBatchQueue<Item> {
     const first = batch[0];
     const last = batch[batch.length - 1];
     if (first === undefined || last === undefined) return;
-    this.counter.settle(outcome);
-    for (const entry of batch) this.#bytes -= entry.bytes;
+    let bytes = 0;
+    for (const entry of batch) bytes += entry.bytes;
+    this.counter.settle(outcome, bytes);
     this.#completed = last.seq;
     const lossy = outcome.dropped + outcome.failed > 0;
     for (const waiter of this.#waiters) {

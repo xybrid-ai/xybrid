@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "choice-letter-and-word-keys",
+  "profile": "lfm3-d1/text/v1",
+  "title": "One key that is not a letter: every option gets an assigned code",
+  "covers": [
+    "choice-letter-keys"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"A\": \"First\", \"B\": \"Second\", \"other\": \"Something else\"}}}}",
+  "artifact": "d1-2b-hf"
+}

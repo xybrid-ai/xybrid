@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "choice-letter-keys",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Keys that are all single ASCII letters are the codes, in request order",
+  "covers": [
+    "choice-letter-keys"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"B\": \"Billing\", \"A\": \"Account\", \"C\": \"Cancellation\"}}}}",
+  "artifact": "d1-2b-hf"
+}

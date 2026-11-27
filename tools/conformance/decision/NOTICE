@@ -2,19 +2,19 @@ Upstream decision oracle: third-party material
 
 This directory builds and links llama.cpp from vendor/llama-cpp, unmodified.
 Its own files repeat small parts of llama.cpp at commit
-8642541b255bfb5dc39cd351a178be09013a55d6:
+b1b770d90d94cad9e9ea5b993bdbc383a522fb28:
 
 - oracle.cpp mirrors server code it cannot call:
   - the prompt-size checks of a slot that cannot split its prompt, with their
     error messages (tools/server/server-context.cpp, update_slots, the
-    !slot.can_split() branch at line 4058);
+    !slot.can_split() branch at line 4077);
   - the max over each label group in send_decision
-    (tools/server/server-context.cpp, line 2526);
+    (tools/server/server-context.cpp, line 2530);
   - the image-input refusal of the /v1/systemone handler
-    (tools/server/server-context.cpp, line 6618);
+    (tools/server/server-context.cpp, line 6558);
   - the exception-to-status mapping of ex_wrapper (tools/server/server.cpp,
-    line 61) and the status and type names of format_error_response
-    (tools/server/server-common.cpp, line 93).
+    line 64) and the status and type names of format_error_response
+    (tools/server/server-common.cpp, line 97).
 - test_access.h repeats the signatures of private members of
   server_decision_context (tools/server/server-decision.h).
 

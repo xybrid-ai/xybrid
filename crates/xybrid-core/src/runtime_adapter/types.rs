@@ -351,6 +351,8 @@ fn parts_from_envelope(envelope: &Envelope) -> Result<Vec<MultimodalMessagePart>
         EnvelopeKind::Audio(_)
         | EnvelopeKind::Embedding(_)
         | EnvelopeKind::ChoiceRequest(_)
+        | EnvelopeKind::DecisionRequest(_)
+        | EnvelopeKind::Decisions(_)
         | EnvelopeKind::ChoiceScores(_) => Err(AdapterError::InvalidInput(format!(
             "unsupported multimodal envelope kind {}",
             envelope.kind.as_str()

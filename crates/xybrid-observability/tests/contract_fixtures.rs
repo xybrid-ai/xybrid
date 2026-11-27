@@ -27,8 +27,8 @@ use xybrid_observability::{
     Evaluation, Feedback, InferenceOperation, InferenceRequest, InputMessage, Location,
     ManualClock, ModelLoadInfo, ModelLoadOperation, ObservationContext, ObservationRef, Observer,
     OutputMessage, Part, PromptRef, RedactionError, RedactionRule, Redactor, ResourceSample,
-    StartOptions, SubstringRedactor, ToolCallInfo, ToolOperation, TraceMode, Usage,
-    WorkflowOperation,
+    SpanContentEncoding, StartOptions, SubstringRedactor, ToolCallInfo, ToolOperation, TraceMode,
+    Usage, WorkflowOperation,
 };
 
 const BASE_MS: u64 = 1_700_000_000_000;
@@ -498,6 +498,8 @@ const CONFIG_FIELDS: &[&str] = &[
     "content_capture",
     "max_content_attribute_bytes",
     "max_retained_operation_bytes",
+    "max_request_body_bytes",
+    "span_content_encoding",
     "max_traversal_bytes",
     "redact_substrings",
     "test_redactor",
@@ -526,6 +528,20 @@ fn content_policy(config: &Value) -> ContentPolicy {
             "max_retained_operation_bytes",
             semconv::DEFAULT_MAX_RETAINED_OPERATION_BYTES,
         ))
+        .with_max_request_body_bytes(size(
+            "max_request_body_bytes",
+            semconv::DEFAULT_MAX_REQUEST_BODY_BYTES,
+        ))
+        .with_span_content_encoding(
+            match config
+                .get("span_content_encoding")
+                .map_or("json", |v| v.as_str().expect("span_content_encoding"))
+            {
+                "json" => SpanContentEncoding::Json,
+                "protobuf" => SpanContentEncoding::Protobuf,
+                other => panic!("span_content_encoding: {other}"),
+            },
+        )
         .with_max_traversal_bytes(size(
             "max_traversal_bytes",
             semconv::DEFAULT_MAX_TRAVERSAL_BYTES,
@@ -1311,6 +1327,40 @@ fn catalog_matches_constants() {
         defaults["max_traversal_bytes"],
         semconv::DEFAULT_MAX_TRAVERSAL_BYTES
     );
+    assert_eq!(
+        defaults["span_envelope_allowance_bytes"],
+        semconv::SPAN_ENVELOPE_ALLOWANCE_BYTES
+    );
+    assert_eq!(
+        defaults["span_content_encoding_growth"],
+        json!({
+            "json": semconv::SPAN_CONTENT_ENCODING_GROWTH_JSON,
+            "protobuf": semconv::SPAN_CONTENT_ENCODING_GROWTH_PROTOBUF,
+        })
+    );
+    for encoding in [SpanContentEncoding::Json, SpanContentEncoding::Protobuf] {
+        assert_eq!(
+            defaults["span_content_encoding_growth"][encoding.as_str()],
+            encoding.growth()
+        );
+    }
+    assert_eq!(
+        defaults["span_content_encoding"],
+        SpanContentEncoding::default().as_str()
+    );
+    assert_eq!(
+        defaults["max_request_body_bytes"],
+        semconv::DEFAULT_MAX_REQUEST_BODY_BYTES
+    );
+    // The default retained budget is the protobuf ceiling of the default
+    // request bound: OTLP/protobuf, the default protocol, never clamps it.
+    assert_eq!(
+        semconv::span_content_ceiling(
+            semconv::DEFAULT_MAX_REQUEST_BODY_BYTES,
+            SpanContentEncoding::Protobuf
+        ),
+        semconv::DEFAULT_MAX_RETAINED_OPERATION_BYTES
+    );
     assert_eq!(defaults["max_json_depth"], semconv::MAX_JSON_DEPTH);
     assert_eq!(
         defaults["preflight_node_bytes"],
@@ -1331,7 +1381,18 @@ fn catalog_matches_constants() {
     );
     assert_eq!(
         defaults["max_retained_operation_bytes"],
-        policy.max_retained_operation_bytes()
+        policy
+            .clone()
+            .with_span_content_encoding(SpanContentEncoding::Protobuf)
+            .max_retained_operation_bytes()
+    );
+    // Written as JSON (the default encoding), the default bound carries half.
+    assert_eq!(
+        policy.max_retained_operation_bytes(),
+        semconv::span_content_ceiling(
+            semconv::DEFAULT_MAX_REQUEST_BODY_BYTES,
+            SpanContentEncoding::Json
+        )
     );
     assert_eq!(
         defaults["max_traversal_bytes"],
@@ -1348,6 +1409,13 @@ fn catalog_matches_constants() {
     assert_eq!(
         catalog["enums"]["redaction_rule"],
         json!(["replace_literal", "omit_attribute"])
+    );
+    assert_eq!(
+        catalog["enums"]["span_content_encoding"],
+        json!([
+            SpanContentEncoding::Json.as_str(),
+            SpanContentEncoding::Protobuf.as_str()
+        ])
     );
     assert_eq!(
         catalog["enums"][attr::RESOURCE_MEMORY_PRESSURE],

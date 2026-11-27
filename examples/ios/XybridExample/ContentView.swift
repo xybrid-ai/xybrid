@@ -77,7 +77,7 @@ struct ContentView: View {
             // XYBRID_TRACES_ENDPOINT scheme environment variables (Product →
             // Scheme → Edit Scheme → Run → Arguments), so they never land in
             // the repo. Empty/unset resolves to anonymous, local-only init.
-            // Get a free key at dashboard.xybrid.dev. See README.
+            // Get a key at console.xybrid.dev. See README.
             let env = ProcessInfo.processInfo.environment
             let apiKey = env["XYBRID_API_KEY"].flatMap { $0.isEmpty ? nil : $0 }
             let tracesEndpoint = env["XYBRID_TRACES_ENDPOINT"].flatMap { $0.isEmpty ? nil : $0 }

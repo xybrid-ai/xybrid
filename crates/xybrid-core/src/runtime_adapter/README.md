@@ -25,7 +25,7 @@ runtime_adapter/
 │   ├── adapter.rs         # OnnxRuntimeAdapter
 │   ├── backend.rs         # OnnxBackend
 │   ├── session.rs         # ONNXSession wrapper
-│   └── mobile.rs          # Android NNAPI support
+│   └── mobile.rs          # Android adapter (CPU; NNAPI is detected, not used)
 │
 ├── candle/                # Candle backend (pure Rust)
 │   ├── README.md

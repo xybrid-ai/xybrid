@@ -30,10 +30,19 @@ cargo test  --workspace --features ort-download         # CI: test (matrix)
 (no `-check`) writes fixes — run before committing. Match CI's
 `--features ort-download` locally so feature-gated paths don't surprise you.
 
-CI gates (`.github/workflows/ci.yml`): `fmt`, `clippy`, `test` (macOS/Linux/Windows),
-plus feature-matrix jobs: `check-no-default-features`, `check-platform-macos`,
-`check-platform-desktop`, `clippy-llm`, `test-llm`, `test-candle`, `build-cli`,
-`api-contract`.
+CI gates: two required checks protect `master`, `CI Success` (`ci.yml`) and
+`Bazel graph + RBE targets` (`bazel.yml`). `ci.yml` runs `Repo checks` (the
+workflow index, version sync and every `tools/scripts/tests` test, on every
+change), the three commands above (`test` on Linux only), the feature checks
+(`check-*`, `clippy-llm`, `test-llm`), `api-contract`, observability, the Web
+and Python SDKs, the binding drift job, the backend lanes (Candle, whisper.cpp,
+policy routing, llama.cpp) and the lanes it calls: the SDKs
+(`build-android.yml`, `build-apple.yml`, `build-flutter.yml`,
+`build-react-native.yml`, `unity-editor.yml`) and conformance
+(`test-choice-conformance.yml`, `test-decision-conformance.yml`).
+`tools/scripts/ci_gate.py` decides which jobs a change needs, and `CI Success`
+fails unless each job it requires, every lane included, passed or was skipped
+for that reason. `.github/workflows/README.md` maps every workflow.
 
 Crate-wide lint opt-outs go in `lib.rs` at the crate root (see e.g.
 `crates/xybrid-core/src/lib.rs`). Don't sprinkle `#[allow(...)]` at call sites —
@@ -225,6 +234,55 @@ cmake/cc/NDK versions. That is right for publisher/consumer cache parity and
 wrong for distribution, which is why the download path selects by target +
 feature set + ABI attributes from the manifest instead of recomputing it.
 
+### Liquid decision models (`lfm3-d1/text/v1`)
+
+Decision models answer typed questions without generating text. A request is
+an `EnvelopeKind::DecisionRequest` on the ordinary `run` / `run_async` /
+`run_with_options` surface; there is no decision-specific `run*` method. The
+contract is `docs/development/liquid-decision-protocol.md`, and
+`docs/development/decision-conformance.md` says what is and is not qualified.
+
+- **No build advertises the d1 registry capability.**
+  `llamacpp-lfm3-d1-text-v1` is absent on purpose from
+  `xybrid_core::features` and from the SDK's `ARTIFACT_BACKENDS`, so the
+  registry serves no decision artifact while the reference comparison (P02 in
+  the conformance record) is open. A test in each file fails if it is added.
+  Loads that do not go through the registry are unaffected.
+- **The chat path refuses decision artifacts that generate no text.** A GGUF
+  carries a decision marker when a metadata key is
+  `tokenizer.chat_template.systemone`, starts with `systemone.` or contains
+  `.decision.`. It stays a chat model only when its
+  `<architecture>.decision.type` is one that also generates text
+  (`decision_type_generates_text`: `granite-switch`, the one type the pinned
+  llama.cpp's `server_model_output_modalities` serves as text too); xybrid
+  answers no decisions with those. The SDK's header sniff
+  (`xybrid_core::execution::decision`) is best effort; the authority is
+  `LlamaModel::load`, which scans every key after loading and refuses.
+  `xybrid_llama` keeps its own copy of the rules. Change both together: core
+  tests compare them.
+- **`Decision conformance / Decision CPU conformance` gates llama.cpp releases.**
+  `ci.yml` calls `test-decision-conformance.yml` on every change that is not
+  docs-only, and `tools/scripts/llamacpp_update.py` waits on that check name.
+  It collects a fresh upstream reference on the runner and compares bit for
+  bit. Never loosen the comparison to make it pass.
+- **The llama.cpp pin has copies the update automation does not rewrite:**
+  `tools/conformance/decision/{check.py,oracle.py}`,
+  `integration-tests/fixtures/decision/{integrity.json,oracle.json}`,
+  `integration-tests/tests/decision_conformance.rs`, and the commit named in
+  `crates/llama-cpp-sys/NOTICE`. A llama.cpp update PR migrates them by hand,
+  and rechecks `decision_type_generates_text` against upstream's list.
+- **`crates/llama-cpp-sys/NOTICE` is the notice source.** Byte-identical copies
+  are committed for the Kotlin AAR (`assets/xybrid/llama/NOTICE`, gated by
+  `verify_zzz_android.py`), Python and Unity; React Native, the web package,
+  native slices and the CLI release assets copy it at build time. Edit the
+  source, then the committed copies.
+- **The wrapper compiles llama.cpp's Jinja closure** (`common/jinja/*.cpp`,
+  `common/json.cpp`, `common/unicode.cpp`). The list is in
+  `crates/llama-cpp-sys/build.rs` and in `//:llama_decision_jinja`; keep them
+  equal (`tools/scripts/tests/test_decision_jinja_sources.py` fails when they
+  differ). Keep llama.cpp's `src/` off the wrapper's include path: a second
+  `ggml.h` breaks the iOS build.
+
 ### Releases
 
 **Releases are cut by branch name, not by hand.** Push a `release/v<version>`
@@ -235,6 +293,8 @@ the `Release v<version>` PR to master). Don't `gh pr create` a release or run
 pipeline and ships nothing. Never commit `Package.swift useLocalNatives = true`
 (local-dev only; breaks remote SPM — run `bindings/apple/scripts/set-natives-mode.sh
 --set-remote`). Full ritual + gotchas: **§ Releases** below.
+
+If a release tool starts writing new metadata, update the exact trusted rendering in `tools/scripts/zzz_source_policy.py` and its real-bump regression test.
 
 ---
 
@@ -256,12 +316,22 @@ extends the same runtime without replacing the offline path:
    the engine — the direction being actively built out. When a developer
    authenticates, these light up *on top of* the same local runtime:
    - **Auth / API keys** — `crates/xybrid-core/src/cloud/config.rs`
-     (`set_xybrid_api_key`, `XYBRID_API_KEY`). Gates the cloud gateway *and* the
-     telemetry exporter. Default gateway: `api.xybrid.dev`.
+     (`set_xybrid_api_key`, `XYBRID_API_KEY`). Gates the cloud gateway. Default
+     gateway: `api.xybrid.dev`. A key alone exports no telemetry (see the
+     observability bullet).
    - **Cloud routing** — `crates/xybrid-core/src/cloud/` +
      `crates/xybrid-core/src/orchestrator/routing_engine.rs` (local→cloud fallback under device stress).
-   - **Telemetry / observability** — `crates/xybrid-core/src/telemetry/`;
-     SDK exporter in `crates/xybrid-sdk/src/telemetry.rs`; ingest at `ingest.xybrid.dev`.
+   - **Observability** — OpenTelemetry (GenAI conventions, OTLP/HTTP) in the
+     portable `crates/xybrid-observability` and `bindings/observability-js`
+     (`@xybrid/observability`), which depend on OpenTelemetry only, never on
+     xybrid crates; their shared contract is
+     `crates/xybrid-observability/CONTRACT.md`. The SDK wires them in
+     `crates/xybrid-sdk/src/observability.rs`. Export is **off until
+     configured explicitly** (a Xybrid preset to `ingest.xybrid.dev/v1/traces`,
+     or any OTLP endpoint or application-owned provider). `xybrid-core` stays
+     free of observability types: it reports stages through
+     `crates/xybrid-core/src/tracing.rs`. `crates/xybrid-sdk/src/telemetry.rs`
+     is the in-process event stream only and never leaves the process.
    - **Remote routing authority** — `crates/xybrid-core/src/orchestrator/authority/remote.rs`
      (`GET /v1/routing/advice`; partial).
    - **Control sync** — `crates/xybrid-core/src/control_sync.rs` (policy /
@@ -282,7 +352,8 @@ Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
 | Crate                          | Role                                                       | Layer    |
 |--------------------------------|------------------------------------------------------------|----------|
 | `crates/xybrid-core`           | ML execution + pipelines; **additive platform plane** (cloud routing, telemetry, control sync) | core lib |
-| `crates/xybrid-sdk`            | Public Rust SDK; model load/run/stream + platform init (auth, telemetry) | lib      |
+| `crates/xybrid-sdk`            | Public Rust SDK; model load/run/stream + platform init (auth, observability) | lib      |
+| `crates/xybrid-observability`  | Portable OpenTelemetry instrumentation and OTLP export; no xybrid dependencies (JS twin: `bindings/observability-js`) | lib |
 | `crates/xybrid-cli`            | `xybrid` binary                                            | bin      |
 | `crates/xybrid-ffi-facade`     | FFI-agnostic POD/Arc facade over the SDK (one canonical translation) | FFI |
 | `crates/xybrid-bolt`           | BoltFFI bindings: Swift / Kotlin / Java / C# (Unity) / WASM + C header — the sole native binding crate | FFI |
@@ -330,6 +401,12 @@ so a new binding there reports theirs only until it registers. Add a new name
 to the facade's `resolve_binding`; a test fails until you do. The table is in
 `docs/telemetry/registry.md`.
 
+Under CI the same header ends with `ci=1` (`crates/xybrid-sdk/src/ci.rs`:
+`XYBRID_CI` decides when it is `1`/`true` or `0`/`false`, else `CI`), and
+registry analytics can leave those requests out. Coding-agent sandboxes don't set
+`CI`: export `XYBRID_CI=1` before running tests or examples that can reach the
+registry, or point `XYBRID_REGISTRY_URL` at a local stub.
+
 The browser package (`bindings/web`, npm `@xybrid/web`) is a GGUF text-generation
 preview over the existing Rust/llama.cpp path. `pnpm build` invokes Bazel for CPU
 and experimental WebGPU WASM, then bundles the client and worker. `pnpm
@@ -346,6 +423,7 @@ xybrid-bolt ──► xybrid-ffi-facade ─► xybrid-sdk ─► xybrid-core
 flutter rust──► xybrid-ffi-facade ─► xybrid-sdk ─► xybrid-core
 xtask ────────────────────────────► xybrid-core
 integration-tests ────────────────► xybrid-core
+xybrid-sdk, xybrid-cli ───────────► xybrid-observability (depends on no xybrid crate)
 ```
 
 Workspace **package metadata** is inherited via `[workspace.package]` —
@@ -534,9 +612,10 @@ Pushing `release/v*` triggers `release-prep.yml`, which:
   not committed). Run `bindings/apple/scripts/set-natives-mode.sh --set-remote`
   before committing — remote (`false`) is the canonical committed state.
 
-Install snippets in the READMEs and docs pages that name a release are pins in
+Install snippets in the READMEs and docs pages that name a release, and the
+root `Package.swift`'s comment for external users, are pins in
 `PINS` (`tools/scripts/install_pins.py`). A new snippet shape, or a new page
-carrying one, gets an entry there or no bump rewrites it. CI's `Version sync`
+carrying one, gets an entry there or no bump rewrites it. CI's `Repo checks`
 job runs `version-sync.sh --check` and `test_install_pins.py` on every PR,
 docs-only ones included: a stale or dropped pin fails, and so does a known shape
 on an unlisted page or a package named with a version no pin owns. Pins follow
@@ -596,17 +675,41 @@ is generated from the workflow files, and these rules keep it true:
   queue behind the last (`llamacpp-update.yml`, `star-history.yml`).
 - **Regenerate the map.** After touching any workflow, run
   `python3 tools/scripts/gen_workflow_index.py`. CI runs it with `--check` (job
-  `Workflow index`) and fails on drift or a broken rule. A rebase can bring in
+  `Repo checks`) and fails on drift or a broken rule. A rebase can bring in
   master workflows written without these rules; fix them on your branch.
 - **Rename workflow files rarely.** GitHub ties run history and code-scanning
   configurations (CodeQL `codeql.yml:analyze`, Scorecard `scorecard.yml:analysis`)
   to the path, and `release-publish.yml` and the docs call
   `gh workflow run <file>`. Change `name:` instead.
+- **Add CI by extending `ci.yml`, never with a new workflow file.**
+  `gen_workflow_index.py --check` fails on a file missing from its
+  `WORKFLOW_FILES`, and on a `pull_request` / `pull_request_target` trigger
+  outside `PULL_REQUEST_FILES`: only `ci.yml` and `bazel.yml` validate pull
+  requests (the others listed scan, dry-run, publish or greet). A lane file
+  declares `workflow_call` (plus `workflow_dispatch`, plus `schedule` for a
+  nightly) and is called from `ci.yml`. A seconds-long check that needs no
+  toolchain is a test under `tools/scripts/tests/`; a new cargo invocation is a
+  step in the `ci.yml` job with the same runner and feature family; a new
+  backend or real-model suite is one `ci.yml` job built from the shared actions
+  in `.github/actions/` (`setup-rust`, `install-boltffi`, `fetch-model`,
+  `free-disk-space`), one `LANE_PATHS` row and `OPTIONAL_JOBS` entry in
+  `tools/scripts/ci_gate.py` with its `tooling-changes` output and one `CI
+  Success` `needs` entry (a lane that turns flaky goes to `ADVISORY_JOBS` while
+  it is fixed); a new binding or platform is a lane file, the one new file this
+  allows: its PR lists it in `WORKFLOW_FILES`. `setup-rust`, `install-boltffi`
+  and `fetch-model` save their caches from `master` only. macOS runs 5 jobs at
+  once for the whole organization, so add steps to an existing macOS job: the
+  check also holds `ci.yml` and its lane files to `MACOS_JOB_BUDGET` macOS jobs,
+  which a new one raises in the same PR with a reason. The full rules are in the
+  workflow README, "Adding CI".
 - **Job names are matched as checks; never rename them.** `CI Success`
   (`ci.yml`) and `Bazel graph + RBE targets` (`bazel.yml`)
   gate `master` through branch protection. `tools/scripts/llamacpp_update.py`
   also waits on job names (`REQUIRED_CHECKS`, `AUTOMATION_CHECKS`) before it
-  cuts a llama.cpp release. Edit a workflow's `name:` freely.
+  cuts a llama.cpp release. Edit a workflow's `name:` freely. A lane file's
+  checks are named `<caller job name> / <job name>`, so the caller job's
+  `name:` in `ci.yml` (`Android`, `Choice conformance`, ...) is part of those
+  check names, two of which `REQUIRED_CHECKS` polls.
 
 ---
 

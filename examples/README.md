@@ -74,9 +74,9 @@ Native iOS example using SwiftUI and the Xybrid Swift SDK.
 
 | Tool | Required Version | Installation |
 |------|------------------|--------------|
-| Xcode | 14.0+ | Mac App Store |
-| iOS Deployment Target | 15.0+ | - |
-| Rust | 1.70+ | [rustup.rs](https://rustup.rs) (for XCFramework build) |
+| Xcode | 15.3+ | Mac App Store |
+| iOS Deployment Target | 16.0+ | - |
+| Bazel (via bazelisk) | per `.bazelversion` | `brew install bazelisk` (for the XCFramework build) |
 
 ### Getting Started
 
@@ -89,6 +89,7 @@ cd ios
 xcodebuild -project XybridExample.xcodeproj \
   -scheme XybridExample \
   -destination 'generic/platform=iOS Simulator' \
+  EXCLUDED_ARCHS=x86_64 \
   CODE_SIGNING_ALLOWED=NO
 ```
 
@@ -106,6 +107,8 @@ unzip -o bazel-bin/bindings/apple/XybridFFI.xcframework.zip -d bindings/apple/XC
 - **SDK Initialization**: Async startup with Swift concurrency
 - **Model Loading**: Text field for model ID, load button with progress
 - **TTS Inference**: Text input, inference execution, audio playback
+- **Live Camera Vision**: On-device VLM captions that refresh as the scene changes
+- **Structured Extraction**: LFM2.5-230M turns text into schema-valid JSON through GBNF constrained decoding
 - **Result Display**: Status, latency metrics, Play Audio button
 - **Error Handling**: User-friendly error messages with retry
 
@@ -267,14 +270,14 @@ The Xybrid SDK follows a consistent pattern across all platforms:
 ### Core API Documentation
 
 - **[API Reference](../docs/sdk/API_REFERENCE.md)** - Complete SDK API specification
-- **[Flutter SDK](../docs/sdk/flutter.md)** - Flutter-specific documentation
-- **[Kotlin SDK](../docs/sdk/kotlin.md)** - Kotlin-specific documentation
-- **[Swift SDK](../docs/sdk/swift.md)** - Swift-specific documentation (planned)
+- **[Flutter SDK](../bindings/flutter/README.md)** - Flutter-specific documentation
+- **[Kotlin SDK](../bindings/kotlin/README.md)** - Kotlin-specific documentation
+- **[Swift SDK](../bindings/apple/README.md)** - Swift-specific documentation
 
 ### Online Documentation
 
 - **[docs.xybrid.dev](https://docs.xybrid.dev)** - Full documentation site
-- **[docs.xybrid.dev/sdk](https://docs.xybrid.dev/sdk)** - SDK guides and tutorials
+- **[docs.xybrid.dev/docs/quickstart](https://docs.xybrid.dev/docs/quickstart)** - Quickstart, then a guide per SDK
 
 ---
 

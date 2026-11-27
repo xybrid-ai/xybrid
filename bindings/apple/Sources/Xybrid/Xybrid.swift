@@ -1,13 +1,13 @@
 //
 //  Xybrid.swift
-//  Xybrid SDK for iOS/macOS
+//  Xybrid SDK for iOS
 //
 //  Hand-written wrappers + a compatibility shim that smooths over the
 //  uniffi → bolt migration. The BoltFFI-generated bindings live in
 //  `xybrid_bolt.swift` alongside this file; both compile into the same
 //  Swift module so consumers `import Xybrid` and see one surface.
 //
-//  For full API documentation, see https://docs.xybrid.dev/sdk/swift
+//  For full API documentation, see https://docs.xybrid.dev/docs/sdks/ios
 //
 
 import Foundation
@@ -31,7 +31,7 @@ private let boltIsSpeculativeCloudEnabled = isSpeculativeCloudEnabled
 private let boltHasApiKey = hasApiKey
 private let boltSetProviderApiKey = setProviderApiKey
 
-/// Main entry point for the Xybrid SDK on iOS/macOS.
+/// Main entry point for the Xybrid SDK on iOS.
 ///
 /// Call `Xybrid.initialize()` once before using any other Xybrid functionality.
 /// It registers the binding identifier so registry calls are attributed to the
@@ -39,8 +39,8 @@ private let boltSetProviderApiKey = setProviderApiKey
 ///
 /// Inference runs on-device whether or not you authenticate. The `apiKey`
 /// authenticates the cloud gateway; it does not export anything. Trace export
-/// is off until you start it with ``Xybrid/Observability`` — get a free key at
-/// https://dashboard.xybrid.dev.
+/// is off until you start it with ``Xybrid/Observability`` — get a key at
+/// https://console.xybrid.dev.
 ///
 /// ```swift
 /// // Anonymous — local inference only
@@ -73,8 +73,8 @@ public enum Xybrid {
     /// All parameters are optional. Without an `apiKey`, the SDK runs fully
     /// on-device. `apiKey` authenticates the cloud gateway and `gatewayUrl`
     /// overrides it. Neither starts trace export: build a config with
-    /// ``Xybrid/Observability`` and call `start()` for that. Get a free key at
-    /// https://dashboard.xybrid.dev.
+    /// ``Xybrid/Observability`` and call `start()` for that. Get a key at
+    /// https://console.xybrid.dev.
     ///
     /// Configuration is applied on the first call; because `initialize()` is
     /// idempotent, a later call with different arguments is a no-op.
@@ -84,9 +84,7 @@ public enum Xybrid {
     /// reading through the SDK's push-state surface so the routing
     /// engine has live battery telemetry. Thermal state on Apple
     /// platforms is sourced from `NSProcessInfo.thermalState` directly
-    /// in `xybrid-core` (no host wiring needed). On macOS, both
-    /// battery (IOKit) and thermal (NSProcessInfo) are in-Rust, so
-    /// nothing extra is registered here.
+    /// in `xybrid-core` (no host wiring needed).
     ///
     /// - Parameters:
     ///   - apiKey: Xybrid API key for the cloud gateway.
@@ -156,8 +154,9 @@ public enum Xybrid {
 
     /// Sets the process-wide default for speculative cloud serving.
     ///
-    /// Speculation answers from the cloud gateway while a registry model's
-    /// weights download in the background, instead of blocking on the download.
+    /// Speculation tries the registry id at the gateway while its weights
+    /// download. Only ids also listed in the gateway catalog can be served
+    /// remotely.
     ///
     /// This is the *default* for loads that do not opt in per-load;
     /// ``ModelLoader/fromRegistrySpeculative(_:)`` opts in explicitly and is
@@ -341,10 +340,12 @@ public enum ModelSource: Sendable, Equatable {
     /// A Hugging Face repository (`org/repo` or `org/repo:variant`).
     case huggingFace(String)
 
-    /// A registry model served from the cloud gateway while its weights
-    /// download in the background. See
+    /// Try the registry id at the gateway while its weights download. See
     /// ``ModelLoader/fromRegistrySpeculative(_:)``.
     case registrySpeculative(String)
+
+    /// A raw GGUF file on disk. See ``ModelLoader/fromModelFile(_:)``.
+    case modelFile(URL)
 }
 
 /// A cheap model reference that defers all expensive work until ``load()``.
@@ -364,8 +365,8 @@ public struct ModelLoader: Sendable {
         Self(source: .registry(id))
     }
 
-    /// Create a loader that answers from the cloud gateway while the registry
-    /// weights download in the background, instead of blocking on the download.
+    /// Try the registry id at the cloud gateway while the weights download.
+    /// Only ids also listed in the gateway catalog can be served remotely.
     ///
     /// ``load()`` returns almost immediately with a cloud-backed model that
     /// switches to on-device by itself once the download lands. Requires an API
@@ -407,6 +408,20 @@ public struct ModelLoader: Sendable {
         Self(source: .huggingFace(repo))
     }
 
+    /// Create a loader for a raw llama.cpp GGUF file, such as one the app
+    /// downloaded.
+    ///
+    /// No `model_metadata.json` is needed. ``load()`` generates it from the
+    /// GGUF header and writes it next to the file, unless one is already
+    /// there, then loads the file's directory. Put each GGUF in its own
+    /// directory inside the app container (Application Support, for example):
+    /// the app bundle is read-only, and an existing `model_metadata.json` is
+    /// used as is, so a second GGUF in the same directory would load the first
+    /// one's model. Copy a file the user picks into the container first.
+    public static func fromModelFile(_ url: URL) -> Self {
+        Self(source: .modelFile(url))
+    }
+
     /// Load the model without blocking the calling task's executor.
     public func load() async throws -> XybridModel {
         try await Task.detached { try loadSync() }.value
@@ -428,6 +443,8 @@ public struct ModelLoader: Sendable {
             return try XybridModel(fromHuggingface: repo)
         case .registrySpeculative(let id):
             return try XybridModel(fromRegistrySpeculative: id)
+        case .modelFile(let url):
+            return try XybridModel(fromModelFile: url.path)
         }
     }
 
@@ -440,23 +457,25 @@ public struct ModelLoader: Sendable {
     ///
     /// ```swift
     /// let loader = Xybrid.model("qwen3-0.6b")
-    /// let download = loader.download()
-    /// for await status in download.progress() {
-    ///     bar.progress = Float(status.progress)
-    ///     label.text = "\(status.downloadedBytes) / \(status.totalBytes ?? 0)"
+    /// if let download = loader.download() {
+    ///     for await status in download.progress() {
+    ///         bar.progress = Float(status.progress)
+    ///         label.text = "\(status.downloadedBytes) / \(status.totalBytes ?? 0)"
+    ///     }
     /// }
     /// let model = try await loader.load()
     /// ```
     ///
     /// Returns `nil` for a source with nothing to fetch — a local bundle,
-    /// directory, or Hugging Face repo — where ``load()`` is the whole story.
+    /// directory, model file, or Hugging Face repo — where ``load()`` is the
+    /// whole story.
     /// Cancelling the task consuming `progress()` unsubscribes from updates;
     /// call ``XybridDownload/cancel()`` to stop the transfer itself.
     public func download() -> XybridDownload? {
         switch source {
         case .registry(let id), .registrySpeculative(let id):
             return XybridDownload(fromRegistry: id)
-        case .bundle, .directory, .huggingFace:
+        case .bundle, .directory, .huggingFace, .modelFile:
             return nil
         }
     }
@@ -549,7 +568,9 @@ public extension Xybrid {
             XybridObservabilityConfig(otlp: endpoint)
         }
 
-        /// Current delivery counters; all zero while export is off.
+        /// Delivery counters: live while export runs; after `shutdown`, the
+        /// final ones (what the shutdown failed or dropped included) until the
+        /// next `start()`; all zero before any.
         public static var stats: XybridObservabilityStats {
             observabilityStats()
         }
@@ -1163,11 +1184,9 @@ public extension XybridModel {
     /// whatever the backend reports for a cancelled run — it does not surface
     /// `CancellationError`.
     ///
-    /// Cancellation is checked at token boundaries **while streaming**. A batch
-    /// run is only cancellable before generation starts: once the backend is
-    /// producing, `run_with_options` has no token-aware path to stop it, so the
-    /// call finishes normally. Use the streaming surface when a mid-flight stop
-    /// button matters.
+    /// Decision runs check cancellation before preparation, between passes and
+    /// during native decoding. Other batch runs check it before generation;
+    /// streaming generation checks it at token boundaries.
     func runAsync(
         envelope: XybridEnvelope,
         options: XybridRunOptions? = nil
@@ -1387,6 +1406,10 @@ public extension XybridRunOptions {
     ///   - conversationId: your conversation id, recorded on the run's trace.
     ///   - suppressTrace: skip the detailed trace for this run; metrics are
     ///     still recorded.
+    ///   - frameSessionId: your id for one continuous live-capture session (a
+    ///     camera or microphone loop). Every run of the session is counted in
+    ///     metrics, and detailed traces are kept for roughly one run per live
+    ///     trace interval per session (`setLiveTraceIntervalMs`).
     static func make(
         generationConfig: XybridGenerationConfig? = nil,
         abortOn: [XybridAbortSignal] = [],
@@ -1396,7 +1419,8 @@ public extension XybridRunOptions {
         traceparent: String? = nil,
         tracestate: String? = nil,
         conversationId: String? = nil,
-        suppressTrace: Bool = false
+        suppressTrace: Bool = false,
+        frameSessionId: String? = nil
     ) -> XybridRunOptions {
         XybridRunOptions(
             generationConfig: generationConfig,
@@ -1407,7 +1431,8 @@ public extension XybridRunOptions {
             traceparent: traceparent,
             tracestate: tracestate,
             conversationId: conversationId,
-            suppressTrace: suppressTrace
+            suppressTrace: suppressTrace,
+            frameSessionId: frameSessionId
         )
     }
 }
@@ -1452,6 +1477,22 @@ public extension XybridEnvelope {
 // fields, so we mirror them as computed properties on the bolt type.
 
 public extension XybridResult {
+    /// Typed decision answers in request order, retaining Double probabilities.
+    var decisions: XybridDecisions? {
+        if case .decisions(let decisions) = envelope.kind { return decisions }
+        return nil
+    }
+
+    /// Tokens evaluated across all decision passes (zero tokens are generated).
+    var tokensIn: UInt64? {
+        envelope.metadata.first { $0.key == "tokens_in" }.flatMap { UInt64($0.value) }
+    }
+
+    /// Generated output tokens, always zero for decisions.
+    var tokensOut: UInt64? {
+        envelope.metadata.first { $0.key == "tokens_out" }.flatMap { UInt64($0.value) }
+    }
+
     /// `true` for any result returned from `XybridModel.run`. Bolt
     /// surfaces failures as `throws` rather than a `success` flag; this
     /// flag stays at `true` for shape compatibility with the previous
@@ -1508,6 +1549,16 @@ public extension XybridStreamToken {
 // helpers fold the well-known TTS / ASR metadata keys into entries.
 
 public extension XybridEnvelope {
+    /// Ordered typed decision input, validated by the shared Rust contract.
+    static func decisionRequest(_ request: XybridDecisionRequest) throws -> XybridEnvelope {
+        try decisionRequestEnvelope(request: request)
+    }
+
+    /// Raw Liquid SystemOne JSON. Keep structured content as text to preserve number identity.
+    static func decisionRequestJson(_ json: String) throws -> XybridEnvelope {
+        try decisionRequestJsonEnvelope(json: json)
+    }
+
     /// Creates an audio envelope with format metadata.
     /// - Parameters:
     ///   - pcmData: Raw PCM / WAV bytes.

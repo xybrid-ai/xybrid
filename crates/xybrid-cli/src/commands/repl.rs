@@ -115,8 +115,6 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
     // --huggingface: load from HuggingFace repo
     let stages = if want_speculative {
         let model_id = model.clone().expect("want_speculative implies a model id");
-        // Serve the registry model itself: the gateway routes its id to xycloud
-        // (the CPU cluster that runs the edge model) while it downloads locally.
         let model_obj = load_speculative_model(&model_id)?;
         let mut stage = StageDescriptor::new(&model_id);
         stage.target = execution_target.clone();
@@ -588,6 +586,9 @@ fn load_stages(
         let name = config.name.as_deref().unwrap_or("unnamed");
         ui::kv("Pipeline", name);
         for stage_config in &config.stages {
+            if let Some(message) = stage_config.unapplied_execution_provider_warning() {
+                ui::warning(&message);
+            }
             let model_id = stage_config.model_id();
             let mut desc = StageDescriptor::new(&model_id);
             let configured_target = parse_stage_config_target(stage_config);
@@ -843,6 +844,8 @@ fn handle_special_command(
                         // request, so label it rather than fold it into text.
                         EnvelopeKind::ChoiceRequest(_) => "[choice request]",
                         EnvelopeKind::ChoiceScores(_) => "[choice scores]",
+                        EnvelopeKind::DecisionRequest(_) => "[decision request]",
+                        EnvelopeKind::Decisions(_) => "[decisions]",
                         EnvelopeKind::Audio(_)
                         | EnvelopeKind::Embedding(_)
                         | EnvelopeKind::Image { .. }
@@ -1176,6 +1179,7 @@ fn execute_streaming(
         Ok(result) => {
             let elapsed = start.elapsed();
             println!();
+            super::utils::report_speculative_recovery(&result);
             maybe_warn_thinking_budget(result.envelope());
 
             if let Some(ref mut ctx) = conversation_context {
@@ -1305,7 +1309,10 @@ fn execute_batch(
                         ui::ok(&format!("Multi-part output: {} parts", parts.len()));
                     }
                     // Pipelines refuse choice kinds before and after every stage.
-                    EnvelopeKind::ChoiceRequest(_) | EnvelopeKind::ChoiceScores(_) => {
+                    EnvelopeKind::ChoiceRequest(_)
+                    | EnvelopeKind::ChoiceScores(_)
+                    | EnvelopeKind::DecisionRequest(_)
+                    | EnvelopeKind::Decisions(_) => {
                         ui::err("Pipeline stages do not return choice requests or scores");
                     }
                 }
@@ -1323,6 +1330,12 @@ fn execute_batch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn init_test_cache() {
+        static CACHE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(|| tempfile::tempdir().expect("create CLI test cache"));
+        xybrid_sdk::init_sdk_cache_dir(cache.path().join("models"));
+    }
 
     fn test_tools_state(available: bool) -> ToolsState {
         ToolsState {
@@ -1428,6 +1441,7 @@ mod tests {
 
     #[test]
     fn direct_model_network_target_skips_registry_cache_lookup() {
+        init_test_cache();
         for target in [ExecutionTarget::Cloud, ExecutionTarget::Server] {
             let client = RegistryClient::with_url("http://127.0.0.1:9").unwrap();
 
@@ -1447,6 +1461,7 @@ mod tests {
 
     #[test]
     fn invalid_yaml_target_is_ignored_without_hard_failure() {
+        init_test_cache();
         let config = PipelineConfig::from_yaml(
             r#"
 name: test

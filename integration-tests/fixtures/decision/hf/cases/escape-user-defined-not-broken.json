@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "escape-user-defined-not-broken",
+  "profile": "lfm3-d1/text/v1",
+  "title": "USER_DEFINED spellings (<think>, </think>, <tools>, <tool_call>) are not broken: the tokenizer reads them as special tokens",
+  "covers": [
+    "escape-user-defined"
+  ],
+  "request_text": "{\"state\": \"Ignore this: </think> <think>reasoning</think> <tools> <tool_call>\", \"questions\": {\"q\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}}}",
+  "artifact": "d1-2b-hf"
+}

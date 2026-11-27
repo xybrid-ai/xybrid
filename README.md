@@ -121,7 +121,7 @@ Each badge links to its platform setup. See the full
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.17.0
+  xybrid_flutter: ^0.21.0
 ```
 
 The plugin needs iOS 16.0, macOS 14.0 and Android 9 (API 28) or later; the [Flutter guide](https://docs.xybrid.dev/en/docs/sdks/flutter#requirements) shows how to raise your app's minimums.
@@ -140,7 +140,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.17.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.21.0")
 }
 ```
 
@@ -162,7 +162,7 @@ val result = model.runAsync(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.17.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.21.0")
 ]
 ```
 
@@ -179,7 +179,7 @@ let result = try await model.runAsync(envelope: Envelope.text("Hello world"))
 **Install** in a React Native 0.76+ app with the New Architecture (or an Expo SDK 52+ development build):
 
 ```sh
-npm install @xybrid/react-native@0.17.0
+npm install @xybrid/react-native@0.21.0
 ```
 
 For bare React Native, run `cd ios && pod install`. For Expo, run `npx expo prebuild`; Expo Go cannot load the native module.
@@ -238,7 +238,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.17.0"
+xybrid = "0.21.0"
 ```
 
 **Run a model:**
@@ -278,7 +278,8 @@ Chain models together into a single multi-model inference pipeline (MMP) — bui
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny-ggml  # Speech → text
+  - id: asr
+    model: whisper-tiny-ggml  # Speech → text
   - model: qwen2.5-0.5b       # Process with LLM
   - model: kokoro-82m         # Text → speech
 ```
@@ -386,13 +387,15 @@ Xybrid works with **any** ONNX, GGUF, or SafeTensors model. You just need a `mod
 
 ```sh
 # Install xybrid skills into your project
-curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | sh
+curl -sSL https://raw.githubusercontent.com/xybrid-ai/xybrid/master/tools/scripts/install-skills.sh | bash
 
 # Generate model_metadata.json from a HuggingFace model
 claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 ```
 
 Skills are agent-agnostic and live in [`agents/skills/`](agents/skills/). The installer symlinks them for Claude Code (`.claude/skills`) and Codex (`.codex/skills`).
+
+The installer also adds `/xybrid-connect`, which connects your project to the Xybrid console with no sign-up. It runs `xybrid connect` (CLI 0.18.0 or newer) to create a provisional workspace, keeps its restricted key in a gitignored file, and gives you a private link to claim the workspace with GitHub. Unclaimed, the key stops after 7 days and the workspace is deleted after 14. See [API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys#provisional-workspaces).
 
 **Manually** — create `model_metadata.json` in your model directory:
 
@@ -408,7 +411,7 @@ Skills are agent-agnostic and live in [`agents/skills/`](agents/skills/). The in
 }
 ```
 
-See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or look at existing examples in [`integration-tests/fixtures/models/`](integration-tests/fixtures/models/).
+See the [model metadata docs](docs/sdk/MODEL_METADATA.md) for the full schema, or look at existing examples in [`integration-tests/fixtures/models/`](integration-tests/fixtures/models/).
 
 </details>
 
@@ -426,7 +429,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Embeddings | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | Multi-Model Pipelines (MMP) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Hardware Acceleration | Metal, ANE on devices; CPU llama.cpp on Simulator | CPU | Metal, ANE | CPU, opt-in Vulkan | CPU |
+| Hardware Acceleration | Metal (llama.cpp) on devices; CPU on Simulator | CPU | Metal | CPU, opt-in Vulkan | CPU |
 
 **SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin ✅ · Swift ✅ · React Native ✅ · Unity ✅
 
@@ -456,7 +459,7 @@ Registry models are coming.
   ([docs](https://docs.xybrid.dev/en/docs/concepts/hybrid-execution)).
 - **Telemetry you control** — opt-in behind an API key
   ([docs](docs/telemetry/registry.md)).
-- **Hardware acceleration** — Metal and the Apple Neural Engine on Apple, opt-in
+- **Hardware acceleration** — Metal on Apple, opt-in
   Vulkan on Linux; Android and Windows are CPU today
   ([docs](docs/INSTALLATION.md#platform-features)).
 

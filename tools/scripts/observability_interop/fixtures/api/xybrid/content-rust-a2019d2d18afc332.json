@@ -1,0 +1,14 @@
+{
+ "bytes": 181,
+ "span_id": "a2019d2d18afc332",
+ "storage": "object",
+ "trace_id": "e65def71db67b57b768f59d149f76bbd",
+ "values": {
+  "gen_ai.tool.call.arguments": {
+   "stringValue": "{\"city\":\"Paris\",\"unit\":null}"
+  },
+  "gen_ai.tool.call.result": {
+   "stringValue": "{\"conditions\":\"cloudy\",\"temperature_c\":18}"
+  }
+ }
+}

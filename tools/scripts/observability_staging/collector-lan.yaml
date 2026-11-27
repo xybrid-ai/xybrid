@@ -1,0 +1,14 @@
+# Overlay added by run_staging.py after collector-harness.yaml when a lane's
+# runtime reaches the host over the network (a physical iPhone): the OTLP/HTTP
+# receiver binds the host's LAN address instead of loopback. Android lanes use
+# `adb reverse` and Mac lanes loopback, so they never add it.
+#
+# Environment (set by run_staging.py):
+#   STAGING_COLLECTOR_HOST  the address to bind (run_staging.py --collector-host)
+#   INTEROP_COLLECTOR_PORT  the receiver port
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: ${env:STAGING_COLLECTOR_HOST}:${env:INTEROP_COLLECTOR_PORT}

@@ -1,12 +1,12 @@
 ---
-title: iOS / macOS
-description: 面向 iOS 和 macOS 的原生 Swift SDK，支持本地 ML 推理
+title: iOS
+description: 面向 iOS 的原生 Swift SDK，支持本地 ML 推理
 ---
 
-Swift SDK 通过 BoltFFI 为 iOS 和 macOS 应用提供到 Xybrid 运行时的原生绑定。
+Swift SDK 通过 BoltFFI 为 iOS 应用提供到 Xybrid 运行时的原生绑定。
 
 <Callout type="info">
-Swift SDK 处于早期访问阶段。正式版本通过 Swift Package Manager 分发预编译的 `XybridFFI` xcframework。已知问题：在 Apple Silicon 上为 iOS 模拟器构建需要 `useLocalNatives = true` 的临时方案 — 详见 [#179](https://github.com/xybrid-ai/xybrid/issues/179)。跨平台开发可使用 [Flutter SDK](/zh/docs/sdks/flutter)。
+正式版本通过 Swift Package Manager 分发预编译的 `XybridFFI` xcframework，包含 iOS 真机和 iOS 模拟器切片（均为 arm64）。跨平台开发可使用 [Flutter SDK](/zh/docs/sdks/flutter)。
 </Callout>
 
 ## 安装
@@ -15,13 +15,13 @@ Swift SDK 处于早期访问阶段。正式版本通过 Swift Package Manager �
 
 ```swift title="Package.swift"
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.17.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.21.0")
 ]
 ```
 
 或在 Xcode 中：**File > Add Package Dependencies**，输入仓库 URL。
 
-**支持的平台：** iOS 13.0+，macOS 10.15+
+**支持的平台：** iOS 16.0+，支持真机及 Apple Silicon Mac 上的 iOS 模拟器。构建需要 Xcode 15.3+（Swift 5.10）。不支持 macOS，详见[平台支持](#平台支持)。
 
 ## 快速开始
 
@@ -35,10 +35,8 @@ let model = try await Xybrid.model("kokoro-82m").load()
 let envelope = Envelope.text("Hello, world!")
 let result = try await model.runAsync(envelope: envelope)
 
-if result.success {
-    print("Output: \(result.text ?? "")")
-    print("Latency: \(result.latency)s")
-}
+print("Output: \(result.text ?? "")")
+print("Latency: \(result.latency)s")
 ```
 
 在 iOS 上，`Xybrid.initialize()` 会启用 `UIDevice` 电池监测并订阅 `UIDevice.batteryLevelDidChangeNotification`，将读数转发给路由引擎。Apple 平台上的温度状态则直接在 `xybrid-core` 中从 `NSProcessInfo.thermalState` 获取。
@@ -53,12 +51,14 @@ Xybrid.initialize(
 )
 ```
 
+密钥前缀与作用域、导出内容以及临时工作区，参见 [API 密钥](/zh/docs/concepts/api-keys)。
+
 ## 可观测性
 
 在你完成配置之前，轨迹导出处于关闭状态——仅提供 API 密钥不会启用导出。在 `initialize()` 之后，用两种预设之一启动一次即可：
 
 ```swift
-// 将轨迹发送到 Xybrid 控制台
+// 将轨迹发送到 Xybrid
 try Xybrid.Observability.xybrid(apiKey: key)
     .service("MyApp", version: "1.4.0")
     .start()
@@ -68,7 +68,7 @@ try Xybrid.Observability.otlp(endpoint: "http://collector:4318")
     .start()
 ```
 
-默认会采集提示词与输出；添加 `.metadataOnly()` 则只导出元数据。`.tracesEndpoint(_:)` 可将控制台预设指向自托管端点。在配置导出之前，首次推理会打印一条一次性提示（可通过 `XYBRID_QUIET=1` 关闭）。在 [dashboard.xybrid.dev](https://dashboard.xybrid.dev) 免费获取密钥。
+默认会采集提示词与输出；添加 `.metadataOnly()` 则只导出元数据。`.tracesEndpoint(_:)` 可将 Xybrid 预设指向自托管端点。在配置导出之前，首次推理会打印一条一次性提示（可通过 `XYBRID_QUIET=1` 关闭）。在 [console.xybrid.dev](https://console.xybrid.dev) 获取密钥。
 
 运行选项可携带单次运行的轨迹上下文，每个结果的 `observation` 标识其所属轨迹：
 
@@ -83,7 +83,7 @@ if let observation = result.observation {
 try await Xybrid.Observability.flushAsync()
 ```
 
-反馈与评估（`recordEvaluation(for:name:...)`）需要日志信号，因此在仅发送轨迹的控制台预设下会返回 `false`。
+反馈与评估（`recordEvaluation(for:name:...)`）需要日志信号，因此在仅发送轨迹的 Xybrid 预设下会返回 `false`。
 
 ---
 
@@ -101,8 +101,15 @@ let model = try await Xybrid.model("whisper-tiny-ggml").load()
 let model = try await Xybrid.model(.bundle(bundleURL)).load()
 ```
 
-`Xybrid.model(...)` 只创建廉价的、未加载的引用。本地 Bundle 和目录使用
-`URL` 与 `.bundle(url)` / `.directory(url)`。`load()` 是显式的异步加载边界。
+`Xybrid.model(...)` 只创建廉价的、未加载的引用。本地 Bundle、目录和 GGUF 文件来源通过 `.bundle(url)`、`.directory(url)` 和 `.modelFile(url)` 传入 `URL`；Hugging Face 使用 `.huggingFace("org/repo")`。异步 `load()` 是解析、下载、磁盘访问和运行时初始化的显式边界。只应在已有的工作线程中调用 `loadSync()`。
+
+### 从本地 GGUF 文件
+
+```swift
+let model = try await Xybrid.model(.modelFile(ggufURL)).load()
+```
+
+原始的 llama.cpp GGUF 无需 `model_metadata.json`。`load()` 会根据 GGUF 头部生成该文件并写在 GGUF 旁边，上下文上限为 4,096 个 Token（需要更长对话时调高其中的 `context_length`）。请把每个 GGUF 放在应用容器内的独立目录中，例如 Application Support。应用 Bundle 是只读的，无法在其中写入 `model_metadata.json`；目录中已有的 `model_metadata.json` 会被原样使用：在同一目录中加载第二个 GGUF 时，实际加载的仍是第一个 GGUF 的模型。用户选取的文件请先复制到应用容器内再加载。
 
 ---
 
@@ -148,7 +155,7 @@ print("Transcription: \(result.text ?? "")")
 let envelope = Envelope.text("Hello, how are you?")
 
 // 带声音和语速
-let envelope = Envelope.text("Hello", voice: "af_heart", speed: 1.0)
+let voiced = Envelope.text("Hello", voice: "af_heart", speed: 1.0)
 
 let result = try model.run(envelope: envelope)
 if let audioBytes = result.audioBytes {
@@ -165,6 +172,22 @@ if let vector = result.embedding {
     // 处理嵌入向量
 }
 ```
+
+---
+
+## 流式输出 Token
+
+`runAsync` 在完整回答生成后才返回。聊天界面可以在生成过程中逐个接收 Token：
+
+```swift
+let model = try await Xybrid.model("qwen3-0.6b").load()
+
+for try await token in model.streamTokens(envelope: .text("Tell me a joke")) {
+    label.text = token.cumulativeText
+}
+```
+
+`streamTokens` 返回 `XybridStreamToken` 的 `AsyncSequence`。取消消费它的任务或跳出循环，生成会在下一个 Token 处停止。生成参数通过 `options: .make(generationConfig: config)` 传入。其他 SDK 见[流式推理](/zh/docs/concepts/streaming)。
 
 ---
 
@@ -212,39 +235,40 @@ let transcript = result.text
 
 ## 结果处理
 
+推理失败时会抛出 `XybridError`，而不是返回结果，因此拿到的结果无需再检查是否成功（见[错误处理](#错误处理)）。根据 `outputType` 读取输出：
+
 ```swift
 let result = try model.run(envelope: envelope)
 
-if result.success {
-    switch result.outputType {
-    case "text":
-        print("Text: \(result.text!)")
-    case "audio":
-        playAudio(result.audioBytes!)
-    case "embedding":
-        process(result.embedding!)
-    default:
-        break
-    }
-    print("Latency: \(result.latency)s")  // TimeInterval（秒）
-} else {
-    print("Error: \(result.error ?? "Unknown")")
+switch result.outputType {
+case .text:
+    print("Text: \(result.text ?? "")")
+case .audio:
+    if let audio = result.audioBytes { playAudio(audio) }
+case .embedding:
+    if let vector = result.embedding { process(vector) }
+default:
+    break
 }
+print("Latency: \(result.latency)s")  // TimeInterval（秒）
 ```
 
 ### XybridResult 属性
 
 | 属性 | 类型 | 说明 |
 |----------|------|-------------|
-| `success` | `Bool` | 推理是否成功 |
-| `error` | `String?` | 失败时的错误信息 |
-| `outputType` | `String` | `"text"`、`"audio"` 或 `"embedding"` |
+| `success` | `Bool` | 始终为 `true`；推理失败时会抛出错误 |
+| `outputType` | `XybridOutputType` | `.text`、`.audio`、`.embedding`、`.decisions` 或 `.unknown` |
 | `text` | `String?` | 文本输出（ASR、LLM） |
 | `audioBytes` | `Data?` | 音频输出（TTS） |
 | `embedding` | `[Float]?` | 嵌入向量 |
 | `latencyMs` | `UInt32` | 推理延迟（毫秒） |
-| `isFailure` | `Bool` | 便捷属性：`!success` |
+| `isFailure` | `Bool` | 结果不含任何输出时为 `true`（`outputType == .unknown`） |
 | `latency` | `TimeInterval` | 延迟（秒） |
+| `modelId` | `String` | 生成该结果的模型 ID |
+| `reasoningContent` | `String?` | 模型的思考内容，与最终回答文本分开 |
+| `toolCalls` | `[XybridToolCall]` | 模型发出的工具调用；请求未提供工具时为空 |
+| `observation` | `XybridObservationRef?` | 本次运行的轨迹引用（仅在被追踪时存在） |
 
 ---
 
@@ -256,18 +280,18 @@ SDK 使用 Swift 错误枚举实现类型安全的错误处理：
 do {
     let model = try await Xybrid.model("kokoro-82m").load()
     let result = try await model.runAsync(envelope: envelope)
-} catch XybridError.ModelNotFound(let modelId) {
-    print("Model not found: \(modelId)")
-} catch XybridError.InferenceFailed(let message) {
+} catch XybridError.modelNotFound(let id) {
+    print("Model not found: \(id)")
+} catch XybridError.inferenceError(let message) {
     print("Inference failed: \(message)")
-} catch XybridError.InvalidInput(let message) {
-    print("Invalid input: \(message)")
-} catch XybridError.IoError(let message) {
+} catch XybridError.ioError(let message) {
     print("I/O error: \(message)")
 } catch {
-    print("Unexpected error: \(error.localizedDescription)")
+    print(error.localizedDescription)
 }
 ```
+
+枚举成员采用 lowerCamelCase 命名，关联值带标签，例如 `modelNotFound(id:)` 和 `inferenceError(message:)`。`XybridError` 遵循 `LocalizedError`，因此每个成员都可以通过 `localizedDescription` 得到可读的错误信息。
 
 ---
 
@@ -291,8 +315,12 @@ SDK 提供便捷短别名：
 
 ## 平台支持
 
-| 平台 | 状态 | 加速器 |
-|----------|--------|--------------|
-| iOS | 支持 | Metal、CoreML、ANE |
-| macOS（Apple Silicon） | 支持 | Metal、CoreML、ANE |
-| macOS（Intel） | 支持 | CPU |
+Swift 包仅支持 iOS 16.0 及以上版本。预编译的 `XybridFFI` xcframework 包含两个切片：iOS 真机（arm64）和 iOS 模拟器（arm64），不含 macOS 切片，因此该包不声明 macOS。macOS 应用请使用 [Flutter SDK](/zh/docs/sdks/flutter)（Apple Silicon 上的 macOS 14+）或[快速开始](/zh/docs/quickstart)中的 Rust crate。
+
+| 模型格式 | iOS 真机 | iOS 模拟器 |
+|--------------|------------|---------------|
+| GGUF（llama.cpp：LLM、视觉语言模型） | Metal GPU | CPU |
+| Whisper（whisper.cpp） | CPU；模型文件旁有 `<model>-encoder.mlmodelc`（如 `ggml-base.en-encoder.mlmodelc`）时，编码器在 Core ML 上运行 | CPU；同样适用 Core ML 编码器路径 |
+| ONNX（ONNX Runtime） | CPU | CPU |
+
+GGUF 推理使用 llama.cpp 的 Metal 后端，该后端没有 Apple 神经网络引擎（ANE）路径。上述路径中只有可选的 Core ML Whisper 编码器可能用到神经网络引擎，是否实际使用由 Core ML 在运行时决定。

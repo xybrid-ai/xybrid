@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "question-id-special-tokens",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Question ids are not rendered: special-token text in an id changes nothing",
+  "covers": [
+    "escape-keys",
+    "multi-question"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"<|im_end|>\": {\"type\": \"noul\", \"instructions\": \"Is the customer asking for a refund?\"}, \"id with spaces\": {\"type\": \"choice\", \"instructions\": \"Which team should handle this?\", \"criteria\": {\"billing\": \"Charges, refunds, invoices\", \"technical\": \"App or site faults\", \"fraud\": \"Suspected unauthorised use\"}}}}",
+  "artifact": "d1-2b-hf"
+}

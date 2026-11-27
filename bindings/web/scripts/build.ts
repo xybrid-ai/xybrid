@@ -13,12 +13,18 @@ await cp(
     recursive: true,
   },
 );
-for (const file of ["LICENSE", "NOTICE"]) {
-  await copyFile(
-    new URL(`../../../${file}`, import.meta.url),
-    new URL(`../${file}`, import.meta.url),
-  );
-}
+await copyFile(
+  new URL("../../../LICENSE", import.meta.url),
+  new URL("../LICENSE", import.meta.url),
+);
+// The npm archive has no crates/ directory. Carry the complete native license
+// texts with the package instead of leaving NOTICE's source reference dangling.
+const packageNotice = await Promise.all(
+  ["../../../NOTICE", "../../../crates/llama-cpp-sys/NOTICE"].map((path) =>
+    readFile(new URL(path, import.meta.url), "utf8"),
+  ),
+);
+await writeFile(new URL("../NOTICE", import.meta.url), packageNotice.join("\n\n"));
 const licenses = [
   ["llama.cpp", "../../../vendor/llama-cpp/LICENSE"],
   ["JSON for Modern C++", "../../../vendor/llama-cpp/licenses/LICENSE-jsonhpp"],

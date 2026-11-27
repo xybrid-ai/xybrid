@@ -243,9 +243,13 @@ fn observability_http_trace_includes_resource_identity() {
     );
     observability::shutdown_observability(Duration::from_secs(5)).unwrap();
     assert!(!observability::is_enabled());
-    assert!(observability::stats().is_none());
+    // The final counters stay readable until the next init; a flush and a
+    // repeated shutdown are no-ops.
+    let last = observability::stats().expect("the final counters stay readable");
+    assert_eq!((last.traces.exported, last.traces.pending), (1, 0));
     observability::flush_observability(Duration::from_secs(5)).unwrap();
     observability::shutdown_observability(Duration::from_secs(5)).unwrap();
+    assert_eq!(observability::stats(), Some(last));
 }
 
 /// Verify that `TemplateExecutor::execute` does **not** emit

@@ -18,6 +18,12 @@ export type SignalStats = {
   readonly failed: number;
   /** Accepted items not yet terminal (queued, in flight, or waiting in backoff). */
   readonly pending: number;
+  /**
+   * Library-owned bytes held for the pending items: the per-item estimate (for metrics, the
+   * encoded collection) admitted against `batch.maxBufferedBytes` (32 MiB). Not process memory;
+   * zero once nothing is pending, so always zero after shutdown.
+   */
+  readonly bufferedBytes: number;
 };
 
 /** Counters per signal; unconfigured signals are all zero. */
@@ -33,6 +39,7 @@ export const ZERO_STATS: SignalStats = Object.freeze({
   dropped: 0,
   failed: 0,
   pending: 0,
+  bufferedBytes: 0,
 });
 
 export class SignalCounter {
@@ -41,15 +48,22 @@ export class SignalCounter {
   #dropped = 0;
   #failed = 0;
   #pending = 0;
+  #bytes = 0;
 
   get pending(): number {
     return this.#pending;
   }
 
-  /** Items accepted and now pending. */
-  admit(items: number): void {
+  /** Estimated bytes held for the pending items (the byte budget's running total). */
+  get bufferedBytes(): number {
+    return this.#bytes;
+  }
+
+  /** Items accepted and now pending, holding `bytes` of the byte budget. */
+  admit(items: number, bytes: number): void {
     this.#accepted += items;
     this.#pending += items;
+    this.#bytes += bytes;
   }
 
   /** Items offered and immediately discarded (admission refused or closed). */
@@ -64,12 +78,13 @@ export class SignalCounter {
     this.#failed += items;
   }
 
-  /** Terminal outcomes of pending items. */
-  settle(outcome: Outcome): void {
+  /** Terminal outcomes of pending items, releasing the `bytes` they held. */
+  settle(outcome: Outcome, bytes: number): void {
     this.#exported += outcome.exported;
     this.#dropped += outcome.dropped;
     this.#failed += outcome.failed;
     this.#pending -= outcome.exported + outcome.dropped + outcome.failed;
+    this.#bytes -= bytes;
   }
 
   snapshot(): SignalStats {
@@ -79,6 +94,7 @@ export class SignalCounter {
       dropped: this.#dropped,
       failed: this.#failed,
       pending: this.#pending,
+      bufferedBytes: this.#bytes,
     });
   }
 }

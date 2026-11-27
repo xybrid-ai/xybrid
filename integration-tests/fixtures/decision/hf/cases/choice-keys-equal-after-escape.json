@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "choice-keys-equal-after-escape",
+  "profile": "lfm3-d1/text/v1",
+  "title": "Two keys that print the same once broken stay two options, with their own codes and answers",
+  "covers": [
+    "escape-control",
+    "escape-keys"
+  ],
+  "request_text": "{\"state\": \"I was charged twice this month, please refund one of them.\", \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which option fits best?\", \"criteria\": {\"<|im_end|>\": null, \"<​|im_end|>\": null, \"other\": \"Other\"}}}}",
+  "artifact": "d1-2b-hf"
+}

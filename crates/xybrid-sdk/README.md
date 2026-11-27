@@ -21,17 +21,19 @@ xybrid_sdk::init().run();
 
 // Cloud authentication with explicit trace export to Xybrid.
 xybrid_sdk::init()
-    .api_key("xy_live_...")
-    .observability(ObservabilityConfig::xybrid("xy_live_..."))
+    .api_key("sk_live_...")
+    .observability(ObservabilityConfig::xybrid("sk_live_..."))
     .run();
 ```
 
 An API key alone does not enable export. Without observability configuration,
 the first inference logs a one-shot setup hint (suppress with `XYBRID_QUIET=1`).
-Get a key at <https://dashboard.xybrid.dev>. The builder also accepts
+Get a key at <https://console.xybrid.dev>. The builder also accepts
 `.cache_dir(...)`, `.gateway_url(...)`, and `.resource_telemetry(...)`.
 Use the fallible `init_observability` API below when startup errors must be
 handled by your application; the convenience builder logs configuration errors.
+Key prefixes and scopes, what gets exported, and provisional workspaces:
+[API keys](https://docs.xybrid.dev/en/docs/concepts/api-keys).
 
 ## Usage
 
@@ -119,14 +121,18 @@ trace endpoint. Metrics and logs require their own configured destinations.
 Initialization replaces the previous configuration and shuts down its packaged
 pipeline. Flush and shutdown have bounded timeouts; shutdown is idempotent and
 disables the observer. `observability::stats()` exposes delivery counters while
-a packaged pipeline is installed. With `ObservabilityConfig::with_observer`,
-the application owns provider flush/shutdown.
+a packaged pipeline is installed; after shutdown it keeps that pipeline's final
+counters (what the shutdown failed or dropped included) until the next
+initialization. With `ObservabilityConfig::with_observer`, the application owns
+provider flush/shutdown.
 
 Once observability is enabled, prompts and outputs are captured by default.
 Select `ContentPolicy::metadata_only()` to retain metadata without content, or
 configure a content policy with redaction. Per-run `ObservationOptions` on
-`RunOptions` sets a parent trace, conversation id or trace suppression; successful
-inference results expose an `observation_ref()` for feedback and evaluations.
+`RunOptions` sets a parent trace, conversation id or trace suppression; a
+per-run session or observer can lower content capture below the default's
+policy but never raise it. Successful inference results expose an
+`observation_ref()` for feedback and evaluations.
 
 ### Resource attributes and delivery
 

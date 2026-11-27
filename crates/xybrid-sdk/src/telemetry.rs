@@ -374,13 +374,13 @@ fn redact_secret_like_token(token: &str) -> String {
         || trimmed.starts_with("gho_")
         || trimmed.starts_with("xoxb-")
         || trimmed.starts_with("xoxp-")
-        // Xybrid's own key prefixes — the secret most likely to appear in a
-        // *xybrid* error / gateway-auth failure string, and previously the one
-        // provider key this redactor missed. Matched specifically (`xy_live_`
-        // / `xy_test_`, the only two formats used across the SDK docs and
-        // bindings) rather than a bare `xy_`, which would over-redact common
-        // identifiers like `xy_coords` / `xy_axis` and corrupt legitimate
-        // error messages.
+        // Legacy Xybrid key placeholders — older SDK docs and bindings showed
+        // `xy_live_` / `xy_test_` keys (the platform issues `sk_live_` /
+        // `sk_test_`, caught by the `sk_` arm above), so a key pasted in that
+        // shape can still reach a *xybrid* error / gateway-auth failure string.
+        // Matched specifically rather than a bare `xy_`, which would
+        // over-redact common identifiers like `xy_coords` / `xy_axis` and
+        // corrupt legitimate error messages.
         || trimmed.starts_with("xy_live_")
         || trimmed.starts_with("xy_test_")
     {
@@ -526,9 +526,13 @@ pub fn publish_cloud_retry(
 // First-inference dev nudge
 // ============================================================================
 
-/// Documentation for enabling observability export. Hard-coded rather than
+/// Documentation for enabling observability export (the API keys page, which
+/// separates cloud authentication from trace export). Hard-coded rather than
 /// wired through config because the nudge fires when no config was provided.
-const OBSERVABILITY_DOCS_URL: &str = "https://docs.xybrid.dev/sdk/observability";
+const OBSERVABILITY_DOCS_URL: &str = "https://docs.xybrid.dev/docs/concepts/api-keys";
+
+/// The console that issues project keys (the dashboard origin is retired).
+const CONSOLE_URL: &str = "https://console.xybrid.dev";
 
 /// Once-guard for [`maybe_emit_dev_nudge`].
 static DEV_NUDGE: std::sync::Once = std::sync::Once::new();
@@ -544,11 +548,7 @@ pub(crate) fn maybe_emit_dev_nudge() {
         if !should_emit_dev_nudge(crate::observability::is_enabled(), quiet.as_deref()) {
             return;
         }
-        log::info!(
-            target: "xybrid_sdk",
-            "observability export is not configured; traces stay local. See {} to send traces to Xybrid or any OpenTelemetry backend.",
-            OBSERVABILITY_DOCS_URL,
-        );
+        log::info!(target: "xybrid_sdk", "{}", dev_nudge_text());
     });
 }
 
@@ -557,9 +557,39 @@ fn should_emit_dev_nudge(observability_enabled: bool, quiet: Option<&str>) -> bo
     quiet != Some("1") && !observability_enabled
 }
 
+/// The nudge: export is explicit, and a key (from `xybrid connect` or the
+/// console) only authenticates until it is handed to the Xybrid preset. Every
+/// binding emits it (bolt forwards it to logcat / os_log), so it names no
+/// language's API.
+fn dev_nudge_text() -> String {
+    format!(
+        "observability export is not configured; traces stay local. To send them to Xybrid, \
+         get a project key with `xybrid connect` (or from {CONSOLE_URL}) and pass it to your \
+         SDK's Xybrid observability preset; a key alone exports nothing. Any OpenTelemetry \
+         backend works through the OTLP configuration. See {OBSERVABILITY_DOCS_URL}"
+    )
+}
+
 #[cfg(test)]
 mod dev_nudge_tests {
-    use super::should_emit_dev_nudge;
+    use super::{dev_nudge_text, should_emit_dev_nudge};
+
+    #[test]
+    fn the_nudge_points_at_connect_and_the_console_never_at_key_only_export() {
+        let text = dev_nudge_text();
+        assert!(text.contains("xybrid connect"), "{text}");
+        assert!(text.contains("https://console.xybrid.dev"), "{text}");
+        assert!(text.contains("Xybrid observability preset"), "{text}");
+        assert!(text.contains("a key alone exports nothing"), "{text}");
+        // Emitted by every binding: no Rust-only API names.
+        assert!(!text.contains("ObservabilityConfig"), "{text}");
+        assert!(!text.contains("dashboard.xybrid.dev"), "{text}");
+        // A page the docs site serves (`/sdk/...` paths 404 there).
+        assert!(
+            text.contains("https://docs.xybrid.dev/docs/concepts/api-keys"),
+            "{text}"
+        );
+    }
 
     #[test]
     fn emits_when_observability_is_not_configured() {

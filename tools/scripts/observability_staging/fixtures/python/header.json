@@ -1,0 +1,46 @@
+{
+  "binding": "python",
+  "collector": {
+    "archive_sha256": "f9a0ed310e9beeb0fabca9d9c24bd0d3467f6339e3207710dbd66a6adf1298f6",
+    "binary": "/Users/glennsonna/.cache/xybrid/otelcol/0.165.0/darwin_arm64/otelcol-contrib",
+    "configs": [
+      "crates/xybrid-observability/collector/xybrid.yaml",
+      "crates/xybrid-observability/collector/sinks.yaml",
+      "tools/scripts/observability_interop/collector-sinks-json.yaml",
+      "tools/scripts/observability_interop/collector-harness.yaml"
+    ],
+    "distribution": "otelcol-contrib",
+    "platform": "darwin_arm64",
+    "source": "cache",
+    "version": "0.165.0"
+  },
+  "device": {
+    "machine": "arm64",
+    "python": "3.14.8",
+    "release": "27.2.0",
+    "system": "Darwin"
+  },
+  "harness_commit": "8a10f3dad1c3b2022ca02d7990e06449dbfab80c",
+  "harness_dirty": false,
+  "host": "mac",
+  "lane_exit": 0,
+  "model_id": "lfm2.5-230m",
+  "platform": {
+    "api_health": {
+      "status": "ok",
+      "version": "0.1.0"
+    },
+    "ingest_health": {
+      "service": "xybrid-ingest",
+      "status": "ok",
+      "version": "0.1.0"
+    }
+  },
+  "sdk_commit": "00e617102bc77ca0602115669cf62a68e56a92bb",
+  "sdk_version": "0.17.0",
+  "staging": {
+    "api": "https://staging.api.xybrid.dev",
+    "ingest": "https://staging.ingest.xybrid.dev"
+  },
+  "started": "2026-11-11T14:30:25.104789+00:00"
+}

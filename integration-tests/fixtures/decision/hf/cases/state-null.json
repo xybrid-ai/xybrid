@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "state-null",
+  "profile": "lfm3-d1/text/v1",
+  "title": "A null state: no state and no QUESTION preamble",
+  "covers": [
+    "state-null"
+  ],
+  "request_text": "{\"state\": null, \"questions\": {\"q\": {\"type\": \"choice\", \"instructions\": \"Which team should handle this?\", \"criteria\": {\"billing\": \"Charges, refunds, invoices\", \"technical\": \"App or site faults\", \"fraud\": \"Suspected unauthorised use\"}}}}",
+  "artifact": "d1-2b-hf"
+}

@@ -88,16 +88,26 @@ impl LlamaContext {
         n_batch: usize,
         flash_attn: bool,
     ) -> LlamaResult<Self> {
-        // llama.cpp receives the sizes as C ints; the decode limit below is
-        // derived from these same values.
-        let (n_ctx_c, n_batch_c) = (n_ctx as c_int, n_batch as c_int);
+        if model.decision_cpu {
+            return Err(LlamaError::InvalidInput(
+                "decision models require the dedicated whole-prompt context".into(),
+            ));
+        }
+        // Validate every native integer conversion before touching the model.
+        let to_c_int = |value| {
+            c_int::try_from(value).map_err(|_| {
+                LlamaError::InvalidInput("context setting exceeds native integer limit".into())
+            })
+        };
+        let (n_ctx_c, n_batch_c, n_threads_c) =
+            (to_c_int(n_ctx)?, to_c_int(n_batch)?, to_c_int(n_threads)?);
         // SAFETY: model.as_ptr() is non-null (LlamaModel's ctor guarantees
         // it). Null return surfaces as ContextCreationFailed.
         let ptr = unsafe {
             ffi::new_context_with_model(
                 model.as_ptr() as *mut c_void,
                 n_ctx_c,
-                n_threads as c_int,
+                n_threads_c,
                 n_batch_c,
                 flash_attn,
             )
@@ -339,6 +349,21 @@ fn decode_limit(n_ctx: c_int, n_batch: c_int, native_n_ctx: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_context_settings_are_rejected_before_native_construction() {
+        let model = LlamaModel::test_stub();
+        for (context, threads, batch) in [
+            (usize::MAX, 4, 512),
+            (4096, usize::MAX, 512),
+            (4096, 4, usize::MAX),
+        ] {
+            assert!(matches!(
+                LlamaContext::new(&model, context, threads, batch, false),
+                Err(LlamaError::InvalidInput(_))
+            ));
+        }
+    }
 
     #[test]
     fn the_decode_limit_is_llama_cpps_own_batch_size() {

@@ -51,14 +51,23 @@ export interface RunOptions {
   /** Skip the detailed trace for this run; metrics are still recorded. */
   suppressTrace?: boolean;
   /**
+   * Your id for one continuous live-capture session (a camera or microphone
+   * loop). Every run of the session is counted in metrics, and detailed
+   * traces are kept for roughly one run per live trace interval per session
+   * (`liveTraceIntervalMs` in the observability config).
+   */
+  frameSessionId?: string;
+  /**
    * Seed the run with this conversation's history (multi-turn chat). The
    * context is not modified: push the turns you want to keep yourself.
    */
   context?: ConversationContext;
   /**
    * Stop button. Aborting stops generation at the next token boundary. A
-   * batch `run` is only cancellable before generation starts; use
-   * `runStreaming` when a mid-flight stop matters.
+   * generative batch `run` is only cancellable before generation starts; use
+   * `runStreaming` when a mid-flight stop matters. Decision runs additionally
+   * observe cancellation between passes and through the native abort callback,
+   * returning an error rather than partial answers.
    */
   signal?: AbortSignalLike;
 }
@@ -108,7 +117,7 @@ export class ModelLoader {
   }
 
   /**
-   * Serve from the cloud gateway while the registry weights download in the
+   * Try the same id at the cloud gateway while the registry weights download in the
    * background, instead of blocking on the download. `load()` then resolves
    * almost immediately with a model that switches to on-device by itself.
    * Needs an API key, an uncached model ({@link willSpeculate} checks both up
@@ -325,8 +334,7 @@ export class Model {
   }
 
   /**
-   * Whether runs are currently answered by the cloud because the local
-   * weights aren't ready (speculative loads). Predicts the next run;
+   * Whether a run would try the gateway because the local weights aren't ready.
    * `InferenceResult.executionTarget` reports what a finished run did.
    */
   isCloudServing(): Promise<boolean> {

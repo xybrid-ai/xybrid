@@ -172,6 +172,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
 
             match output.kind {
+                EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+                    return Err("Unexpected decision output".into());
+                }
                 EnvelopeKind::Text(text) => text,
                 _ => "Hello, how are you today?".to_string(),
             }
@@ -209,7 +212,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let config = CloudConfig::gateway()
             .with_gateway_url(&gateway_url)
             .with_api_key(&api_key)
-            .with_default_model("gpt-4o-mini");
+            // The Xybrid gateway takes frontier models by canonical id; a
+            // short id such as `gpt-4o-mini` is `404 model_not_found`.
+            .with_default_model("openai/gpt-4o-mini");
         (config, "gateway".to_string())
     } else {
         // Direct API mode
@@ -325,6 +330,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Extract audio from output envelope
     let audio_bytes = match tts_output.kind {
+        EnvelopeKind::DecisionRequest(_) | EnvelopeKind::Decisions(_) => {
+            return Err("Unexpected decision output".into());
+        }
         EnvelopeKind::Audio(bytes) => bytes,
         _ => {
             eprintln!("❌ Unexpected TTS output type");

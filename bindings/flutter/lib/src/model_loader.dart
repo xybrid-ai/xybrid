@@ -19,6 +19,7 @@ import 'tools.dart';
 
 // Native completion supplies metrics and correlation after the terminal token.
 // Hold that terminal token so successful turns still finalize exactly once.
+// Shared by runStreaming, runStreamingWithContext and runStreamingWithFallback.
 Stream<StreamToken> _tokensWithCompletion(
     Stream<FfiStreamEvent> stream) async* {
   StreamToken? pendingFinal;
@@ -43,7 +44,8 @@ Stream<StreamToken> _tokensWithCompletion(
             if (token.toolCalls.isNotEmpty) emittedToolCalls = true;
             yield token;
           }
-        case FfiStreamEvent_Complete(:final field0):
+        case FfiStreamEvent_Complete(:final field0) ||
+              FfiStreamEvent_Recovered(:final field0):
           final terminal = pendingFinal;
           pendingFinal = null;
           final calls = emittedToolCalls
@@ -63,6 +65,8 @@ Stream<StreamToken> _tokensWithCompletion(
                 (calls.isEmpty ? 'stop' : 'tool_calls'),
             metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
             observation: field0.observation,
+            speculativeCloudError:
+                event is FfiStreamEvent_Recovered ? event.field1 : null,
             toolCalls: calls,
             rawText: terminal?.rawText ?? (calls.isEmpty ? null : field0.text),
           );
@@ -109,9 +113,9 @@ class XybridException implements Exception {
   String toString() => 'XybridException: $message';
 }
 
-/// Cooperative cancel handle for an in-flight streaming run.
+/// Cooperative cancel handle for an in-flight batch or streaming run.
 ///
-/// Construct one, pass it into [XybridModel.runStreaming],
+/// Construct one, pass it into [XybridModel.run], [XybridModel.runStreaming],
 /// [XybridModel.runStreamingWithContext], or
 /// [XybridModel.runStreamingWithFallback], and call [cancel] to halt Rust
 /// generation. Cancellation is cooperative: it takes effect at the next token
@@ -226,7 +230,8 @@ class LoadError extends LoadEvent {
   const LoadError(this.message) : super._();
 }
 
-/// Prepares a model for loading from registry or local bundle.
+/// Prepares a model for loading from the registry, Hugging Face, a local
+/// bundle or directory, or a raw GGUF file.
 class XybridModelLoader {
   /// The underlying FRB model loader.
   final FfiModelLoader _inner;
@@ -244,8 +249,8 @@ class XybridModelLoader {
     return XybridModelLoader._(FfiModelLoader.fromRegistry(modelId: modelId));
   }
 
-  /// Create a loader that serves from the cloud gateway while the registry
-  /// weights download in the background, instead of blocking on the download.
+  /// Try the registry id at the cloud gateway while the weights download.
+  /// Only ids also listed in the gateway catalog can be served remotely.
   ///
   /// [load] then returns almost immediately with a cloud-backed model that
   /// switches to on-device by itself once the download lands. Requires an API
@@ -284,6 +289,32 @@ class XybridModelLoader {
   /// Throws if the directory doesn't exist or metadata is missing/invalid.
   factory XybridModelLoader.fromDirectory(String path) {
     return XybridModelLoader._(FfiModelLoader.fromDirectory(path: path));
+  }
+
+  /// Create a loader for a raw llama.cpp GGUF file, which needs no
+  /// `model_metadata.json`.
+  ///
+  /// Creating the loader touches no disk. [load] and [loadWithProgress]
+  /// generate the metadata from the GGUF header, write it beside the file as
+  /// `model_metadata.json` unless one is already there, then load that
+  /// directory. So:
+  ///
+  /// * The directory must be writable. Flutter assets are not files on disk
+  ///   and the iOS app bundle is read-only: copy the GGUF into a directory of
+  ///   your own, such as one under `getApplicationSupportDirectory()`, and
+  ///   pass the file's full path.
+  /// * An existing `model_metadata.json` is used as it is, so keep one GGUF
+  ///   per directory.
+  /// * The generated context window is capped at 4,096 tokens; raise
+  ///   `context_length` in the file for longer conversations.
+  /// * The generated metadata has no vision projector: load a vision GGUF
+  ///   with an mmproj through [XybridModelLoader.fromDirectory].
+  ///
+  /// [load] throws [XybridException] with `GGUF file not found: <path>` when
+  /// the file is missing. Nothing is downloaded, so [loadWithProgress] emits
+  /// only [LoadComplete] or [LoadError].
+  factory XybridModelLoader.fromModelFile(String path) {
+    return XybridModelLoader._(FfiModelLoader.fromModelFile(path: path));
   }
 
   /// Create a loader for a model from a HuggingFace Hub repository.
@@ -374,8 +405,7 @@ class XybridModel {
   /// Immutable reference for the load that created this model.
   ObservationRef? get loadObservationRef => inner.loadObservationRef();
 
-  /// Whether runs are currently answered by the cloud because the local
-  /// weights are not ready yet. `false` for ordinary local models.
+  /// Whether a run would try the gateway because the local weights are not ready.
   ///
   /// This predicts the *next* run; [XybridResult.executionTarget] reports what
   /// a run that already happened actually did. They differ when a cloud leg
@@ -435,17 +465,22 @@ class XybridModel {
   ///
   /// Pass an optional [config] to control generation parameters (temperature,
   /// top-p, etc.). When `null`, the model's default parameters are used.
+  /// Decision requests reject explicit generation settings and observe
+  /// [cancellationToken] before preparation, between passes and at native abort
+  /// boundaries. They return all answers together or an error.
   ///
   /// Throws [XybridException] if inference fails.
   Future<XybridResult> run(
     XybridEnvelope envelope, {
     GenerationConfig? config,
+    CancellationToken? cancellationToken,
     RunOptions? options,
   }) async {
     try {
       final ffiResult = await inner.run(
         envelope: envelope.inner,
         config: config?.toFfi(),
+        cancellationToken: cancellationToken?.inner.fork(),
         options: options?.toFfi(),
       );
       return XybridResult.fromFfi(ffiResult);
@@ -556,7 +591,7 @@ class XybridModel {
       final stream = inner.runStream(
         envelope: envelope.inner,
         config: config?.toFfi(),
-        cancellationToken: cancellationToken?.inner,
+        cancellationToken: cancellationToken?.inner.fork(),
         preempt: preempt,
         frameSessionId: frameSessionId,
         options: options?.toFfi(),
@@ -589,7 +624,7 @@ class XybridModel {
     final stream = inner.runTtsStream(
       envelope: envelope.inner,
       config: null,
-      cancellationToken: cancellationToken?.inner,
+      cancellationToken: cancellationToken?.inner.fork(),
       options: options?.toFfi(),
     );
     await for (final event in stream) {
@@ -629,7 +664,7 @@ class XybridModel {
         envelope: envelope.inner,
         options: options.toFfi(),
         config: config?.toFfi(),
-        cancellationToken: cancellationToken?.inner,
+        cancellationToken: cancellationToken?.inner.fork(),
       );
 
       yield* _tokensWithCompletion(stream);
@@ -670,6 +705,12 @@ class XybridModel {
   /// context.pushText(buffer.toString(), MessageRole.assistant);
   /// ```
   ///
+  /// A successful turn ends with exactly one final token
+  /// ([StreamToken.isFinal]). It keeps the native finish reason, tool calls
+  /// and [StreamToken.rawText], and carries the run's [StreamToken.metrics]
+  /// and [StreamToken.observation]. A failed run ends the stream with an
+  /// error token ([StreamToken.isError]), which can follow a final token.
+  ///
   /// Pass an optional [cancellationToken] to make the run cancellable: calling
   /// [CancellationToken.cancel] (or unsubscribing from the stream) halts
   /// generation at the next token boundary and releases the model write lock.
@@ -697,60 +738,13 @@ class XybridModel {
         envelope: envelope.inner,
         context: context.inner,
         config: config?.toFfi(),
-        cancellationToken: cancellationToken?.inner,
+        cancellationToken: cancellationToken?.inner.fork(),
         preempt: preempt,
         frameSessionId: frameSessionId,
         options: options?.toFfi(),
       );
 
-      // This method emits the native terminal token AND a completion token
-      // (the latter is where metrics arrive). Tool calls must be delivered
-      // across that pair exactly once, or a caller looping on [hasToolCalls]
-      // would execute every tool twice.
-      var emittedToolCalls = false;
-
-      await for (final event in stream) {
-        switch (event) {
-          case FfiStreamEvent_Token(:final field0):
-            final calls =
-                field0.toolCalls.map(ToolCall.fromFfi).toList(growable: false);
-            if (calls.isNotEmpty) emittedToolCalls = true;
-            yield StreamToken(
-              token: field0.token,
-              index: field0.index,
-              cumulativeText: field0.cumulativeText,
-              isFinal: field0.finishReason != null,
-              finishReason: field0.finishReason,
-              toolCalls: calls,
-              rawText: field0.rawText,
-            );
-          case FfiStreamEvent_Complete(:final field0):
-            final calls = emittedToolCalls
-                ? const <ToolCall>[]
-                : field0.toolCalls
-                    .map(ToolCall.fromFfi)
-                    .toList(growable: false);
-            yield StreamToken(
-              token: '',
-              index: 0,
-              cumulativeText: field0.text ?? '',
-              isFinal: true,
-              finishReason: calls.isEmpty ? 'stop' : 'tool_calls',
-              metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
-              observation: field0.observation,
-              toolCalls: calls,
-              rawText: calls.isEmpty ? null : field0.text,
-            );
-          case FfiStreamEvent_Error(:final field0):
-            yield StreamToken(
-              token: '',
-              index: 0,
-              cumulativeText: '',
-              isFinal: true,
-              finishReason: 'error: $field0',
-            );
-        }
-      }
+      yield* _tokensWithCompletion(stream);
     } catch (e) {
       yield StreamToken(
         token: '',

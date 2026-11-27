@@ -11,7 +11,7 @@ stages:
   #   version: "1.0"
   #   target: device
 
-  - model: gpt-4o-mini
+  - model: openai/gpt-4o-mini       # Xybrid Platform: canonical model id
     target: cloud
     provider: openai
     system_prompt: "You are a motivational coach. Give short, energetic responses."

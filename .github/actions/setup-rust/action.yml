@@ -1,0 +1,60 @@
+name: Set up Rust
+description: >
+  Install a Rust toolchain and restore the cargo cache. Only master saves the
+  cache; pull requests restore master's copy.
+
+# The one toolchain + cache definition for ci.yml's Rust jobs (ci.yml,
+# "Adding CI"). A job passes what differs (components, a cache key) and gets
+# the rest from here.
+#
+# WHY ONLY MASTER SAVES. GitHub scopes a cache saved by a pull request to that
+# pull request, so nothing but its own reruns can read it, yet it counts
+# against the repository's 10 GB limit. Every pull request saved its own copy
+# of each job's cache (about 7 GB per push of a busy PR), which evicted
+# master's, and more than half of restores missed. Pull requests now restore
+# master's cache and add nothing; master pushes refresh it.
+inputs:
+  toolchain:
+    description: Toolchain for dtolnay/rust-toolchain.
+    default: stable
+  components:
+    description: Comma-separated rustup components (rustfmt, clippy).
+    default: ''
+  targets:
+    description: Comma-separated extra targets.
+    default: ''
+  cache:
+    description: Restore (and on master, save) the cargo cache. `false` for jobs that build nothing, like rustfmt.
+    default: 'true'
+  cache-key:
+    description: >
+      Extra cache key, added to rust-cache's job-based key. Jobs whose builds
+      differ (features, targets) use different keys so they do not overwrite
+      each other's cache.
+    default: ''
+  cache-bin:
+    description: Cache ~/.cargo/bin. `false` keeps installed binaries out of a cache that does not need them.
+    default: 'true'
+  per-image:
+    description: >
+      Key the cache on the runner image (ImageOS). macOS jobs that build
+      ort-sys need it: its build-script output records the image's Xcode
+      clang-runtime path, which other images may lack.
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
+
+    - if: inputs.cache == 'true'
+      uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      with:
+        key: ${{ inputs.cache-key }}
+        cache-bin: ${{ inputs.cache-bin }}
+        env-vars: ${{ inputs.per-image == 'true' && 'ImageOS' || '' }}
+        save-if: ${{ github.ref == 'refs/heads/master' }}

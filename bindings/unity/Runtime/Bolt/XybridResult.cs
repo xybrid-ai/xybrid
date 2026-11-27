@@ -12,10 +12,7 @@ namespace XybridBolt
     /// to match the existing uniffi-generated Kotlin/Swift name — the iOS
     /// example references `XybridResult` directly.
     /// </summary>
-    /// <param name="ExecutionTarget">
-    /// Where the answer actually came from. Cloud fallback keeps `model_id`
-    /// identical on both legs, so this is the only way to tell them apart.
-    /// </param>
+    /// <param name="ExecutionTarget">Where the answer actually came from, even when both legs requested the same model id.</param>
     /// <param name="ToolCalls">
     /// Tool calls the model emitted this turn. Empty unless the request
     /// offered tools via [`XybridGenerationConfig::tools`].

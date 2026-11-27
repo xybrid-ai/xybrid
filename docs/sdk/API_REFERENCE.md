@@ -223,8 +223,10 @@ class XybridModelLoader {
   factory XybridModelLoader.fromRegistry(String modelId);
   factory XybridModelLoader.fromBundle(String path);
   factory XybridModelLoader.fromDirectory(String path);
+  // Raw llama.cpp GGUF; load() writes model_metadata.json beside it if absent
+  factory XybridModelLoader.fromModelFile(String path);
 
-  // Serve from the cloud gateway while the weights download in the background
+  // Try the registry id at the gateway while the weights download
   factory XybridModelLoader.fromRegistrySpeculative(String modelId);
 
   // May load() speculate? (enabled + API key + not cached; the registry
@@ -283,12 +285,14 @@ public enum ModelSource {
   case directory(URL)
   case huggingFace(String)
   case registrySpeculative(String)
+  case modelFile(URL)  // raw GGUF; load() writes model_metadata.json beside it if absent
 }
 
 public struct ModelLoader {
   let source: ModelSource
 
   static func fromRegistrySpeculative(_ id: String) -> Self
+  static func fromModelFile(_ url: URL) -> Self
   var willSpeculate: Bool { get }
 
   func load() async throws -> XybridModel
@@ -410,24 +414,31 @@ var result = model.Run(Envelope.Text("Hello!"));
 | `fromDirectory()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingFace()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingfaceWithRevision()` | — | ✅ | ✅ | ✅ |
+| `fromModelFile()` | ✅ | — | ✅ | ✅ |
 | `load()` | ✅ | ✅ | ✅ | ✅ |
 | `loadWithProgress()` | ✅ | — | — | — |
 | `download()` / `StartDownload()` | — | ✅ | ✅ | ✅ |
 | `fromRegistrySpeculative()` | ✅ | ✅ | ✅ | ✅ |
 | `willSpeculate` | ✅ | ✅ | ✅ | ✅ |
 
-`fromRegistrySpeculative()` answers from the cloud gateway while the registry
-weights download in the background, then switches to on-device by itself. It
-needs an API key, an uncached model, and a chat model the registry serves as a
-direct download (a GGUF or vision-language variant, not a `.xyb` bundle) —
-otherwise it behaves exactly like `fromRegistry()`. `willSpeculate` checks the
-first two before loading and never touches the network; the load asks the
-registry for the third, and `isCloudServing()` on the loaded model reports the
-outcome.
+`fromRegistrySpeculative()` lets runs try the **same registry id** at the gateway
+while its weights download, then switches to on-device. This needs an API key,
+an uncached model, and a direct-download chat variant (GGUF or vision-language,
+not a `.xyb` bundle); otherwise it behaves like `fromRegistry()`. `willSpeculate`
+checks local preconditions; the load checks the variant with the registry.
+Neither checks the gateway catalog. `isCloudServing()` predicts that a run will
+try the gateway, not that the gateway will accept the id.
+The per-load opt-in is independent of the `setSpeculativeCloud()` default.
 
-It sets the per-load override itself, so it does **not** depend on
-`setSpeculativeCloud()` — that toggle is the default for loads which do not opt
-in per-load.
+The gateway can reject an unlisted id (404), return 502 when its catalog is
+unknown, or refuse the workspace or its quota. If no token reached the caller,
+the run waits for the download and tries locally. A successful local result
+includes the cloud attempt's error message:
+`result.speculative_cloud_error()` in Rust, `result.speculativeCloudError` in
+Flutter (also on its final stream token), `result.SpeculativeCloudError`
+in Unity, or `speculative_cloud_error` in Bolt result envelope metadata.
+If the download fails or the stream already delivered output, the cloud error
+is returned instead; partial output is never replayed.
 
 ---
 
@@ -712,7 +723,9 @@ class XybridModel {
   Future<void> warmup();
   Future<void> unload();
 
-  // Hardware info
+  // Hardware info (planned; Rust only today, as ExecutionProviderInfo::current()).
+  // Describes ONNX Runtime: name is always "cpu"; coremlAvailable means the
+  // Core ML execution provider is linked into the build, not in use.
   ExecutionProviderInfo executionProviderInfo();
 }
 ```
@@ -840,15 +853,15 @@ println!("{} {:.3}", best.id, best.score);
 | `defaultGenerationConfig()` | — | ✅ | ✅ | ✅ |
 | `voice()` | — | ✅ | ✅ | ✅ |
 | `run()` | ✅ | ✅ | ✅ | ✅ |
-| `runWithOptions()` / `run_with_options()` | Rust ✅ | planned | planned | planned |
-| `runWithContext()` | ✅ | — | — | ✅ |
-| `runWithContextOptions()` / `run_with_context_options()` | Rust ✅ | planned | planned | planned |
-| `runStreaming()` | ✅ | — | — | ✅ |
-| `runStreamingWithOptions()` / `run_streaming_with_options()` | Rust ✅ | planned | planned | planned |
+| `runWithOptions()` / `run_with_options()` | Rust ✅ | 🚧 `run(envelope, options)` | 🚧 `run(envelope:options:)` | planned |
+| `runWithContext()` | ✅ | ✅ | ✅ | ✅ |
+| `runWithContextOptions()` / `run_with_context_options()` | Rust ✅ | 🚧 `runWithContext(envelope, context, options)` | 🚧 `runWithContext(envelope:context:options:)` | planned |
+| `runStreaming()` | ✅ | 🚧 `streamTokens` | 🚧 `streamTokens` | ✅ |
+| `runStreamingWithOptions()` / `run_streaming_with_options()` | Rust ✅ | 🚧 `streamTokens` | 🚧 `streamTokens` | planned |
 | `runTtsStreaming()` / `run_tts_streaming()` | ✅ | — | — | — |
 | `runStreamingWithFallback()` | ✅ | planned | planned | planned |
-| `runStreamingWithContext()` | ✅ | — | — | ✅ |
-| `runStreamingWithContextOptions()` / `run_streaming_with_context_options()` | Rust ✅ | planned | planned | planned |
+| `runStreamingWithContext()` | ✅ | 🚧 pull API `runStreamWithContext` | 🚧 pull API `runStreamWithContext` | ✅ |
+| `runStreamingWithContextOptions()` / `run_streaming_with_context_options()` | Rust ✅ | 🚧 pull API `runStreamWithContext` | 🚧 pull API `runStreamWithContext` | planned |
 | `benchmark()` | — | — | — | — |
 | `warmup()` | ✅ | ✅ | ✅ | — |
 | `unload()` | ✅ | ✅ | ✅ | — |
@@ -856,7 +869,7 @@ println!("{} {:.3}", best.id, best.score);
 | `downloadStatus()` | ✅ | ✅ | ✅ | ✅ |
 | `awaitDownload()` | — | ✅ | ✅ | ✅ |
 | `downloadProgress()` | ✅ | ✅ | ✅ | ✅ |
-| `executionProviderInfo()` | — | — | — | — |
+| `executionProviderInfo()` / `ExecutionProviderInfo::current()` | Rust ✅ | planned | planned | planned |
 
 While a speculative load is still downloading, `isCloudServing()` is true and
 `downloadStatus()` returns a consistent read of the state (`downloading` /
@@ -872,9 +885,8 @@ UI thread. `downloadProgress()` is the pushed form on every SDK: a
 flutter_rust_bridge stream sink on Dart, and a BoltFFI stream elsewhere, which
 carries items Rust → host only so no closure crosses the FFI boundary.
 
-`XybridResult.executionTarget` reports whether an answer that already ran came
-from the device or the cloud; cloud fallback keeps the model id identical on
-both legs, so it is the only way to tell them apart.
+`XybridResult.executionTarget` reports whether the device or the cloud produced
+the answer, even when both legs requested the same model id.
 
 ---
 
@@ -1055,6 +1067,13 @@ stage's latency.
 ## 5. Envelope
 
 Universal input/output container.
+
+`Envelope.decisionRequestJson(json)` accepts a bounded Liquid SystemOne JSON string;
+`Envelope.decisionRequest(request)` accepts ordered typed builders. Both use the
+existing model `run` surface. JSON content remains text at foreign boundaries to
+preserve order, signed zero and large integers. Decisions are local-only: streaming,
+history, generation options, cloud fallback and pipelines are refused in text/v1.
+See [native decision examples](../guides/decision-bindings.md) for all SDKs.
 
 **Design Note**: Envelope is task-agnostic. Optional metadata parameters (like `voiceId` and `speed`)
 are passed through to pipeline stages that understand them. Stages that don't need these params
@@ -1324,6 +1343,14 @@ stages:
 ---
 
 ## 7. Result Types
+
+Decision results expose `decisions` (`Decisions` in C#), containing ordered typed
+answers, `passes` and total `inputTokens`. Distribution probabilities remain f64;
+JSON bridges encode a negative-infinite raw score as `"-Infinity"`. `tokensIn`
+and `tokensOut` read envelope usage metadata (`tokensOut` is zero for decisions). These accessors add no fields to frozen result wire
+records. Swift/Kotlin/Python/Unity use an appended decision envelope variant;
+Flutter ships its new internal result carrier and regenerated Rust/Dart bridge
+together. Actual model/package/device qualification remains a release gate.
 
 > **Audio format**: TTS models produce raw PCM audio bytes (16-bit signed, little-endian).
 > Typical sample rate is 24kHz mono (e.g., Kokoro TTS). The audio is returned as raw bytes,
@@ -1807,10 +1834,18 @@ the optional `cancellationToken` parameter. Cancellation is **cooperative**:
 the token's cancelled state is checked before every emitted token, so it takes
 effect at the next token boundary, not mid-token, and surfaces as the
 `AbortSignal::UserCancelled` policy signal. When the token is cancelled — or
-the Dart stream is unsubscribed mid-run (sink-close-as-cancel) — Rust halts
-generation at the next token and **releases the model write lock promptly**, so
-a follow-up run can start. The Dart cancel handle exposes `cancel()` and an
-`isCancelled` getter.
+the Dart stream is unsubscribed mid-run (sink-close-as-cancel, with or without
+a token) — Rust halts generation at the next token and **releases the model
+write lock promptly**, so a follow-up run can start. The Dart cancel handle
+exposes `cancel()` and an `isCancelled` getter.
+
+**Abandoning a stream cancels its run.** Dropping the Rust `run_stream` stream,
+dropping a facade streaming session, closing a Bolt stream (`stream_close`) or
+unsubscribing the Dart stream before its terminal event stops the run at its
+next token, as a cancelled token would. A Rust token callback does the same by
+returning `AbortReason::UserCancelled`. Observability records the run as
+cancelled (`error.type` `cancelled`), not as an error; see
+[run outcomes](observability-coverage.md#run-outcomes).
 
 ```dart
 final cancel = CancellationToken();
@@ -1819,7 +1854,8 @@ final stream = model.runStreaming(
   cancellationToken: cancel,
 );
 final sub = stream.listen((token) { /* ... */ });
-// Later, to stop Rust generation (not just unsubscribe):
+// Later, stop Rust generation at its next token. Either call does it on its
+// own; the token suits code that does not hold the subscription.
 cancel.cancel();
 await sub.cancel();
 ```
@@ -1835,7 +1871,7 @@ cancellation primitive to it.
 | Binding | Cancel a run by |
 |---------|-----------------|
 | Dart | passing a `CancellationToken`, or unsubscribing the stream |
-| Swift | cancelling the `Task` around `runAsync`, or passing a token to `run(envelope:options:cancel:)` |
+| Swift | cancelling the `Task` around `runAsync` / `streamTokens` (or breaking out of the `for try await` loop), or passing a token to `run(envelope:options:cancel:)` |
 | Kotlin | cancelling the coroutine around `runAsync` / `streamTokens`, or passing a token to the generated `run` |
 | C# (Unity) | passing a `System.Threading.CancellationToken` to `Run` / `RunStreaming` |
 
@@ -1844,11 +1880,17 @@ cancellation primitive to it.
 > that is already cancelled when it starts (`check_before_run`), but once the
 > backend is generating, `run_with_options` has no token-aware path to stop it
 > and the call finishes normally. Reach for the streaming surface when a
-> mid-flight stop button matters.
+> mid-flight stop button matters. Decision models are the exception: their
+> batch run polls the token between passes and inside each pass, and ends with
+> `Cancelled` (see [decisions](decisions.md)).
 
 ```swift
-// Swift — structured concurrency drives the native stop button
-let task = Task { try await model.runAsync(envelope: .text("Tell me a long story")) }
+// Swift — cancelling the consuming task stops native generation
+let task = Task {
+    for try await token in model.streamTokens(envelope: .text("Tell me a long story")) {
+        render(token)
+    }
+}
 task.cancel()   // generation stops at the next token
 ```
 
@@ -1891,27 +1933,30 @@ final stream = model.runStreaming(
 );
 ```
 
-**Live mode / frame session (implemented in Rust + Dart, issue 14).** For
+**Live mode / frame session (Rust, Dart, and the Bolt bindings: Swift, Kotlin,
+Python, Unity and React Native through `RunOptions.frame_session_id`).** For
 continuous live-capture loops (e.g. the Flutter vision-live loop), `RunOptions`
-carries an optional `frameSessionId` — a caller-supplied UUID identifying one
-continuous live-capture session — plus a `liveMode` flag. The **caller**
-generates the id (the SDK treats it as an opaque tag);
-`with_frame_session(frameSessionId)` is a convenience that sets the id and
-`liveMode = true`. This is surfaced on the streaming run-options path. On the
-wire, live-mode inferences carry `frame_session_id` and `live_mode` and are
-**rate-limited at the telemetry dispatch funnel to roughly one wire row per
-second per `frame_session_id`** (the intervening per-frame rows are dropped),
-keeping telemetry low-cardinality across a live stream. A true summary/rollup
-row needs a session-end signal the SDK never receives, so the per-session
-rate-limit is the v1 contract (epic Open Decision #5). Defaults are
-`frameSessionId = null` and `liveMode = false` (per-run telemetry, byte-for-byte
-unchanged). In Dart there is no standalone `RunOptions` builder yet; the
-capability is reachable via the optional `frameSessionId` parameter on the
-streaming run methods (`runStreaming` / `runStreamingWithContext`), which wires
-`FfiRunOptions.frame_session_id` → `with_frame_session` under the hood.
+carries an optional `frameSessionId`: a caller-supplied id for one continuous
+live-capture session, opaque to the SDK. `with_frame_session(frameSessionId)`
+sets the id and `liveMode = true`; the facade and Bolt field does the same,
+and ignores a blank id. It applies to batch and streaming model runs alike.
+Pipelines take no frame session.
+
+Every frame of a live session is counted in metrics. Detailed traces are
+sampled per session: a frame is traced when at least the live trace interval
+(`ObservabilityConfig::live_trace_interval`, 1 s by default) has passed since
+the session's last traced frame, and the frames in between record metrics
+only. The SDK remembers at most 1,024 sessions and forgets one 300 s after its
+last frame. A traced live run carries `xybrid.live.session_id`. In-process
+telemetry events for live runs carry `frame_session_id` and `live_mode`.
+Defaults are `frameSessionId = null` and `liveMode = false`, which leaves
+one-shot runs unchanged. In Dart there is no standalone `RunOptions` builder
+yet; the capability is reachable through the optional `frameSessionId`
+parameter of the streaming run methods (`runStreaming` /
+`runStreamingWithContext`).
 
 ```rust
-// Rust — live-capture session tagging on the streaming run-options path.
+// Rust — tag every run of one live-capture session.
 let session_id = uuid::Uuid::new_v4().to_string(); // caller-generated
 let options = RunOptions::new()
     .with_cancellation_token(token.clone())
@@ -1944,6 +1989,11 @@ Rust SDK abort policy, including the selected memory/thermal stop signals,
 `fallbackToCloud`, and grace-token budget, and uses
 `runStreamingWithFallback(...)` for the continuous token stream.
 
+For a resource-triggered retry, Rust's `run_streaming_with_fallback` requests
+the on-device id unless the envelope explicitly names a cloud `model`.
+Flutter's `runStreamingWithFallback` uses `cloudModel` or its existing default,
+`openai/gpt-4o-mini`.
+
 `cloudGatewayUrl` is an optional override for the Xybrid cloud gateway base URL.
 Customer builds accept HTTPS Xybrid gateway hosts with a `/v1` base path. Debug
 builds also accept localhost, private IP, and link-local gateways so apps can
@@ -1972,7 +2022,7 @@ stream stays low-cardinality.
 | `ImagePlane` | ✅ | 📋 | 📋 | 📋 |
 | `YuvColorInfo` | ✅ | 📋 | 📋 | 📋 |
 | `RunOptions` | ✅ | planned | planned | planned |
-| `RunOptions.frameSessionId` / `liveMode` | ✅ | 📋 | 📋 | 📋 |
+| `RunOptions.frameSessionId` (sets live mode) | ✅ | ✅ | ✅ | ✅ |
 | `AbortPolicy` | ✅ | planned | planned | planned |
 | `AbortSignal` | ✅ | planned | planned | planned |
 | `AbortSignal.userCancelled` (Dart surface via CancellationToken) | ✅ | 📋 | 📋 | 📋 |
@@ -2178,7 +2228,7 @@ format.
 ### Swift-specific
 
 - Uses hand-written Swift facades over BoltFFI-generated types
-- Uses `URL` for local bundle and directory model sources
+- Uses `URL` for local bundle, directory, and GGUF file model sources
 - Uses `async throws` for model loading; `loadSync()` is the explicit blocking form
 
 ### Unity/C#-specific

@@ -51,7 +51,7 @@ stages:
 ```yaml
 stages:
   - id: assistant
-    model: gpt-4o-mini
+    model: openai/gpt-4o-mini
     target: cloud
     provider: openai
     system_prompt: "You are a helpful voice assistant. Keep responses concise."
@@ -62,15 +62,15 @@ stages:
 | 字段 | 说明 |
 |------|------|
 | `id` | 阶段标识符（默认为模型 ID） |
-| `model` | 注册表中的模型 ID，云端阶段则为提供商的模型名 |
+| `model` | 注册表中的模型 ID；云端阶段则为云端模型：通过 Xybrid Platform 时使用 `openai/gpt-4o-mini` 这样的规范 ID，使用 `backend: direct` 时使用提供商自己的模型名 |
 | `version` | 模型版本（如 `"1.0"`） |
 | `target` | 运行位置：`device`、`cloud` 或 `auto`（默认）— 参见[混合执行](/docs/concepts/hybrid-execution)。`auto` **同时**声明 `provider` 即为混合阶段：本地模型加一条云端分支，由策略与设备状态按请求选择 |
 | `provider` | 云端或混合阶段的提供商：`openai`、`anthropic`、`google`、`deepseek`、`elevenlabs`、`openrouter`、`custom` |
-| `cloud_model` | 混合阶段云端分支发送给提供商的模型名（默认与 `model` 相同） |
+| `cloud_model` | 混合阶段云端分支发送的模型（默认与 `model` 相同），命名方式与云端阶段的 `model` 相同 |
 | `backend` | `gateway`（默认）通过 `XYBRID_API_KEY` 访问 Xybrid Platform；对 OpenAI 兼容提供商使用 `direct` 会以 `$<PROVIDER>_API_KEY` 直接调用其 API |
 | `gateway_url`、`api_key` | 云端分支的显式端点与凭据（`api_key` 接受 `$ENV_VAR`）；凭据绝不会跨源继承 |
 | `thinking` | 仅 DeepSeek：`enabled` 或 `disabled`（DeepSeek 默认开启推理；`disabled` 把 `max_tokens` 留给回答） |
-| `execution_provider` | ONNX Runtime 覆盖：`cpu`、`coreml`、`coreml-ane`、`coreml-gpu`（不设置则自动选择） |
+| `execution_provider` | ONNX Runtime 执行提供程序：`cpu`、`coreml`、`coreml-ane`、`coreml-gpu`。目前只解析、尚未生效：无论取值如何，ONNX 模型都在 CPU 上运行；不设置时也不会自动选择。阶段将其设为 `cpu` 以外的值时，加载流水线会记录一条警告（iOS 与 Android SDK 将其写入系统日志；其他平台仅在宿主安装了 Rust `log` 日志记录器时可见），`xybrid run`、`xybrid repl` 与 `xybrid prepare` 会将其打印出来 |
 | *（其他任意键）* | 作为阶段选项传递 — 常用：`system_prompt`、`max_tokens`、`temperature` |
 
 <Callout type="info">
@@ -89,7 +89,7 @@ name: voice-assistant
 stages:
   - whisper-tiny              # 设备端 ASR
 
-  - model: gpt-4o-mini        # 云端 LLM
+  - model: openai/gpt-4o-mini # 云端 LLM
     target: cloud
     provider: openai
     system_prompt: "You are a helpful voice assistant."
@@ -149,9 +149,10 @@ let result = pipeline.run(&input)?;
 |------|--------|
 | Dart（Flutter） | ✅ 可用 |
 | Rust | ✅ 可用 |
-| Kotlin | 🚧 规划中 |
-| Swift | 🚧 规划中 |
-| C#（Unity） | 🚧 规划中 |
+| Kotlin | ✅ 可用 |
+| Swift | ✅ 可用 |
+| React Native | ✅ 可用 |
+| C#（Unity） | ✅ 可用 |
 
 ## 相关阅读
 

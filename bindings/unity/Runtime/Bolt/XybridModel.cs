@@ -88,15 +88,15 @@ namespace XybridBolt
 
 
         /// <summary>
-        /// Load from the registry, serving from the cloud gateway while the weights
-        /// download in the background.
+        /// Try the registry id at the cloud gateway while the weights download.
+        /// Only ids also listed in the gateway catalog can be served remotely.
         ///
         /// Returns almost immediately instead of blocking on the download. Requires
         /// a resolvable API key, an uncached model, and a chat model the registry
         /// serves as a direct download (GGUF or vision-language, not a `.xyb`
         /// bundle); otherwise it behaves exactly like `from_registry`. Poll
-        /// `download_status` for progress and `is_cloud_serving` to know which leg
-        /// is answering.
+        /// `download_status` for progress and `is_cloud_serving` to see whether a
+        /// run would try the gateway.
         /// </summary>
         public static XybridModel FromRegistrySpeculative(string id)
         {
@@ -283,10 +283,6 @@ namespace XybridBolt
             finally
             {
                 NativeMethods.FreeBuf(boltffiResultBuffer);
-                // StreamNext can block for the full inter-token gap. Keep
-                // this wrapper alive so its finalizer cannot free the
-                // native handle while the call is still using it.
-                global::System.GC.KeepAlive(this);
             }
         }
 
@@ -338,8 +334,7 @@ namespace XybridBolt
 
 
         /// <summary>
-        /// Whether runs are currently answered by the cloud because the local
-        /// weights are not ready yet. `false` for ordinary local models.
+        /// Whether a run would try the gateway because the local weights are not ready.
         /// </summary>
         public bool IsCloudServing()
         {
@@ -547,7 +542,18 @@ namespace XybridBolt
                 }
             }
             byte[] optionsBytes = optionsWriter.ToArray();
-            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRun(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, cancel.Handle, out FfiBuf boltffiResultBuffer);
+            FfiBuf boltffiErrorBuffer;
+            FfiBuf boltffiResultBuffer;
+            try
+            {
+                boltffiErrorBuffer = NativeMethods.NativeXybridModelRun(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, cancel.Handle, out boltffiResultBuffer);
+            }
+            finally
+            {
+                // Native code borrows these handles for the full call.
+                global::System.GC.KeepAlive(this);
+                global::System.GC.KeepAlive(cancel);
+            }
             if (boltffiErrorBuffer.ptr != 0)
             {
                 try
@@ -624,7 +630,17 @@ namespace XybridBolt
         public global::XybridBolt.XybridStreamEvent StreamNext(ulong streamId)
         {
             ThrowIfDisposed();
-            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelStreamNext(this.Handle, streamId, out FfiBuf boltffiResultBuffer);
+            FfiBuf boltffiErrorBuffer;
+            FfiBuf boltffiResultBuffer;
+            try
+            {
+                boltffiErrorBuffer = NativeMethods.NativeXybridModelStreamNext(this.Handle, streamId, out boltffiResultBuffer);
+            }
+            finally
+            {
+                // Native code borrows these handles for the full call.
+                global::System.GC.KeepAlive(this);
+            }
             if (boltffiErrorBuffer.ptr != 0)
             {
                 try
@@ -682,6 +698,10 @@ namespace XybridBolt
 
         /// <summary>
         /// Forget a streaming session.
+        ///
+        /// Closing a session before its terminal event cancels its run: the run
+        /// stops at its next token and is recorded as a user cancellation
+        /// (`error.type` `cancelled`), not as an error.
         /// </summary>
         public void StreamClose(ulong streamId)
         {
