@@ -83,8 +83,15 @@ def main() -> None:
         )
         command = [
             "boltffi", "pack", "python", "--deny-skipped",
+            # The committed sources are checked above, then compiled exactly as
+            # they are: pack must not regenerate without the guarded
+            # post-processes (including the GIL release in-flight cancellation
+            # needs). Python needs only the cdylib, so do not also emit the
+            # crate's Rust rlib and static native archive in this build.
+            "--regenerate=false",
             "--python", sys.executable, "--overlay", str(overlay),
             "--cargo-arg=--features", f"--cargo-arg={features}",
+            "--cargo-arg=--crate-type=cdylib",
         ]
         if os.environ.get("DEBUG") != "1":
             command.append("--release")
