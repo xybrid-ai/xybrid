@@ -9,6 +9,13 @@ describes, because a table can only be built from files that follow them:
   * The line directly above `name:` is `# Purpose: <one sentence>`.
   * A concurrency group never uses `github.workflow`, so renaming a workflow
     cannot silently change its concurrency group.
+  * Every file is listed in WORKFLOW_FILES: CI grows by extending ci.yml (a
+    job, or a lane file it calls), not by adding a workflow.
+  * Only the files in PULL_REQUEST_FILES declare pull_request or
+    pull_request_target. A lane file declares workflow_call (plus
+    workflow_dispatch, plus schedule for a nightly), is called by a workflow,
+    and never declares push or a pull-request event.
+  * ci.yml and the lane files it calls hold exactly MACOS_JOB_BUDGET macOS jobs.
 
 Standard library only: this runs on a bare CI runner and on a laptop without a
 YAML package. It reads the small, regular subset of YAML these files use and
@@ -28,7 +35,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import AbstractSet, Dict, List, Optional, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
@@ -39,7 +46,7 @@ END = "<!-- END GENERATED: workflow inventory -->"
 
 # Display order of the inventory; the keys are the allowed `Group` prefixes.
 GROUPS = {
-    "CI": "Workspace validation, pull-request gates and backend test suites.",
+    "CI": "The pull-request pipeline (ci.yml, bazel.yml) and suites that run only on master.",
     "SDK": "Per-platform SDK builds, wrapper tests and example apps.",
     "Artifacts": "Publish reusable native artifacts and their download manifests.",
     "Release": "Cut, validate, publish and announce a release.",
@@ -47,6 +54,88 @@ GROUPS = {
     "Maintenance": "Manual utilities, run on demand.",
     "Community": "Contributor-facing automation.",
 }
+
+# Every file allowed in .github/workflows/. CI coverage is added by extending
+# ci.yml: a job built from the shared actions in .github/actions/, or a lane
+# file it calls. A file missing here fails the check, and so does an entry
+# whose file is gone, so the set only shrinks unless a PR adds a file on
+# purpose and says why (README, "Adding CI").
+WORKFLOW_FILES = frozenset(
+    {
+        "bazel.yml",
+        "build-android.yml",
+        "build-apple.yml",
+        "build-flutter.yml",
+        "build-mlx-xcframework.yml",
+        "build-natives.yml",
+        "build-react-native.yml",
+        "build-unity.yml",
+        "ci.yml",
+        "codeql.yml",
+        "discord-notify.yml",
+        "gradle-wrapper-validation.yml",
+        "llamacpp-update.yml",
+        "release-dryrun.yml",
+        "release-notify.yml",
+        "release-prep.yml",
+        "release-publish.yml",
+        "scorecard.yml",
+        "star-history.yml",
+        "test-choice-conformance.yml",
+        "test-ci.yml",
+        "test-decision-conformance.yml",
+        "test-mlx.yml",
+        "test-zzz-android.yml",
+        "test-zzz-engine.yml",
+        "trusted-zzz-sdk.yml",
+        "unity-activation.yml",
+        "unity-editor.yml",
+        "web-webgpu.yml",
+        "welcome.yml",
+    }
+)
+
+# The files that may declare pull_request or pull_request_target. ci.yml and
+# bazel.yml validate pull requests; the others scan them (codeql.yml,
+# gradle-wrapper-validation.yml), dry-run a release (release-dryrun.yml),
+# publish a merged release PR (release-publish.yml) or greet contributors
+# (discord-notify.yml, welcome.yml).
+PULL_REQUEST_FILES = frozenset(
+    {
+        "bazel.yml",
+        "ci.yml",
+        "codeql.yml",
+        "discord-notify.yml",
+        "gradle-wrapper-validation.yml",
+        "release-dryrun.yml",
+        "release-publish.yml",
+        "welcome.yml",
+    }
+)
+
+# macOS runners are shared: the organization's plan runs 5 macOS jobs at once,
+# across every repository, so each one a pull request starts can queue behind
+# another pull request's. The pull-request pipeline (ci.yml and the lane files
+# it calls, matrix legs counted) holds exactly this many; macos_jobs() lists
+# them. A new one goes into an existing macOS job as steps. If it truly needs
+# its own runner, raise this number in the same PR and say why; when a macOS
+# job goes, lower it, so the room is not reused silently.
+#
+# 7: check-platform-macos, the Candle, whisper.cpp and policy-routing lanes,
+# the Apple build, React Native's iOS build, and the choice lane's Qwen GGUF
+# job, which ran on every matching pull request from its own workflow before
+# ci.yml called it and now runs only when the paths it reads change.
+#
+# 8: the MLX runtime job. MLX links on Apple Silicon macOS alone, so the one
+# job that runs it cannot share a runner with anything else; it is gated on
+# the `mlx_runtime` lane, which an ordinary pull request does not select, and
+# its nightly caller (test-mlx.yml) is outside the pull-request pipeline.
+MACOS_JOB_BUDGET = 8
+
+_PULL_REQUEST_EVENTS = ("pull_request", "pull_request_target")
+
+# Events a lane file (one that declares workflow_call) may also declare.
+_LANE_EVENTS = {"workflow_call", "workflow_dispatch", "schedule"}
 
 _NAME = re.compile(r"^([A-Za-z]+): (\S.*)$")
 _COMMENT = re.compile(r"\s+#.*$")
@@ -57,8 +146,24 @@ _KEY = re.compile(r"^\s*([A-Za-z_][\w-]*):\s*(.*)$")
 # example `branches-ignore`) would change what a row means, so it is refused.
 _EVENT_KEYS = {"branches", "tags", "types", "paths", "paths-ignore", "inputs"}
 
+# workflow_call declares its interface instead of filters; none of it is rendered.
+_CALL_KEYS = {"inputs", "outputs", "secrets"}
+
+# A job that runs a lane file: `uses: ./.github/workflows/<file>` as one of
+# the job's own keys, not a step's `uses:` or a line inside a `run:` script.
+_CALL = re.compile(r"""^uses:\s*(["']?)\./\.github/workflows/([^"'\s#]+)\1\s*(?:#.*)?$""")
+
 # Events are listed in this order so rows scan the same way; others follow alphabetically.
-_EVENT_ORDER = ("push", "pull_request", "pull_request_target", "issues", "release", "schedule", "workflow_dispatch")
+_EVENT_ORDER = (
+    "push",
+    "pull_request",
+    "pull_request_target",
+    "workflow_call",
+    "issues",
+    "release",
+    "schedule",
+    "workflow_dispatch",
+)
 
 
 class Unsupported(Exception):
@@ -73,6 +178,10 @@ class Workflow:
     triggers: Tuple[str, ...]
     writes: Tuple[str, ...]
     concurrency: Tuple[str, ...]
+    # Event names, in the order of `triggers`.
+    events: Tuple[str, ...] = ()
+    # Lane files this workflow runs (`uses: ./.github/workflows/<file>`).
+    calls: Tuple[str, ...] = ()
 
     @property
     def group(self) -> Optional[str]:
@@ -170,6 +279,7 @@ def _event_filters(event: str, rest: str, sub: Sequence[str]) -> Dict[str, List[
         return {"cron": crons}
     filter_indent = min(_indent(line) for line in content)
     filters: Dict[str, List[str]] = {}
+    allowed = _CALL_KEYS if event == "workflow_call" else _EVENT_KEYS
     for offset, line in enumerate(sub):
         if _skip(line) or _indent(line) != filter_indent:
             continue
@@ -177,7 +287,7 @@ def _event_filters(event: str, rest: str, sub: Sequence[str]) -> Dict[str, List[
         if not match:
             raise Unsupported(f"on.{event}: unsupported line {line.strip()!r}")
         key, value = match.groups()
-        if key not in _EVENT_KEYS:
+        if key not in allowed:
             raise Unsupported(f"on.{event}.{key}: the generator does not read this key")
         if key in ("branches", "tags", "types"):
             filters[key] = _items(value, _block(sub, offset))
@@ -201,12 +311,16 @@ def _event_rank(event: str) -> Tuple[int, str]:
     return (_EVENT_ORDER.index(event) if event in _EVENT_ORDER else len(_EVENT_ORDER), event)
 
 
-def _triggers(lines: Sequence[str]) -> List[str]:
+def _triggers(lines: Sequence[str]) -> List[Tuple[str, str]]:
+    """(event, rendered trigger) pairs in display order."""
     start = next((i for i, line in enumerate(lines) if re.match(r"""^("on"|'on'|on):""", line)), None)
     if start is None:
         raise Unsupported("no top-level on:")
     head = re.match(r"""^(?:"on"|'on'|on):\s*(.*)$""", lines[start]).group(1)  # type: ignore[union-attr]
     head = _COMMENT.sub("", head).strip()
+    if head.startswith("{"):
+        # A flow mapping would read as one event and hide pull_request from the rules.
+        raise Unsupported(f"on: unsupported flow mapping {head!r}")
     triggers: Dict[str, str] = {}
     if head:
         for event in _items(head, []):
@@ -225,7 +339,35 @@ def _triggers(lines: Sequence[str]) -> List[str]:
                 raise Unsupported(f"on: unsupported line {line.strip()!r}")
             event, rest = match.groups()
             triggers[event] = _render_trigger(event, _event_filters(event, rest, _block(block, offset)))
-    return [triggers[event] for event in sorted(triggers, key=_event_rank)]
+    return [(event, triggers[event]) for event in sorted(triggers, key=_event_rank)]
+
+
+def _calls(lines: Sequence[str]) -> List[str]:
+    """Lane files run by this workflow's jobs, in file order, each once.
+
+    A call is a `uses:` key at a job's own key indent, found by the nesting of
+    `jobs:`, so any indentation width reads the same."""
+    start = next((i for i, line in enumerate(lines) if _header(line, "jobs", "") == ""), None)
+    if start is None:
+        return []
+    body = _block(lines, start)
+    content = [line for line in body if not _skip(line)]
+    if not content:
+        return []
+    job_indent = min(_indent(line) for line in content)
+    calls: List[str] = []
+    for offset, line in enumerate(body):
+        if _skip(line) or _indent(line) != job_indent:
+            continue
+        keys = [key for key in _block(body, offset) if not _skip(key)]
+        if not keys:
+            continue
+        key_indent = min(_indent(key) for key in keys)
+        for key in keys:
+            match = _CALL.match(key.strip()) if _indent(key) == key_indent else None
+            if match and match.group(2) not in calls:
+                calls.append(match.group(2))
+    return calls
 
 
 def _writes(lines: Sequence[str]) -> List[str]:
@@ -278,16 +420,202 @@ def parse_workflow(path: Path) -> Workflow:
     lines = path.read_text(encoding="utf-8").splitlines()
     try:
         name_index, name = _name(lines)
+        triggers = _triggers(lines)
         return Workflow(
             file=path.name,
             name=name,
             purpose=_purpose(lines, name_index),
-            triggers=tuple(_triggers(lines)),
+            triggers=tuple(text for _, text in triggers),
             writes=tuple(_writes(lines)),
             concurrency=tuple(_concurrency(lines)),
+            events=tuple(event for event, _ in triggers),
+            calls=tuple(_calls(lines)),
         )
     except Unsupported as exc:
         raise Unsupported(f"{path.name}: {exc}") from None
+
+
+@dataclass(frozen=True)
+class Job:
+    """The keys of one job that decide when and where it runs."""
+
+    id: str
+    name: Optional[str]
+    condition: Optional[str]
+    needs: Tuple[str, ...]
+    uses: Optional[str]
+    runs_on: Optional[str]
+    # `strategy.matrix.include` entries, each as its scalar keys.
+    include: Tuple[Dict[str, str], ...] = ()
+    # Other `strategy.matrix` keys (axes whose values multiply the legs).
+    axes: Tuple[str, ...] = ()
+
+    @property
+    def check_name(self) -> str:
+        """The check run GitHub reports for a job that calls no workflow."""
+        return self.name or self.id
+
+
+def _folded(rest: str, block: Sequence[str]) -> str:
+    """A scalar written inline or as a `>-` / `|` block, joined into one line."""
+    rest = _COMMENT.sub("", rest).strip()
+    if rest[:1] in (">", "|"):
+        return " ".join(line.strip() for line in block if not _skip(line))
+    return _scalar(rest)
+
+
+def _header(line: str, key: str, indent: str) -> Optional[str]:
+    """The value after `<indent><key>:`, comment removed ('' for a bare header), or None."""
+    match = re.match(rf"^{indent}{key}:(.*)$", line)
+    return _COMMENT.sub("", match.group(1)).strip() if match else None
+
+
+def _matrix_axes(job_lines: Sequence[str]) -> Tuple[str, ...]:
+    """Keys under `strategy.matrix` other than include/exclude: axes the legs multiply over."""
+    if any(_header(line, "matrix", "      ") for line in job_lines):
+        return ("<inline matrix>",)  # e.g. `matrix: ${{ fromJSON(...) }}`: legs unknown
+    matrix = next((i for i, line in enumerate(job_lines) if _header(line, "matrix", "      ") == ""), None)
+    if matrix is None:
+        return ()
+    block = [line for line in _block(job_lines, matrix) if not _skip(line)]
+    if not block:
+        return ()
+    indent = min(_indent(line) for line in block)
+    keys = [m.group(1) for line in block if _indent(line) == indent and (m := _KEY.match(line))]
+    return tuple(key for key in keys if key not in ("include", "exclude"))
+
+
+def _matrix_include(job_lines: Sequence[str]) -> Tuple[Dict[str, str], ...]:
+    strategy = next((i for i, line in enumerate(job_lines) if _header(line, "strategy", "    ") == ""), None)
+    if strategy is None:
+        return ()
+    block = _block(job_lines, strategy)
+    start = next((i for i, line in enumerate(block) if _header(line, "include", r"\s+") == ""), None)
+    if start is None:
+        return ()
+    entries: List[Dict[str, str]] = []
+    for line in _block(block, start):
+        if _skip(line):
+            continue
+        if re.match(r"^\s*-\s*\{", line):
+            raise Unsupported(f"unsupported flow-mapping matrix entry {line.strip()!r}")
+        match = re.match(r"^\s*(-\s+)?([A-Za-z_][\w-]*):\s*(.*)$", line)
+        if not match:
+            continue
+        if match.group(1) or not entries:
+            entries.append({})
+        value = _COMMENT.sub("", match.group(3)).strip()
+        if value and value[:1] not in (">", "|"):
+            entries[-1][match.group(2)] = _scalar(value)
+    return tuple(entries)
+
+
+def read_jobs(path: Path) -> Dict[str, Job]:
+    """Every job in a workflow file, by id, in file order."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    start = next((i for i, line in enumerate(lines) if _header(line, "jobs", "") == ""), None)
+    if start is None:
+        raise Unsupported(f"{path.name}: no top-level jobs:")
+    jobs: Dict[str, Job] = {}
+    body = _block(lines, start)
+    content = [line for line in body if not _skip(line)]
+    if content and min(_indent(line) for line in content) != 2:
+        raise Unsupported(f"{path.name}: jobs must be indented two spaces")
+    for offset, line in enumerate(body):
+        if _skip(line) or _indent(line) != 2:
+            continue
+        match = re.match(r"^  ([A-Za-z_][\w-]*):\s*$", line)
+        if not match:
+            raise Unsupported(f"{path.name}: unsupported job line {line.strip()!r}")
+        job_lines = _block(body, offset)
+        keys: Dict[str, str] = {}
+        needs: List[str] = []
+        for index, job_line in enumerate(job_lines):
+            key = re.match(r"^    ([A-Za-z_][\w-]*):\s*(.*)$", job_line)
+            if not key:
+                continue
+            name, rest = key.groups()
+            sub = _block(job_lines, index)
+            if name == "needs":
+                needs = _items(rest, sub)
+            elif name in ("name", "if", "uses", "runs-on"):
+                keys[name] = _folded(rest, sub)
+        jobs[match.group(1)] = Job(
+            id=match.group(1),
+            name=keys.get("name"),
+            condition=keys.get("if"),
+            needs=tuple(needs),
+            uses=keys.get("uses"),
+            runs_on=keys.get("runs-on"),
+            include=_matrix_include(job_lines),
+            axes=_matrix_axes(job_lines),
+        )
+    return jobs
+
+
+def _macos_legs(job: Job, file: str) -> List[str]:
+    """This job's macOS legs. Raises on a runner shape it cannot count rather than miss one."""
+    runner = job.runs_on
+    if not runner or runner[:1] in ("[", "{"):
+        # A missing value, a group/labels mapping or a label list.
+        raise Unsupported(f"{file}: job {job.id} runs on {runner!r}, which macos_jobs() cannot count")
+    matrix = re.fullmatch(r"\$\{\{\s*matrix\.([\w-]+)\s*\}\}", runner)
+    if matrix:
+        if not job.include or matrix.group(1) in job.axes:
+            raise Unsupported(
+                f"{file}: job {job.id} runs on a matrix axis; list its legs under `include:` only"
+            )
+        return [
+            f"{file}:{job.id} ({leg.get(matrix.group(1), '?')})"
+            for leg in job.include
+            # GitHub matches runner labels case-insensitively.
+            if leg.get(matrix.group(1), "").lower().startswith("macos")
+        ]
+    if "${{" in runner:
+        raise Unsupported(f"{file}: job {job.id} runs on {runner!r}, which macos_jobs() cannot count")
+    if not runner.lower().startswith("macos"):
+        return []
+    # A matrix on a literal runner starts one job per leg.
+    if job.axes:
+        raise Unsupported(f"{file}: job {job.id} has matrix axes on a macOS runner; list its legs under `include:` only")
+    if job.include:
+        return [f"{file}:{job.id} (leg {index})" for index, _ in enumerate(job.include, 1)]
+    return [f"{file}:{job.id}"]
+
+
+def macos_jobs(directory: Path, entry: str = "ci.yml") -> List[str]:
+    """The macOS jobs a pull request can start through `entry` and the lane files it calls."""
+    if not (directory / entry).is_file():
+        return []
+    found: List[str] = []
+    for job in read_jobs(directory / entry).values():
+        if job.uses and job.uses.startswith("./.github/workflows/"):
+            if job.axes or job.include:
+                # GitHub calls the lane once per leg.
+                raise Unsupported(f"{entry}: job {job.id} calls a lane file from a matrix, which macos_jobs() cannot count")
+            found += macos_jobs(directory, job.uses.rsplit("/", 1)[1])
+        elif job.uses:
+            raise Unsupported(f"{entry}: job {job.id} calls {job.uses}, whose runners macos_jobs() cannot see")
+        else:
+            found += _macos_legs(job, entry)
+    return found
+
+
+def macos_problems(directory: Path, budget: Optional[int] = None) -> List[str]:
+    budget = MACOS_JOB_BUDGET if budget is None else budget
+    jobs = macos_jobs(directory)
+    if len(jobs) > budget:
+        return [
+            f"the pull-request pipeline has {len(jobs)} macOS jobs ({', '.join(jobs)}), over "
+            f"MACOS_JOB_BUDGET ({budget}). Add steps to an existing macOS job, or raise the "
+            "budget in tools/scripts/gen_workflow_index.py in the same PR and say why"
+        ]
+    if len(jobs) < budget:
+        return [
+            f"the pull-request pipeline has {len(jobs)} macOS jobs ({', '.join(jobs)}); lower "
+            f"MACOS_JOB_BUDGET from {budget} to {len(jobs)} so the room is not reused silently"
+        ]
+    return []
 
 
 def load(directory: Path) -> List[Workflow]:
@@ -298,10 +626,45 @@ def load(directory: Path) -> List[Workflow]:
 # --- rules -------------------------------------------------------------------
 
 
-def problems(workflows: Sequence[Workflow]) -> List[str]:
+def problems(
+    workflows: Sequence[Workflow],
+    files: Optional[AbstractSet[str]] = None,
+    pull_request_files: Optional[AbstractSet[str]] = None,
+) -> List[str]:
+    """Rule violations; `files` and `pull_request_files` default to the allowlists above."""
+    files = WORKFLOW_FILES if files is None else files
+    pull_request_files = PULL_REQUEST_FILES if pull_request_files is None else pull_request_files
     found: List[str] = []
     seen: Dict[str, str] = {}
+    present = {workflow.file: workflow for workflow in workflows}
+    names = set(present)
     for workflow in workflows:
+        if workflow.file not in files:
+            found.append(
+                f"{workflow.file}: not an allowed workflow file. Add CI as a job in ci.yml or a lane "
+                "file it calls (.github/workflows/README.md, Adding CI); a file the repository really "
+                "needs is added to WORKFLOW_FILES in tools/scripts/gen_workflow_index.py by a PR that says why"
+            )
+        for event in _PULL_REQUEST_EVENTS:
+            if event in workflow.events and workflow.file not in pull_request_files:
+                found.append(
+                    f"{workflow.file}: declares {event}, but only ci.yml and bazel.yml validate pull "
+                    "requests. Run it from ci.yml: a job, or a lane file that declares workflow_call"
+                )
+        if "workflow_call" in workflow.events:
+            extra = [event for event in workflow.events if event not in _LANE_EVENTS]
+            if extra:
+                found.append(
+                    f"{workflow.file}: a lane file (workflow_call) runs when ci.yml calls it, so it "
+                    f"declares only workflow_call, workflow_dispatch and schedule, not {', '.join(extra)}"
+                )
+            if not any(workflow.file in other.calls for other in workflows):
+                found.append(f"{workflow.file}: declares workflow_call, but no workflow calls it")
+        for callee in workflow.calls:
+            if callee not in present:
+                found.append(f"{workflow.file}: calls {callee}, which does not exist")
+            elif "workflow_call" not in present[callee].events:
+                found.append(f"{workflow.file}: calls {callee}, which does not declare workflow_call")
         match = _NAME.match(workflow.name)
         if not match or match.group(1) not in GROUPS:
             found.append(
@@ -319,6 +682,13 @@ def problems(workflows: Sequence[Workflow]) -> List[str]:
         if workflow.name in seen:
             found.append(f"{workflow.file}: name {workflow.name!r} is already used by {seen[workflow.name]}")
         seen.setdefault(workflow.name, workflow.file)
+    for file in sorted(set(files) - names):
+        found.append(f"WORKFLOW_FILES lists {file}, which does not exist; remove it")
+    for file in sorted(set(pull_request_files) & names):
+        if not any(event in present[file].events for event in _PULL_REQUEST_EVENTS):
+            found.append(f"PULL_REQUEST_FILES lists {file}, which declares no pull-request event; remove it")
+    for file in sorted(set(pull_request_files) - set(files)):
+        found.append(f"PULL_REQUEST_FILES lists {file}, which WORKFLOW_FILES does not allow; remove it")
     return found
 
 
@@ -327,6 +697,13 @@ def problems(workflows: Sequence[Workflow]) -> List[str]:
 
 def _cell(text: str) -> str:
     return text.replace("|", "\\|")
+
+
+def _called_by(workflow: Workflow, workflows: Sequence[Workflow]) -> str:
+    callers = sorted(other.file for other in workflows if workflow.file in other.calls)
+    if not callers:
+        return "workflow_call"
+    return "called by " + ", ".join(f"`{caller}`" for caller in callers)
 
 
 def render(workflows: Sequence[Workflow]) -> str:
@@ -345,7 +722,9 @@ def render(workflows: Sequence[Workflow]) -> str:
         ]
         for w in rows:
             writes = ", ".join(w.writes) if w.writes else "none"
-            triggers = _cell(", ".join(w.triggers))
+            # A lane file's row names its caller instead of the bare event.
+            shown = [_called_by(w, workflows) if text == "workflow_call" else text for text in w.triggers]
+            triggers = _cell(", ".join(shown))
             lines.append(
                 f"| [`{w.file}`]({w.file}) | {_cell(w.name)} | {triggers} | {writes} | {_cell(w.purpose or '')} |"
             )
@@ -372,7 +751,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         workflows = load(WORKFLOWS_DIR)
-        rule_violations = problems(workflows)
+        rule_violations = problems(workflows) + macos_problems(WORKFLOWS_DIR)
         if rule_violations:
             for violation in rule_violations:
                 print(f"error: {violation}", file=sys.stderr)

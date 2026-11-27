@@ -30,7 +30,8 @@ use xybrid_sdk::registry_client::RegistryClient;
 use super::registry_format::registry_format_for_stage_backend;
 use super::utils::{
     choice_scorer_refusal, display_stage_name, format_size, load_speculative_model,
-    maybe_warn_thinking_budget, refuse_choice_scorer, save_wav_file, SPECULATIVE_CLOUD_STREAMS,
+    maybe_warn_thinking_budget, refuse_choice_scorer, report_speculative_recovery, save_wav_file,
+    SPECULATIVE_CLOUD_STREAMS,
 };
 use crate::ui;
 
@@ -225,6 +226,9 @@ fn resolve_pipeline_stages_with_selector_cfg(
         // hybrid stage can name a local bundle and a cloud model.
         let mut desc = StageDescriptor::new(stage_config.stage_id()).with_model(model_id.clone());
         let stage_backend = backend_override.or_else(|| stage_config.backend());
+        if let Some(message) = stage_config.unapplied_execution_provider_warning() {
+            ui::warning(&message);
+        }
 
         match classify_stage(stage_config)? {
             StageShape::CloudOnly { provider } => {
@@ -1292,8 +1296,8 @@ pub(crate) fn run_model(
 }
 
 /// Run a one-shot registry-model inference with speculative cloud fallback:
-/// serve the answer from the cloud gateway instead of blocking on the model
-/// download. Streams tokens to stdout and optionally writes the text output.
+/// try the registry id at the gateway while its weights download. Streams
+/// tokens to stdout and optionally writes the text output.
 /// A model the registry does not describe as chat downloads and runs locally,
 /// and its non-text output (a TTS model's audio, say) is printed and saved as
 /// `run` does.
@@ -1314,8 +1318,6 @@ pub(crate) fn run_model_speculative(
 
     ui::header(&format!("Run · {} (speculative cloud)", model_id));
 
-    // Serve the registry model itself: the gateway routes its id to xycloud
-    // (the CPU cluster that runs the edge model) while it downloads locally.
     let model = load_speculative_model(model_id)?;
     // This path streams and a scorer answers only a batch run. Clap keeps
     // --choice away from --speculative-cloud; this covers a scorer run
@@ -1339,6 +1341,7 @@ pub(crate) fn run_model_speculative(
     println!();
 
     let result = result.context("Speculative inference failed")?;
+    report_speculative_recovery(&result);
     let streamed = accumulated.lock().map(|t| t.clone()).unwrap_or_default();
     finish_speculative_output(result.envelope(), &streamed, output_path)
 }

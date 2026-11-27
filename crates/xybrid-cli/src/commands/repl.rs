@@ -124,8 +124,6 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
     // --huggingface: load from HuggingFace repo
     let stages = if want_speculative {
         let model_id = model.clone().expect("want_speculative implies a model id");
-        // Serve the registry model itself: the gateway routes its id to xycloud
-        // (the CPU cluster that runs the edge model) while it downloads locally.
         let model_obj = load_speculative_model(&model_id)?;
         let mut stage = StageDescriptor::new(&model_id);
         stage.target = execution_target.clone();
@@ -646,6 +644,9 @@ fn load_stages(
         let name = config.name.as_deref().unwrap_or("unnamed");
         ui::kv("Pipeline", name);
         for stage_config in &config.stages {
+            if let Some(message) = stage_config.unapplied_execution_provider_warning() {
+                ui::warning(&message);
+            }
             let model_id = stage_config.model_id();
             let mut desc = StageDescriptor::new(&model_id);
             let configured_target = parse_stage_config_target(stage_config);
@@ -1272,6 +1273,7 @@ fn execute_streaming(
         Ok(result) => {
             let elapsed = start.elapsed();
             println!();
+            super::utils::report_speculative_recovery(&result);
             maybe_warn_thinking_budget(result.envelope());
 
             if let Some(ref mut ctx) = conversation_context {

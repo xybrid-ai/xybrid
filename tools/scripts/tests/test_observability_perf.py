@@ -526,8 +526,36 @@ def process_runs(pid):
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    stat = Path(f"/proc/{pid}/stat")
-    return not (stat.exists() and stat.read_text().split(") ")[-1].startswith("Z"))
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text().split(") ")[-1]
+    except (FileNotFoundError, ProcessLookupError):
+        # No /proc (macOS), or the pid was reaped after the kill probe: opening
+        # its stat then raises ENOENT, reading an already-open one ESRCH. Report
+        # it as running; the caller's next probe decides.
+        return True
+    return not state.startswith("Z")
+
+
+class ProcessRunsTests(unittest.TestCase):
+    def test_a_pid_reaped_between_the_probe_and_the_stat_read_does_not_raise(self):
+        with mock.patch("os.kill", return_value=None), \
+                mock.patch.object(Path, "read_text", side_effect=ProcessLookupError()) as read:
+            self.assertTrue(process_runs(4242))
+        read.assert_called_once()
+
+    def test_a_gone_pid_does_not_run(self):
+        with mock.patch("os.kill", side_effect=ProcessLookupError()):
+            self.assertFalse(process_runs(4242))
+
+    def test_a_zombie_does_not_run(self):
+        with mock.patch("os.kill", return_value=None), \
+                mock.patch.object(Path, "read_text", return_value="4242 (sleep) Z 1 4242"):
+            self.assertFalse(process_runs(4242))
+
+    def test_a_live_pid_without_proc_runs(self):
+        with mock.patch("os.kill", return_value=None), \
+                mock.patch.object(Path, "read_text", side_effect=FileNotFoundError()):
+            self.assertTrue(process_runs(4242))
 
 
 class MicroCollectorTests(unittest.TestCase):

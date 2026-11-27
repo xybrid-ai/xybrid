@@ -42,7 +42,7 @@ ARTIFACT = "d1-2b-q4km"
 
 # The llama.cpp commit official observations come from; move it only together with the
 # vendor/llama-cpp gitlink, and regenerate (README.md, "When the llama.cpp pin moves").
-PINNED_LLAMA_CPP = "8642541b255bfb5dc39cd351a178be09013a55d6"
+PINNED_LLAMA_CPP = "b1b770d90d94cad9e9ea5b993bdbc383a522fb28"
 
 # What an observation depends on: the recipe. The first four are compiled into the executables,
 # whose stamped identity must hash them the same.

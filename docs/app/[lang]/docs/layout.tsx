@@ -13,8 +13,8 @@ export default async function Layout({
 
   return (
     <DocsLayout
-      sidebar={{ tabs: false }}
-      tree={source.pageTree[lang]}
+      tabs={false}
+      tree={source.getPageTree(lang)}
       {...baseOptions(lang)}
     >
       {children}

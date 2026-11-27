@@ -212,7 +212,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let config = CloudConfig::gateway()
             .with_gateway_url(&gateway_url)
             .with_api_key(&api_key)
-            .with_default_model("gpt-4o-mini");
+            // The Xybrid gateway takes frontier models by canonical id; a
+            // short id such as `gpt-4o-mini` is `404 model_not_found`.
+            .with_default_model("openai/gpt-4o-mini");
         (config, "gateway".to_string())
     } else {
         // Direct API mode

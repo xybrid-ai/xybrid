@@ -48,15 +48,13 @@ token，因此一张 1200 万像素的照片约为 4,000 个 token，即 llama.c
 
 ## 启用视觉功能的构建
 
-默认的平台预设仍为纯文本。请为将要运行 VLM 的构建添加 `llm-llamacpp-vision`：
+每个平台预设都已包含 `llm-llamacpp-vision`，因此直接用预设构建即可运行 VLM，无需额外特性：
 
 ```bash
-cargo build -p xybrid --features platform-macos,llm-llamacpp-vision
+cargo build -p xybrid-cli --features platform-macos
 ```
 
-对于直接使用 Rust crate 的应用，将目标平台预设与 `llm-llamacpp-vision` 组合。
-对于 Flutter、Kotlin、Swift 和 Unity 包，请使用以相同特性构建的发布构件或
-本地原生构建。
+对于直接使用 Rust crate 的应用，`xybrid-sdk` 上的 `platform-*` 预设已带有 `llm-llamacpp-vision`；不使用预设的自定义特性集合需自行添加。对于 Flutter、Kotlin、Swift 和 Unity 包，请使用以相同特性构建的发布构件或本地原生构建。
 
 ## CLI
 

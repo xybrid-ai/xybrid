@@ -711,7 +711,9 @@ jobs:
       - name: Stage Observability SDK for npm approval
         env:
           VERSION: ${{ needs.publish-release.outputs.version }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_OBSERVABILITY_TOKEN }}
+          # Its own token if set, else the React Native one. An empty token
+          # with no trusted publisher fails with ENEEDAUTH (v0.19.0).
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_OBSERVABILITY_TOKEN || secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           test "$(node -p "require('./package.json').version")" = "$VERSION"
@@ -726,8 +728,9 @@ jobs:
 
   # =========================================================================
   # Stage @xybrid/web using the exact archive built and tested by release-prep.
-  # Separate opt-in and stage-only token let its first-publish/trusted-publisher
-  # setup happen independently of React Native. See bindings/web/RELEASING.md.
+  # A separate opt-in lets its first-publish/trusted-publisher setup happen
+  # independently of React Native; with no NPM_WEB_TOKEN it stages with
+  # NPM_TOKEN. See bindings/web/RELEASING.md.
   # =========================================================================
   publish-web-npm:
     name: Publish Web SDK (npm)
@@ -788,7 +791,7 @@ jobs:
       - name: Stage Web SDK for npm approval
         env:
           VERSION: ${{ needs.publish-release.outputs.version }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_WEB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_WEB_TOKEN || secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           test "$(node -p "require('./package.json').version")" = "$VERSION"
@@ -865,6 +868,8 @@ jobs:
           echo "URL: $URL"
           echo "Checksum: $CHECKSUM"
 
+          # linkerSettings must equal the root Package.swift's
+          # (tools/scripts/tests/test_apple_linked_frameworks.py).
           cat > Package.swift << SWIFT_EOF
           // swift-tools-version:5.7
           import PackageDescription
@@ -889,8 +894,6 @@ jobs:
                       linkerSettings: [
                           .linkedLibrary("c++"),
                           .linkedFramework("Metal"),
-                          .linkedFramework("MetalPerformanceShaders"),
-                          .linkedFramework("MetalPerformanceShadersGraph"),
                           .linkedFramework("CoreML"),
                           .linkedFramework("Accelerate"),
                           .linkedFramework("Security"),
@@ -927,6 +930,14 @@ jobs:
           cp -r staging/Sources .
           rm -rf staging
 
-          git add Package.swift Sources/
+          # Vercel builds the docs site from docs/ on every branch of this repo.
+          # This branch has no docs/, so each release left a failed ("Root
+          # Directory does not exist") deployment and an email. This file
+          # turns the branch's deployments off, and skips the build if one
+          # still starts.
+          mkdir -p docs
+          echo '{"git":{"deploymentEnabled":false},"ignoreCommand":"exit 0"}' > docs/vercel.json
+
+          git add Package.swift Sources/ docs/vercel.json
           git commit -m "swift: update to ${TAG}"
           git push origin swift --force

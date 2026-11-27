@@ -16,9 +16,7 @@ tools/
 │   ├── check_choice_provenance.py  # Verify the conformance fixture pins
 │   ├── version-sync.sh       # Read or set the version across every manifest
 │   ├── install_pins.py       # The docs' install-snippet pins version-sync owns
-│   ├── api-contract-check.sh # Soft-warning public SDK signature check
-│   ├── build-xcframework.sh  # Build XCFramework for Apple platforms
-│   └── build-android.sh      # Build AAR for Android
+│   └── api-contract-check.sh # Soft-warning public SDK signature check
 └── README.md       # This file
 
 xtask/              # Cargo xtask for build automation (at repo root)
@@ -213,4 +211,3 @@ For simpler tasks or CI pipelines that prefer shell scripts, helper scripts are 
 ## Related Documentation
 
 - [FEATURE_MATRIX.md](../docs/FEATURE_MATRIX.md) - Feature flags and valid combinations
-- [DRAFT-PLATFORM-SDK-RESTRUCTURE.md](../docs/architecture/DRAFT-PLATFORM-SDK-RESTRUCTURE.md) - SDK restructuring plan

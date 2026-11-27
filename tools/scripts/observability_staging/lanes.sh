@@ -256,7 +256,7 @@ cli_lane() {
     python3 "$HERE/run_staging.py" stats --out "$out/stats-before.json"
     printf 'name: staging-cli-pipeline\nstages:\n  - %s\n' "lfm2.5-230m" > "$out/pipeline.yaml"
     printf 'name: staging-cli-cloud\nstages:\n  - model: %s\n    target: cloud\n    provider: openai\n    max_tokens: 24\n' \
-        "gpt-4o-mini" > "$out/cloud.yaml"
+        "openai/gpt-4o-mini" > "$out/cloud.yaml"
     local exports=()
     run_cli() {
         local name="$1" status=0; shift

@@ -174,6 +174,188 @@ impl xybrid_core::runtime_adapter::ModelRuntime for Gated {
     }
 }
 
+fn pending_speculative_model() -> (XybridModel, Arc<SpeculativeDownload>) {
+    let download = Arc::new(SpeculativeDownload::default());
+    let mut model = named(
+        as_chat(test_model_with_runtime(Box::new(Answers("local answer")))),
+        "lfm2.5-350m",
+    );
+    model.handle.write().unwrap().state = LoadState::Unloaded;
+    model.speculative = Some(download.clone());
+    (model, download)
+}
+
+fn gateway_input(server: &httpmock::MockServer) -> Envelope {
+    let mut input = text_envelope("hello");
+    input
+        .metadata
+        .insert("gateway_url".into(), server.url("/v1"));
+    input
+}
+
+#[test]
+fn reactive_fallback_returns_the_gateway_error_for_the_requested_id() {
+    use httpmock::prelude::*;
+    use serde_json::json;
+
+    let model = named(test_loaded_model(true), "lfm2.5-350m");
+    let server = MockServer::start();
+    let gateway = server.mock(|when, then| {
+        when.method(POST)
+            .path("/v1/chat/completions")
+            .json_body_partial(json!({"model": model.model_id()}).to_string());
+        then.status(502).json_body(json!({
+            "error": {"type": "api_error", "message": "Upstream provider error (xycloud)"}
+        }));
+    });
+    let unexpected = server.mock(|_, then| {
+        then.status(400);
+    });
+    let err = model
+        .run_streaming_with_fallback(
+            &gateway_input(&server),
+            &pressured(),
+            &CloudRuntimeAdapter::new(),
+            &mut |_| panic!("no output on a gateway refusal"),
+            &mut |_| {},
+        )
+        .unwrap_err();
+    let cause = std::error::Error::source(&err).unwrap().to_string();
+    assert!(
+        cause.contains("502") && cause.contains("Upstream provider error (xycloud)"),
+        "{cause}"
+    );
+    gateway.assert_hits(1);
+    unexpected.assert_hits(0);
+}
+
+#[test]
+fn speculative_gateway_errors_survive_local_recovery() {
+    use httpmock::prelude::*;
+    use serde_json::json;
+
+    for (status, code, message, streaming, context) in [
+        (404, Some("model_not_found"), "Unknown model", false, false),
+        (502, None, "Upstream provider error (xycloud)", true, false),
+        (403, None, "Not allowed in this workspace", false, true),
+        (
+            429,
+            Some("insufficient_quota"),
+            "Workspace quota exhausted",
+            true,
+            true,
+        ),
+    ] {
+        let server = MockServer::start();
+        let (model, download) = pending_speculative_model();
+        let mut body = json!({"error": {"type": "api_error", "message": message}});
+        if let Some(code) = code {
+            body["error"]["code"] = code.into();
+        }
+        let gateway = server.mock(|when, then| {
+            when.method(POST)
+                .path("/v1/chat/completions")
+                .json_body_partial(json!({"model": model.model_id()}).to_string());
+            then.status(status).json_body(body);
+        });
+        let unexpected = server.mock(|_, then| {
+            then.status(400);
+        });
+        let input = gateway_input(&server);
+        let result = std::thread::scope(|scope| {
+            let run = scope.spawn(|| match (streaming, context) {
+                (false, false) => model.run(&input, None),
+                (false, true) => model.run_with_context(&input, &ConversationContext::new(), None),
+                (true, false) => model.run_streaming(&input, None, |_| Ok(())),
+                (true, true) => model.run_streaming_with_context(
+                    &input,
+                    &ConversationContext::new(),
+                    None,
+                    |_| Ok(()),
+                ),
+            });
+            let deadline = Instant::now() + HANG;
+            while gateway.hits() == 0 && !run.is_finished() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            model.handle.write().unwrap().state = LoadState::Loaded;
+            download.finish(true);
+            run.join().unwrap().unwrap()
+        });
+        assert_eq!(result.text(), Some("local answer"));
+        assert_eq!(result.provenance(), crate::ExecutionProvenance::Local);
+        let error = result
+            .speculative_cloud_error()
+            .expect("this run recovered locally");
+        assert!(
+            error.contains(&status.to_string()) && error.contains(message),
+            "{error}"
+        );
+        assert_eq!(
+            result
+                .metadata("speculative_cloud_error")
+                .map(String::as_str),
+            Some(error)
+        );
+        assert!(model
+            .run(&input, None)
+            .unwrap()
+            .speculative_cloud_error()
+            .is_none());
+        gateway.assert_hits(1);
+        unexpected.assert_hits(0);
+    }
+}
+
+#[test]
+fn speculative_partial_stream_or_failed_download_returns_the_cloud_error() {
+    use httpmock::prelude::*;
+    use serde_json::json;
+
+    let server = MockServer::start();
+    let (model, download) = pending_speculative_model();
+    let input = gateway_input(&server);
+    let chunk = json!({"id":"test", "object":"chat.completion.chunk", "created":0, "model":model.model_id(),
+                       "choices":[{"index":0,"delta":{"content":"first"}}]});
+    let mut gateway = server.mock(|when, then| {
+        when.method(POST).path("/v1/chat/completions");
+        then.status(200)
+            .header("content-type", "text/event-stream")
+            .body(format!("data: {chunk}\n\ndata: invalid\n\n"));
+    });
+    download.finish(true);
+    let mut tokens = Vec::new();
+    let error = model
+        .run_streaming(&input, None, |token| {
+            tokens.push(token.token);
+            Ok(())
+        })
+        .unwrap_err();
+    assert_eq!(tokens, ["first"]);
+    let cause = std::error::Error::source(&error).unwrap().to_string();
+    assert!(cause.contains("Serialization error"), "{cause}");
+    gateway.assert_hits(1);
+    gateway.delete();
+
+    let (model, download) = pending_speculative_model();
+    download.finish(false);
+    let refusal = server.mock(|when, then| {
+        when.method(POST).path("/v1/chat/completions");
+        then.status(403).json_body(
+            json!({"error":{"code":"model_not_allowed","message":"Not allowed in this workspace"}}),
+        );
+    });
+    let error = model
+        .run_streaming(&input, None, |_| panic!("no output on a refusal"))
+        .unwrap_err();
+    let cause = std::error::Error::source(&error).unwrap().to_string();
+    assert!(
+        cause.contains("403") && cause.contains("Not allowed in this workspace"),
+        "{cause}"
+    );
+    refusal.assert_hits(1);
+}
+
 /// Fake `"onnx"` runtime answering `text` at once.
 struct Answers(&'static str);
 

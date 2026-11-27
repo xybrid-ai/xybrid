@@ -1,4 +1,4 @@
-# Purpose: Run the MLX backend on Apple Silicon: real weights (Qwen 3 0.6B and LFM2.5 1.2B, MLX 4-bit) through chat, streaming, cancellation, two models at once, tool calling and the CLI for a change to the backend, and nightly with the whole MLX-linked test tier.
+# Purpose: Run the MLX backend on Apple Silicon nightly: real weights (Qwen 3 0.6B and LFM2.5 1.2B, MLX 4-bit) through chat, streaming, cancellation, two models at once, tool calling and the CLI, plus the whole MLX-linked test tier.
 name: "CI: MLX backend"
 
 # Two jobs, both on Apple Silicon, neither a required check.
@@ -15,55 +15,19 @@ name: "CI: MLX backend"
 # macOS runner for it. A change to shared code can still compile on every
 # tier and break MLX at run time; this job runs ci.yml's MLX steps against
 # master every night to catch that within a day.
+#
+# Neither job declares a pull-request event: ci.yml validates pull requests
+# (README, "Adding CI"). ci.yml's `mlx_runtime` lane selects the MLX-linked
+# job, and this nightly is where the paths its row leaves out (`ci_gate.py`,
+# shared code) get covered anyway.
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'crates/mlx-c-sys/**'
-      - 'crates/xybrid-mlx/**'
-      - 'crates/xybrid-core/src/runtime_adapter/mlx/**'
-      - 'crates/xybrid-core/src/runtime_adapter/selector.rs'
-      - 'crates/xybrid-core/src/execution/strategies/mlx_embedding.rs'
-      - 'crates/xybrid-core/tests/mlx_*.rs'
-      - 'vendor/mlx-apple/UPSTREAM_VERSIONS.txt'
-      - 'tools/scripts/build-mlx-slice.sh'
-      - 'tools/scripts/build-local-mlx-xcframework.sh'
-      - 'tools/scripts/run-mlx-real-tests.sh'
-      - 'tools/scripts/check-mlx-runtime.sh'
-      - 'integration-tests/download.sh'
-      - 'integration-tests/fixtures/models/models.json'
-      - '.github/actions/mlx-xcframework/**'
-      - '.github/workflows/test-mlx.yml'
-      # Markdown inside any path above cannot affect this build.
-      - "!**.md"
-  pull_request:
-    branches: [master]
-    paths:
-      - 'crates/mlx-c-sys/**'
-      - 'crates/xybrid-mlx/**'
-      - 'crates/xybrid-core/src/runtime_adapter/mlx/**'
-      - 'crates/xybrid-core/src/runtime_adapter/selector.rs'
-      - 'crates/xybrid-core/src/execution/strategies/mlx_embedding.rs'
-      - 'crates/xybrid-core/tests/mlx_*.rs'
-      - 'vendor/mlx-apple/UPSTREAM_VERSIONS.txt'
-      - 'tools/scripts/build-mlx-slice.sh'
-      - 'tools/scripts/build-local-mlx-xcframework.sh'
-      - 'tools/scripts/run-mlx-real-tests.sh'
-      - 'tools/scripts/check-mlx-runtime.sh'
-      - 'integration-tests/download.sh'
-      - 'integration-tests/fixtures/models/models.json'
-      - '.github/actions/mlx-xcframework/**'
-      - '.github/workflows/test-mlx.yml'
-      # Markdown inside any path above cannot affect this build.
-      - "!**.md"
   schedule:
     # Nightly, off the hour and outside working hours in Europe and the US.
     - cron: '23 3 * * *'
   workflow_dispatch:
 
-# The nightly run gets a group of its own. It runs on master, and in the
-# group of master's pushes a push that touches the backend would cancel it;
-# the push's own run does not include the runtime-tier job.
+# The nightly run gets a group of its own, so a manual run and the night's
+# scheduled run never cancel each other.
 concurrency:
   group: test-mlx-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
   cancel-in-progress: true
@@ -79,26 +43,20 @@ jobs:
   # script, plus a release build of the two MLX benchmarks.
   test-mlx-runtime-tier:
     name: Test MLX runtime tier (nightly)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: macos-15
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          components: clippy
       # The cache ci.yml's `check (llm-mlx-runtime, macos)` restores: this
-      # nightly run is what keeps it warm on master.
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # nightly run is what keeps it warm on master. `per-image` keys it on the
+      # runner image, whose Xcode clang-runtime path the build output records.
+      - uses: ./.github/actions/setup-rust
         with:
+          components: clippy
           shared-key: mlx-runtime-tier
-          save-if: ${{ github.ref == 'refs/heads/master' }}
-          # Per-image cache: build-script output records this image's Xcode
-          # clang-runtime path, which other images may lack.
-          env-vars: ImageOS
+          per-image: 'true'
       - name: Materialize the MLX xcframework
         uses: ./.github/actions/mlx-xcframework
       - name: Lint and test the MLX runtime tier
@@ -122,18 +80,10 @@ jobs:
       MLX_TOOLS_FIXTURE_SHA256: d837f243744bbdbe7dd032f90b482a1c45d5b6035b25c1d7804d0f4c74b5c004
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+      - uses: ./.github/actions/setup-rust
         with:
-          toolchain: stable
-      # Saved on master only, where this job runs every night; a pull
-      # request restores that copy (see ci.yml's `llm-mlx` job for why).
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          key: mlx-integration
-          save-if: ${{ github.ref == 'refs/heads/master' }}
-          # Per-image cache: build-script output records this image's Xcode
-          # clang-runtime path, which other images may lack.
-          env-vars: ImageOS
+          cache-key: macos-mlx-integration
+          per-image: 'true'
 
       - name: Materialize the MLX xcframework
         uses: ./.github/actions/mlx-xcframework

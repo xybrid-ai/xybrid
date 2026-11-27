@@ -154,7 +154,10 @@ impl std::str::FromStr for ThinkingMode {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompletionRequest {
     /// Model identifier (optional - uses default if not specified).
-    /// Examples: "gpt-4o-mini", "claude-3-5-sonnet", "llama-3.2-1b"
+    /// Through the Xybrid gateway, frontier models use canonical ids such as
+    /// "openai/gpt-4o-mini" or "anthropic/claude-haiku-4.5" (a short id such
+    /// as "gpt-4o-mini" is `404 model_not_found` there); the direct backend
+    /// takes the provider's own id, such as "gpt-4o-mini".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 

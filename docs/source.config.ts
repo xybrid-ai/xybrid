@@ -1,23 +1,15 @@
-import {
-  defineConfig,
-  defineDocs,
-  frontmatterSchema,
-  metaSchema,
-} from 'fumadocs-mdx/config';
+import { defineConfig, defineDocs } from 'fumadocs-mdx/config';
 import { remarkMdxMermaid } from 'fumadocs-core/mdx-plugins';
 
-// You can customise Zod schemas for frontmatter and `meta.json` here
-// see https://fumadocs.dev/docs/mdx/collections
+// Pages and `meta.json` use the default schemas of `fumadocs-core/source/schema`;
+// extend them here, see https://fumadocs.dev/docs/mdx/collections
 export const docs = defineDocs({
   dir: 'content/docs',
   docs: {
-    schema: frontmatterSchema,
     postprocess: {
+      // the Markdown of each page, for `llms.txt`, `llms-full.txt` and `<page>.md`
       includeProcessedMarkdown: true,
     },
-  },
-  meta: {
-    schema: metaSchema,
   },
 });
 

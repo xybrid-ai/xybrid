@@ -23,7 +23,7 @@ Flutter SDK（`xybrid_flutter`）通过 FFI 提供到 Xybrid Rust 核心的 Dart
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.19.0
+  xybrid_flutter: ^0.21.0
 ```
 
 ## 初始化
@@ -149,6 +149,19 @@ await for (final event in loader.loadWithProgress()) {
 （例如 Hugging Face 仓库），`totalBytes` 为 `null`；无论哪种情况 `downloadedBytes`
 都是准确值，可用于显示已下载体积、速度和剩余时间。
 
+## 加载本地 GGUF 文件
+
+```dart
+import 'package:path_provider/path_provider.dart';
+
+// 每个 GGUF 一个目录：用户选择的文件，或从应用 Bundle 中复制出来的 asset。
+final support = await getApplicationSupportDirectory();
+final path = '${support.path}/models/my-model/my-model.gguf';
+final model = await XybridModelLoader.fromModelFile(path).load();
+```
+
+原始的 llama.cpp GGUF 无需 `model_metadata.json`。创建加载器不会访问磁盘；`load()` 会根据 GGUF 头部生成该文件并写在 GGUF 旁边，上下文上限为 4,096 个 Token（需要更长对话时调高其中的 `context_length`）。请把每个 GGUF 放在可写的独立目录中，例如 `getApplicationSupportDirectory()` 下的目录：`pubspec.yaml` 中声明的 assets 不是磁盘上的文件，iOS 应用 Bundle 是只读的，都无法写入 `model_metadata.json`。目录中已有的 `model_metadata.json` 会被原样使用：在同一目录中加载第二个 GGUF 时，实际加载的仍是第一个 GGUF 的模型。生成的元数据不含视觉投影器，带 mmproj 的视觉 GGUF 仍需使用 `fromDirectory`。文件不存在时，`load()` 会抛出消息包含 `GGUF file not found: <path>` 的 `XybridException`；`loadWithProgress()` 没有可下载的内容，只会发出 `LoadComplete` 或 `LoadError`。
+
 ---
 
 ## API 参考
@@ -183,7 +196,11 @@ class Xybrid {
 ```dart
 class XybridModelLoader {
   factory XybridModelLoader.fromRegistry(String modelId);
+  factory XybridModelLoader.fromRegistrySpeculative(String modelId);
   factory XybridModelLoader.fromBundle(String path);
+  factory XybridModelLoader.fromDirectory(String path);
+  factory XybridModelLoader.fromHuggingFace(String repo);
+  factory XybridModelLoader.fromModelFile(String path);
 
   Future<XybridModel> load();
   Stream<LoadEvent> loadWithProgress();
@@ -261,11 +278,19 @@ class XybridResult {
 
 ```dart
 class StreamToken {
-  final String token;            // 生成的 Token 文本
-  final int index;               // Token 位置
-  final String cumulativeText;   // 目前已生成的全部文本
-  final bool isFinal;            // 是否为序列中的最后一个 Token
-  final String? finishReason;    // "stop"、"length"、"error"
+  final String token;                    // 生成的 Token 文本
+  final int index;                       // 从零开始的 Token 位置
+  final String cumulativeText;           // 目前已输出的文本，不含工具调用块
+  final bool isFinal;                    // 是否为序列中的最后一个 Token
+  final String? finishReason;            // "stop"、"length"、"tool_calls" 或 "error: <message>"
+  final XybridInferenceMetrics? metrics; // 仅在最后一个 Token 上提供
+  final ObservationRef? observation;     // 轨迹引用，仅在最后一个 Token 上提供
+  final List<ToolCall> toolCalls;        // 仅在最后一个 Token 上提供，其他情况为空
+  final String? rawText;                 // 包含工具调用块的本轮原始文本；无工具调用时为 null
+
+  bool get hasToolCalls;                 // toolCalls 非空
+  bool get isError;                      // finishReason 以 "error:" 开头
+  String? get errorMessage;              // 错误 Token 的错误信息
 }
 ```
 
@@ -348,16 +373,18 @@ class XybridException implements Exception {
 }
 ```
 
-所有 SDK 错误均抛出 `XybridException`。使用 `loadWithProgress()` 时，加载错误通过 `LoadError` 事件上报。
+除 Token 流式方法（`runStreaming`、`runStreamingWithContext`、`runStreamingWithFallback`）外，所有 SDK 错误均抛出 `XybridException`；这些方法改为以一个错误 Token 结束流（`StreamToken.isError`、`StreamToken.errorMessage`）。使用 `loadWithProgress()` 时，加载错误通过 `LoadError` 事件上报。
 
 ---
 
 ## 平台支持
 
-| 平台 | 状态 | 加速器 |
-|----------|--------|--------------|
-| macOS | 支持 | Metal、CoreML |
-| iOS | 支持 | Metal、CoreML |
-| Android | 支持 | NNAPI |
-| Linux | 支持 | CPU |
-| Windows | 规划中 | DirectML |
+预编译库覆盖 iOS（真机与模拟器，arm64）、Apple Silicon 上的 macOS、Android（arm64-v8a、x86_64）、Linux（x86_64）和 Windows（x86_64）。模型在哪里运行取决于其格式：
+
+| 模型格式 | iOS 真机 | iOS 模拟器 | macOS | Android、Linux、Windows |
+|--------------|------------|---------------|-------|-------------------------|
+| GGUF（llama.cpp：LLM、视觉语言模型） | Metal GPU | CPU | Metal GPU | CPU |
+| Whisper（whisper.cpp） | CPU；可选 Core ML 编码器 | CPU；可选 Core ML 编码器 | Metal GPU | CPU |
+| ONNX（ONNX Runtime） | CPU | CPU | CPU | CPU |
+
+在 iOS 上，模型文件旁有 `<model>-encoder.mlmodelc`（如 `ggml-base.en-encoder.mlmodelc`）时，whisper.cpp 会在 Core ML 上运行编码器。iOS 和 macOS 链接了 ONNX Runtime 的 Core ML 执行提供程序，但 SDK 尚未选用它，因此 ONNX 模型在 CPU 上运行。没有任何路径使用 NNAPI 或 DirectML。

@@ -202,7 +202,7 @@ For the full field reference, see [MODEL_METADATA.md](../sdk/MODEL_METADATA.md).
 
 ```rust
 use xybrid_sdk::ModelLoader;
-use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 
 let loader = ModelLoader::from_directory("/path/to/my-custom-model")?;
 let model = loader.load()?;
@@ -211,7 +211,8 @@ let input = Envelope {
     kind: EnvelopeKind::Text("Hello, world!".into()),
     metadata: Default::default(),
 };
-let output = model.run(&input)?;
+// The second argument is an optional `GenerationConfig`.
+let output = model.run(&input, None)?;
 ```
 
 ### Flutter (Dart)
@@ -222,32 +223,48 @@ import 'package:xybrid_flutter/xybrid_flutter.dart';
 final loader = XybridModelLoader.fromDirectory('/path/to/my-custom-model');
 final model = await loader.load();
 
-final result = await model.run(
-  envelope: XybridEnvelope.text(text: 'Hello, world!'),
-);
+final result = await model.run(XybridEnvelope.text('Hello, world!'));
 ```
+
+A single llama.cpp GGUF file needs no hand-written metadata:
+`XybridModelLoader.fromModelFile('/path/to/model.gguf')` writes
+`model_metadata.json` next to it on `load()` when that file is absent. The
+GGUF's directory must therefore be writable: Flutter assets are not files on
+disk and the iOS app bundle is read-only, so copy the GGUF under
+`getApplicationSupportDirectory()` first (see "Flutter — Bundled Assets"
+below).
 
 ### Kotlin (Android)
 
 ```kotlin
+import ai.xybrid.Envelope
 import ai.xybrid.ModelLoader
+import ai.xybrid.runAsync
 
+// Inside a coroutine: load() and runAsync() suspend.
 val loader = ModelLoader.fromDirectory("/path/to/my-custom-model")
 val model = loader.load()
 
-val result = model.run(XybridEnvelope.text("Hello, world!"))
+val result = model.runAsync(Envelope.text("Hello, world!"))
 ```
 
-### Swift (iOS / macOS)
+### Swift (iOS)
 
 ```swift
 import Xybrid
 
-let loader = try ModelLoader.fromDirectory(path: "/path/to/my-custom-model")
-let model = try loader.load()
+let url = URL(fileURLWithPath: "/path/to/my-custom-model")
+let model = try await Xybrid.model(.directory(url)).load()
 
-let result = try model.run(envelope: .text("Hello, world!"))
+let result = try await model.runAsync(envelope: .text("Hello, world!"))
 ```
+
+A single llama.cpp GGUF file needs no hand-written metadata: Swift's
+`Xybrid.model(.modelFile(ggufURL))`, like React Native's `fromModelFile` and
+Unity's `FromModelFile`, writes `model_metadata.json` next to it on `load()`
+when that file is absent. The GGUF's directory must therefore be writable: an
+iOS app bundle is read-only, so copy the GGUF into the app container first, or
+ship a `model_metadata.json` beside it.
 
 ### Unity (C#)
 
@@ -323,17 +340,17 @@ if (!modelDir.exists()) {
 val loader = ModelLoader.fromDirectory(modelDir.absolutePath)
 ```
 
-### iOS / macOS — App Bundle
+### iOS — App Bundle
 
 Add model files to your Xcode project as a folder reference:
 
 ```swift
 // Models added to the Xcode project are in the app bundle
-guard let modelPath = Bundle.main.path(forResource: "my-model", ofType: nil) else {
+guard let modelURL = Bundle.main.url(forResource: "my-model", withExtension: nil) else {
     fatalError("Model directory not found in bundle")
 }
 
-let loader = try ModelLoader.fromDirectory(path: modelPath)
+let model = try await Xybrid.model(.directory(modelURL)).load()
 ```
 
 ### Unity — StreamingAssets
@@ -440,7 +457,7 @@ sentence-transformers' (see [Sentence Embeddings](#sentence-embeddings)).
 
 ```rust
 use xybrid_sdk::ModelLoader;
-use xybrid_core::ir::{Envelope, EnvelopeKind};
+use xybrid_sdk::ir::{Envelope, EnvelopeKind};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let loader = ModelLoader::from_directory("my-minilm")?;
@@ -451,10 +468,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         metadata: Default::default(),
     };
 
-    let output = model.run(&input)?;
+    let output = model.run(&input, None)?;
 
-    // output.kind is EnvelopeKind::Embedding(Vec<f32>): 384 dimensions, unit length
-    if let EnvelopeKind::Embedding(embedding) = &output.kind {
+    // embedding() returns the vector: 384 dimensions, unit length
+    if let Some(embedding) = output.embedding() {
         println!("Embedding dimensions: {}", embedding.len());
         println!("First 5 values: {:?}", &embedding[..5]);
     }

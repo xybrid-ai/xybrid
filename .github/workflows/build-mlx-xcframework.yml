@@ -1,4 +1,4 @@
-# Purpose: Build the pinned MLX XCFramework for validation and publish it on mlx-v* tags.
+# Purpose: Build the pinned MLX XCFramework from upstream sources and publish it on mlx-v* tags.
 name: "Artifacts: MLX XCFramework"
 
 # Builds a fat mlx.xcframework from upstream ml-explore/mlx and ml-explore/mlx-c
@@ -11,10 +11,13 @@ name: "Artifacts: MLX XCFramework"
 # Triggers:
 #   - workflow_dispatch:        manual rebuild (e.g. after bumping UPSTREAM_VERSIONS.txt)
 #   - push to master:           when vendor/mlx-apple/UPSTREAM_VERSIONS.txt changes
-#   - pull_request to master:   same paths, for review
 #   - tags 'mlx-v*':            tagged release; the artifact is also attached
 #                               to the GitHub Release as mlx-{version}.xcframework.zip
 #                               with a sibling .sha256 file.
+#
+# A pull request is not a trigger: ci.yml validates the pins and builds the
+# same slice in its `check (llm-mlx-runtime, macos)` job, through
+# `.github/actions/mlx-xcframework` (README, "Adding CI").
 
 on:
   workflow_dispatch:
@@ -25,22 +28,16 @@ on:
       - 'vendor/mlx-apple/UPSTREAM_VERSIONS.txt'
       - 'tools/scripts/build-mlx-slice.sh'
       - '.github/workflows/build-mlx-xcframework.yml'
-  pull_request:
-    branches: [master]
-    paths:
-      - 'vendor/mlx-apple/UPSTREAM_VERSIONS.txt'
-      - 'tools/scripts/build-mlx-slice.sh'
-      - '.github/workflows/build-mlx-xcframework.yml'
 
-# Read-only by default: the pull-request and master-push runs only build and
-# upload a workflow artifact. The publish job below asks for `contents: write`
+# Read-only by default: the master-push and manual runs only build and upload
+# a workflow artifact. The publish job below asks for `contents: write`
 # itself, and runs only for an `mlx-v*` tag.
 permissions:
   contents: read
 
 concurrency:
   group: build-mlx-xcframework-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 env:
   MLX_DEPLOYMENT_TARGET_IOS: '16.4'

@@ -1117,8 +1117,7 @@ pub struct XybridResult {
     pub output_type: XybridOutputType,
     pub model_id: String,
     pub latency_ms: u32,
-    /// Where the answer actually came from. Cloud fallback keeps `model_id`
-    /// identical on both legs, so this is the only way to tell them apart.
+    /// Where the answer actually came from, even when both legs requested the same model id.
     pub execution_target: XybridExecutionTarget,
     pub metrics: XybridInferenceMetrics,
     /// Tool calls the model emitted this turn. Empty unless the request
@@ -1156,8 +1155,7 @@ impl From<facade::ExecutionTarget> for XybridExecutionTarget {
 pub enum XybridDownloadState {
     Downloading,
     Ready,
-    /// Download failed; for a speculative load the cloud keeps serving and
-    /// `isLoaded` never flips.
+    /// Download failed; a speculative model never becomes local.
     Failed,
     /// The host called `cancel`.
     Cancelled,
@@ -1681,8 +1679,8 @@ pub fn set_platform_url(url: String) {
     facade::set_platform_url(url);
 }
 
-/// Enable speculative cloud fallback globally: a registry chat model that
-/// isn't downloaded yet is served from the gateway while the weights download.
+/// Try the registry chat model's id at the gateway while its weights download.
+/// Only ids also listed in the gateway catalog can be served remotely.
 ///
 /// An uncached load asks the registry first, so other models (ASR, TTS,
 /// `.xyb` bundles) download and load as usual.
@@ -2242,15 +2240,15 @@ impl XybridModel {
         Ok(Self::new(model))
     }
 
-    /// Load from the registry, serving from the cloud gateway while the weights
-    /// download in the background.
+    /// Try the registry id at the cloud gateway while the weights download.
+    /// Only ids also listed in the gateway catalog can be served remotely.
     ///
     /// Returns almost immediately instead of blocking on the download. Requires
     /// a resolvable API key, an uncached model, and a chat model the registry
     /// serves as a direct download (GGUF or vision-language, not a `.xyb`
     /// bundle); otherwise it behaves exactly like `from_registry`. Poll
-    /// `download_status` for progress and `is_cloud_serving` to know which leg
-    /// is answering.
+    /// `download_status` for progress and `is_cloud_serving` to see whether a
+    /// run would try the gateway.
     pub fn from_registry_speculative(id: String) -> Result<Self, XybridError> {
         set_platform_fallback_binding();
         let model = facade::ModelLoader::from_registry_speculative(id)
@@ -2321,8 +2319,7 @@ impl XybridModel {
         self.inner.is_loaded()
     }
 
-    /// Whether runs are currently answered by the cloud because the local
-    /// weights are not ready yet. `false` for ordinary local models.
+    /// Whether a run would try the gateway because the local weights are not ready.
     pub fn is_cloud_serving(&self) -> bool {
         self.inner.is_cloud_serving()
     }

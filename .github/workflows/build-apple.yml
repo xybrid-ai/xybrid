@@ -1,64 +1,13 @@
 # Purpose: Build and verify the Apple XCFramework, then unit-test the Swift wrapper and run the observability runtime scenario on an iOS Simulator.
 name: "SDK: Apple"
 
+# A lane: ci.yml's `Apple` job calls this file when one of the paths in
+# LANE_PATHS["apple"] (tools/scripts/ci_gate.py) changes, on pull requests and
+# on master pushes, which keep master's caches warm for new branches. Its
+# checks are named `Apple / <job>`. Dispatch it here to run it alone.
 on:
-  pull_request:
-    branches: [master]
-    paths:
-      - 'bindings/apple/**'
-      - 'crates/xybrid-bolt/**'
-      - 'crates/xybrid-ffi-facade/**'
-      - 'crates/xybrid-core/**'
-      - 'crates/xybrid-sdk/**'
-      - 'crates/xybrid-observability/**'
-      - 'crates/xybrid-llama/**'
-      - 'crates/llama-cpp-sys/**'
-      # The Bazel graph that assembles the xcframework (G4): sim triple + ort-sys
-      # annotation, the llama iOS arms, --config=ios, the fetched sim-ORT rule,
-      # and the committed device ORT slice.
-      - 'MODULE.bazel'
-      - 'BUILD.bazel'
-      - '.bazelrc'
-      - 'bazel/**'
-      - 'vendor/ort-ios/**'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      # The shared observability scenario the runtime job runs and checks.
-      - 'tools/scripts/observability_capture/**'
-      - '.github/workflows/build-apple.yml'
-      # Docs-only changes under the paths above (READMEs, examples) never
-      # affect the native build — exclude markdown so they don't trigger it.
-      - '!**.md'
-  # Run on master merges too, so the Bazel xcframework build stays green on the
-  # default branch (and warms any future Bazel remote/disk cache — the build is
-  # currently uncached, so a cold iOS build is ~15-20 min; caching is a follow-up).
-  # Keep these paths in sync with the pull_request trigger above.
-  push:
-    branches: [master]
-    paths:
-      - 'bindings/apple/**'
-      - 'crates/xybrid-bolt/**'
-      - 'crates/xybrid-ffi-facade/**'
-      - 'crates/xybrid-core/**'
-      - 'crates/xybrid-sdk/**'
-      - 'crates/xybrid-observability/**'
-      - 'crates/xybrid-llama/**'
-      - 'crates/llama-cpp-sys/**'
-      - 'MODULE.bazel'
-      - 'BUILD.bazel'
-      - '.bazelrc'
-      - 'bazel/**'
-      - 'vendor/ort-ios/**'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - 'tools/scripts/observability_capture/**'
-      - '.github/workflows/build-apple.yml'
-      - '!**.md'
+  workflow_call:
   workflow_dispatch:
-
-concurrency:
-  group: build-apple-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions: read-all
 
@@ -134,6 +83,19 @@ jobs:
             file "$BIN" | grep -qi 'archive' || { echo "Error: $BIN is not an ar archive"; exit 1; }
             grep -q "<string>$slice</string>" "$XCFW/Info.plist" || { echo "Error: $slice not in Info.plist"; exit 1; }
             echo "OK: $slice -> $(lipo -info "$BIN" | sed 's/.*: //')"
+            # No Apple manifest links MetalPerformanceShaders (#807), so an MPS
+            # symbol here is undefined in every app that links this slice: link
+            # the framework again in Package.swift, the swift-branch manifest
+            # (release-publish.yml) and the React Native and Flutter podspecs
+            # in the same change. This sees link-time references only. Metal is
+            # the control: without its symbol the scan read nothing.
+            UNDEF="$(nm -u "$BIN" 2>/dev/null || true)"
+            test "$(printf '%s\n' "$UNDEF" | grep -cE '(^| )_MTLCreateSystemDefaultDevice$' || true)" -gt 0 \
+              || { echo "Error: $slice: nm -u lists no Metal symbol, so the MPS check would prove nothing"; exit 1; }
+            if printf '%s\n' "$UNDEF" | grep -E '(^| )_(MPS|OBJC_(CLASS|METACLASS)_\$_MPS)' | sort -u; then
+              echo "::error::$slice references MetalPerformanceShaders, which no Apple manifest links (#807)"; exit 1
+            fi
+            echo "OK: $slice references no MetalPerformanceShaders symbol"
           done
           echo "XCFramework verify: device + simulator slices OK"
 
@@ -164,9 +126,13 @@ jobs:
           # CI-runtime flip to the locally-built xcframework. Do NOT commit this.
           ./bindings/apple/scripts/set-natives-mode.sh --set-local
           xcodebuild -resolvePackageDependencies
+          # One DerivedData for this job: the unit tests reuse this build and
+          # the scenario below reuses the tests' build. (-resolvePackageDependencies
+          # refuses -derivedDataPath without a scheme; the build resolves there.)
           xcodebuild build \
             -scheme Xybrid \
             -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO
 
@@ -179,9 +145,12 @@ jobs:
         run: |
           set -euo pipefail
           SIM_ID="$(./bindings/apple/scripts/boot-ci-simulator.sh)"
+          # The observability scenario below runs on the same simulator.
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
           xcodebuild test \
             -scheme Xybrid \
             -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO
 
@@ -192,50 +161,25 @@ jobs:
           path: bindings/apple/XCFrameworks/XybridFFI.xcframework
           if-no-files-found: error
 
-  observability-runtime:
-    name: Observability runtime scenario (iOS Simulator)
-    # Runs the shared observability scenario
-    # (tools/scripts/observability_capture/scenario.md) through the public Swift
-    # API on an iOS Simulator, linked against the xcframework the job above
-    # built: parent-in, reference-out, manual operations, content redaction and
-    # omission, release and the flush/shutdown lifecycle. run_scenario.py starts
-    # capture_server.py, runs the test, stops the receiver and runs
-    # check_capture.py on what reached it. This is the Swift row of
-    # docs/sdk/observability-coverage.md.
-    #
-    # xcodebuild rather than `swift test --filter`: the xcframework ships only
-    # ios-arm64 + ios-arm64-simulator and Package.swift declares iOS only, so a
-    # macOS-host `swift test` has no slice to link. `-only-testing:` is the
-    # filter. xcodebuild hands the test runner only TEST_RUNNER_-prefixed
-    # variables (prefix stripped), hence the `env` below. The simulator reaches
-    # the receiver on the host as 127.0.0.1 and reads and writes host paths.
-    needs: build-xcframework
-    runs-on: macos-26
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Download XCFramework
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: XybridFFI-xcframework
-          path: bindings/apple/XCFrameworks/XybridFFI.xcframework
-
-      - name: Build Swift tests (iOS Simulator)
-        run: |
-          set -euo pipefail
-          # CI-runtime flip to the downloaded xcframework. Do NOT commit this.
-          ./bindings/apple/scripts/set-natives-mode.sh --set-local
-          SIM_ID="$(./bindings/apple/scripts/boot-ci-simulator.sh "Xybrid observability iPhone")"
-          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
-          xcodebuild build-for-testing \
-            -scheme Xybrid \
-            -destination "platform=iOS Simulator,id=$SIM_ID" \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            -skipPackagePluginValidation \
-            CODE_SIGNING_ALLOWED=NO
-
+      # Runs the shared observability scenario
+      # (tools/scripts/observability_capture/scenario.md) through the public
+      # Swift API on the simulator the unit tests used, linked against the
+      # xcframework built above: parent-in, reference-out, manual operations,
+      # content redaction and omission, release and the flush/shutdown
+      # lifecycle. run_scenario.py starts capture_server.py, runs the test,
+      # stops the receiver and runs check_capture.py on what reached it. This
+      # is the Swift row of docs/sdk/observability-coverage.md.
+      #
+      # xcodebuild rather than `swift test --filter`: the xcframework ships
+      # only ios-arm64 + ios-arm64-simulator and Package.swift declares iOS
+      # only, so a macOS-host `swift test` has no slice to link.
+      # `-only-testing:` is the filter, and `test-without-building` reuses the
+      # unit tests' build. xcodebuild hands the test runner only
+      # TEST_RUNNER_-prefixed variables (prefix stripped), hence the `env`
+      # below. The simulator reaches the receiver on the host as 127.0.0.1 and
+      # reads and writes host paths.
       - name: Run observability scenario (iOS Simulator)
+        id: scenario
         timeout-minutes: 10
         run: |
           set -euo pipefail
@@ -257,9 +201,25 @@ jobs:
               CODE_SIGNING_ALLOWED=NO
 
       - name: Upload scenario report
-        if: always()
+        if: ${{ !cancelled() && steps.scenario.outcome != 'skipped' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: observability-runtime-swift
           path: ${{ runner.temp }}/observability-swift
           if-no-files-found: warn
+
+      # The steps above link only the simulator slice. build-for-testing on a
+      # generic iOS device links XybridTests.xctest for arm64 iphoneos against
+      # the ios-arm64 slice with Package.swift's linkerSettings, so a framework
+      # the device archive needs but the manifest does not link fails here
+      # (#807). It reuses the local-natives flip from the wrapper build; its own
+      # DerivedData leaves the simulator builds alone. No device, no signing.
+      - name: Link the device slice (iOS, no signing)
+        run: |
+          set -euo pipefail
+          xcodebuild build-for-testing \
+            -scheme Xybrid \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData-device" \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO

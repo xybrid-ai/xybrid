@@ -60,7 +60,7 @@ described in [README.md](./README.md). Consumers need no native build tools.
 
 The npm job is off until repository variable `NPM_WEB_PUBLISH_ENABLED` is `true`.
 Enabling web also enables `publish-observability-npm`, which uses its own trusted
-publisher or `NPM_OBSERVABILITY_TOKEN`; see
+publisher or `NPM_OBSERVABILITY_TOKEN` (else `NPM_TOKEN`); see
 [the observability release guide](../observability-js/RELEASING.md).
 GitHub release packaging runs regardless of those variables. The web npm job has
 no dependency on React Native or Maven Central. Like every package publisher, it
@@ -78,9 +78,11 @@ checksum check stages nothing on npm.
    GitHub Actions repository `xybrid-ai/xybrid`, workflow `release-publish.yml`,
    and stage-only permission. The workflow requests OIDC and attaches provenance.
    Until trusted publishing is configured, use a stage-only granular token
-   scoped to `@xybrid/web` in repository secret `NPM_WEB_TOKEN`.
-3. Set `NPM_WEB_PUBLISH_ENABLED=true`. The existing React Native flag and token
-   remain separate. Each staged version becomes public only after npm approval.
+   that covers `@xybrid/web` in repository secret `NPM_WEB_TOKEN`. Without
+   that secret the job uses `NPM_TOKEN`, React Native's token, which must then
+   cover `@xybrid/web` too.
+3. Set `NPM_WEB_PUBLISH_ENABLED=true`. The React Native flag stays separate.
+   Each staged version becomes public only after npm approval.
 
 Staging needs Node >= 22.14 and npm >= 11.15; the workflow uses Node 22 and npm
 11. If a merge-triggered OIDC request is rejected, recover with a full

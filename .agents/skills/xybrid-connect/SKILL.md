@@ -45,7 +45,7 @@ Otherwise tell the user what you're about to do, in one line, before running any
 | Rust | `Cargo.toml` depends on `xybrid-sdk` | `.env` | | `XYBRID_API_KEY` |
 | Python | `xybrid` in `pyproject.toml` / `requirements*.txt` | `.env` | | `XYBRID_API_KEY` |
 | Android (Kotlin) | `settings.gradle(.kts)`, `ai.xybrid:xybrid-kotlin` | `local.properties` (Gradle root) | | `xybrid.apiKey` |
-| iOS / macOS (Swift) | `*.xcodeproj` / `project.yml` / `Project.swift` using `Xybrid` | `Config/Secrets.xcconfig` | | `XYBRID_API_KEY` |
+| iOS (Swift) | `*.xcodeproj` / `project.yml` / `Project.swift` using `Xybrid` | `Config/Secrets.xcconfig` | | `XYBRID_API_KEY` |
 | Flutter | `pubspec.yaml` with `xybrid_flutter` | `.env.xybrid` | | `XYBRID_API_KEY` |
 | Expo | `package.json` with `expo` and `@xybrid/react-native` | `.env.local` | `EXPO_PUBLIC_XYBRID_API_KEY` | `EXPO_PUBLIC_XYBRID_API_KEY` |
 | React Native (bare) | `package.json` with `@xybrid/react-native`, no `expo` | the env loader's file, usually `.env` | | `XYBRID_API_KEY` |
@@ -71,13 +71,19 @@ If `~/.xybrid` isn't writable (some sandboxes), the CLI fails with a `credential
 
 ## Step 4: Run `xybrid connect`
 
-From the repository root:
+From the repository root, preserve the first **Xybrid setup entrypoint** supplied by the instructions that brought you here (`web-copy`, `setup-prompt`, `llms-txt`, `skill`, `mcp`, or `docs`). Only default to `skill` when the skill itself was the entrypoint. The following Bash example uses `XYBRID_SETUP_VIA` to carry that earlier value. In any shell, inspect `xybrid connect --help` and omit `--via` if it isn't listed. Use the target file selected in Step 2 (and `--env-name` if needed).
 
 ```bash
-xybrid connect --agent <claude-code|codex|cursor|...> --write-env <file> [--env-name <VAR>] --json
+env_args=(--write-env '<file>')
+# If Step 2 selects a custom name: env_args+=(--env-name '<name>')
+if xybrid connect --help | grep -q -- '--via'; then
+  xybrid connect --via "${XYBRID_SETUP_VIA:-skill}" "${env_args[@]}" --json
+else
+  xybrid connect "${env_args[@]}" --json
+fi
 ```
 
-`--agent` is self-reported. The console names `claude-code`, `codex`, `cursor`, `gemini-cli`, `github-copilot`, `windsurf`, `cline`, `roo-code`, `aider`, `amp`, `goose`, `jules`, `kiro`, `opencode`, `zed` and `devin`; any other value shows as "Coding agent". The workspace is named after the repository directory unless you pass `--project-name`.
+`--agent` is separate and self-reported: optionally supply the actual agent name, not the entrypoint and not a name copied from an example. The workspace is named after the repository directory unless you pass `--project-name`. Retrying an unanswered setup or reusing an existing workspace keeps its original attribution.
 
 It prints one JSON object on stdout and exits with the status's code. It contacts the Xybrid API, solves a small proof of work (a few seconds), saves the key and claim token to `~/.xybrid/credentials.json` (0600), then writes the key and a comment with the claim command and dates (never the link) to the file. It never starts an exporter. Don't run two at once.
 
@@ -334,7 +340,7 @@ android {
 }
 ```
 
-### iOS / macOS (Swift)
+### iOS (Swift)
 
 The key: `Config/Secrets.xcconfig` (create the `Config` directory first), which the CLI writes as `XYBRID_API_KEY = sk_live_…`.
 
@@ -391,7 +397,7 @@ struct MyApp: App {
 }
 ```
 
-UIKit apps call `XybridSetup.start()` in `application(_:didFinishLaunchingWithOptions:)` and flush in `sceneDidEnterBackground`. A SwiftPM tool without an Info.plist reads `ProcessInfo.processInfo.environment["XYBRID_API_KEY"]` and the dotenv instead.
+UIKit apps call `XybridSetup.start()` in `application(_:didFinishLaunchingWithOptions:)` and flush in `sceneDidEnterBackground`.
 
 ### Flutter
 
@@ -711,12 +717,12 @@ The Xybrid preset exports **traces only**. `record_feedback` / `recordFeedback` 
 
 When no CLI with `connect` (0.18.0 or newer) can be installed, speak the same contract directly. The rules don't change: pinned hosts only, the key goes only into an untracked and gitignored project file, the claim token goes only into the private store and the user's chat, and nothing prints the key.
 
-The reference implementation is [`scripts/xybrid_agent_connect.py`](scripts/xybrid_agent_connect.py) next to this file (Python 3.8+, standard library only). It prints the CLI's JSON shape and exit codes, and saves its recovery state in the CLI's own store, so a later `xybrid auth claim` or `xybrid auth status` finds it. Use the copy installed with this skill, or download it to a directory outside the repository and check its SHA-256 before running it:
+The reference implementation is [`scripts/xybrid_agent_connect.py`](scripts/xybrid_agent_connect.py) next to this file (Python 3.8+, standard library only). It prints the CLI's JSON shape and exit codes, and saves its recovery state in the CLI's own store, so a later `xybrid auth claim` or `xybrid auth status` finds it. Set `XYBRID_SETUP_VIA` to any earlier setup entrypoint rather than replacing it with `skill`. Use the copy installed with this skill, or download it to a directory outside the repository and check its SHA-256 before running it:
 
 ```bash
 curl -sSL -o "${TMPDIR:-/tmp}/xybrid_agent_connect.py" https://raw.githubusercontent.com/xybrid-ai/xybrid/master/agents/skills/xybrid-connect/scripts/xybrid_agent_connect.py
-# sha256: f05f722d70fc744fd4ecc03d5a1cd4a5e9943ae894f66dfcfc733a96ff416495
-python3 -I "${TMPDIR:-/tmp}/xybrid_agent_connect.py" connect --write-env .env --agent claude-code --binding python
+# sha256: fc2b18a45432a2245ffee5b8fe4268d4a204aee2b4eb636cf165678f67659e88
+python3 -I "${TMPDIR:-/tmp}/xybrid_agent_connect.py" connect --write-env .env --via "${XYBRID_SETUP_VIA:-skill}" --binding python
 python3 -I "${TMPDIR:-/tmp}/xybrid_agent_connect.py" status   # Step 7, instead of `xybrid auth status --json`
 python3 -I "${TMPDIR:-/tmp}/xybrid_agent_connect.py" claim    # the private claim link again
 ```
@@ -733,10 +739,10 @@ Its `status` values, exit codes and fields match Steps 5 and 7 (`claim` also ans
 Never follow redirects on these requests, and never take a host from a response.
 
 1. **Preflight**, before any request: the CI markers and opt-outs of Step 1 end with `ci_skipped` / `opted_out`. A `--env-name` the file's format can't hold (`invalid_env_name`: a C identifier, or `[A-Za-z0-9_.-]` for `.properties`, at most 128 characters) ends with `error`. A target that `git ls-files` lists ends with `env_file_tracked`. A nonempty `XYBRID_API_KEY` or an existing value in the target file ends with `existing`, changing nothing; a file read differently around the variable (step 6) ends with `env_file_ambiguous`. Then make sure the target is ignored: when `git check-ignore -q -- <path>` fails, append a root-anchored, glob-escaped entry (`/<path>`) to the repository's `.gitignore` and check again. Open the private store (described after step 9) and stop if it isn't private to this account, or if it sits in a Git working tree you can't keep it out of.
-2. **Challenge:** `GET /v1/agent/challenge` answers `200 {"challenge", "difficulty", "expires_at", "algorithm": "sha256-leading-zero-bits"}`. The challenge is opaque, valid for five minutes and single-use; the difficulty is 18 to 28 bits (20 by default). `403 {"error": "agent_signup_closed", "reason", "console_url", "min_cli_version"}` means `signup_closed`; `503 agent_signup_unavailable` means try again later.
+2. **Challenge:** `GET /v1/agent/challenge` answers `200 {"challenge", "difficulty", "expires_at", "algorithm": "sha256-leading-zero-bits"}`. A request may include allowlisted `client_info.via` only if its challenge explicitly grants `"collect_via": true`. When a retry needs a replacement challenge that does not grant collection, remove `via` from the saved snapshot; never add it back on retry. The challenge is opaque, valid for five minutes and single-use; the difficulty is 18 to 28 bits (20 by default). `403 {"error": "agent_signup_closed", "reason", "console_url", "min_cli_version"}` means `signup_closed`; `503 agent_signup_unavailable` means try again later.
 3. **Proof of work:** find the smallest `nonce`, a canonical decimal `u64` (ASCII digits, no sign, no leading zeros, `"0"` allowed), such that `SHA256(UTF8(challenge) || ":" || ASCII(nonce))` starts with at least `difficulty` zero bits. Bits count from the most significant bit of the first byte.
 4. **Retry state first:** generate an `Idempotency-Key` of 32 to 128 characters from `[A-Za-z0-9_-]` (32 random bytes in unpadded base64url) and save it with the challenge and nonce in the private store **before** posting, so a lost answer is retried instead of creating a second workspace.
-5. **Connect:** `POST /v1/agent/connect` with `Content-Type: application/json`, exactly one `Idempotency-Key` header, and a body of at most 16 KiB: `{"challenge", "nonce", "source"?, "project_name"?, "install_id"?, "client_info"?}`. `source` is the self-reported agent (normalized to 32 characters of `[a-z0-9-]`), `project_name` becomes the workspace name (48 characters), `client_info` takes only `cli_version`, `sdk_version`, `os`, `arch` and `binding` (64 characters each), and `install_id` (16 to 128 URL-safe characters) is optional; the script omits it.
+5. **Connect:** `POST /v1/agent/connect` with `Content-Type: application/json`, exactly one `Idempotency-Key` header, and a body of at most 16 KiB: `{"challenge", "nonce", "source"?, "project_name"?, "install_id"?, "client_info"?}`. `source` is the self-reported agent (normalized to 32 characters of `[a-z0-9-]`), `project_name` becomes the workspace name (48 characters), `client_info` takes `cli_version`, `sdk_version`, `os`, `arch` and `binding` (64 characters each) and the optional allowlisted `via` from Step 2. Save the `client_info` snapshot in the pending record before posting and reuse it on retry. Older pending records without a snapshot resume with `via` omitted. `install_id` (16 to 128 URL-safe characters) is optional; the script omits it.
    - `201` (new) or `200` with `"replayed": true` (a retry with the same key within ten minutes: same workspace and deadlines, a **new** key and claim token, the previous key revoked): `{"api_key", "key_prefix", "scope": "client", "organization": {"slug", "name"}, "project": {"slug", "name"}, "key_expires_at", "claim_expires_at", "claim_token", "limits": {"gateway_daily_requests", "max_projects"}, "terms_url"?, "privacy_url"?, "replayed"}`.
    - `400 challenge_expired | challenge_invalid | proof_of_work_invalid`: solve a fresh challenge once, same key. `409 idempotency_key_expired | idempotency_key_conflict | workspace_claimed | workspace_unavailable`: start over once with a new key and challenge. `503 agent_signup_busy` (`Retry-After: 2`): wait and retry with the same key, up to three times. `429 agent_signup_rate_limited` (`Retry-After`) and `409 challenge_replayed`: stop and relay. `503 client_ip_unavailable`: relay it, but as with any 5xx keep the retry state (next item).
    - No answer, a 5xx or a malformed 2xx: the request may have been applied. Keep the retry state and repeat the same request (same key, challenge and nonce) within ten minutes; the platform resolves a retry before it checks the challenge.
@@ -745,7 +751,7 @@ Never follow redirects on these requests, and never take a host from a response.
 8. **Verify:** `GET /v1/agent/workspace` with `Authorization: Bearer <key>` answers `{"organization", "project", "scope", "provisional", "claimed", "expired", "key_expires_at", "claim_expires_at", "verification": {"state": "received" | "none" | "unavailable", "traces_received", "spans", "traces", "first_ingested_at", "last_ingested_at"}}`; `401 invalid_api_key` for an unknown, revoked or purged key; `401`/`403 workspace_expired` (or the `X-Xybrid-Workspace: expired` header) for an expired one. Errors everywhere are flat JSON: `{"error": "<code>", "message": "...", ...details}`.
 9. **Reuse:** a saved key is checked with step 8 before its deadlines are trusted, since a claim made in the console shows only there. Save what it answers (`claimed`, `scope`, deadlines; a claim for every entry with the same claim token) under the store's lock; set the entry aside in `retired` on `401 invalid_api_key` (`stored_credential_rejected`). Only without an answer do the saved deadlines decide, and an answer off the contract is none: without `organization` and `project`, or with a deadline that isn't an RFC 3339 time with its UTC offset (`Z` or `±hh:mm`), nothing in it is saved, since the CLI refuses a store holding such a deadline. An expired workspace is `workspace_expired` until `claim_expires_at`, then `error` with `claim_expired`.
 
-The private store is the CLI's `~/.xybrid/credentials.json` (or `XYBRID_CREDENTIALS_FILE`): directory `0700`, file `0600`, replaced atomically; on Unix, writers hold an exclusive `flock` on `credentials.json.lock`. It is `{"version": 1, "credentials": [...], "pending": [...], "retired": [...]}`. Each credential holds `platform_origin`, `repository_root` (the canonical repository root), `api_key`, `scope`, `organization`, `project`, `key_expires_at`, `claim_expires_at`, `claim_token`, `source`, `env_file` (`{"path", "variable"}`), `claimed`, `terms_url`, `privacy_url` and `created_at`; a custom host's entry also holds `console_origin`. A pending request holds `platform_origin`, `repository_root`, `kind: "connect"`, `idempotency_key`, `challenge`, `nonce`, `project_name`, `source` and `started_at`. Each `retired` entry, a set-aside credential (the last 20 are kept), is `{"reason", "retired_at", "credential"}`. When the store's directory is inside any Git working tree (a dotfiles repository at home, or `XYBRID_CREDENTIALS_FILE` pointing into a repository), gitignore that directory first; refuse when it is the repository root itself or holds tracked files.
+The private store is the CLI's `~/.xybrid/credentials.json` (or `XYBRID_CREDENTIALS_FILE`): directory `0700`, file `0600`, replaced atomically; on Unix, writers hold an exclusive `flock` on `credentials.json.lock`. It is `{"version": 1, "credentials": [...], "pending": [...], "retired": [...]}`. Each credential holds `platform_origin`, `repository_root` (the canonical repository root), `api_key`, `scope`, `organization`, `project`, `key_expires_at`, `claim_expires_at`, `claim_token`, `source`, `env_file` (`{"path", "variable"}`), `claimed`, `terms_url`, `privacy_url` and `created_at`; a custom host's entry also holds `console_origin`. A pending request holds `platform_origin`, `repository_root`, `kind: "connect"`, `idempotency_key`, `challenge`, `nonce`, `project_name`, `source`, an optional `client_info` snapshot, and `started_at`. Records without a snapshot omit `via` on retry. Each `retired` entry, a set-aside credential (the last 20 are kept), is `{"reason", "retired_at", "credential"}`. When the store's directory is inside any Git working tree (a dotfiles repository at home, or `XYBRID_CREDENTIALS_FILE` pointing into a repository), gitignore that directory first; refuse when it is the repository root itself or holds tracked files.
 
 ### Proof-of-work test vectors
 

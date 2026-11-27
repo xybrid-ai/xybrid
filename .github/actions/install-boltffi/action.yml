@@ -1,0 +1,55 @@
+name: Install boltffi
+description: >
+  Put the pinned boltffi CLI on PATH, from the cache when master has saved it,
+  otherwise with cargo install. Run it after setup-rust.
+
+# The generators (tools/scripts/gen_*_bolt.py, bindings/apple/scripts/
+# gen-bolt-bindings.sh) pin the same version as PINNED_BOLTFFI, and it must
+# match the boltffi crate in Cargo.lock: a CLI/runtime skew mis-generates the
+# foreign surface. tools/scripts/tests/test_ci_actions.py keeps them equal.
+inputs:
+  version:
+    description: boltffi_cli version.
+    default: '0.30.1'
+
+runs:
+  using: composite
+  steps:
+    # A cold `cargo install` takes 2-3 minutes. The cached binary is a few MB.
+    - name: Restore the boltffi CLI
+      id: restore
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/.cargo/bin/boltffi
+        key: boltffi-cli-${{ runner.os }}-${{ runner.arch }}-${{ inputs.version }}
+
+    # `cargo install` skips a matching version already on PATH (setup-rust's
+    # cache can carry one in ~/.cargo/bin) and replaces any other.
+    - name: Install boltffi_cli ${{ inputs.version }}
+      if: steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        BOLTFFI_VERSION: ${{ inputs.version }}
+      run: cargo install boltffi_cli --version "$BOLTFFI_VERSION" --locked
+
+    # Saved from master only, like setup-rust's cache: a pull request's copy
+    # would be visible to that pull request alone.
+    - name: Save the boltffi CLI
+      if: steps.restore.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/.cargo/bin/boltffi
+        key: boltffi-cli-${{ runner.os }}-${{ runner.arch }}-${{ inputs.version }}
+
+    # The generators only warn on a version mismatch; fail here instead.
+    - name: Check the boltffi version
+      shell: bash
+      env:
+        BOLTFFI_VERSION: ${{ inputs.version }}
+      run: |
+        installed="$(boltffi --version)"
+        echo "$installed"
+        case "$installed" in
+          *"$BOLTFFI_VERSION"*) ;;
+          *) echo "::error::expected boltffi $BOLTFFI_VERSION, found '$installed'"; exit 1 ;;
+        esac

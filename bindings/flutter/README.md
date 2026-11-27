@@ -15,7 +15,7 @@ Or add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.19.0
+  xybrid_flutter: ^0.21.0
 ```
 
 <details>
@@ -103,10 +103,10 @@ An invalid explicit `traceparent` is rejected before any work starts: `run`
 and `XybridPipeline.run` throw `XybridException`, token streams end with an
 error token, `runTtsStreaming` fails its stream with a `StateError`, and
 `XybridStreamSession.fromModel`, `withObservation` and the manual `start*`
-calls throw. Normal and fallback
-streams merge `observation` and metrics into one terminal token, preserving its
-native index and finish reason. Context streams retain their separate
-metrics/completion token. Tool calls are delivered once.
+calls throw. Every token stream (`runStreaming`, `runStreamingWithContext`,
+`runStreamingWithFallback`) merges `observation` and metrics into one terminal
+token, preserving its native index and finish reason. Tool calls are delivered
+once.
 
 Every traced surface takes observation controls and returns a reference
 (`null` when untraced or suppressed):
@@ -209,7 +209,7 @@ rules and size budgets as the SDK's own content.
 
 ### Model Loading
 
-Load models from the Xybrid registry or local bundles:
+Load models from the Xybrid registry, a local bundle or a raw GGUF file:
 
 ```dart
 // From registry (downloads + caches automatically)
@@ -218,11 +218,26 @@ final model = await XybridModelLoader.fromRegistry('kokoro-82m').load();
 // From local bundle
 final model = await XybridModelLoader.fromBundle('path/to/model.xyb').load();
 
+// From a raw llama.cpp GGUF file (no model_metadata.json needed)
+final model = await XybridModelLoader.fromModelFile('/abs/path/model.gguf').load();
+
 // Check if already cached
 if (Xybrid.isModelCached('kokoro-82m')) {
   print('Model ready, no download needed');
 }
 ```
+
+`fromModelFile` touches no disk until `load()`, which generates
+`model_metadata.json` from the GGUF header and writes it next to the file
+unless one is already there, with the context capped at 4,096 tokens (raise
+its `context_length` for longer chats). So the directory must be writable:
+assets are not files on disk and the iOS app bundle is read-only, so copy the
+GGUF into a directory of its own under `getApplicationSupportDirectory()`
+first. An existing `model_metadata.json` is used as is, so keep one GGUF per
+directory. The generated metadata has no vision projector; load a vision GGUF
+with an mmproj through `fromDirectory`. A missing file makes `load()` throw an
+`XybridException` containing `GGUF file not found: <path>`, and
+`loadWithProgress()` emits only `LoadComplete` or `LoadError`.
 
 ### Download Progress
 
@@ -435,13 +450,21 @@ await for (final token in model.runStreamingWithContext(envelope, context)) {
 
 ## Platform Support
 
-| Platform | ONNX Runtime | Candle | LLM (llama.cpp) | Notes |
-|----------|:---:|:---:|:---:|-------|
-| **macOS** | ✅ | ✅ Metal | ✅ | Apple Silicon only (M1+) |
-| **iOS** | ✅ CoreML | ✅ Metal | ✅ | arm64, downloads ORT from HuggingFace |
-| **Android** | ✅ | — | ✅ | arm64-v8a, x86_64; ORT from Maven Central |
-| **Linux** | ✅ | ✅ CPU | ✅ | x86_64 |
-| **Windows** | ✅ | ✅ CPU | ✅ | x86_64 |
+Precompiled libraries ship for iOS (device and Simulator, arm64), macOS on
+Apple Silicon (M1+), Android (arm64-v8a, x86_64), Linux (x86_64) and Windows
+(x86_64). Where a model runs depends on its format:
+
+| Model format | iOS device | iOS Simulator | macOS | Android, Linux, Windows |
+|--------------|------------|---------------|-------|-------------------------|
+| GGUF (llama.cpp: LLMs, vision-language models) | Metal GPU | CPU | Metal GPU | CPU |
+| Whisper (whisper.cpp) | CPU; optional Core ML encoder | CPU; optional Core ML encoder | Metal GPU | CPU |
+| ONNX (ONNX Runtime) | CPU | CPU | CPU | CPU |
+
+On iOS, whisper.cpp runs the encoder on Core ML when a
+`<model>-encoder.mlmodelc` (e.g. `ggml-base.en-encoder.mlmodelc`) sits beside
+the model file. ONNX Runtime's Core ML execution provider is linked on iOS and
+macOS, but the SDK does not select it yet, so ONNX models run on the CPU. The
+precompiled libraries do not include Candle.
 
 ### Model Support
 
@@ -449,7 +472,7 @@ await for (final token in model.runStreamingWithContext(envelope, context)) {
 |-------|------|:---:|
 | Kokoro 82M | TTS | ✅ |
 | KittenTTS Nano | TTS | ✅ |
-| Whisper Tiny (Candle) | ASR | ✅ |
+| Whisper Tiny (whisper.cpp) | ASR | ✅ |
 | Wav2Vec2 (ONNX) | ASR | ✅ |
 | SmolLM2 360M | LLM | ✅ |
 | Qwen 2.5 0.5B | LLM | ✅ |
@@ -547,7 +570,7 @@ https://github.com/xybrid-ai/xybrid/tree/master/examples/flutter
 | Class | Purpose |
 |-------|---------|
 | `Xybrid` | SDK initialization, cache checking, factory methods |
-| `XybridModelLoader` | Load models from registry or local bundle |
+| `XybridModelLoader` | Load models from the registry, Hugging Face, a local bundle or directory, or a GGUF file |
 | `XybridModel` | Run inference (batch, streaming, with context) |
 | `XybridEnvelope` | Type-safe inputs: audio, text, embedding |
 | `XybridResult` | Inference output: text, audio, embedding, latency |

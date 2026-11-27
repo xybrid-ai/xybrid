@@ -30,10 +30,19 @@ cargo test  --workspace --features ort-download         # CI: test (matrix)
 (no `-check`) writes fixes — run before committing. Match CI's
 `--features ort-download` locally so feature-gated paths don't surprise you.
 
-CI gates (`.github/workflows/ci.yml`): `fmt`, `clippy`, `test` (macOS/Linux/Windows),
-plus feature-matrix jobs: `check-no-default-features`, `check-platform-macos`,
-`check-platform-desktop`, `clippy-llm`, `test-llm`, `test-candle`, `build-cli`,
-`api-contract`.
+CI gates: two required checks protect `master`, `CI Success` (`ci.yml`) and
+`Bazel graph + RBE targets` (`bazel.yml`). `ci.yml` runs `Repo checks` (the
+workflow index, version sync and every `tools/scripts/tests` test, on every
+change), the three commands above (`test` on Linux only), the feature checks
+(`check-*`, `clippy-llm`, `test-llm`), `api-contract`, observability, the Web
+and Python SDKs, the binding drift job, the backend lanes (Candle, whisper.cpp,
+policy routing, llama.cpp) and the lanes it calls: the SDKs
+(`build-android.yml`, `build-apple.yml`, `build-flutter.yml`,
+`build-react-native.yml`, `unity-editor.yml`) and conformance
+(`test-choice-conformance.yml`, `test-decision-conformance.yml`).
+`tools/scripts/ci_gate.py` decides which jobs a change needs, and `CI Success`
+fails unless each job it requires, every lane included, passed or was skipped
+for that reason. `.github/workflows/README.md` maps every workflow.
 
 Crate-wide lint opt-outs go in `lib.rs` at the crate root (see e.g.
 `crates/xybrid-core/src/lib.rs`). Don't sprinkle `#[allow(...)]` at call sites —
@@ -251,11 +260,11 @@ contract is `docs/development/liquid-decision-protocol.md`, and
   `LlamaModel::load`, which scans every key after loading and refuses.
   `xybrid_llama` keeps its own copy of the rules. Change both together: core
   tests compare them.
-- **`Decision CPU conformance` is a required check.**
-  `test-decision-conformance.yml` has no path filter, and
-  `tools/scripts/llamacpp_update.py` waits on that job name. It collects a
-  fresh upstream reference on the runner and compares bit for bit. Never loosen
-  the comparison to make it pass.
+- **`Decision conformance / Decision CPU conformance` gates llama.cpp releases.**
+  `ci.yml` calls `test-decision-conformance.yml` on every change that is not
+  docs-only, and `tools/scripts/llamacpp_update.py` waits on that check name.
+  It collects a fresh upstream reference on the runner and compares bit for
+  bit. Never loosen the comparison to make it pass.
 - **The llama.cpp pin has copies the update automation does not rewrite:**
   `tools/conformance/decision/{check.py,oracle.py}`,
   `integration-tests/fixtures/decision/{integrity.json,oracle.json}`,
@@ -375,16 +384,17 @@ User-facing behavior is in `docs/backends/mlx.md`.
   `check (llm-mlx non-linking, ubuntu-latest)` runs the `llm-mlx` tier's whole
   test suite for every code change; that is where a change to shared code
   that breaks the adapter fails. `check (llm-mlx-runtime, macos)` links MLX
-  and runs only when `mlx_runtime` in `tools/scripts/ci_gate.py` matches,
-  which is the MLX backend itself (and, like every optional job, ci.yml).
-  `test-mlx.yml` runs the MLX-linked steps against master every night. Keep
-  shared paths out of `mlx_runtime`: put what a shared change can break into
-  a test the Linux job runs instead. The MLX-linked steps live in
+  and runs only when the `mlx_runtime` lane in `tools/scripts/ci_gate.py`
+  matches, which is the MLX backend itself (and, like every lane, a change to
+  ci.yml or the shared actions). `test-mlx.yml` runs the MLX-linked steps,
+  plus the real-weight tests, against master every night. Keep shared paths
+  out of `mlx_runtime`: put what a shared change can break into a test the
+  Linux job runs instead. The MLX-linked steps live in
   `tools/scripts/check-mlx-runtime.sh`, shared by the pull-request job and
   the nightly one; add a step there, not to either workflow. The MLX jobs
-  save their Rust caches on master only (`save-if`): the repository's Actions
-  cache is at its 10 GB cap, and the nightly run keeps master's copies warm
-  for pull requests to restore.
+  save their Rust caches on master only (`setup-rust`'s `save-if`): the
+  repository's Actions cache is at its 10 GB cap, and the nightly run keeps
+  master's copies warm for pull requests to restore.
 
 ### Releases
 
@@ -396,6 +406,8 @@ the `Release v<version>` PR to master). Don't `gh pr create` a release or run
 pipeline and ships nothing. Never commit `Package.swift useLocalNatives = true`
 (local-dev only; breaks remote SPM — run `bindings/apple/scripts/set-natives-mode.sh
 --set-remote`). Full ritual + gotchas: **§ Releases** below.
+
+If a release tool starts writing new metadata, update the exact trusted rendering in `tools/scripts/zzz_source_policy.py` and its real-bump regression test.
 
 ---
 
@@ -501,6 +513,12 @@ registers, `xybrid-bolt` reports a fallback: `swift` on Apple platforms,
 so a new binding there reports theirs only until it registers. Add a new name
 to the facade's `resolve_binding`; a test fails until you do. The table is in
 `docs/telemetry/registry.md`.
+
+Under CI the same header ends with `ci=1` (`crates/xybrid-sdk/src/ci.rs`:
+`XYBRID_CI` decides when it is `1`/`true` or `0`/`false`, else `CI`), and
+registry analytics can leave those requests out. Coding-agent sandboxes don't set
+`CI`: export `XYBRID_CI=1` before running tests or examples that can reach the
+registry, or point `XYBRID_REGISTRY_URL` at a local stub.
 
 The browser package (`bindings/web`, npm `@xybrid/web`) is a GGUF text-generation
 preview over the existing Rust/llama.cpp path. `pnpm build` invokes Bazel for CPU
@@ -707,9 +725,10 @@ Pushing `release/v*` triggers `release-prep.yml`, which:
   not committed). Run `bindings/apple/scripts/set-natives-mode.sh --set-remote`
   before committing — remote (`false`) is the canonical committed state.
 
-Install snippets in the READMEs and docs pages that name a release are pins in
+Install snippets in the READMEs and docs pages that name a release, and the
+root `Package.swift`'s comment for external users, are pins in
 `PINS` (`tools/scripts/install_pins.py`). A new snippet shape, or a new page
-carrying one, gets an entry there or no bump rewrites it. CI's `Version sync`
+carrying one, gets an entry there or no bump rewrites it. CI's `Repo checks`
 job runs `version-sync.sh --check` and `test_install_pins.py` on every PR,
 docs-only ones included: a stale or dropped pin fails, and so does a known shape
 on an unlisted page or a package named with a version no pin owns. Pins follow
@@ -769,17 +788,41 @@ is generated from the workflow files, and these rules keep it true:
   queue behind the last (`llamacpp-update.yml`, `star-history.yml`).
 - **Regenerate the map.** After touching any workflow, run
   `python3 tools/scripts/gen_workflow_index.py`. CI runs it with `--check` (job
-  `Workflow index`) and fails on drift or a broken rule. A rebase can bring in
+  `Repo checks`) and fails on drift or a broken rule. A rebase can bring in
   master workflows written without these rules; fix them on your branch.
 - **Rename workflow files rarely.** GitHub ties run history and code-scanning
   configurations (CodeQL `codeql.yml:analyze`, Scorecard `scorecard.yml:analysis`)
   to the path, and `release-publish.yml` and the docs call
   `gh workflow run <file>`. Change `name:` instead.
+- **Add CI by extending `ci.yml`, never with a new workflow file.**
+  `gen_workflow_index.py --check` fails on a file missing from its
+  `WORKFLOW_FILES`, and on a `pull_request` / `pull_request_target` trigger
+  outside `PULL_REQUEST_FILES`: only `ci.yml` and `bazel.yml` validate pull
+  requests (the others listed scan, dry-run, publish or greet). A lane file
+  declares `workflow_call` (plus `workflow_dispatch`, plus `schedule` for a
+  nightly) and is called from `ci.yml`. A seconds-long check that needs no
+  toolchain is a test under `tools/scripts/tests/`; a new cargo invocation is a
+  step in the `ci.yml` job with the same runner and feature family; a new
+  backend or real-model suite is one `ci.yml` job built from the shared actions
+  in `.github/actions/` (`setup-rust`, `install-boltffi`, `fetch-model`,
+  `free-disk-space`), one `LANE_PATHS` row and `OPTIONAL_JOBS` entry in
+  `tools/scripts/ci_gate.py` with its `tooling-changes` output and one `CI
+  Success` `needs` entry (a lane that turns flaky goes to `ADVISORY_JOBS` while
+  it is fixed); a new binding or platform is a lane file, the one new file this
+  allows: its PR lists it in `WORKFLOW_FILES`. `setup-rust`, `install-boltffi`
+  and `fetch-model` save their caches from `master` only. macOS runs 5 jobs at
+  once for the whole organization, so add steps to an existing macOS job: the
+  check also holds `ci.yml` and its lane files to `MACOS_JOB_BUDGET` macOS jobs,
+  which a new one raises in the same PR with a reason. The full rules are in the
+  workflow README, "Adding CI".
 - **Job names are matched as checks; never rename them.** `CI Success`
   (`ci.yml`) and `Bazel graph + RBE targets` (`bazel.yml`)
   gate `master` through branch protection. `tools/scripts/llamacpp_update.py`
   also waits on job names (`REQUIRED_CHECKS`, `AUTOMATION_CHECKS`) before it
-  cuts a llama.cpp release. Edit a workflow's `name:` freely.
+  cuts a llama.cpp release. Edit a workflow's `name:` freely. A lane file's
+  checks are named `<caller job name> / <job name>`, so the caller job's
+  `name:` in `ci.yml` (`Android`, `Choice conformance`, ...) is part of those
+  check names, two of which `REQUIRED_CHECKS` polls.
 
 ---
 

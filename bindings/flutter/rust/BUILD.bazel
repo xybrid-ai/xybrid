@@ -59,9 +59,9 @@ rust_shared_library(
         "//conditions:default": "dynamic",
     }),
     # ["default"] matches the cargokit ship (it passes no --features); the real
-    # candle/vision/coreml feature set flows transitively from the //crates/
+    # vision/coreml feature set flows transitively from the //crates/
     # xybrid-sdk target this links (verified: the darwin staticlib carries
-    # ggml_metal/mtmd/candle/CoreML symbols with default features only).
+    # ggml_metal/mtmd/CoreML symbols with default features only).
     crate_features = ["default"],
     deps = all_crate_deps(normal = True),
     link_deps = select({

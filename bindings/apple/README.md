@@ -1,8 +1,6 @@
-# Xybrid Swift SDK (iOS/macOS)
+# Xybrid Swift SDK (iOS)
 
-> **Status**: Coming Soon — Swift bindings are in development. Use [Flutter](../flutter/) or [Kotlin](../kotlin/) for production use today.
-
-Native iOS and macOS SDK for [Xybrid](https://github.com/xybrid-ai/xybrid), providing on-device ML inference via BoltFFI-generated Swift bindings.
+Native iOS SDK for [Xybrid](https://github.com/xybrid-ai/xybrid), providing on-device ML inference via BoltFFI-generated Swift bindings.
 
 ## Installation
 
@@ -12,14 +10,14 @@ Add Xybrid to your Xcode project:
 
 1. In Xcode, select **File > Add Package Dependencies...**
 2. Enter: `https://github.com/xybrid-ai/xybrid`
-3. Set **Dependency Rule** to **Up to Next Major Version** → `0.19.0`
+3. Set **Dependency Rule** to **Up to Next Major Version** → `0.21.0`
 4. Select the **Xybrid** library product
 
 Or add it to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.19.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.21.0")
 ]
 ```
 
@@ -54,13 +52,45 @@ let envelope = XybridEnvelope.text(
 // Run inference without blocking the caller's executor.
 let result = try await model.runAsync(envelope: envelope)
 
-// Access the result
-if result.success {
-    if let audioBytes = result.audioBytes {
-        // Play or save the audio
-    }
+// Access the result (a failed run throws instead of returning one)
+if let audioBytes = result.audioBytes {
+    // Play or save the audio
 }
 ```
+
+### Streaming tokens
+
+For a chat UI, stream an LLM's answer as it is generated instead of waiting for
+`runAsync`:
+
+```swift
+let model = try await Xybrid.model("qwen3-0.6b").load()
+
+for try await token in model.streamTokens(envelope: XybridEnvelope.text("Tell me a joke")) {
+    print(token.token, terminator: "")
+}
+```
+
+`streamTokens` returns an `AsyncSequence` of `XybridStreamToken`. Cancelling the
+task that consumes it, or breaking out of the loop, stops generation at the
+next token.
+
+### Loading a local GGUF file
+
+A llama.cpp GGUF file the app downloaded loads directly, with no
+`model_metadata.json` to write:
+
+```swift
+let model = try await Xybrid.model(.modelFile(ggufURL)).load()
+```
+
+`load()` generates `model_metadata.json` from the GGUF header and writes it
+next to the file, unless one is already there. The generated file caps the
+context at 4,096 tokens; raise its `context_length` for longer chats. Put each
+GGUF in its own directory inside the app container, such as Application
+Support: the app bundle is read-only, and a `model_metadata.json` already in
+the directory is used as is, so a second GGUF there would load the first one's
+model. Copy a file the user picks into the app container before loading it.
 
 ### Reasoning (thinking models)
 
@@ -149,8 +179,8 @@ with the label `application_error` (never the error text) otherwise.
 `Tests/XybridTests/ObservabilityRuntimeTests.swift` runs the shared
 [observability runtime scenario](../../tools/scripts/observability_capture/scenario.md)
 through this API against a local OTLP receiver. It skips unless the scenario
-driver supplies the receiver, which CI's `Observability runtime scenario (iOS
-Simulator)` job in `build-apple.yml` does. To run it on a Mac, with the local
+driver supplies the receiver, which the `Run observability scenario (iOS
+Simulator)` step of `build-apple.yml`'s `Build XCFramework` job does. To run it on a Mac, with the local
 xcframework unzipped (see below) and a booted simulator:
 
 ```bash
@@ -172,11 +202,11 @@ python3 tools/scripts/observability_capture/run_scenario.py --binding swift --ou
 
 | Type | Description |
 |------|-------------|
-| `ModelSource` | Registry, bundle, directory, or Hugging Face model location |
+| `ModelSource` | Registry, bundle, directory, local GGUF file, or Hugging Face model location |
 | `ModelLoader` | Cheap model reference; call `load()` to perform I/O |
 | `XybridModel` | A loaded model ready for inference |
 | `XybridEnvelope` | Input data container (audio, text, embedding, image, or multi-part user message) |
-| `XybridResult` | Inference result with success status and output data |
+| `XybridResult` | Inference result with output data (a failed run throws `XybridError`) |
 | `XybridError` | Error enum for error handling |
 
 ### Creating Envelopes
@@ -191,14 +221,14 @@ let ttsEnvelope = XybridEnvelope.text(
 
 // Speech-to-Text input
 let asrEnvelope = XybridEnvelope.audio(
-    bytes: audioData,
+    pcmData: audioData,
     sampleRate: 16000,
     channels: 1
 )
 
 // Embedding input
 let embeddingEnvelope = XybridEnvelope.embedding(
-    data: [0.1, 0.2, 0.3, ...]
+    data: [0.1, 0.2, 0.3]
 )
 
 // Vision-language input
@@ -215,13 +245,22 @@ runtime error instead of an opaque memory pressure failure.
 
 ## Structure
 
+The Swift package manifest is the repo-root [`Package.swift`](../../Package.swift),
+not a file in this directory. It serves both SPM consumers and local
+development; its `useLocalNatives` flag picks the xcframework.
+
 ```
 apple/
-├── Package.swift                    # Swift Package manifest (local dev: path-based binaryTarget)
+├── BUILD.bazel                      # Bazel targets for XybridFFI.xcframework
 ├── Sources/
 │   └── Xybrid/                      # Swift source
 │       ├── Xybrid.swift             # Public API, extensions, type aliases
 │       └── xybrid_bolt.swift        # BoltFFI-generated Swift bindings (DO NOT EDIT)
+├── Tests/
+│   └── XybridTests/                 # Swift unit tests (the XybridTests target)
+├── include/
+│   └── xybrid-bolt.h                # BoltFFI-generated C header the xcframework ships (DO NOT EDIT)
+├── scripts/                         # set-natives-mode.sh, sync-spm-checksum.sh, gen-bolt-bindings.sh, ...
 └── XCFrameworks/                    # Local-dev unzip target for the Bazel-built xcframework
     └── XybridFFI.xcframework/       # (gitignored; unzipped from bazel-bin)
 ```
@@ -230,18 +269,25 @@ apple/
 
 | Platform | Minimum Version |
 |----------|-----------------|
-| iOS | 13.0 |
-| macOS | 10.15 (Catalina) |
+| iOS (device and Simulator, arm64) | 16.0 |
+
+Building an app against the package needs Xcode 15.3 or later (Swift 5.10).
+The package declares iOS only. The xcframework ships no macOS slice; for a
+macOS app, use the [Flutter SDK](../flutter/) (macOS 14+ on Apple Silicon) or
+the [Rust crate](../../crates/xybrid/).
 
 ## Building the XCFramework
 
-The XCFramework containing the compiled Rust library must be built before using the Swift package.
+This section is for local development only. Apps that add the package with SPM
+get the release XCFramework automatically: with `useLocalNatives = false`, the
+committed state, SPM downloads `XybridFFI-v<version>.xcframework.zip` from the
+GitHub release.
 
 ### Prerequisites
 
 | Tool | Required Version | Installation |
 |------|------------------|--------------|
-| Xcode | 14.0+ | Mac App Store |
+| Xcode | 15.3+ | Mac App Store |
 | Bazel (via bazelisk) | per `.bazelversion` | `brew install bazelisk` |
 | Xcode Command Line Tools | Latest | `xcode-select --install` |
 
@@ -258,11 +304,19 @@ bazel build --config=ios //bindings/apple:XybridFFI
 
 # Unzip it where the Swift package's local-natives mode looks
 unzip -o bazel-bin/bindings/apple/XybridFFI.xcframework.zip -d bindings/apple/XCFrameworks
+
+# Point the root Package.swift at the local xcframework
+./bindings/apple/scripts/set-natives-mode.sh --set-local
 ```
 
 This produces `XCFrameworks/XybridFFI.xcframework` containing:
 - iOS device (arm64)
 - iOS simulator (arm64)
+
+Without `--set-local`, the package keeps using the release xcframework, not your
+build. `useLocalNatives = true` is for local development only. Toggle back to
+remote mode before committing:
+`./bindings/apple/scripts/set-natives-mode.sh --set-remote`.
 
 ### Build Output
 
@@ -319,35 +373,32 @@ before publication. The standard release workflow still uses `:XybridFFI`.
 
 ### Troubleshooting
 
-#### "error: linker 'cc' not found"
+#### SPM can't find the local xcframework, or ignores your build
 
-**Cause**: Xcode Command Line Tools not installed.
+**Cause**: The root `Package.swift` is in remote mode, or the xcframework is not
+where local mode looks.
 
-**Fix**: Run `xcode-select --install`
+**Fix**: Run `./bindings/apple/scripts/set-natives-mode.sh --status`.
 
-#### "error: target 'aarch64-apple-ios' not installed"
+- `useLocalNatives = false`: SPM uses the release xcframework. Run
+  `./bindings/apple/scripts/set-natives-mode.sh --set-local`.
+- `useLocalNatives = true`: SPM reads
+  `bindings/apple/XCFrameworks/XybridFFI.xcframework`. Check that this
+  directory exists. If it does not, run the `unzip` command above from the repo
+  root.
 
-**Cause**: Missing Rust target.
+Do not add the xcframework to your Xcode project's "Frameworks, Libraries, and
+Embedded Content" yourself. Apps depend on the `Xybrid` product, and SPM
+resolves the `XybridFFI` binary target.
 
-**Fix**: Build via Bazel (`bazel build --config=ios //bindings/apple:XybridFFI`) — it provides its own Rust toolchain and targets
+#### "Cannot find 'boltffi_…' in scope" in `xybrid_bolt.swift`
 
-#### "xcodebuild: error: cannot be used together with -create-xcframework"
+**Cause**: The xcframework's C header is older than the committed Swift
+bindings. In remote mode, the release xcframework can predate the bindings on
+`master`. In local mode, the unzipped xcframework can predate your last pull.
 
-**Cause**: Conflicting xcodebuild options or incompatible library format.
-
-**Fix**: Ensure you're using static libraries (.a files), not dynamic (.dylib).
-
-#### Build works but Swift can't find the module
-
-**Cause**: XCFramework not in expected location or not linked.
-
-**Fix**: Ensure `XCFrameworks/XybridFFI.xcframework` exists and is listed in your Xcode project's "Frameworks, Libraries, and Embedded Content".
-
-#### "Undefined symbols for architecture arm64"
-
-**Cause**: XCFramework built for different architecture than target.
-
-**Fix**: Rebuild with `bazel build --config=ios //bindings/apple:XybridFFI`.
+**Fix**: Build and unzip the xcframework again (see [Building](#building)),
+then run `./bindings/apple/scripts/set-natives-mode.sh --set-local`.
 
 ### Non-macOS Developers
 
@@ -368,7 +419,3 @@ The Swift bindings are generated from `crates/xybrid-bolt/` using [BoltFFI](http
 ## Telemetry
 
 The Apple binding reports `binding=swift` in a small `X-Xybrid-Client` header attached to registry metadata calls. See [docs/telemetry/registry.md](../../docs/telemetry/registry.md) for the exact wire format and the opt-out switch (`XYBRID_TELEMETRY_OPTOUT=1`).
-
-## Full Plan
-
-See [DRAFT-PLATFORM-SDK-RESTRUCTURE.md](../../docs/architecture/DRAFT-PLATFORM-SDK-RESTRUCTURE.md) for the complete restructuring plan.

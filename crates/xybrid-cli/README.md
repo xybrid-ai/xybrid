@@ -19,10 +19,8 @@ irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
 **From source:**
 
 ```bash
+# Every platform preset already includes the VLM feature (llm-llamacpp-vision).
 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-macos
-
-# Vision-language models add the VLM feature to the platform preset:
-cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-macos,llm-llamacpp-vision
 ```
 
 `platform-macos` does not include the MLX backend. Running SafeTensors models

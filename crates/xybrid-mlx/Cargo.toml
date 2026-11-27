@@ -21,7 +21,7 @@ default = []
 bindings = ["xybrid-mlx-sys/bindings", "dep:metal", "dep:libc"]
 
 [dependencies]
-xybrid-mlx-sys = { path = "../mlx-c-sys", version = "0.19.0" }
+xybrid-mlx-sys = { path = "../mlx-c-sys", version = "0.21.0" }
 thiserror = { workspace = true }
 tracing = "0.1"
 

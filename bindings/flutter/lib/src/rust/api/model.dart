@@ -17,9 +17,9 @@ import 'result.dart';
 import 'streaming.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `completion`, `decision_io_refusal`, `from_sdk`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `resolved_streaming_run_options`, `sdk_error_message`, `should_cancel_on_sink_close`, `sink_token_callback`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `completion`, `decision_io_refusal`, `from_sdk`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `load_reporting_progress`, `non_empty`, `normalize_gateway_url`, `resolve`, `resolved_streaming_run_options`, `sdk_error_message`, `should_cancel_on_sink_close`, `sink_token_callback`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`, `LoaderSource`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 /// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
 /// [`FfiGenerationConfig::grammar`].
@@ -74,8 +74,7 @@ abstract class FfiModel implements RustOpaqueInterface {
   /// rather than polling.
   FfiDownloadStatus downloadStatus();
 
-  /// Whether runs are currently answered by the cloud because the local
-  /// weights are not ready yet. `false` for ordinary local models.
+  /// Whether a run would try the gateway because the local weights are not ready.
   ///
   /// This predicts the *next* run; `FfiResult.executionTarget` reports what a
   /// run that already happened actually did. They differ when a cloud leg
@@ -101,7 +100,7 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Returns a stream of events:
   /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-  /// - `FfiStreamEvent::Complete` when inference finishes
+  /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
   /// - `FfiStreamEvent::Error` if an error occurs
   ///
   /// For non-LLM models, a single Token event is emitted with the full result.
@@ -144,7 +143,7 @@ abstract class FfiModel implements RustOpaqueInterface {
   ///
   /// Returns a stream of events:
   /// - `FfiStreamEvent::Token` for each generated token (LLM models)
-  /// - `FfiStreamEvent::Complete` when inference finishes
+  /// - `FfiStreamEvent::Complete` or `FfiStreamEvent::Recovered` on success
   /// - `FfiStreamEvent::Error` if an error occurs
   ///
   /// Pass an optional `config` to control generation parameters.
@@ -274,12 +273,21 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
       XybridRustLib.instance.api
           .crateApiModelFfiModelLoaderFromHuggingface(repo: repo);
 
+  /// Loader for a raw llama.cpp GGUF file. Creating it touches no disk:
+  /// `load()` and `load_with_progress()` write a generated
+  /// `model_metadata.json` beside the file if absent, then load its
+  /// directory. Nothing is downloaded, so `load_with_progress()` emits only
+  /// `Complete` or `Error`.
+  static FfiModelLoader fromModelFile({required String path}) =>
+      XybridRustLib.instance.api
+          .crateApiModelFfiModelLoaderFromModelFile(path: path);
+
   static FfiModelLoader fromRegistry({required String modelId}) =>
       XybridRustLib.instance.api
           .crateApiModelFfiModelLoaderFromRegistry(modelId: modelId);
 
-  /// Loader that serves from the cloud gateway while the registry weights
-  /// download in the background, instead of blocking on the download.
+  /// Try the registry id at the cloud gateway while the weights download.
+  /// Only ids also listed in the gateway catalog can be served remotely.
   ///
   /// `load()` then returns almost immediately with a cloud-backed model that
   /// switches to on-device by itself once the download lands. Requires a
@@ -318,16 +326,13 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
 
 /// Lifecycle of a model download.
 enum FfiDownloadState {
-  /// Bytes still in flight. For a speculative load, runs are served from
-  /// the cloud meanwhile.
+  /// Bytes still in flight. Speculative runs try the cloud meanwhile.
   downloading,
 
   /// Every artifact landed and the model is usable.
   ready,
 
-  /// Download failed — for a speculative load the cloud keeps serving and
-  /// the model never becomes local. Surfacing this is the only way the UI
-  /// can stop waiting.
+  /// Download failed; a speculative model never becomes local.
   failed,
 
   /// The download was cancelled by the caller.
@@ -585,6 +590,12 @@ sealed class FfiStreamEvent with _$FfiStreamEvent {
   const factory FfiStreamEvent.error(
     String field0,
   ) = FfiStreamEvent_Error;
+
+  /// Local completion and the preceding speculative cloud error.
+  const factory FfiStreamEvent.recovered(
+    FfiResult field0,
+    String field1,
+  ) = FfiStreamEvent_Recovered;
 }
 
 /// Token received during streaming inference.

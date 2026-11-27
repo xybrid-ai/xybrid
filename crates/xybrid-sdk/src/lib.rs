@@ -158,6 +158,7 @@ use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
 
 pub mod benchmark;
 pub mod cache;
+mod ci;
 pub mod device;
 pub mod download;
 pub mod llm;
@@ -593,13 +594,11 @@ pub fn set_provider_api_key(provider: &str, api_key: &str) {
 
 /// Enable or disable speculative cloud fallback globally.
 ///
-/// When enabled, a [`ModelLoader`] whose model isn't downloaded yet is served
-/// from the Xybrid gateway while the weights download in the background —
-/// provided a cloud API key is resolvable and the registry reports a chat
-/// model (see [`ModelLoader::will_speculate`]). This sets the process-global
-/// default; individual loads override it with
-/// [`ModelLoader::with_speculative_cloud`]. The flag persists in memory for the
-/// app lifetime.
+/// With an API key, uncached registry chat models try the Xybrid gateway while
+/// the weights download. Only ids also listed in the gateway catalog can be
+/// served remotely. This sets the process-global default; individual loads
+/// override it with [`ModelLoader::with_speculative_cloud`]. The flag persists
+/// in memory for the app lifetime.
 ///
 /// # Examples
 /// ```

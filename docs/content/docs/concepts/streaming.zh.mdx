@@ -4,7 +4,7 @@ description: LLM 与音频转录的实时 Token 流式输出
 ---
 
 
-Xybrid 支持两种流式推理：**LLM Token 流式输出**（现已可用）和**实时音频流式输出**（规划中）。
+Xybrid 支持两种流式推理：**LLM Token 流式输出**和**实时音频流式输出**（实时转写）。
 
 ## LLM Token 流式输出
 
@@ -49,6 +49,18 @@ await for (final token in stream) {
 }
 ```
 
+### Swift
+
+```swift
+let model = try await Xybrid.model("gemma-3-1b").load()
+
+for try await token in model.streamTokens(envelope: .text("Tell me a joke")) {
+    print(token.token, terminator: "") // 每个 Token 生成时立即输出
+}
+```
+
+`streamTokens` 返回一个 `AsyncSequence`。取消消费它的任务或跳出循环，生成会在下一个 Token 处停止。生成参数通过 `options: .make(generationConfig: config)` 传入。需要对话上下文时使用拉取式 API：`runStreamWithContext(envelope:context:options:)` 返回一个流 ID，用 `streamNext(streamId:)` 依次读取直至结束，再用 `streamClose(streamId:)` 关闭。
+
 ### Unity（C#）
 
 ```csharp
@@ -74,18 +86,29 @@ string response = model.RunStreamingText("Tell me a story.", token =>
 | 属性 | 类型 | 说明 |
 |----------|------|-------------|
 | `token` | `String` | 生成的 Token 文本 |
-| `index` | `int` | Token 在序列中的位置 |
-| `cumulativeText` | `String` | 目前已生成的全部文本 |
-| `isFinal` | `bool` | 是否为最后一个 Token |
-| `finishReason` | `String?` | `"stop"`、`"length"` 或 `"error"` |
+| `tokenId` | 整数或 null | 后端提供时为原始 Token ID。Swift 为 `Int64?`，Kotlin 为 `Long?`，Unity 为 `long?`。Dart 没有该字段 |
+| `index` | 非负整数 | Token 在序列中从零开始的位置。Dart 为 `int`，Swift 为 `UInt64`，Kotlin 为 `ULong`，Unity 为 `uint` |
+| `cumulativeText` | `String` | 目前已输出的文本。其中不含工具调用块，因此可能与模型的原始输出不同（参见 `rawText`） |
+| `isFinal` | `bool` | 是否为最后一个 Token。Dart 的流总以该 Token 结束。Unity 的 `IsFinal`，以及 Swift/Kotlin 中非空的 `finishReason`，标记终止 Token，但未生成文本的运行结束时不会发送终止 Token：请以循环结束作为流结束的信号 |
+| `finishReason` | `String?` | 在终止 Token 上设置：`"stop"`（序列结束或命中停止序列）、`"length"`（达到 `max_tokens`）或 `"tool_calls"`（本轮以工具调用结束，参见 `toolCalls`）。经云端路由的运行会原样传递网关返回的原因，因此可能出现其他值。在 Dart 中，运行失败时这里为 `"error: <message>"`，参见[运行失败](#运行失败) |
+| `toolCalls` | 列表 | 模型请求的工具调用。仅在终止 Token 上提供：其他 Token 上以及未调用工具的轮次中为空。参见[带工具的流式聊天](/zh/docs/guides/tool-calling#带工具的流式聊天) |
+| `rawText` | `String?` | 本轮的原始输出，包含工具调用块。续接本轮时将其作为 `priorAssistantText` 传入。仅在终止 Token 上提供，且仅当 `toolCalls` 非空时才有值 |
+
+### 运行失败
+
+没有任何 SDK 会用单独的 `"error"` 结束原因来报告失败。各 SDK 的报告方式不同：
+
+- **Flutter**：流以一个 Token 结束，其 `finishReason` 以 `"error: "` 开头并附带错误信息。检查 `token.isError`，并读取 `token.errorMessage`。该 Token 可能紧跟在一个正常的最后 Token 之后。
+- **Swift 和 Kotlin**：`streamTokens` 抛出 `XybridError`，因此 `for try await` 循环（Swift）或 `collect` 调用（Kotlin）会抛出异常。使用拉取式 API 时，由 `streamNext` 抛出。
+- **Unity**：`RunStreaming` 返回 `Success` 为 false 的 `InferenceResult`。调用 `result.ThrowIfFailed()` 即可抛出异常。`RunStreamingText` 会替你调用它。
 
 ## SDK 支持情况
 
 | 功能 | Flutter | Unity | Kotlin | Swift |
 |---------|---------|-------|--------|-------|
-| `runStreaming()` | 支持 | 支持 | 规划中 | 规划中 |
-| `runStreamingWithContext()` | 支持 | 支持 | 规划中 | 规划中 |
-| 生成配置 | 支持 | 支持 | 规划中 | 规划中 |
+| `runStreaming()` | 支持 | 支持 | 支持（`streamTokens`；无 `preempt`） | 支持（`streamTokens`；无 `preempt`） |
+| `runStreamingWithContext()` | 支持 | 支持 | 仅拉取式 API（`runStreamWithContext`） | 仅拉取式 API（`runStreamWithContext`） |
+| 生成配置 | 支持 | 支持 | 支持 | 支持 |
 
 ---
 
@@ -115,13 +138,6 @@ XYBRID_LLAMACPP_VERBOSITY=4 ./my-xybrid-app
 
 ---
 
-## 实时音频流式输出（规划中）
+## 实时音频流式输出
 
-基于分块 Whisper 推理的实时音频转录（含部分结果输出）已列入未来版本计划，将支持：
-
-- 麦克风持续输入与分块处理
-- 音频接收过程中的部分转录结果
-- 用于自动分段的语音活动检测（VAD）
-- 可配置的块大小与重叠
-
-该功能实现后将在所有 SDK 中提供。
+实时转写会话持续接收应用送入的麦克风音频，并在语音到达时返回部分转写结果，可选用语音活动检测按语音边界切分。详见 [iOS](/zh/docs/sdks/ios#实时转写)、[Android](/zh/docs/sdks/android#实时转写) 和 [Unity](/zh/docs/sdks/unity#实时转写) 的“实时转写”章节，以及 [Flutter](/zh/docs/sdks/flutter#语音转文字) 的“语音转文字”章节；React Native 通过 `model.stream()` 打开会话（[指南](/en/docs/sdks/react-native#more-capabilities)，英文）。

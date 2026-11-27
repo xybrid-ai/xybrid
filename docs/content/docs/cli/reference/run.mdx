@@ -106,7 +106,9 @@ Swap in `policies/local-only.yaml` to keep the same prompt on the device, or
 `routing_decision` JSON line.
 
 Use `--platform-url <base-url>` for a staging or self-hosted platform. The
-example uses `gpt-4o-mini`, which the platform must have configured upstream.
+example's cloud model is `openai/gpt-4o-mini`: the platform names frontier
+models by their canonical OpenRouter ID, and returns 404 `model_not_found` for
+a short ID such as `gpt-4o-mini`.
 
 ### Direct provider testing
 
@@ -226,7 +228,7 @@ stages:
   - whisper-tiny@1.0
   - target: integration
     provider: openai
-    model: gpt-4o-mini
+    model: openai/gpt-4o-mini
   - kokoro-82m@0.1
 ```
 

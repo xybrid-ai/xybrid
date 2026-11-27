@@ -509,6 +509,10 @@ jobs:
             # 0 vs 158 on real slices. (`nm`, not `strings`, for the same
             # reason the sibling ggml_metal / mtmd gates use it.)
             test "$(nm "$lib" 2>/dev/null | grep -c '_whisper_')" -gt 0 || { echo "$1: MISSING whisper.cpp (ASR) symbols"; exit 1; }
+            # The podspecs do not link MetalPerformanceShaders (#807) and both
+            # force_load this archive, so one MPS symbol fails every app's link.
+            # The _ggml_metal check above is the control.
+            test "$(nm -u "$lib" 2>/dev/null | grep -cE '(^| )_(MPS|OBJC_(CLASS|METACLASS)_\$_MPS)')" -eq 0 || { echo "$1: references MetalPerformanceShaders, which the Flutter podspecs do not link"; exit 1; }
             local platform
             platform=$(otool -l "$lib" | awk '/LC_BUILD_VERSION/{f=1} f && /platform/ && !p {p=$2} END{print p}')
             test "$platform" = "$2" || { echo "$1: wrong platform $platform (want $2)"; exit 1; }

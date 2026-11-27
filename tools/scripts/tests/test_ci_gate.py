@@ -1,20 +1,136 @@
-"""Regression tests for docs-only selection and the required CI gate."""
+"""Regression tests for the CI path registry and the required CI Success gate."""
 
-import importlib.util
+import contextlib
 import io
 import re
 import sys
 import unittest
 from pathlib import Path
-from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ci_gate import OPTIONAL_JOBS, PATH_FILTERS, check_jobs, classify
+import gen_workflow_index
+import llamacpp_update
+from ci_gate import (
+    ADVISORY_JOBS,
+    ALWAYS_JOBS,
+    BAZEL_PATHS,
+    LANE_PATHS,
+    OPTIONAL_JOBS,
+    PATH_FILTERS,
+    PIPELINE_PATHS,
+    SUB_LANES,
+    bazel,
+    check_jobs,
+    classify,
+    dispatch,
+    glob_regex,
+    path_selected,
+)
+
+REPO = Path(__file__).resolve().parents[3]
+WORKFLOWS = REPO / ".github" / "workflows"
 
 
 def pr_files(*paths: str) -> list:
     return [[{"filename": path} for path in paths]]
+
+
+def push_paths(workflow: str) -> list:
+    """The `paths:` list under a workflow's `on.push`, in order."""
+    text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
+    block = re.search(r"^  push:\n((?:    .*\n|\s*#.*\n)*)", text, re.M)
+    if block is None:
+        raise AssertionError(f"{workflow} has no push trigger")
+    listed = re.search(r"^    paths:\n((?:      .*\n)*)", block[1], re.M)
+    if listed is None:
+        raise AssertionError(f"{workflow}'s push trigger has no paths")
+    return re.findall(r"""^      - ["']([^"']+)["']$""", listed[1], re.M)
+
+
+def workflow_call_secrets(workflow: str) -> set:
+    text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
+    block = re.search(r"^  workflow_call:\n((?:    .*\n|\s*#.*\n)*)", text, re.M)
+    if block is None:
+        return set()
+    secrets = re.search(r"^    secrets:\n((?:      .*\n|\s*#.*\n)*)", block[1], re.M)
+    return set(re.findall(r"^      ([A-Z][A-Z0-9_]*):", secrets[1], re.M)) if secrets else set()
+
+
+def job_text(workflow: str, job: str) -> str:
+    text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
+    match = re.search(rf"^  {re.escape(job)}:\n((?:    .*\n|\s*#.*\n|\n)*)", text, re.M)
+    if match is None:
+        raise AssertionError(f"{workflow} has no job {job}")
+    return match[1]
+
+
+def ci_jobs() -> dict:
+    return gen_workflow_index.read_jobs(WORKFLOWS / "ci.yml")
+
+
+def job_check_names(job) -> set:
+    """The check runs a job reports; one calling a lane file reports
+    `<caller> / <job>` for each job of the callee."""
+    if job.uses and job.uses.startswith("./.github/workflows/"):
+        callee = job.uses.rsplit("/", 1)[1]
+        return {f"{job.check_name} / {name}" for name in check_names(callee)}
+    return {job.check_name}
+
+
+def check_names(workflow: str) -> set:
+    names = set()
+    for job in gen_workflow_index.read_jobs(WORKFLOWS / workflow).values():
+        names |= job_check_names(job)
+    return names
+
+
+class GlobTests(unittest.TestCase):
+    """GitHub's `paths:` filter semantics, which the lane rows are written in."""
+
+    def test_star_stays_in_a_directory_and_double_star_crosses(self):
+        cases = {
+            ("*.rs", "lib.rs"): True,
+            ("*.rs", "src/lib.rs"): False,
+            ("crates/*/Cargo.toml", "crates/xybrid-core/Cargo.toml"): True,
+            ("crates/*/Cargo.toml", "crates/a/b/Cargo.toml"): False,
+            ("crates/**", "crates/xybrid-core/src/lib.rs"): True,
+            ("**.md", "README.md"): True,
+            ("**.md", "crates/llama-cpp-sys/README.md"): True,
+            ("**/BUILD.bazel", "BUILD.bazel"): True,
+            ("**/BUILD.bazel", "crates/xybrid-core/BUILD.bazel"): True,
+            ("**/BUILD.bazel", "crates/xybrid-core/BUILD.bazel.bak"): False,
+            (".cargo/**", ".cargo/config.toml"): True,
+            ("Cargo.lock", "crates/x/Cargo.lock"): False,
+        }
+        for (pattern, path), expected in cases.items():
+            with self.subTest(pattern=pattern, path=path):
+                self.assertEqual(bool(glob_regex(pattern).fullmatch(path)), expected)
+
+    def test_a_directory_glob_does_not_match_a_submodule_gitlink(self):
+        # A submodule bump changes one path, the gitlink itself.
+        self.assertFalse(path_selected(["vendor/llama-cpp/**"], "vendor/llama-cpp"))
+        self.assertTrue(path_selected(["vendor/llama-cpp"], "vendor/llama-cpp"))
+        self.assertFalse(path_selected(["vendor/llama-cpp"], "vendor/llama-cpp-extra"))
+
+    def test_the_last_matching_pattern_decides(self):
+        patterns = ["crates/**", "!**.md", "crates/keep/**"]
+        self.assertTrue(path_selected(patterns, "crates/a/lib.rs"))
+        self.assertFalse(path_selected(patterns, "crates/a/README.md"))
+        self.assertTrue(path_selected(patterns, "crates/keep/README.md"))
+        self.assertFalse(path_selected(patterns, "docs/a.rs"))
+        self.assertFalse(path_selected(["!**.md"], "a.rs"))
+
+    def test_glob_characters_with_easily_misread_meanings_are_refused(self):
+        for pattern in ("a?.rs", "a+.rs", "[ab].rs"):
+            with self.subTest(pattern=pattern), self.assertRaises(ValueError):
+                glob_regex(pattern)
+
+    def test_every_registry_pattern_compiles(self):
+        for lane, patterns in {**LANE_PATHS, "pipeline": PIPELINE_PATHS}.items():
+            for pattern in patterns:
+                with self.subTest(lane=lane, pattern=pattern):
+                    glob_regex(pattern.removeprefix("!"))
 
 
 class ChangeSelectionTests(unittest.TestCase):
@@ -23,7 +139,7 @@ class ChangeSelectionTests(unittest.TestCase):
             "README.md", "docs/guide.json", "examples/hello.rs",
             ".github/ISSUE_TEMPLATE/bug.yml", "LICENSE", "tools/scripts/README.md",
         ))
-        self.assertTrue(all(value == "false" for value in outputs.values()))
+        self.assertTrue(all(value == "false" for value in outputs.values()), outputs)
 
     def test_mixed_code_and_changelog_requires_full_ci(self):
         outputs = classify("pull_request", pr_files("CHANGELOG.md", "vendor/llama-cpp"))
@@ -33,122 +149,32 @@ class ChangeSelectionTests(unittest.TestCase):
         outputs = classify("pull_request", pr_files("README.md") + pr_files("Cargo.toml"))
         self.assertEqual(outputs["full_ci"], "true")
 
-    def test_renaming_code_to_docs_requires_full_ci(self):
+    def test_renaming_code_to_docs_requires_full_ci_and_its_lanes(self):
         outputs = classify("pull_request", [[{
-            "filename": "docs/old-script.md", "previous_filename": "tools/scripts/old.py",
+            "filename": "docs/old-wrapper.md", "previous_filename": "crates/llama-cpp-sys/wrapper.cpp",
         }]])
         self.assertEqual(outputs["full_ci"], "true")
-        self.assertEqual(outputs["relevant"], "true")
+        self.assertEqual(outputs["llamacpp"], "true")
 
     def test_push_uses_the_same_docs_rule(self):
         self.assertEqual(classify("push", {"files": pr_files("README.md")[0]})["full_ci"], "false")
         self.assertEqual(classify("push", {"files": pr_files("Cargo.lock")[0]})["full_ci"], "true")
 
-    def test_zzz_contract_and_gated_workflows_run_tooling_tests(self):
+    def test_js_release_surfaces_run_full_ci(self):
         for path in (
-            "crates/zzz-sys/zzz_pull.py", "crates/zzz-sys/natives-manifest.json",
-            ".github/workflows/release-prep.yml", ".github/workflows/release-publish.yml",
-            ".github/workflows/test-zzz-android.yml", ".github/workflows/test-zzz-engine.yml",
-            ".github/workflows/trusted-zzz-sdk.yml",
-        ):
-            with self.subTest(path=path):
-                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "true")
-        for path in (
-            "crates/zzz-sys/src/lib.rs", "crates/zzz-sys/zzz_pull.py.orig",
-            ".github/workflows/build-android.yml", ".github/workflows/release-prep.yml.bak",
-        ):
-            with self.subTest(path=path):
-                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "false")
-
-    def test_js_release_surfaces_run_tooling_and_full_ci(self):
-        for path in (
-            "bindings/web/scripts/check-pack.mjs",
-            "bindings/web/scripts/check-pack.test.mjs",
-            "bindings/web/package.json", "bindings/web/pnpm-lock.yaml",
-            "bindings/web/pnpm-workspace.yaml",
-            "bindings/observability-js/scripts/build.ts",
-            "bindings/observability-js/package.json",
-            "bindings/observability-js/pnpm-lock.yaml",
-            "bindings/observability-js/pnpm-workspace.yaml",
+            "bindings/web/scripts/check-pack.mjs", "bindings/web/package.json",
             "bindings/observability-js/src/version.ts",
         ):
             with self.subTest(path=path):
-                outputs = classify("pull_request", pr_files(path))
-                self.assertEqual(outputs["full_ci"], "true")
-                self.assertEqual(outputs["relevant"], "true")
-        for path in (
-            "bindings/web/README.md", "bindings/observability-js/RELEASING.md",
-            "bindings/web/package.json.bak", "bindings/web/src/llm.ts",
-        ):
-            with self.subTest(path=path):
-                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "false")
+                self.assertEqual(classify("pull_request", pr_files(path))["full_ci"], "true")
 
-    def test_flutter_platform_floors_run_tooling_tests(self):
-        for path in (
-            "bindings/flutter/ios/xybrid_flutter.podspec",
-            "bindings/flutter/macos/xybrid_flutter.podspec",
-            "bindings/flutter/android/build.gradle", ".bazelrc",
-        ):
-            with self.subTest(path=path):
-                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "true")
-        for path in (
-            "bindings/flutter/example/android/app/build.gradle.kts",
-            "bindings/flutter/ios/Classes/dummy_file.c", "bindings/.bazelrc",
-        ):
-            with self.subTest(path=path):
-                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "false")
-
-    def test_every_file_the_generation_gate_tests_read_runs_tooling_tests(self):
-        # test_generation_gates.py asserts on build-flutter.yml, the FRB
-        # wrapper, ci.yml and every generator it globs. Editing any of them
-        # (say, deleting the FRB drift step) must run that test, or the PR
-        # skips it and still passes CI Success. Record what the suite really
-        # reads instead of restating it here, so the two cannot drift.
-        tests_dir = Path(__file__).resolve().parent
-        spec = importlib.util.spec_from_file_location(
-            "generation_gates_under_ci_gate", tests_dir / "test_generation_gates.py"
+    def test_only_the_staging_script_runs_the_onnx_runtime_legs(self):
+        self.assertEqual(
+            classify("pull_request", pr_files("tools/scripts/stage_unity_desktop_ort.py"))["ort_staging"], "true"
         )
-        gates = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(gates)
-        repo = gates.REPO_ROOT.resolve()
-        read, globbed = set(), []
-        read_text, glob = Path.read_text, Path.glob
-
-        def recording_read(path, *args, **kwargs):
-            read.add(path.resolve())
-            return read_text(path, *args, **kwargs)
-
-        def recording_glob(path, pattern, *args, **kwargs):
-            globbed.append(pattern)
-            return glob(path, pattern, *args, **kwargs)
-
-        suite = unittest.defaultTestLoader.loadTestsFromTestCase(gates.GenerationGateTests)
-        with mock.patch.object(Path, "read_text", recording_read), \
-                mock.patch.object(Path, "glob", recording_glob):
-            result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
-        self.assertTrue(result.wasSuccessful(), result.failures + result.errors)
-
-        inputs = sorted(
-            path.relative_to(repo).as_posix() for path in read if path.is_relative_to(repo)
-        )
-        for expected in (".github/workflows/build-flutter.yml", "bindings/flutter/generate-frb.sh"):
-            self.assertIn(expected, inputs, "the generation gate tests no longer read this file")
-        # A listed generator (deleting one fails the suite) and any file its
-        # globs would discover (a new generator without a gate) must select
-        # the tooling tests too.
-        self.assertTrue(globbed, "the generation gate tests no longer glob for generators")
-        new_generators = [pattern.replace("*", "new") for pattern in globbed]
-        for path in inputs + sorted(gates.GATES) + new_generators:
+        for path in ("tools/scripts/tests/test_stage_unity_desktop_ort.py", "tools/scripts/gen_python_bolt.py"):
             with self.subTest(path=path):
-                outputs = classify("pull_request", pr_files(path))
-                self.assertEqual(outputs["relevant"], "true")
-                self.assertEqual(OPTIONAL_JOBS["tooling-tests"], "relevant")
-        for path in (
-            ".github/workflows/build-flutter.yml.bak", "bindings/flutter/generate-frb.sh.orig",
-            "bindings/flutter/lib/src/pipeline.dart", "bindings/apple/scripts/set-natives-mode.sh",
-        ):
-            with self.subTest(path=path):
-                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "false")
+                self.assertEqual(classify("pull_request", pr_files(path))["ort_staging"], "false")
 
     def test_bolt_and_facade_sources_run_every_generated_binding_gate(self):
         # Each committed binding is generated from the bolt crate (exports and
@@ -160,28 +186,16 @@ class ChangeSelectionTests(unittest.TestCase):
             "crates/xybrid-ffi-facade/src/observability_operations.rs",
         ):
             outputs = classify("pull_request", pr_files(path))
-            for flag in ("unity_bolt", "python_sdk", "kotlin_jni", "apple_bolt"):
+            for flag in ("bindings_drift", "python_sdk"):
                 with self.subTest(path=path, flag=flag):
                     self.assertEqual(outputs[flag], "true")
         for path in ("crates/xybrid-sdk/src/lib.rs", "bindings/unity/Tests/Editor/ObservationTests.cs"):
             with self.subTest(path=path):
-                self.assertEqual(classify("pull_request", pr_files(path))["unity_bolt"], "false")
+                self.assertEqual(classify("pull_request", pr_files(path))["bindings_drift"], "false")
 
-    def test_observability_scenario_inputs_run_their_gates(self):
-        # test_observability_capture.py requires every lane's scenario source to
-        # configure the omit rule and record the content it drops, so editing a
-        # lane must run the tooling tests. The Python suite runs the scenario
-        # end to end over the harness, the SDK and the observability crate.
-        tests_dir = Path(__file__).resolve().parent
-        spec = importlib.util.spec_from_file_location(
-            "observability_capture_under_ci_gate", tests_dir / "test_observability_capture.py"
-        )
-        capture = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(capture)
-        for path, _, _ in capture.LANE_SOURCES.values():
-            with self.subTest(path=path):
-                self.assertTrue((capture.REPO / path).is_file(), path)
-                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "true")
+    def test_observability_scenario_inputs_run_the_python_suite(self):
+        # The Python suite runs the shared scenario end to end over the
+        # harness, the SDK and the observability crate.
         for path in (
             "tools/scripts/observability_capture/check_capture.py",
             "crates/xybrid-observability/src/exporter.rs",
@@ -190,25 +204,33 @@ class ChangeSelectionTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertEqual(classify("pull_request", pr_files(path))["python_sdk"], "true")
-        for path in (
-            "bindings/flutter/test/observability_test.dart",
-            "bindings/apple/Tests/XybridTests/ObservationTests.swift",
-        ):
-            with self.subTest(path=path):
-                self.assertEqual(classify("pull_request", pr_files(path))["relevant"], "false")
 
-    def test_unity_drift_inputs_select_both_unity_jobs(self):
+    def test_each_generator_and_its_outputs_run_the_drift_job(self):
         for path in (
             "bindings/unity/Runtime/Bolt/XybridError.cs",
             "bindings/unity/Runtime/Api/Observation.cs",
             "tools/scripts/gen_unity_bolt_csharp.py",
+            "tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj",
+            "tools/scripts/gen_kotlin_bolt.py",
+            "bindings/kotlin/bazel/jni/jni_glue.c",
+            "bindings/apple/scripts/gen-bolt-bindings.sh",
+            "bindings/apple/include/xybrid-bolt.h",
         ):
             with self.subTest(path=path):
-                self.assertEqual(classify("pull_request", pr_files(path))["unity_bolt"], "true")
+                self.assertEqual(classify("pull_request", pr_files(path))["bindings_drift"], "true")
 
-    def test_workflow_changes_run_every_optional_gate(self):
-        outputs = classify("pull_request", pr_files(".github/workflows/ci.yml"))
-        self.assertTrue(all(value == "true" for value in outputs.values()))
+    def test_the_pipeline_and_its_registry_run_every_job_and_lane(self):
+        for path in (
+            ".github/workflows/ci.yml", "tools/scripts/ci_gate.py",
+            ".github/actions/setup-rust/action.yml", ".github/actions/new-action/action.yml",
+        ):
+            with self.subTest(path=path):
+                outputs = classify("pull_request", pr_files(path))
+                self.assertTrue(all(value == "true" for value in outputs.values()), outputs)
+        # A README beside an action is still documentation.
+        self.assertTrue(all(
+            value == "false" for value in classify("pull_request", pr_files(".github/actions/README.md")).values()
+        ))
 
     def test_empty_or_capped_results_run_every_gate(self):
         for event, payload in (
@@ -225,10 +247,369 @@ class ChangeSelectionTests(unittest.TestCase):
                 classify("pull_request", payload)
 
 
+class LaneTests(unittest.TestCase):
+    """Each row reproduces the `paths:` filter of the workflow it replaced."""
+
+    BACKEND = {"candle", "whispercpp", "policy_routing", "llamacpp", "mlx_runtime"}
+    SDK = {"android", "apple", "flutter", "react_native", "unity_editor"}
+    CONFORMANCE = {"choice", "choice_gguf"}
+
+    def lanes(self, *paths: str, among: set = BACKEND) -> set:
+        outputs = classify("pull_request", pr_files(*paths))
+        return {lane for lane in among if outputs[lane] == "true"}
+
+    def test_every_lane_is_a_backend_sdk_or_conformance_lane(self):
+        self.assertEqual(set(LANE_PATHS), self.BACKEND | self.SDK | self.CONFORMANCE)
+
+    def test_the_choice_lane_and_its_gguf_job_run_on_their_inputs(self):
+        cases = {
+            "integration-tests/fixtures/choice/provenance.json": {"choice", "choice_gguf"},
+            "integration-tests/fixtures/models/models.json": {"choice", "choice_gguf"},
+            "tools/conformance/convert_gguf.sh": {"choice", "choice_gguf"},
+            "tools/scripts/check_choice_provenance.py": {"choice", "choice_gguf"},
+            "vendor/llama-cpp": {"choice", "choice_gguf"},
+            ".github/workflows/test-choice-conformance.yml": {"choice", "choice_gguf"},
+            # The decision tooling is no input of the GGUF job.
+            "tools/conformance/decision/check.py": {"choice"},
+            "crates/xybrid-core/src/lib.rs": {"choice"},
+            "integration-tests/fixtures/models/cua-s1-forms/model_metadata.json": {"choice"},
+            "integration-tests/fixtures/choice/README.md": set(),
+            "crates/xybrid-bolt/src/lib.rs": set(),
+        }
+        for path, expected in cases.items():
+            with self.subTest(path=path):
+                self.assertEqual(self.lanes(path, among=self.CONFORMANCE), expected)
+
+    def test_the_gguf_row_only_narrows_the_choice_lane(self):
+        for pattern in LANE_PATHS["choice_gguf"]:
+            if pattern.startswith("!"):
+                continue
+            with self.subTest(pattern=pattern):
+                self.assertIn(pattern, LANE_PATHS["choice"])
+        self.assertEqual(SUB_LANES, {"choice_gguf": "choice"})
+
+    def test_each_lane_runs_on_its_own_inputs(self):
+        cases = {
+            "crates/xybrid-core/src/runtime_adapter/candle/whisper.rs": {"candle", "policy_routing"},
+            "crates/xybrid-sdk/Cargo.toml": {"candle", "policy_routing"},
+            "crates/whisper-cpp-sys/build.rs": {"whispercpp"},
+            "vendor/whisper-cpp": {"whispercpp"},
+            "crates/xybrid-core/src/runtime_adapter/whisper_cpp/mod.rs": {"whispercpp", "policy_routing"},
+            "crates/xybrid-cli/src/main.rs": {"policy_routing"},
+            ".cargo/config.toml": {"policy_routing"},
+            "Cargo.toml": {"policy_routing"},
+            "Cargo.lock": {"candle", "whispercpp", "policy_routing"},
+            "integration-tests/tests/llamacpp_release.rs": {"candle", "whispercpp", "policy_routing", "llamacpp"},
+            "crates/llama-cpp-sys/build.rs": {"whispercpp", "policy_routing", "llamacpp"},
+            ".github/llamacpp-version.json": {"llamacpp"},
+            "tools/scripts/llamacpp_update.py": {"llamacpp"},
+            "crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs": {"policy_routing", "llamacpp"},
+            "crates/xybrid-observability/src/lib.rs": set(),
+            "bindings/kotlin/build.gradle.kts": set(),
+        }
+        for path, expected in cases.items():
+            with self.subTest(path=path):
+                self.assertEqual(self.lanes(path), expected)
+
+    def test_the_mlx_lane_runs_on_the_backend_alone(self):
+        # MLX links on Apple Silicon macOS only, so its row is narrow: the
+        # backend, its adapter, tests and benchmarks, its pins, the scripts
+        # that build and run it and its setup action. Shared code is covered
+        # by ci.yml's `llm-mlx` non-linking job, which runs for every code
+        # change, and by the nightly test-mlx.yml.
+        selected = (
+            "crates/mlx-c-sys/build.rs",
+            "crates/xybrid-mlx/src/array.rs",
+            "crates/xybrid-core/src/runtime_adapter/mlx/generate.rs",
+            "crates/xybrid-core/src/runtime_adapter/selector.rs",
+            "crates/xybrid-core/src/execution/strategies/mlx_embedding.rs",
+            "crates/xybrid-core/tests/mlx_llm_chat.rs",
+            "crates/xybrid-core/benches/mlx_embedding.rs",
+            "crates/xybrid-core/benches/llm_backend_compare.rs",
+            "vendor/mlx-apple/UPSTREAM_VERSIONS.txt",
+            "tools/scripts/build-mlx-slice.sh",
+            "tools/scripts/check-mlx-runtime.sh",
+            "tools/scripts/test-fetch-mlx-xcframework.sh",
+            ".github/actions/mlx-xcframework/action.yml",
+            ".github/workflows/test-mlx.yml",
+            ".github/workflows/ci.yml",
+        )
+        for path in selected:
+            with self.subTest(path=path):
+                self.assertEqual(self.lanes(path, among={"mlx_runtime"}), {"mlx_runtime"})
+        for path in (
+            "crates/xybrid-core/src/ir/envelope.rs",
+            "crates/xybrid-core/src/runtime_adapter/llm.rs",
+            "crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs",
+            "crates/xybrid-core/tests/llama_cpp_chat.rs",
+            "crates/xybrid-sdk/src/registry_client.rs",
+            "crates/xybrid-cli/src/commands/run.rs",
+            "crates/xybrid-llama/src/generation.rs",
+            "crates/llama-cpp-sys/build.rs",
+            "macros/src/lib.rs",
+            "vendor/llama-cpp",
+            "Cargo.lock",
+            "Cargo.toml",
+            "crates/xybrid-core/Cargo.toml",
+            "crates/xybrid-bolt/src/lib.rs",
+            "bindings/kotlin/build.gradle.kts",
+            "bindings/web/src/index.ts",
+            ".github/workflows/build-mlx-xcframework.yml",
+            "vendor/mlx-apple/README.md",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(self.lanes(path, among={"mlx_runtime"}), set())
+
+    def test_markdown_skips_the_lanes_that_excluded_it(self):
+        self.assertEqual(self.lanes("crates/xybrid-core/src/audio/README.md"), set())
+        self.assertEqual(self.lanes("integration-tests/README.md"), set())
+        # The llama.cpp lane never excluded Markdown.
+        self.assertEqual(self.lanes("crates/llama-cpp-sys/README.md"), {"llamacpp"})
+
+    def test_a_llama_cpp_submodule_bump_runs_every_llama_lane(self):
+        # Policy routing listed `vendor/llama-cpp/**`, which no submodule bump matches.
+        self.assertEqual(self.lanes("vendor/llama-cpp"), {"whispercpp", "policy_routing", "llamacpp"})
+
+    def test_the_natives_manifest_push_runs_every_check_the_llama_cpp_release_waits_on(self):
+        # build-natives.yml's manifest PR is the last merge before a llama.cpp
+        # release: release_plan() then requires each polled check to have
+        # succeeded on that HEAD, so the push must select every polled lane.
+        outputs = classify("push", {"files": [{"filename": "crates/llama-cpp-sys/natives-manifest.txt"}]})
+        polled = [
+            job for job in ci_jobs().values()
+            if job_check_names(job) & llamacpp_update.REQUIRED_CHECKS
+        ]
+        self.assertGreaterEqual(len(polled), 5)
+        for job in polled:
+            with self.subTest(job=job.id):
+                flag = OPTIONAL_JOBS.get(job.id, "full_ci")
+                self.assertEqual(outputs[flag], "true")
+
+    def test_sdk_lanes_run_on_their_bindings_and_sources(self):
+        cases = {
+            "bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt": {"android", "react_native"},
+            "bindings/apple/Sources/Xybrid/Xybrid.swift": {"apple", "react_native"},
+            "bindings/flutter/lib/xybrid.dart": {"flutter"},
+            "bindings/react-native/src/index.ts": {"react_native"},
+            "bindings/unity/Runtime/Api/Xybrid.cs": {"unity_editor"},
+            "crates/xybrid-bolt/src/lib.rs": {"android", "apple", "react_native", "unity_editor"},
+            "crates/xybrid-observability/src/lib.rs": {"android", "apple", "flutter", "unity_editor"},
+            "vendor/ort-ios/README.txt": {"apple"},
+            "tools/scripts/stage_unity_native.py": {"unity_editor"},
+            ".github/workflows/build-android.yml": {"android"},
+            ".github/workflows/unity-editor.yml": {"unity_editor"},
+            "bindings/flutter/README.md": set(),
+        }
+        for path, expected in cases.items():
+            with self.subTest(path=path):
+                self.assertEqual(self.lanes(path, among=self.SDK), expected)
+
+    def test_dispatch_runs_every_job_and_the_named_lanes(self):
+        everything = dispatch("")
+        self.assertTrue(all(value == "true" for value in everything.values()))
+        some = dispatch("candle, whispercpp")
+        self.assertEqual({lane for lane in LANE_PATHS if some[lane] == "true"}, {"candle", "whispercpp"})
+        self.assertTrue(all(some[key] == "true" for key in ("full_ci", *PATH_FILTERS)))
+        choice = dispatch("choice")
+        self.assertEqual({lane for lane in LANE_PATHS if choice[lane] == "true"}, {"choice", "choice_gguf"})
+        for name in ("candel", "choice_gguf"):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                dispatch(name)
+
+    def test_dispatch_on_master_runs_every_lane(self):
+        # A skipped lane would put a newer, skipped check run on master's HEAD
+        # under the name llamacpp_update.check_problems() requires to succeed.
+        # Failing would skip every job instead, which is worse.
+        for lanes in ("", "llamacpp", "candel"):
+            with self.subTest(lanes=lanes), contextlib.redirect_stderr(io.StringIO()):
+                self.assertTrue(all(value == "true" for value in dispatch(lanes, "refs/heads/master").values()))
+        self.assertEqual(dispatch("llamacpp", "refs/heads/topic")["whispercpp"], "false")
+
+
+class BazelGateTests(unittest.TestCase):
+    """bazel.yml's required job: the same registry, its own row."""
+
+    def relevant(self, *paths: str) -> bool:
+        return bazel("pull_request", pr_files(*paths))["relevant"] == "true"
+
+    def test_bazel_inputs_run_the_required_job(self):
+        for path in (
+            "MODULE.bazel", "crates/xybrid-core/src/lib.rs", "bazel/ggml/android.bzl",
+            "crates/xybrid-core/BUILD.bazel", "spike/BUILD.bazel", "tools/scripts/ci_gate.py",
+            "vendor/llama-cpp", "vendor/whisper-cpp", "integration-tests/fixtures/models/models.json",
+            "xtask/src/main.rs", "bindings/flutter/rust/src/lib.rs", "tools/windows-smoke/Program.cs",
+            "bindings/unity/Runtime/Bolt/XybridBolt.cs", "bindings/web/test/fixtures/rust-metadata-gguf.json",
+            ".github/actions/free-disk-space/action.yml", ".github/workflows/bazel.yml",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(self.relevant(path))
+
+    def test_other_changes_skip_it(self):
+        for path in (
+            "README.md", "crates/xybrid-core/README.md", "docs/content/docs/index.mdx",
+            "crates/xybrid-core/docs/guide.mdx", ".github/workflows/ci.yml",
+            "bindings/flutter/lib/xybrid.dart", "bindings/apple/Sources/Xybrid/Xybrid.swift",
+            "bindings/web/test/fixtures/hf-tree-smollm2-gguf.json",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(self.relevant(path))
+
+    def test_an_uncertain_file_list_runs_it(self):
+        self.assertTrue(self.relevant())
+        self.assertEqual(bazel("push", {"files": []})["relevant"], "true")
+
+    def test_the_push_trigger_lists_the_same_paths(self):
+        # Pushes to master filter at the trigger; pull requests filter in the
+        # `changes` job through this registry. Both must select the same runs.
+        self.assertEqual(push_paths("bazel.yml"), BAZEL_PATHS)
+
+    def test_a_failed_gate_runs_bazel_rather_than_passing_it(self):
+        # A skipped required check counts as passing, so an erroring gate must
+        # not skip the required job.
+        jobs = gen_workflow_index.read_jobs(WORKFLOWS / "bazel.yml")
+        for job in ("bazel", "bazel-linux-vulkan"):
+            with self.subTest(job=job):
+                self.assertEqual(
+                    jobs[job].condition,
+                    "${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.relevant == 'true') }}",
+                )
+
+    def test_the_changes_job_reads_the_registry(self):
+        changes = job_text("bazel.yml", "changes")
+        self.assertIn("python3 tools/scripts/ci_gate.py bazel pull_request", changes)
+        self.assertIn("sparse-checkout: tools/scripts/ci_gate.py", changes)
+        self.assertIn("shell: bash", changes)
+
+
+class PipelineShapeTests(unittest.TestCase):
+    """ci.yml and the registry describe the same jobs."""
+
+    def test_every_job_is_always_on_gated_by_full_ci_or_gated_by_its_flag(self):
+        for job in ci_jobs().values():
+            if job.id == "ci-success":
+                continue
+            with self.subTest(job=job.id):
+                if job.id in ALWAYS_JOBS:
+                    self.assertIsNone(job.condition, "an always-on job has no path gate")
+                else:
+                    flag = OPTIONAL_JOBS.get(job.id, "full_ci")
+                    self.assertEqual(job.condition, f"needs.tooling-changes.outputs.{flag} == 'true'")
+                    self.assertIn("tooling-changes", job.needs)
+
+    def test_ci_success_needs_exactly_the_non_advisory_jobs(self):
+        jobs = ci_jobs()
+        required = jobs["ci-success"].needs
+        self.assertEqual(len(required), len(set(required)), "a job is listed twice")
+        self.assertEqual(set(required), set(jobs) - {"ci-success"} - ADVISORY_JOBS)
+        self.assertLessEqual(ADVISORY_JOBS, set(jobs), "an advisory job no longer exists")
+        self.assertLessEqual(set(OPTIONAL_JOBS), set(jobs), "a gated job no longer exists")
+        self.assertLessEqual(ALWAYS_JOBS, set(required))
+
+    def test_the_detector_outputs_one_line_per_flag(self):
+        workflow = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+        for flag in ("full_ci", *PATH_FILTERS, *LANE_PATHS):
+            with self.subTest(flag=flag):
+                self.assertIn(f"      {flag}: ${{{{ steps.filter.outputs.{flag} }}}}\n", workflow)
+        self.assertEqual(set(OPTIONAL_JOBS.values()) - set(PATH_FILTERS) - set(LANE_PATHS), set())
+
+    def test_a_manual_run_on_master_head_counts_as_master(self):
+        # Check runs attach to the commit: a branch whose tip is master's HEAD
+        # must not narrow the lanes either.
+        workflow = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+        self.assertRegex(workflow, r'if ! MASTER_SHA="\$\(gh api [^\n]*\)" \\\n\s+\|\| \[ "\$CURRENT_SHA" = "\$MASTER_SHA" \]; then\n\s+REF=refs/heads/master')
+        self.assertIn('ci_gate.py dispatch "$LANES" --ref "$REF"', workflow)
+
+    def test_master_push_runs_are_never_cancelled(self):
+        # A push selects lanes from its own diff; cancelling it would drop the
+        # lanes and the cache saves of the commit before.
+        workflow = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+        group = re.search(r"^concurrency:\n  group: (.*)$", workflow, re.M)[1]
+        self.assertIn("github.event_name == 'push' && github.sha", group)
+
+    def test_repo_checks_run_every_tooling_test_and_the_index(self):
+        workflow = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+        start = workflow.index("  repo-checks:\n")
+        block = workflow[start:workflow.index("\n  clippy:\n", start)]
+        self.assertIn("python3 tools/scripts/gen_workflow_index.py --check", block)
+        self.assertIn("bash tools/scripts/version-sync.sh --check", block)
+        self.assertIn("python3 -m unittest discover -s tools/scripts/tests -p 'test_*.py'", block)
+
+    def test_each_lane_file_is_called_with_every_secret_it_declares(self):
+        for job in ci_jobs().values():
+            if not job.uses:
+                continue
+            callee = job.uses.rsplit("/", 1)[1]
+            caller = job_text("ci.yml", job.id)
+            for secret in sorted(workflow_call_secrets(callee)):
+                with self.subTest(job=job.id, secret=secret):
+                    self.assertIn(f"{secret}: ${{{{ secrets.{secret} }}}}", caller)
+            self.assertNotIn("secrets: inherit", caller, "pass each secret a lane declares, nothing more")
+
+    def test_lane_files_declare_no_concurrency_group(self):
+        # In a called run, github.ref is the caller's: a lane file's group
+        # would match its own nightly schedule run on master and cancel the
+        # push run whose checks the llama.cpp release reads. ci.yml's group
+        # already cancels superseded runs.
+        for job in ci_jobs().values():
+            if job.uses:
+                callee = job.uses.rsplit("/", 1)[1]
+                with self.subTest(lane=callee):
+                    self.assertEqual(gen_workflow_index.parse_workflow(WORKFLOWS / callee).concurrency, ())
+
+    def test_the_gguf_job_follows_its_own_row(self):
+        caller = job_text("ci.yml", "choice-conformance")
+        self.assertIn("gguf: ${{ needs.tooling-changes.outputs.choice_gguf }}", caller)
+        lane = gen_workflow_index.read_jobs(WORKFLOWS / "test-choice-conformance.yml")
+        self.assertEqual(lane["label-token"].condition, "inputs.gguf != 'false'")
+        self.assertTrue(lane["label-token"].runs_on.startswith("macos"))
+
+    def test_decision_conformance_runs_on_every_change_that_is_not_docs_only(self):
+        self.assertEqual(ci_jobs()["decision-conformance"].condition, "needs.tooling-changes.outputs.full_ci == 'true'")
+        self.assertNotIn("decision-conformance", OPTIONAL_JOBS)
+
+    def test_the_unity_lane_may_publish_its_check(self):
+        caller = job_text("ci.yml", "unity-editor")
+        self.assertRegex(caller, r"(?m)^    permissions:\n      contents: read\n      checks: write$")
+
+    def test_each_nightly_alias_names_the_same_job_as_its_prefixed_check(self):
+        # A lane file's schedule reports its jobs unprefixed; each alias must be
+        # exactly a job of the file ci.yml's caller calls.
+        callers = {job.check_name: job for job in ci_jobs().values() if job.uses}
+        for nightly, prefixed in llamacpp_update.CHECK_ALIASES.items():
+            with self.subTest(check=prefixed):
+                caller, _, job = prefixed.partition(" / ")
+                self.assertEqual(job, nightly)
+                lane = callers[caller].uses.rsplit("/", 1)[1]
+                self.assertIn(nightly, check_names(lane))
+                self.assertIn("schedule", gen_workflow_index.parse_workflow(WORKFLOWS / lane).events)
+
+    def test_every_job_of_a_scheduled_lane_has_an_alias(self):
+        # Without one, a failed push run of that job is never replaced by the
+        # nightly's success, and the release stays blocked.
+        for job in ci_jobs().values():
+            if not job.uses:
+                continue
+            lane = job.uses.rsplit("/", 1)[1]
+            if "schedule" not in gen_workflow_index.parse_workflow(WORKFLOWS / lane).events:
+                continue
+            for name in check_names(lane):
+                with self.subTest(lane=lane, job=name):
+                    self.assertEqual(llamacpp_update.CHECK_ALIASES.get(name), f"{job.check_name} / {name}")
+
+    def test_every_check_the_llama_cpp_release_waits_on_exists(self):
+        # A misspelt or renamed job leaves the automation waiting forever.
+        names = set()
+        for workflow in gen_workflow_index.load(WORKFLOWS):
+            if {"push", "pull_request"} <= set(workflow.events):
+                names |= check_names(workflow.file)
+        self.assertEqual(llamacpp_update.REQUIRED_CHECKS - names, set())
+
+
 class RequiredGateTests(unittest.TestCase):
     def needs(self, *paths):
         return {
             "tooling-changes": {"result": "success", "outputs": classify("pull_request", pr_files(*paths))},
+            "repo-checks": {"result": "success"},
             "fmt": {"result": "success"},
             "clippy": {"result": "success"},
             "tooling-tests": {"result": "skipped"},
@@ -239,7 +620,7 @@ class RequiredGateTests(unittest.TestCase):
         needs["clippy"]["result"] = "skipped"
         check_jobs(needs)
 
-    def test_code_accepts_irrelevant_tooling_skips(self):
+    def test_code_accepts_irrelevant_skips(self):
         check_jobs(self.needs("crates/xybrid-core/src/lib.rs"))
 
     def test_mixed_change_cannot_mask_a_failed_required_check(self):
@@ -249,93 +630,48 @@ class RequiredGateTests(unittest.TestCase):
             with self.subTest(result=result), self.assertRaises(ValueError):
                 check_jobs(needs)
 
-    def test_docs_only_runs_and_cannot_mask_the_always_on_jobs(self):
-        # Docs-only PRs skip every gated job, and they are where the docs'
-        # install pins and the agent skills get edited, so Version sync and
-        # Agent skills (like Workflow index) have no path gate: they must stay
-        # ungated, required, and fail the gate.
-        workflow = (Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-        required = re.search(r"^  ci-success:\n(?:    .*\n)*?    needs: \[([^\]]*)\]", workflow, re.M)[1]
-        for job in ("workflow-index", "version-sync", "agent-skills"):
-            block = re.search(rf"^  {job}:\n((?:    .*\n|\n)*)", workflow, re.M)[1]
-            with self.subTest(job=job):
-                self.assertNotRegex(block, r"(?m)^    (if|needs):", "an always-on job has no path gate")
-                self.assertIn(job, [name.strip() for name in required.split(",")])
-                for result in ("failure", "cancelled"):
-                    needs = self.needs("README.md", "docs/content/docs/quickstart.mdx")
-                    needs[job] = {"result": result}
-                    with self.assertRaises(ValueError):
-                        check_jobs(needs)
+    def test_always_on_jobs_cannot_fail_or_skip_even_on_docs_only_changes(self):
+        # Docs-only PRs are where the install pins and agent skills get edited.
+        for job in ALWAYS_JOBS - {"tooling-changes"}:
+            for result in ("failure", "cancelled", "skipped"):
+                needs = self.needs("README.md", "docs/content/docs/quickstart.mdx")
+                needs[job] = {"result": result}
+                with self.subTest(job=job, result=result), self.assertRaises(ValueError):
+                    check_jobs(needs)
 
-    def test_unity_drift_is_optional_only_when_unity_inputs_are_untouched(self):
+    def test_the_mlx_runtime_job_is_required_only_when_the_lane_is_selected(self):
+        needs = self.needs("crates/xybrid-mlx/src/array.rs")
+        needs["check-mlx-runtime-macos"] = {"result": "skipped"}
+        with self.assertRaises(ValueError):
+            check_jobs(needs)
+        needs = self.needs("crates/xybrid-core/src/runtime_adapter/llm.rs")
+        needs["tooling-tests"] = {"result": "success"}
+        needs["check-mlx-runtime-macos"] = {"result": "skipped"}
+        check_jobs(needs)
+
+    def test_a_gated_job_is_optional_only_when_its_inputs_are_untouched(self):
         needs = self.needs("crates/xybrid-core/src/lib.rs")
-        needs["unity-bolt-drift"] = {"result": "skipped"}
+        needs["bindings-drift"] = {"result": "skipped"}
         check_jobs(needs)
         for path in ("crates/xybrid-bolt/src/lib.rs", "bindings/unity/Runtime/Bolt/XybridError.cs"):
             needs = self.needs(path)
-            needs["unity-bolt-drift"] = {"result": "skipped"}
+            needs["bindings-drift"] = {"result": "skipped"}
             with self.subTest(path=path), self.assertRaises(ValueError):
                 check_jobs(needs)
 
-    def test_mlx_runtime_job_runs_only_for_the_mlx_backend_itself(self):
-        for path in (
-            "crates/mlx-c-sys/build.rs", "crates/xybrid-mlx/src/array.rs",
-            "crates/xybrid-core/src/runtime_adapter/mlx/generate.rs",
-            "crates/xybrid-core/src/runtime_adapter/selector.rs",
-            "crates/xybrid-core/src/execution/strategies/mlx_embedding.rs",
-            "crates/xybrid-core/tests/mlx_llm_chat.rs",
-            "crates/xybrid-core/benches/mlx_embedding.rs",
-            "crates/xybrid-core/benches/llm_backend_compare.rs",
-            "vendor/mlx-apple/UPSTREAM_VERSIONS.txt",
-            "tools/scripts/build-mlx-slice.sh", "tools/scripts/check-mlx-runtime.sh",
-            "tools/scripts/test-fetch-mlx-xcframework.sh",
-            ".github/actions/mlx-xcframework/action.yml", ".github/workflows/ci.yml",
-        ):
-            with self.subTest(path=path):
-                self.assertEqual(classify("pull_request", pr_files(path))["mlx_runtime"], "true")
-                needs = self.needs(path)
-                needs["check-mlx-runtime-macos"] = {"result": "skipped"}
-                with self.assertRaises(ValueError):
-                    check_jobs(needs)
-        # Shared code does not start the macOS job: the non-linking job covers
-        # it on Linux, and test-mlx.yml links MLX against master every night.
-        for path in (
-            "crates/xybrid-core/src/ir/envelope.rs",
-            "crates/xybrid-core/src/runtime_adapter/llm.rs",
-            "crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs",
-            "crates/xybrid-core/src/runtime_adapter/selector.rs.orig",
-            "crates/xybrid-core/tests/llama_cpp_chat.rs",
-            "crates/xybrid-sdk/src/registry_client.rs", "crates/xybrid-cli/src/commands/run.rs",
-            "crates/xybrid-llama/src/generation.rs", "crates/llama-cpp-sys/build.rs",
-            "macros/src/lib.rs", "vendor/llama-cpp", "Cargo.lock", "Cargo.toml",
-            "crates/xybrid-core/Cargo.toml", "crates/xybrid-sdk/Cargo.toml",
-            "crates/xybrid-bolt/src/lib.rs", "bindings/kotlin/build.gradle.kts",
-            "bindings/web/src/index.ts", "tools/scripts/ci_gate.py",
-            "vendor/llama-cpp-notes.txt", ".github/workflows/build-mlx-xcframework.yml",
-        ):
-            with self.subTest(path=path):
-                self.assertEqual(classify("pull_request", pr_files(path))["mlx_runtime"], "false")
-                needs = self.needs(path)
-                # Some of these paths require the tooling tests instead.
-                needs["tooling-tests"] = {"result": "success"}
-                needs["check-mlx-runtime-macos"] = {"result": "skipped"}
-                check_jobs(needs)
-
-    def test_every_optional_job_is_required_by_ci_success_and_gated_by_its_flag(self):
-        workflow = (Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-        required = re.search(r"^  ci-success:\n(?:    .*\n)*?    needs: \[([^\]]*)\]", workflow, re.M)[1]
-        required = [name.strip() for name in required.split(",")]
-        outputs = re.search(r"^  tooling-changes:\n((?:    .*\n|\n)*)", workflow, re.M)[1]
-        for job, flag in OPTIONAL_JOBS.items():
-            with self.subTest(job=job):
-                self.assertIn(job, required)
-                block = re.search(rf"^  {job}:\n((?:    .*\n|\n)*)", workflow, re.M)[1]
-                self.assertIn(f"if: needs.tooling-changes.outputs.{flag} == 'true'", block)
-                self.assertIn(f"{flag}: ${{{{ steps.filter.outputs.{flag} }}}}", outputs)
-
-    def test_relevant_tooling_cannot_be_skipped(self):
+    def test_a_required_lane_skip_follows_its_own_flag_not_full_ci(self):
+        # The llama.cpp lane runs on a Markdown-only change inside its paths.
+        needs = self.needs("crates/llama-cpp-sys/README.md")
+        needs["llamacpp-validate"] = {"result": "skipped"}
         with self.assertRaises(ValueError):
-            check_jobs(self.needs("tools/scripts/ci_gate.py"))
+            check_jobs(needs)
+        needs = self.needs("crates/xybrid-observability/src/lib.rs")
+        needs["llamacpp-validate"] = {"result": "skipped"}
+        check_jobs(needs)
+
+    def test_the_onnx_runtime_legs_cannot_be_skipped_when_their_script_changes(self):
+        with self.assertRaises(ValueError):
+            check_jobs(self.needs("tools/scripts/stage_unity_desktop_ort.py"))
 
     def test_missing_or_failed_detection_cannot_pass(self):
         for detector in ({}, {"result": "failure"}, {"result": "skipped"}, {"result": "success"}):

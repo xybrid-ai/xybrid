@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Connect a project to Xybrid without the CLI: the `xybrid connect` contract.
 
-  python3 -I xybrid_agent_connect.py connect --write-env .env --agent claude-code --binding python
+  python3 -I xybrid_agent_connect.py connect --write-env .env --via skill --binding python
   python3 -I xybrid_agent_connect.py status   # trace verification for the key connect reported
   python3 -I xybrid_agent_connect.py claim    # the private claim link, from the private store
 
@@ -46,6 +46,7 @@ EXIT = {"created": 0, "existing": 0, "connected": 0, "claimable": 0, "claimed": 
         "not_connected": 1, "error": 1}
 MAX_DIFFICULTY = 28          # the platform clamps difficulty to 18..=28
 RETRY_WINDOW = 9 * 60        # Idempotency-Key retries are honored for 10 minutes
+CONNECT_ENTRYPOINTS = ("web-copy", "setup-prompt", "llms-txt", "skill", "mcp", "docs")
 MAX_RETIRED = 20             # set-aside credentials kept for manual recovery, as the CLI keeps them
 KEY_RE = re.compile(r"^[A-Za-z0-9_-]{8,256}$")
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
@@ -1296,9 +1297,16 @@ def provision(args, host, lock, data, root):
                 "project_name": (args.project_name or Path(root).name)[:64],
                 "source": (args.agent or "")[:64] or None, "started_at": stamp(now())}
 
+    def current_info():
+        return {"os": platform.system().lower()[:64], "arch": platform.machine().lower()[:64],
+                "binding": (args.binding or "agent-script")[:64]}
+
     def solve_into(record):
         status, body, _ = call(host, "GET", "/v1/agent/challenge")
         check_failure(status, body, record, lock, data)
+        if body.get("collect_via") is not True and record.get("client_info", {}).pop("via", None) is not None:
+            if record in data["pending"]:
+                lock.save(data)
         challenge, difficulty = body.get("challenge"), body.get("difficulty")
         if body.get("algorithm") not in (None, "sha256-leading-zero-bits") or not isinstance(challenge, str) or \
                 not challenge or len(challenge) > 512 or any(ord(c) < 32 for c in challenge) or \
@@ -1315,12 +1323,21 @@ def provision(args, host, lock, data, root):
 
     if pending is None:
         pending = fresh()
+        pending["client_info"] = current_info()
+        if args.via in CONNECT_ENTRYPOINTS:
+            pending["client_info"]["via"] = args.via
         solve_into(pending)
     refreshed = restarted = False
     busy = 0
     while True:
-        info = {"os": platform.system().lower()[:64], "arch": platform.machine().lower()[:64],
-                "binding": (args.binding or "agent-script")[:64]}
+        saved_info = pending.get("client_info")
+        if not isinstance(saved_info, dict):
+            saved_info = current_info()
+        info = {field: saved_info[field] for field in ("cli_version", "os", "arch", "binding")
+                if isinstance(saved_info.get(field), str)}
+        via = saved_info.get("via")
+        if via in CONNECT_ENTRYPOINTS:
+            info["via"] = via
         body = {"client_info": info, "challenge": pending["challenge"], "nonce": pending["nonce"]}
         for field in ("source", "project_name"):
             if pending.get(field):
@@ -1334,12 +1351,14 @@ def provision(args, host, lock, data, root):
         code = answer.get("error")
         if code in ("challenge_expired", "challenge_invalid", "proof_of_work_invalid") and not refreshed:
             refreshed = True
+            pending["client_info"] = info
             solve_into(pending)
         elif code in ("idempotency_key_expired", "idempotency_key_conflict", "workspace_claimed",
                       "workspace_unavailable") and not restarted:
             restarted = True
             data["pending"].remove(pending)
             pending = fresh()
+            pending["client_info"] = info
             solve_into(pending)
         elif code == "agent_signup_busy" and busy < 3:
             busy += 1
@@ -1542,6 +1561,8 @@ def main():
                         "connect found a key in (key.source env_file)")
     parser.add_argument("--env-name", help="variable to set (default XYBRID_API_KEY; xybrid.apiKey for .properties)")
     parser.add_argument("--agent", help="self-reported agent name, e.g. claude-code")
+    parser.add_argument("--via", help="connect: setup entrypoint (" + ", ".join(CONNECT_ENTRYPOINTS) +
+                        "); sent only when the platform enables collection")
     parser.add_argument("--binding", help="the app's SDK: python, flutter, react-native, ...")
     parser.add_argument("--project-name")
     parser.add_argument("--platform-url", default=env("XYBRID_PLATFORM_URL") or "https://api.xybrid.dev")

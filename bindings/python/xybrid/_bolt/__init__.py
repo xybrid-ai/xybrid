@@ -2754,9 +2754,7 @@ class XybridResult:
     model_id: str
     latency_ms: int
     execution_target: XybridExecutionTarget
-    """Where the answer actually came from. Cloud fallback keeps `model_id`
-    identical on both legs, so this is the only way to tell them apart.
-    """
+    """Where the answer actually came from, even when both legs requested the same model id."""
     metrics: XybridInferenceMetrics
     tool_calls: list[XybridToolCall]
     """Tool calls the model emitted this turn. Empty unless the request
@@ -4050,15 +4048,15 @@ class XybridModel:
 
     @classmethod
     def from_registry_speculative(cls, id: str) -> "XybridModel":
-        """Load from the registry, serving from the cloud gateway while the weights
-        download in the background.
+        """Try the registry id at the cloud gateway while the weights download.
+        Only ids also listed in the gateway catalog can be served remotely.
 
         Returns almost immediately instead of blocking on the download. Requires
         a resolvable API key, an uncached model, and a chat model the registry
         serves as a direct download (GGUF or vision-language, not a `.xyb`
         bundle); otherwise it behaves exactly like `from_registry`. Poll
-        `download_status` for progress and `is_cloud_serving` to know which leg
-        is answering.
+        `download_status` for progress and `is_cloud_serving` to see whether a
+        run would try the gateway.
         """
         return XybridModel._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_from_registry_speculative(id)))
 
@@ -4106,9 +4104,7 @@ class XybridModel:
         return _native._boltffi_xybrid_model_is_loaded(self._handle)
 
     def is_cloud_serving(self) -> bool:
-        """Whether runs are currently answered by the cloud because the local
-        weights are not ready yet. `false` for ordinary local models.
-        """
+        """Whether a run would try the gateway because the local weights are not ready."""
         return _native._boltffi_xybrid_model_is_cloud_serving(self._handle)
 
     def download_status(self) -> XybridDownloadStatus:
@@ -4902,8 +4898,8 @@ def set_platform_url(url: str) -> None:
     """
     _native.set_platform_url(url)
 def set_speculative_cloud(enabled: bool) -> None:
-    """Enable speculative cloud fallback globally: a registry chat model that
-    isn't downloaded yet is served from the gateway while the weights download.
+    """Try the registry chat model's id at the gateway while its weights download.
+    Only ids also listed in the gateway catalog can be served remotely.
 
     An uncached load asks the registry first, so other models (ASR, TTS,
     `.xyb` bundles) download and load as usual.
@@ -4989,7 +4985,7 @@ def observability_record_evaluation(target: XybridObservationRef, name: str, sco
 
 MODULE_NAME = "xybrid_bolt"
 PACKAGE_NAME = "xybrid_bolt"
-PACKAGE_VERSION = "0.19.0"
+PACKAGE_VERSION = "0.21.0"
 
 __all__ = [
     "MODULE_NAME",

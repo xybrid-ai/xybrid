@@ -135,19 +135,20 @@ compile_error!(
     - For CPU-only on Apple: Use `candle` (no GPU acceleration)"
 );
 
-// ort-coreml enables Apple's CoreML/Neural Engine acceleration (macOS/iOS only).
+// ort-coreml links ONNX Runtime's Core ML execution provider (macOS/iOS only).
+// The SDK does not select it yet: the ONNX sessions it builds use the CPU provider.
 #[cfg(all(
     feature = "ort-coreml",
     not(any(target_os = "macos", target_os = "ios"))
 ))]
 compile_error!(
     "Invalid feature combination: `ort-coreml` requires macOS or iOS.\n\n\
-    Reason: CoreML is Apple's ML framework for Neural Engine acceleration and is only \
-    available on Apple platforms.\n\n\
+    Reason: `ort-coreml` links ONNX Runtime's Core ML execution provider, and Core ML \
+    is only available on Apple platforms.\n\n\
     Solution:\n\
-    - For macOS/iOS: `ort-coreml` is valid (enables ANE acceleration)\n\
-    - For Android: Use `ort-dynamic` with NNAPI\n\
-    - For other platforms: Use `ort-download` (CPU only)"
+    - For macOS/iOS: `ort-coreml` is valid (it links the provider; the SDK does not \
+    select it yet)\n\
+    - For other platforms: remove `ort-coreml` (ONNX Runtime runs on the CPU there)"
 );
 
 // llm-mlx-runtime links Apple's MLX framework through the validated

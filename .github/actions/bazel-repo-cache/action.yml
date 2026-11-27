@@ -1,8 +1,9 @@
 name: Cache pinned Bazel downloads
 description: >
   Persist hermetic-llvm's macOS SDK and apple_support archives, with bounded
-  retries and checksum verification for cold apple_support downloads, and seed
-  rules_rs's pinned zlib package with a checksum-verified Launchpad fallback.
+  retries and checksum verification for cold apple_support downloads, seed
+  rules_rs's pinned zlib package with a checksum-verified Launchpad fallback,
+  and give pinned Maven Central downloads a mirror and a fallback.
 
 # WHY THIS EXISTS. hermetic-llvm pins the macOS SDK to a swcdn.apple.com URL plus
 # one web.archive.org mirror. Apple's URL now returns 403 permanently (verified
@@ -185,6 +186,31 @@ runs:
           seed arm64 "$ZLIB_ARM64_SHA256"
         fi
 
+    # Maven Central rate-limits Actions runners: on 2026-11-23 repo1.maven.org
+    # answered 429 Too Many Requests for rules_kotlin's KSP jars and the pinned
+    # kotlinx-coroutines jar, failing Build Android and the Bazel graph until
+    # rerun. Bazel retries a 429 for about 13 s (8 attempts, backing off from
+    # 100 ms), then gives up on that URL.
+    #
+    # Every Maven Central URL becomes two. Each matching rule contributes one
+    # URL, in file order, and Bazel tries them in that order: Google's mirror
+    # of Maven Central first, with the original host as its fallback. The
+    # fetches are SHA-256 pinned (http_jar in MODULE.bazel, rules_kotlin's own
+    # pins), so the mirror can serve exactly the pinned bytes or fail.
+    #
+    # Bazel takes a single --downloader_config, so this step owns the file and
+    # the flag; later steps append rules to it.
+    - name: Mirror Maven Central downloads
+      shell: bash
+      run: |
+        cfg="$PWD/.context/downloader.cfg"
+        cat > "$cfg" <<'EOF'
+        rewrite (repo1\.maven\.org|repo\.maven\.apache\.org)/maven2/(.*) maven-central.storage-download.googleapis.com/maven2/$2
+        rewrite (repo1\.maven\.org|repo\.maven\.apache\.org)/maven2/(.*) $1/maven2/$2
+        EOF
+        echo "common --downloader_config=$cfg" >> .context/local.bazelrc
+        cat "$cfg"
+
     # The cold-cache hole, and the switch that closes it. Nothing is hardcoded to
     # a default mirror on purpose: the package is Apple's, and where it may be
     # republished is the repository owner's licensing call, not a CI detail.
@@ -197,10 +223,10 @@ runs:
       env:
         MIRROR: ${{ inputs.macos-sdk-mirror }}
       run: |
+        # Appends to the config (and flag) "Mirror Maven Central downloads" set up.
         cfg="$PWD/.context/downloader.cfg"
         # Match the pinned package by name, whatever build-id path Apple used.
         printf 'rewrite swcdn\\.apple\\.com/.*/CLTools_macOSNMOS_SDK\\.pkg %s\n' \
-          "$MIRROR" > "$cfg"
-        echo "common --downloader_config=$cfg" >> .context/local.bazelrc
+          "$MIRROR" >> "$cfg"
         echo "macOS SDK downloads rewritten to: $MIRROR"
         cat "$cfg"

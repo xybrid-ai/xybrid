@@ -18,7 +18,7 @@ pub struct StageConfig {
     /// Unique stage identifier within the pipeline.
     pub id: String,
 
-    /// Model identifier (e.g., "wav2vec2-base-960h", "gpt-4o-mini").
+    /// Model identifier (e.g., "wav2vec2-base-960h", "openai/gpt-4o-mini").
     pub model: String,
 
     /// Model version (for device/server targets).
@@ -59,9 +59,12 @@ pub struct StageConfig {
     #[serde(default)]
     pub options: StageOptions,
 
-    /// ONNX Runtime execution provider override.
-    /// If not set, auto-selection will be used based on model hints.
-    /// Valid values: "cpu", "coreml", "coreml-ane", "coreml-gpu"
+    /// ONNX Runtime execution provider requested for this stage: "cpu",
+    /// "coreml", "coreml-ane" or "coreml-gpu".
+    ///
+    /// Parsed but not applied yet. No runtime path reads this field: every
+    /// ONNX session runs on the CPU execution provider whatever it says, and
+    /// nothing is auto-selected when it is unset.
     #[serde(default)]
     pub execution_provider: Option<String>,
 }
@@ -116,9 +119,11 @@ impl StageConfig {
         self
     }
 
-    /// Set the ONNX Runtime execution provider.
+    /// Record the requested ONNX Runtime execution provider.
     ///
-    /// Valid values: "cpu", "coreml", "coreml-ane", "coreml-gpu"
+    /// Expected values: "cpu", "coreml", "coreml-ane", "coreml-gpu". The value
+    /// is stored but not applied yet: ONNX sessions run on the CPU execution
+    /// provider whatever it says (see the `execution_provider` field).
     pub fn with_execution_provider(mut self, provider: impl Into<String>) -> Self {
         self.execution_provider = Some(provider.into());
         self

@@ -36,6 +36,7 @@
 //! ```
 
 use crate::cache::CacheManager;
+use crate::ci::is_ci;
 use crate::download::{DownloadStatus, ProgressReporter};
 use crate::model::SdkError;
 use crate::platform::current_platform;
@@ -91,30 +92,37 @@ pub const CLIENT_HEADER_NAME: &str = "X-Xybrid-Client";
 /// `binding={b}; sdk_version={v}; core_version={cv}; platform={p}; backends={list}`
 ///
 /// `backends` is the comma-separated, alphabetical output of
-/// [`xybrid_core::features::enabled`].
+/// [`xybrid_core::features::enabled`]. When the process runs under CI
+/// (`XYBRID_CI=1`, or `CI` set and `XYBRID_CI` not `0`/`false`; see
+/// `docs/telemetry/registry.md`) the value ends with `; ci=1`. Nothing is
+/// appended otherwise: `ci=0` is never sent.
 pub fn build_client_header(binding: &str) -> Option<String> {
-    build_client_header_with_optout(binding, is_telemetry_opted_out())
+    build_client_header_with(binding, is_telemetry_opted_out(), is_ci())
 }
 
 /// Pure helper underlying [`build_client_header`].
 ///
-/// Takes the opt-out decision as a parameter so unit tests can exercise both
-/// branches without depending on the process-global `OnceLock` cache that
-/// [`is_telemetry_opted_out`] keeps.
-fn build_client_header_with_optout(binding: &str, opted_out: bool) -> Option<String> {
+/// Takes the opt-out and CI decisions as parameters so unit tests can
+/// exercise every branch without depending on the process-global `OnceLock`
+/// caches that [`is_telemetry_opted_out`] and [`is_ci`] keep.
+fn build_client_header_with(binding: &str, opted_out: bool, ci: bool) -> Option<String> {
     if opted_out {
         return None;
     }
     let safe_binding = sanitize_binding(binding);
     let backends = xybrid_core::features::enabled().join(",");
-    Some(format!(
+    let mut header = format!(
         "binding={}; sdk_version={}; core_version={}; platform={}; backends={}",
         safe_binding,
         SDK_VERSION,
         xybrid_core::VERSION,
         current_platform(),
         backends,
-    ))
+    );
+    if ci {
+        header.push_str("; ci=1");
+    }
+    Some(header)
 }
 
 /// Backends that pick which file the registry serves (`requires_backends`).
@@ -864,19 +872,22 @@ impl RegistryClient {
     /// no header is set on the wire.
     fn apply_client_header(&self, req: ureq::Request) -> ureq::Request {
         let req = xybrid_core::tracing::inject_trace_headers(req);
-        self.apply_client_header_with_optout(req, is_telemetry_opted_out())
+        self.apply_client_header_with(req, is_telemetry_opted_out(), is_ci())
     }
 
-    /// Same as [`Self::apply_client_header`] but takes the opt-out flag explicitly.
+    /// Same as [`Self::apply_client_header`] but takes the opt-out and CI
+    /// flags explicitly.
     ///
-    /// Tests use this to exercise both branches without depending on the
-    /// process-global `OnceLock` cache that [`is_telemetry_opted_out`] keeps.
-    fn apply_client_header_with_optout(
+    /// Tests use this to exercise every branch without depending on the
+    /// process-global `OnceLock` caches that [`is_telemetry_opted_out`] and
+    /// [`is_ci`] keep.
+    fn apply_client_header_with(
         &self,
         req: ureq::Request,
         opted_out: bool,
+        ci: bool,
     ) -> ureq::Request {
-        match build_client_header_with_optout(self.binding, opted_out) {
+        match build_client_header_with(self.binding, opted_out, ci) {
             Some(value) => req.set(CLIENT_HEADER_NAME, &value),
             None => req,
         }
@@ -1305,7 +1316,13 @@ impl RegistryClient {
         }
     }
 
-    /// Check if a model is cached locally.
+    /// Check whether the bundle the registry resolves for `mask` is downloaded.
+    ///
+    /// This is not an offline check: it calls [`Self::resolve`] first, so it
+    /// costs a registry round trip and fails when the registry does not list
+    /// `mask`. It looks only at the downloaded bundle (checking its SHA-256
+    /// when the registry gives one), not at an extracted directory;
+    /// [`Self::resolve_offline`] answers that without the network.
     pub fn is_cached(&self, mask: &str, platform: Option<&str>) -> Result<bool, SdkError> {
         let resolved = self.resolve(mask, platform)?;
         self.is_resolved_cached(&resolved)
@@ -4706,7 +4723,7 @@ mod tests {
 
     #[test]
     fn build_client_header_default_binding_has_all_fields() {
-        let header = build_client_header_with_optout("rust", false)
+        let header = build_client_header_with("rust", false, false)
             .expect("header must be built when not opted out");
         assert!(
             header.starts_with("binding=rust;"),
@@ -4739,12 +4756,44 @@ mod tests {
     fn build_client_header_opt_out_returns_none() {
         // Tests the inner helper directly so it doesn't fight the OnceLock-
         // cached opt-out state owned by `is_telemetry_opted_out` in other tests.
-        assert!(build_client_header_with_optout("rust", true).is_none());
+        // The opt-out drops the whole header, CI label included.
+        assert!(build_client_header_with("rust", true, false).is_none());
+        assert!(build_client_header_with("rust", true, true).is_none());
+    }
+
+    #[test]
+    fn build_client_header_ends_with_ci_label_under_ci() {
+        let plain = build_client_header_with("rust", false, false).unwrap();
+        let labelled = build_client_header_with("rust", false, true).unwrap();
+        assert_eq!(labelled, format!("{plain}; ci=1"));
+    }
+
+    #[test]
+    fn public_build_client_header_follows_the_process_ci_decision() {
+        // The public builder wires in the cached decisions; a regression
+        // that dropped `is_ci()` there would pass every pure-helper test.
+        assert_eq!(
+            build_client_header("rust"),
+            build_client_header_with("rust", is_telemetry_opted_out(), is_ci())
+        );
+    }
+
+    #[test]
+    fn build_client_header_never_sends_ci_zero() {
+        let header = build_client_header_with("rust", false, false).unwrap();
+        assert!(!header.contains("ci="), "no ci key outside CI: {header}");
+        assert!(
+            header.ends_with(&format!(
+                "backends={}",
+                xybrid_core::features::enabled().join(",")
+            )),
+            "outside CI the header is unchanged: {header}"
+        );
     }
 
     #[test]
     fn build_client_header_malformed_binding_falls_back_to_default() {
-        let header = build_client_header_with_optout("flutter; injected", false)
+        let header = build_client_header_with("flutter; injected", false, false)
             .expect("header must be built when not opted out");
         assert!(
             header.starts_with("binding=rust;"),
@@ -4760,7 +4809,7 @@ mod tests {
 
     #[test]
     fn build_client_header_uppercase_binding_falls_back_to_default() {
-        let header = build_client_header_with_optout("FLUTTER", false).unwrap();
+        let header = build_client_header_with("FLUTTER", false, false).unwrap();
         assert!(
             header.starts_with("binding=rust;"),
             "uppercase binding is not in the [a-z0-9_-] allowlist: {}",
@@ -4770,7 +4819,7 @@ mod tests {
 
     #[test]
     fn build_client_header_empty_binding_falls_back_to_default() {
-        let header = build_client_header_with_optout("", false).unwrap();
+        let header = build_client_header_with("", false, false).unwrap();
         assert!(header.starts_with("binding=rust;"));
     }
 
@@ -4784,7 +4833,7 @@ mod tests {
             "swift",
             "unity",
         ] {
-            let header = build_client_header_with_optout(binding, false).unwrap();
+            let header = build_client_header_with(binding, false, false).unwrap();
             let prefix = format!("binding={};", binding);
             assert!(
                 header.starts_with(&prefix),
@@ -4802,7 +4851,7 @@ mod tests {
         // key and never panics when the value is empty (the join on an empty
         // slice yields ""). When no features are enabled, the header would end
         // with `backends=` — and that is valid output, not a panic surface.
-        let header = build_client_header_with_optout("rust", false).unwrap();
+        let header = build_client_header_with("rust", false, false).unwrap();
         assert!(
             header.contains("backends="),
             "header always carries the backends key: {}",
@@ -4910,7 +4959,7 @@ mod tests {
                 &["tts-zzz", "zzz-phonon-31m"],
                 Some(os),
             );
-            let request = client.apply_client_header_with_optout(client.agent.get(&url), true);
+            let request = client.apply_client_header_with(client.agent.get(&url), true, true);
             assert_eq!(request.header(CLIENT_HEADER_NAME), None);
             assert_eq!(
                 request.url(),
@@ -5845,12 +5894,12 @@ mod tests {
 
     #[test]
     fn apply_client_header_sets_header_when_not_opted_out() {
-        // Build a request through the helper that takes opted_out explicitly so
-        // the test never touches the OnceLock-cached opt-out state owned by
-        // `is_telemetry_opted_out`.
+        // Build a request through the helper that takes opted_out and ci
+        // explicitly so the test never touches the OnceLock-cached state owned
+        // by `is_telemetry_opted_out` and `is_ci`.
         let client = RegistryClient::with_url("http://127.0.0.1:1").unwrap();
         let req = client.agent.get("http://127.0.0.1:1/v1/models");
-        let req = client.apply_client_header_with_optout(req, false);
+        let req = client.apply_client_header_with(req, false, false);
         let header = req.header(CLIENT_HEADER_NAME);
         assert!(header.is_some(), "header must be set when opt-out is false");
         let value = header.unwrap();
@@ -5859,18 +5908,33 @@ mod tests {
         assert!(value.contains("core_version="), "value: {}", value);
         assert!(value.contains("platform="), "value: {}", value);
         assert!(value.contains("backends="), "value: {}", value);
+        assert!(!value.contains("ci="), "no CI label outside CI: {}", value);
+    }
+
+    #[test]
+    fn apply_client_header_labels_ci_runs() {
+        let client = RegistryClient::with_url("http://127.0.0.1:1")
+            .unwrap()
+            .with_binding("python");
+        let req = client.agent.get("http://127.0.0.1:1/v1/models");
+        let req = client.apply_client_header_with(req, false, true);
+        let value = req.header(CLIENT_HEADER_NAME).unwrap();
+        assert!(value.starts_with("binding=python;"), "value: {}", value);
+        assert!(value.ends_with("; ci=1"), "value: {}", value);
     }
 
     #[test]
     fn apply_client_header_omits_header_when_opted_out() {
         let client = RegistryClient::with_url("http://127.0.0.1:1").unwrap();
-        let req = client.agent.get("http://127.0.0.1:1/v1/models");
-        let req = client.apply_client_header_with_optout(req, true);
-        assert_eq!(
-            req.header(CLIENT_HEADER_NAME),
-            None,
-            "no header on the wire when telemetry is opted out"
-        );
+        for ci in [false, true] {
+            let req = client.agent.get("http://127.0.0.1:1/v1/models");
+            let req = client.apply_client_header_with(req, true, ci);
+            assert_eq!(
+                req.header(CLIENT_HEADER_NAME),
+                None,
+                "no header on the wire when telemetry is opted out (ci={ci})"
+            );
+        }
     }
 
     #[test]
@@ -5879,7 +5943,7 @@ mod tests {
             .unwrap()
             .with_binding("flutter");
         let req = client.agent.get("http://127.0.0.1:1/v1/models");
-        let req = client.apply_client_header_with_optout(req, false);
+        let req = client.apply_client_header_with(req, false, false);
         let value = req.header(CLIENT_HEADER_NAME).unwrap();
         assert!(
             value.starts_with("binding=flutter;"),
@@ -5893,9 +5957,10 @@ mod tests {
     //
     // These exercise the actual HTTP path through `list_models`, `get_model`,
     // and `resolve` against a local httpmock instance. The opt-in/opt-out
-    // matrix is covered by the in-process `apply_client_header_with_optout`
-    // tests above (the OnceLock cache in `is_telemetry_opted_out` makes a
-    // process-wide flip impractical here).
+    // and CI-label matrix is covered by the in-process
+    // `apply_client_header_with` tests above (the OnceLock caches in
+    // `is_telemetry_opted_out` and `is_ci` make a process-wide flip
+    // impractical here).
     // ------------------------------------------------------------------------
 
     #[test]
@@ -5909,7 +5974,9 @@ mod tests {
         // as a test failure, not a silent pass.
         use httpmock::prelude::*;
 
-        let expected = build_client_header_with_optout("flutter", false)
+        // The wire path reads the process's CI decision, so the expected
+        // value does too (`; ci=1` when the suite itself runs under CI).
+        let expected = build_client_header_with("flutter", false, is_ci())
             .expect("header must be built when not opted out");
 
         let server = MockServer::start();
@@ -6348,7 +6415,7 @@ mod tests {
         // XYBRID_TELEMETRY_OPTOUT=1), no X-Xybrid-Client header reaches the
         // wire. We can't flip the process-wide OnceLock cache that
         // `is_telemetry_opted_out` keeps, so this test exercises the wire path
-        // through `apply_client_header_with_optout(_, true)` directly. The
+        // through `apply_client_header_with(_, true, _)` directly. The
         // mock fails the match if the header is present (header(name, "")
         // requires equality, which a missing header satisfies as None).
         use httpmock::prelude::*;
@@ -6376,7 +6443,7 @@ mod tests {
 
         let client = RegistryClient::with_url(server.base_url()).unwrap();
         let url = format!("{}/v1/models", server.base_url());
-        let req = client.apply_client_header_with_optout(client.agent.get(&url), true);
+        let req = client.apply_client_header_with(client.agent.get(&url), true, true);
         let response = req.call().expect("request should reach mock server");
         assert_eq!(response.status(), 200);
 

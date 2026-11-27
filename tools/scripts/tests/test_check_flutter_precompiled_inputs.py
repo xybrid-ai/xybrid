@@ -220,8 +220,8 @@ class HistoryTests(GitFixture):
         self.assertEqual(result.culprits, (change,))
 
     def test_reverting_a_native_change_still_fails(self):
-        # A run may have built the release while the change was in (test-ci.yml
-        # can precompile any commit), so only moving the hash settles it.
+        # A run may have built the release while the change was in (a
+        # precompile run can build any commit), so only moving the hash settles it.
         self.cut_release()
         change = self.commit("fix(core): native fix", {CORE_SRC: "pub fn run() { fixed() }\n"})
         self.git("revert", "--no-edit", "HEAD")

@@ -1379,8 +1379,7 @@ pub struct InferenceResult {
     pub output_type: OutputType,
     pub model_id: String,
     pub latency_ms: u32,
-    /// Where this result actually came from. Cloud fallback keeps `model_id`
-    /// identical on both legs, so this is the only way to tell them apart.
+    /// Where this result actually came from, even when both legs requested the same model id.
     pub execution_target: ExecutionTarget,
     pub metrics: InferenceMetrics,
     /// Tool calls the model emitted this turn.
@@ -2093,6 +2092,126 @@ impl VoiceInfo {
 // Model loader + model handle
 // ============================================================================
 
+/// Prepares a raw GGUF file for a directory load and returns that directory.
+///
+/// Generates `model_metadata.json` from the GGUF header and writes it beside
+/// the file unless one is already there, so a second call writes nothing and
+/// a hand-written metadata file is never replaced. The sidecar appears whole
+/// or not at all, so concurrent calls for one file are safe. A bare file name
+/// (`model.gguf`) resolves to the current directory, `.`. The returned
+/// directory is what `xybrid_sdk::ModelLoader::from_directory` expects.
+///
+/// This reads the GGUF header and may write the sidecar, so call it off a UI
+/// thread. [`ModelLoader::from_model_file`] is this step plus a directory
+/// loader.
+///
+/// # Errors
+///
+/// [`Error::ConfigError`] when `path` is empty or names no file, or when the
+/// metadata cannot be generated; [`Error::IoError`] when the sidecar cannot be
+/// written, for example into a read-only app bundle or on a filesystem that
+/// does not support hard links. An existing sidecar does not need a hard link.
+pub fn prepare_model_file(path: &str) -> Result<std::path::PathBuf> {
+    if path.is_empty() {
+        return Err(Error::ConfigError {
+            message: "path is empty".to_string(),
+        });
+    }
+    let gguf_path = std::path::Path::new(path);
+    if !gguf_path.exists() {
+        return Err(Error::ConfigError {
+            message: format!("GGUF file not found: {path}"),
+        });
+    }
+
+    let metadata = sdk::metadata_gen::generate_metadata_for_gguf_file(gguf_path).map_err(|e| {
+        Error::ConfigError {
+            message: format!("failed to generate metadata for GGUF file: {e}"),
+        }
+    })?;
+
+    let parent_dir = model_file_directory(gguf_path).ok_or_else(|| Error::ConfigError {
+        message: "cannot determine parent directory of GGUF file".to_string(),
+    })?;
+
+    // Write the sidecar only if absent, so re-loading the same file is
+    // idempotent and never clobbers a user-authored metadata file. It is
+    // published whole, so a concurrent first load never reads half of it.
+    let metadata_path = parent_dir.join("model_metadata.json");
+    if !metadata_path.exists() {
+        let json = serde_json::to_string_pretty(&metadata).map_err(|e| Error::ConfigError {
+            message: format!("failed to serialize metadata: {e}"),
+        })?;
+        publish_if_absent(&metadata_path, json.as_bytes()).map_err(|e| Error::IoError {
+            message: format!("failed to write model_metadata.json: {e}"),
+        })?;
+    }
+
+    Ok(parent_dir.to_path_buf())
+}
+
+/// Publishes `contents` as `path` unless a file is already there, without
+/// ever exposing a partial file. The bytes go to a uniquely named temporary
+/// file in the same directory, which is then hard-linked into place; a link
+/// never replaces an existing file. Losing that race to a concurrent call is
+/// success. If the filesystem cannot publish without replacement, this fails
+/// without modifying the destination.
+fn publish_if_absent(path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
+    publish_if_absent_with_link(path, contents, |source, destination| {
+        std::fs::hard_link(source, destination)
+    })
+}
+
+fn publish_if_absent_with_link(
+    path: &std::path::Path,
+    contents: &[u8],
+    link: impl FnOnce(&std::path::Path, &std::path::Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    use std::hash::{Hash, Hasher};
+    use std::io::{ErrorKind, Write};
+
+    // Process, thread and time keep concurrent writers on separate names;
+    // `create_new` refuses to share one if they ever collide.
+    let mut thread = std::collections::hash_map::DefaultHasher::new();
+    std::thread::current().id().hash(&mut thread);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("file");
+    let temporary = path.with_file_name(format!(
+        ".{name}.{}.{:x}.{nanos}.tmp",
+        std::process::id(),
+        thread.finish()
+    ));
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)?;
+    let written = file.write_all(contents);
+    drop(file);
+    let published = written.and_then(|()| match link(&temporary, path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error),
+    });
+    let _ = std::fs::remove_file(&temporary);
+    published
+}
+
+/// The directory a GGUF's sidecar belongs in: its parent, or `.` for a bare
+/// file name, whose parent is the empty path that no directory load accepts.
+fn model_file_directory(gguf_path: &std::path::Path) -> Option<&std::path::Path> {
+    match gguf_path.parent() {
+        Some(parent) if parent.as_os_str().is_empty() => Some(std::path::Path::new(".")),
+        parent => parent,
+    }
+}
+
 /// FFI-friendly model loader. Constructors return `Arc<Self>` so the same
 /// loader can be passed across threads or held by the host while the
 /// `load` future runs.
@@ -2115,8 +2234,8 @@ impl ModelLoader {
         })
     }
 
-    /// Registry load that serves from the cloud gateway while the weights
-    /// download in the background, instead of blocking on the download.
+    /// Try the registry id at the cloud gateway while the weights download.
+    /// Only ids also listed in the gateway catalog can be served remotely.
     ///
     /// Requires a resolvable API key, an uncached model, and a chat model the
     /// registry serves as a direct download (a GGUF or vision-language
@@ -2174,49 +2293,15 @@ impl ModelLoader {
 
     /// Load from a raw GGUF file: auto-generate `model_metadata.json` from the
     /// GGUF header (writing it next to the file if absent), then load the parent
-    /// directory. Mirrors the pre-bolt C ABI's `from_model_file`.
+    /// directory. Mirrors the pre-bolt C ABI's `from_model_file`; the sidecar
+    /// step is [`prepare_model_file`], which runs here, at construction.
     ///
     /// # Errors
     /// [`Error::ConfigError`] on an empty/missing path or metadata-generation
     /// failure; [`Error::IoError`] if the metadata sidecar can't be written.
     pub fn from_model_file(path: String) -> Result<Arc<Self>> {
-        if path.is_empty() {
-            return Err(Error::ConfigError {
-                message: "path is empty".to_string(),
-            });
-        }
-        let gguf_path = std::path::Path::new(&path);
-        if !gguf_path.exists() {
-            return Err(Error::ConfigError {
-                message: format!("GGUF file not found: {path}"),
-            });
-        }
-
-        let metadata =
-            sdk::metadata_gen::generate_metadata_for_gguf_file(gguf_path).map_err(|e| {
-                Error::ConfigError {
-                    message: format!("failed to generate metadata for GGUF file: {e}"),
-                }
-            })?;
-
-        let parent_dir = gguf_path.parent().ok_or_else(|| Error::ConfigError {
-            message: "cannot determine parent directory of GGUF file".to_string(),
-        })?;
-
-        // Write the sidecar only if absent, so re-loading the same file is
-        // idempotent and never clobbers a user-authored metadata file.
-        let metadata_path = parent_dir.join("model_metadata.json");
-        if !metadata_path.exists() {
-            let json = serde_json::to_string_pretty(&metadata).map_err(|e| Error::ConfigError {
-                message: format!("failed to serialize metadata: {e}"),
-            })?;
-            std::fs::write(&metadata_path, json).map_err(|e| Error::IoError {
-                message: format!("failed to write model_metadata.json: {e}"),
-            })?;
-        }
-
-        let inner = sdk::ModelLoader::from_directory(parent_dir.to_string_lossy().to_string())
-            .map_err(Error::from)?;
+        let directory = prepare_model_file(&path)?;
+        let inner = sdk::ModelLoader::from_directory(directory).map_err(Error::from)?;
         Ok(Arc::new(Self { inner }))
     }
 
@@ -2381,8 +2466,7 @@ impl XybridModel {
         self.inner.is_loaded()
     }
 
-    /// Whether runs are currently answered by the cloud because the local
-    /// weights are not ready yet. `false` for ordinary local models.
+    /// Whether a run would try the gateway because the local weights are not ready.
     pub fn is_cloud_serving(&self) -> bool {
         self.inner.is_cloud_serving()
     }
@@ -3478,8 +3562,8 @@ pub fn set_platform_url(url: String) {
     sdk::set_platform_url(&url);
 }
 
-/// Enable speculative cloud fallback globally: a registry chat model that
-/// isn't downloaded yet is served from the gateway while the weights download.
+/// Try the registry chat model's id at the gateway while its weights download.
+/// Only ids also listed in the gateway catalog can be served remotely.
 ///
 /// Only takes effect when an API key resolves. An uncached load asks the
 /// registry first, so other models (ASR, TTS, `.xyb` bundles) download and
@@ -5386,6 +5470,207 @@ stages:
             .unwrap()
             .load()
             .expect("a chat model loads through the facade");
+    }
+
+    /// A header-only GGUF: an `lfm3` model declaring a 262,144-token context,
+    /// the same bytes as the SDK's metadata-generation test.
+    fn write_gguf_header(path: &std::path::Path) {
+        const GGUF_TYPE_UINT32: u32 = 4;
+        const GGUF_TYPE_STRING: u32 = 8;
+        fn string(bytes: &mut Vec<u8>, value: &str) {
+            bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(value.as_bytes());
+        }
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3u32.to_le_bytes()); // version
+        bytes.extend_from_slice(&0u64.to_le_bytes()); // tensor count
+        bytes.extend_from_slice(&2u64.to_le_bytes()); // key-value count
+        string(&mut bytes, "general.architecture");
+        bytes.extend_from_slice(&GGUF_TYPE_STRING.to_le_bytes());
+        string(&mut bytes, "lfm3");
+        string(&mut bytes, "lfm3.context_length");
+        bytes.extend_from_slice(&GGUF_TYPE_UINT32.to_le_bytes());
+        bytes.extend_from_slice(&262_144u32.to_le_bytes());
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn prepare_model_file_reports_a_missing_or_empty_path() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let missing = dir.path().join("missing.gguf");
+        let missing = missing.to_string_lossy().to_string();
+
+        match prepare_model_file(&missing) {
+            Err(Error::ConfigError { message }) => {
+                assert_eq!(message, format!("GGUF file not found: {missing}"))
+            }
+            other => panic!("expected ConfigError, got {other:?}"),
+        }
+        assert!(matches!(
+            prepare_model_file(""),
+            Err(Error::ConfigError { .. })
+        ));
+        assert!(!dir.path().join("model_metadata.json").exists());
+        assert!(matches!(
+            ModelLoader::from_model_file(missing),
+            Err(Error::ConfigError { .. })
+        ));
+    }
+
+    #[test]
+    fn prepare_model_file_writes_a_capped_sidecar_beside_the_gguf() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let gguf = dir.path().join("LFM3-1.7B-Q4_0.gguf");
+        write_gguf_header(&gguf);
+        let gguf = gguf.to_string_lossy().to_string();
+
+        assert_eq!(prepare_model_file(&gguf).unwrap(), dir.path());
+
+        let sidecar: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("model_metadata.json")).unwrap(),
+        )
+        .unwrap();
+        let template = &sidecar["execution_template"];
+        assert_eq!(template["type"], "Gguf");
+        assert_eq!(template["model_file"], "LFM3-1.7B-Q4_0.gguf");
+        assert_eq!(template["context_length"], 4096);
+        assert_eq!(sidecar["metadata"]["max_context_length"], 262_144);
+
+        let loader = ModelLoader::from_model_file(gguf).unwrap();
+        assert_eq!(loader.source_type(), "directory");
+        loader.load().expect("the prepared directory loads");
+    }
+
+    #[test]
+    fn prepare_model_file_keeps_an_existing_sidecar() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let gguf = dir.path().join("model.gguf");
+        write_gguf_header(&gguf);
+        let gguf = gguf.to_string_lossy().to_string();
+        let sidecar = dir.path().join("model_metadata.json");
+        let authored = serde_json::json!({
+            "model_id": "authored",
+            "version": "1.0",
+            "execution_template": { "type": "Gguf", "model_file": "model.gguf" },
+            "files": [],
+        })
+        .to_string();
+        std::fs::write(&sidecar, &authored).unwrap();
+
+        prepare_model_file(&gguf).unwrap();
+        assert_eq!(std::fs::read_to_string(&sidecar).unwrap(), authored);
+
+        // A generated sidecar is left as it is on the next call too.
+        std::fs::remove_file(&sidecar).unwrap();
+        prepare_model_file(&gguf).unwrap();
+        let generated = std::fs::read(&sidecar).unwrap();
+        assert_eq!(prepare_model_file(&gguf).unwrap(), dir.path());
+        assert_eq!(std::fs::read(&sidecar).unwrap(), generated);
+    }
+
+    #[test]
+    fn publish_if_absent_writes_a_missing_file_and_leaves_no_temporary() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("model_metadata.json");
+
+        publish_if_absent(&path, b"generated").unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"generated");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn publish_if_absent_never_replaces_an_existing_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("model_metadata.json");
+        std::fs::write(&path, b"authored").unwrap();
+
+        publish_if_absent(&path, b"generated").unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"authored");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    /// A sidecar written in place could be seen by a second first load after
+    /// it was created and before it was complete, and that load then failed to
+    /// parse it. Every racing load must succeed and leave no temporary file.
+    #[test]
+    fn concurrent_first_loads_of_one_model_file_all_succeed() {
+        const LOADERS: usize = 8;
+        for _ in 0..20 {
+            let dir = tempfile::TempDir::new().unwrap();
+            let gguf = dir.path().join("model.gguf");
+            write_gguf_header(&gguf);
+            let gguf = gguf.to_string_lossy().to_string();
+            let start = std::sync::Barrier::new(LOADERS);
+            std::thread::scope(|scope| {
+                for _ in 0..LOADERS {
+                    scope.spawn(|| {
+                        start.wait();
+                        if let Err(error) = ModelLoader::from_model_file(gguf.clone()) {
+                            panic!("a concurrent first load failed: {error}");
+                        }
+                    });
+                }
+            });
+            let mut names: Vec<_> = std::fs::read_dir(dir.path())
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect();
+            names.sort();
+            assert_eq!(names, ["model.gguf", "model_metadata.json"]);
+        }
+    }
+
+    #[test]
+    fn sidecar_publication_fails_safely_without_hard_links() {
+        use std::io::{Error, ErrorKind};
+
+        for competing_writer in [false, true] {
+            let dir = tempfile::TempDir::new().unwrap();
+            let sidecar = dir.path().join("model_metadata.json");
+            let existing = b"user-authored metadata";
+            let error =
+                publish_if_absent_with_link(&sidecar, b"generated metadata", |source, target| {
+                    assert_eq!(std::fs::read(source).unwrap(), b"generated metadata");
+                    if competing_writer {
+                        std::fs::write(target, existing).unwrap();
+                    }
+                    Err(Error::new(ErrorKind::Unsupported, "hard links unavailable"))
+                })
+                .unwrap_err();
+
+            assert_eq!(error.kind(), ErrorKind::Unsupported);
+            if competing_writer {
+                assert_eq!(std::fs::read(&sidecar).unwrap(), existing);
+            } else {
+                assert!(!sidecar.exists());
+            }
+            assert_eq!(
+                std::fs::read_dir(dir.path()).unwrap().count(),
+                usize::from(competing_writer)
+            );
+        }
+    }
+
+    /// Tests the pure helper: a load relative to the process's working
+    /// directory would need `set_current_dir`, which races other tests.
+    #[test]
+    fn a_bare_model_file_name_resolves_to_the_current_directory() {
+        use std::path::Path;
+        assert_eq!(
+            model_file_directory(Path::new("m.gguf")),
+            Some(Path::new("."))
+        );
+        assert_eq!(
+            model_file_directory(Path::new("models/m.gguf")),
+            Some(Path::new("models"))
+        );
+        assert_eq!(
+            model_file_directory(Path::new("/m.gguf")),
+            Some(Path::new("/"))
+        );
+        assert_eq!(model_file_directory(Path::new("/")), None);
     }
 
     #[test]

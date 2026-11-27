@@ -119,7 +119,8 @@ pub struct StageDescriptor {
     /// Integration provider (required for integration target).
     /// E.g., OpenAI, Anthropic, Google, ElevenLabs.
     pub provider: Option<IntegrationProvider>,
-    /// Model identifier for integration targets (e.g., "gpt-4o-mini").
+    /// Model identifier for integration targets (e.g., "openai/gpt-4o-mini"
+    /// through the Xybrid gateway, "gpt-4o-mini" on a direct provider call).
     pub model: Option<String>,
     /// Stage-specific options (temperature, max_tokens, system_prompt, etc.).
     pub options: Option<StageOptions>,

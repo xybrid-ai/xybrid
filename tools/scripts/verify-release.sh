@@ -135,7 +135,7 @@ test_spm() {
 import PackageDescription
 let package = Package(
     name: "Verify",
-    platforms: [.iOS(.v13), .macOS(.v10_15)],
+    platforms: [.iOS(.v16)],
     products: [.executable(name: "Verify", targets: ["Verify"])],
     dependencies: [
         .package(url: "https://github.com/xybrid-ai/xybrid", from: "${VERSION}")
