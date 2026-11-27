@@ -23,6 +23,12 @@ irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-macos
 ```
 
+`platform-macos` does not include the MLX backend. Running SafeTensors models
+on MLX is a preview for Apple Silicon Macs: from a clone of the repository,
+run `./tools/scripts/build-local-mlx-xcframework.sh`, then build with
+`--features platform-macos,llm-mlx-runtime`. See
+[`docs/backends/mlx.md`](../../docs/backends/mlx.md).
+
 ## Quick Start
 
 ```bash
@@ -40,6 +46,9 @@ xybrid repl --model smollm2-360m --stream
 
 # Vision-language prompt (requires a vision-capable build and model)
 xybrid run --model lfm2-vl-450m --input-text "Describe this image" --input-image photo.jpg
+
+# Pin the local backend (auto | mlx | llamacpp | mistral)
+xybrid repl --model qwen3.5-0.8b --backend llamacpp --stream
 
 # Run any GGUF from HuggingFace
 xybrid run --huggingface "unsloth/SmolLM2-360M-Instruct-GGUF:Q4_K_M" --input-text "Hello!"

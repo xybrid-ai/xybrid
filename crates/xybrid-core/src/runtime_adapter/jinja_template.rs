@@ -1,26 +1,33 @@
-//! Minijinja fallback renderer for a GGUF's embedded chat template.
+//! Minijinja renderer for a model's own chat template.
 //!
-//! llama.cpp ships a hardcoded, *non-Jinja* matcher for chat templates: it
-//! recognises a fixed set of known families by sniffing for literal markers
-//! (`<start_of_turn>`, `<|im_start|>`, …) in the embedded template string.
-//! When a GGUF carries a real Jinja template that the matcher can't classify
-//! — e.g. gemma-4's 16 KB tool-calling template, which contains no literal
-//! `<start_of_turn>` — `llama_chat_apply_template` returns error code `-1`
-//! and native formatting hard-fails.
+//! A model ships the Jinja template it was trained with: embedded in a GGUF,
+//! or in an MLX bundle's `tokenizer_config.json` / `chat_template.jinja`.
+//! This module renders that template through [`minijinja`], a real Jinja
+//! engine, with the context HuggingFace's `apply_chat_template` builds, so
+//! the prompt is the one the model saw in training. Both local text backends
+//! render through it, and a template therefore means the same prompt on
+//! either.
 //!
-//! This module renders that same embedded template through [`minijinja`], a
-//! real Jinja engine, so the resulting raw prompt can be fed back into
-//! llama.cpp directly. It is the exact engine and context shape the MLX
-//! adapter uses for HuggingFace templates. [`super::chat::format_chat_prompt`]
-//! reaches for it in two cases: as a fallback when native formatting reports
-//! a template is present but unrenderable, and as the *primary* path for
-//! tool-bearing prompts — llama.cpp's `llama_chat_apply_template` takes only
-//! role/content pairs, so tool definitions can only reach the model through a
-//! real Jinja render. If minijinja also fails, the caller surfaces an error
-//! rather than substituting a different prompt family.
+//! The llama.cpp adapter needs it because llama.cpp ships a hardcoded,
+//! *non-Jinja* matcher for chat templates: it recognises a fixed set of known
+//! families by sniffing for literal markers (`<start_of_turn>`,
+//! `<|im_start|>`, …) in the embedded template string. When a GGUF carries a
+//! real Jinja template that the matcher can't classify (e.g. gemma-4's 16 KB
+//! tool-calling template, which contains no literal `<start_of_turn>`),
+//! `llama_chat_apply_template` returns error code `-1` and native formatting
+//! hard-fails. `llama_cpp::chat::format_chat_prompt` reaches for this module
+//! in two cases: as a fallback when native formatting reports a template is
+//! present but unrenderable, and as the *primary* path for tool-bearing
+//! prompts, since `llama_chat_apply_template` takes only role/content pairs
+//! and tool definitions can only reach the model through a real Jinja
+//! render. If minijinja also fails, the caller surfaces an error rather than
+//! substituting a different prompt family.
 //!
-//! There is no file I/O here: the template string and BOS/EOS tokens are
-//! supplied by the caller, which already holds the loaded [`LlamaModel`].
+//! The MLX adapter has no native formatter and renders every chat prompt
+//! here (`mlx::chat_template`).
+//!
+//! There is no file I/O and no model handle here: the template string and
+//! BOS/EOS tokens are supplied by the caller.
 
 use minijinja::value::Kwargs;
 use minijinja::{context, Environment, Value};
@@ -28,7 +35,7 @@ use minijinja_contrib::pycompat::unknown_method_callback;
 
 use crate::runtime_adapter::ChatMessage;
 
-/// Error from compiling or rendering a GGUF's embedded Jinja chat template.
+/// Error from compiling or rendering a model's Jinja chat template.
 #[derive(Debug, thiserror::Error)]
 pub(super) enum JinjaTemplateError {
     /// Template failed to compile (Jinja2 syntax error) or render (undefined
@@ -73,11 +80,11 @@ impl Default for RenderOptions {
     }
 }
 
-/// A GGUF's embedded Jinja chat template, ready to render message lists into
-/// raw prompt text.
+/// A model's Jinja chat template, ready to render message lists into raw
+/// prompt text.
 #[derive(Debug, Clone)]
 pub(super) struct JinjaChatTemplate {
-    /// The raw Jinja template string, as embedded in the GGUF.
+    /// The raw Jinja template string, as the model ships it.
     template: String,
     /// Optional BOS token (e.g. `<s>`) passed into the Jinja context as
     /// `bos_token` for templates that interpolate it.
@@ -108,7 +115,8 @@ impl JinjaChatTemplate {
 
     /// Render a message list to a prompt string. The Jinja context mirrors
     /// the HuggingFace transformers tokenizer's `apply_chat_template`, so a
-    /// template copied verbatim from a GGUF renders without modification.
+    /// template copied verbatim from a GGUF or an MLX bundle renders without
+    /// modification.
     pub(super) fn render(
         &self,
         messages: &[ChatMessage],

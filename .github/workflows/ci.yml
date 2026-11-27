@@ -15,8 +15,8 @@ on:
       lanes:
         description: >-
           Lanes to run, comma-separated: candle, whispercpp, policy_routing,
-          llamacpp, android, apple, flutter, react_native, unity_editor,
-          choice. Empty runs every lane.
+          llamacpp, mlx_runtime, android, apple, flutter, react_native,
+          unity_editor, choice. Empty runs every lane.
         type: string
         required: false
         default: ''
@@ -56,6 +56,7 @@ jobs:
       unity_editor: ${{ steps.filter.outputs.unity_editor }}
       choice: ${{ steps.filter.outputs.choice }}
       choice_gguf: ${{ steps.filter.outputs.choice_gguf }}
+      mlx_runtime: ${{ steps.filter.outputs.mlx_runtime }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Check changed paths
@@ -343,6 +344,94 @@ jobs:
         env:
           XYBRID_LLAMA_CPP_VULKAN: "1"
         run: cargo check -p xybrid-sdk --features platform-desktop
+
+  # The `llm-mlx` tier compiles everything about the MLX backend except the
+  # calls into MLX itself (selection, registry formats, config and weight
+  # validation, chat templates, sampling). It runs on Linux for every code
+  # change, with that tier's whole test suite, so a change to shared code that
+  # breaks the MLX adapter is caught here and the macOS job below can stay off
+  # pull requests that do not touch MLX.
+  check-mlx-non-linking:
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.full_ci == 'true'
+    name: check (llm-mlx non-linking, ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy
+          cache-key: ubuntu-mlx-non-linking
+      # The workspace clippy job never enables `llm-mlx`, so nothing else lints
+      # this tier.
+      - name: Clippy core MLX non-linking tier
+        run: cargo clippy -p xybrid-core --no-default-features --features llm-mlx --all-targets -- -D warnings
+      - name: Check SDK MLX non-linking tier
+        run: cargo check -p xybrid-sdk --no-default-features --features llm-mlx
+      - name: Check CLI MLX non-linking tier
+        run: cargo check -p xybrid-cli --no-default-features --features llm-mlx
+      - name: Test core MLX non-linking tier
+        run: cargo test -p xybrid-core --no-default-features --features llm-mlx --lib
+      - name: Test SDK MLX non-linking tier
+        run: cargo test -p xybrid-sdk --no-default-features --features llm-mlx --lib
+      - name: Test CLI MLX non-linking tier
+        run: cargo test -p xybrid-cli --no-default-features --features llm-mlx --bin xybrid
+      # `llm-mlx-runtime` is refused on every target but Apple Silicon macOS
+      # by one `cfg`, so this host proves it for iOS too. The check reuses
+      # this job's target directory: the dependencies are already built.
+      - name: Test MLX runtime platform gate
+        env:
+          XYBRID_MLX_GATE_TARGET_DIR: target
+        run: bash tools/scripts/test-mlx-runtime-gate.sh
+      - name: Test MLX xcframework fetch script pin status
+        run: bash tools/scripts/test-fetch-mlx-xcframework.sh
+      - name: Test MLX xcframework slice build script
+        run: bash tools/scripts/test-build-mlx-slice.sh
+      - name: Test local MLX xcframework source-build script
+        run: bash tools/scripts/test-build-local-mlx-xcframework.sh
+      - name: Test real-weight MLX test runner
+        run: bash tools/scripts/test-run-mlx-real-tests.sh
+      - name: Test MLX runtime-tier runner
+        run: bash tools/scripts/test-check-mlx-runtime.sh
+      - name: Test staged MLX fixture checks
+        run: bash tools/scripts/test-integration-download-staged.sh
+      - name: Test MLX benchmark wrapper host gates
+        run: bash tools/scripts/test-bench-scripts.sh
+
+  # The only ci.yml job that links MLX and runs it. It needs Apple Silicon
+  # and, while no xcframework release is pinned, a source build of MLX, so it
+  # runs for a change to the MLX backend itself (`mlx_runtime` in
+  # tools/scripts/ci_gate.py). Every other code change is covered by the
+  # `llm-mlx` job above, and test-mlx.yml runs this job's steps on master
+  # every night, which is where a change to shared code that compiles but
+  # breaks MLX at run time shows up.
+  check-mlx-runtime-macos:
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.mlx_runtime == 'true'
+    name: check (llm-mlx-runtime, macos)
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+      # One cache with the nightly job in test-mlx.yml, which builds the same
+      # tier on master every day and so keeps it from being evicted; this job
+      # runs too rarely on master to keep one alive itself.
+      - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: mlx-runtime-tier
+          per-image: 'true'
+      - name: Materialize the MLX xcframework
+        uses: ./.github/actions/mlx-xcframework
+      # One list of steps, shared with the nightly run in test-mlx.yml. A
+      # hosted runner's GPU is virtual and now and then rejects a command
+      # buffer; the script retries that one failure, recognized by MLX's
+      # message, and prints and counts every occurrence.
+      - name: Lint and test the MLX runtime tier
+        env:
+          XYBRID_MLX_GPU_RETRIES: 2
+        run: bash tools/scripts/check-mlx-runtime.sh
 
   clippy-llm:
     needs: tooling-changes
@@ -919,6 +1008,8 @@ jobs:
       - check-platform-desktop
       - check-vision-platforms
       - check-llamacpp-vulkan
+      - check-mlx-non-linking
+      - check-mlx-runtime-macos
       - clippy-llm
       - test-llm
       - test

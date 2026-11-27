@@ -32,6 +32,12 @@ inputs:
       differ (features, targets) use different keys so they do not overwrite
       each other's cache.
     default: ''
+  shared-key:
+    description: >
+      rust-cache's shared-key: one cache for jobs in different workflow files
+      that build the same thing (a pull-request job and its nightly run), which
+      a job-based key would keep apart. Use it instead of cache-key, not with it.
+    default: ''
   cache-bin:
     description: Cache ~/.cargo/bin. `false` keeps installed binaries out of a cache that does not need them.
     default: 'true'
@@ -55,6 +61,7 @@ runs:
       uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       with:
         key: ${{ inputs.cache-key }}
+        shared-key: ${{ inputs.shared-key }}
         cache-bin: ${{ inputs.cache-bin }}
         env-vars: ${{ inputs.per-image == 'true' && 'ImageOS' || '' }}
         save-if: ${{ github.ref == 'refs/heads/master' }}

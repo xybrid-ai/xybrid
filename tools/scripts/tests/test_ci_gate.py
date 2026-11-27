@@ -250,7 +250,7 @@ class ChangeSelectionTests(unittest.TestCase):
 class LaneTests(unittest.TestCase):
     """Each row reproduces the `paths:` filter of the workflow it replaced."""
 
-    BACKEND = {"candle", "whispercpp", "policy_routing", "llamacpp"}
+    BACKEND = {"candle", "whispercpp", "policy_routing", "llamacpp", "mlx_runtime"}
     SDK = {"android", "apple", "flutter", "react_native", "unity_editor"}
     CONFORMANCE = {"choice", "choice_gguf"}
 
@@ -310,6 +310,55 @@ class LaneTests(unittest.TestCase):
         for path, expected in cases.items():
             with self.subTest(path=path):
                 self.assertEqual(self.lanes(path), expected)
+
+    def test_the_mlx_lane_runs_on_the_backend_alone(self):
+        # MLX links on Apple Silicon macOS only, so its row is narrow: the
+        # backend, its adapter, tests and benchmarks, its pins, the scripts
+        # that build and run it and its setup action. Shared code is covered
+        # by ci.yml's `llm-mlx` non-linking job, which runs for every code
+        # change, and by the nightly test-mlx.yml.
+        selected = (
+            "crates/mlx-c-sys/build.rs",
+            "crates/xybrid-mlx/src/array.rs",
+            "crates/xybrid-core/src/runtime_adapter/mlx/generate.rs",
+            "crates/xybrid-core/src/runtime_adapter/selector.rs",
+            "crates/xybrid-core/src/execution/strategies/mlx_embedding.rs",
+            "crates/xybrid-core/tests/mlx_llm_chat.rs",
+            "crates/xybrid-core/benches/mlx_embedding.rs",
+            "crates/xybrid-core/benches/llm_backend_compare.rs",
+            "vendor/mlx-apple/UPSTREAM_VERSIONS.txt",
+            "tools/scripts/build-mlx-slice.sh",
+            "tools/scripts/check-mlx-runtime.sh",
+            "tools/scripts/test-fetch-mlx-xcframework.sh",
+            ".github/actions/mlx-xcframework/action.yml",
+            ".github/workflows/test-mlx.yml",
+            ".github/workflows/ci.yml",
+        )
+        for path in selected:
+            with self.subTest(path=path):
+                self.assertEqual(self.lanes(path, among={"mlx_runtime"}), {"mlx_runtime"})
+        for path in (
+            "crates/xybrid-core/src/ir/envelope.rs",
+            "crates/xybrid-core/src/runtime_adapter/llm.rs",
+            "crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs",
+            "crates/xybrid-core/tests/llama_cpp_chat.rs",
+            "crates/xybrid-sdk/src/registry_client.rs",
+            "crates/xybrid-cli/src/commands/run.rs",
+            "crates/xybrid-llama/src/generation.rs",
+            "crates/llama-cpp-sys/build.rs",
+            "macros/src/lib.rs",
+            "vendor/llama-cpp",
+            "Cargo.lock",
+            "Cargo.toml",
+            "crates/xybrid-core/Cargo.toml",
+            "crates/xybrid-bolt/src/lib.rs",
+            "bindings/kotlin/build.gradle.kts",
+            "bindings/web/src/index.ts",
+            ".github/workflows/build-mlx-xcframework.yml",
+            "vendor/mlx-apple/README.md",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(self.lanes(path, among={"mlx_runtime"}), set())
 
     def test_markdown_skips_the_lanes_that_excluded_it(self):
         self.assertEqual(self.lanes("crates/xybrid-core/src/audio/README.md"), set())
@@ -589,6 +638,16 @@ class RequiredGateTests(unittest.TestCase):
                 needs[job] = {"result": result}
                 with self.subTest(job=job, result=result), self.assertRaises(ValueError):
                     check_jobs(needs)
+
+    def test_the_mlx_runtime_job_is_required_only_when_the_lane_is_selected(self):
+        needs = self.needs("crates/xybrid-mlx/src/array.rs")
+        needs["check-mlx-runtime-macos"] = {"result": "skipped"}
+        with self.assertRaises(ValueError):
+            check_jobs(needs)
+        needs = self.needs("crates/xybrid-core/src/runtime_adapter/llm.rs")
+        needs["tooling-tests"] = {"result": "success"}
+        needs["check-mlx-runtime-macos"] = {"result": "skipped"}
+        check_jobs(needs)
 
     def test_a_gated_job_is_optional_only_when_its_inputs_are_untouched(self):
         needs = self.needs("crates/xybrid-core/src/lib.rs")

@@ -252,6 +252,29 @@ LANE_PATHS: Dict[str, List[str]] = {
         ".github/workflows/test-choice-conformance.yml",
         "!**.md",
     ],
+    # The MLX backend itself: the two MLX crates, the adapter, the selector
+    # and their tests and benchmarks in core, the MLX pins, the scripts that
+    # build and run it, its setup action and its nightly lane file. Shared
+    # code is deliberately absent: the `llm-mlx` non-linking job compiles and
+    # tests the adapter on Linux for every code change, and test-mlx.yml runs
+    # the MLX-linked steps on master every night, so the macOS runner starts
+    # only for a change to the backend.
+    "mlx_runtime": [
+        "crates/mlx-c-sys/**",
+        "crates/xybrid-mlx/**",
+        "crates/xybrid-core/src/runtime_adapter/mlx/**",
+        "crates/xybrid-core/src/runtime_adapter/selector.rs",
+        "crates/xybrid-core/src/execution/strategies/mlx_embedding.rs",
+        "crates/xybrid-core/tests/mlx_*.rs",
+        "crates/xybrid-core/benches/mlx_*.rs",
+        "crates/xybrid-core/benches/llm_backend_compare.rs",
+        # The pin pair and the xcframework slices built from it.
+        "vendor/mlx-apple/**",
+        "tools/scripts/*mlx*.sh",
+        ".github/actions/mlx-xcframework/**",
+        ".github/workflows/test-mlx.yml",
+        "!**.md",
+    ],
 }
 
 # Rows that narrow a step inside another lane rather than select a job: a
@@ -330,6 +353,7 @@ OPTIONAL_JOBS = {
     "react-native": "react_native",
     "unity-editor": "unity_editor",
     "choice-conformance": "choice",
+    "check-mlx-runtime-macos": "mlx_runtime",
 }
 ALWAYS_JOBS = {"tooling-changes", "repo-checks"}
 

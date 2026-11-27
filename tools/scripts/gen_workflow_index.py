@@ -66,6 +66,7 @@ WORKFLOW_FILES = frozenset(
         "build-android.yml",
         "build-apple.yml",
         "build-flutter.yml",
+        "build-mlx-xcframework.yml",
         "build-natives.yml",
         "build-react-native.yml",
         "build-unity.yml",
@@ -83,6 +84,7 @@ WORKFLOW_FILES = frozenset(
         "test-choice-conformance.yml",
         "test-ci.yml",
         "test-decision-conformance.yml",
+        "test-mlx.yml",
         "test-zzz-android.yml",
         "test-zzz-engine.yml",
         "trusted-zzz-sdk.yml",
@@ -123,7 +125,12 @@ PULL_REQUEST_FILES = frozenset(
 # the Apple build, React Native's iOS build, and the choice lane's Qwen GGUF
 # job, which ran on every matching pull request from its own workflow before
 # ci.yml called it and now runs only when the paths it reads change.
-MACOS_JOB_BUDGET = 7
+#
+# 8: the MLX runtime job. MLX links on Apple Silicon macOS alone, so the one
+# job that runs it cannot share a runner with anything else; it is gated on
+# the `mlx_runtime` lane, which an ordinary pull request does not select, and
+# its nightly caller (test-mlx.yml) is outside the pull-request pipeline.
+MACOS_JOB_BUDGET = 8
 
 _PULL_REQUEST_EVENTS = ("pull_request", "pull_request_target")
 

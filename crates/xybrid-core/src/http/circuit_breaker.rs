@@ -169,28 +169,25 @@ impl CircuitBreaker {
 
         match current_state {
             STATE_CLOSED => true,
-            STATE_OPEN => {
-                // Check if we should transition to half-open
-                if self.open_duration_over() {
-                    // Transition to half-open
-                    if self
-                        .state
-                        .compare_exchange(
-                            STATE_OPEN,
-                            STATE_HALF_OPEN,
-                            Ordering::SeqCst,
-                            Ordering::SeqCst,
-                        )
-                        .is_ok()
-                    {
-                        self.half_open_requests.store(0, Ordering::SeqCst);
-                    }
-                    // Allow this request as the first half-open test
-                    self.take_test_request()
-                } else {
-                    false
+            // The open window has elapsed: transition to half-open and allow
+            // this request as the first half-open test.
+            STATE_OPEN if self.open_duration_over() => {
+                if self
+                    .state
+                    .compare_exchange(
+                        STATE_OPEN,
+                        STATE_HALF_OPEN,
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                    )
+                    .is_ok()
+                {
+                    self.half_open_requests.store(0, Ordering::SeqCst);
                 }
+                self.take_test_request()
             }
+            // Still refusing: the open window has not elapsed.
+            STATE_OPEN => false,
             // Allow limited requests in half-open state
             STATE_HALF_OPEN => self.take_test_request(),
             _ => false,

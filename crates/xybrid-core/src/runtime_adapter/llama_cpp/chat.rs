@@ -14,11 +14,13 @@
 
 mod functiongemma;
 
-use super::jinja_template::{JinjaChatTemplate, JinjaTemplateError, RenderOptions};
 use crate::gateway::Tool;
+use crate::runtime_adapter::jinja_template::{
+    JinjaChatTemplate, JinjaTemplateError, RenderOptions,
+};
 use crate::runtime_adapter::llm::LlmResult;
 use crate::runtime_adapter::streaming_postprocess::is_reasoning_primed;
-use crate::runtime_adapter::tool_call::{is_lfm3_template, ToolCallProtocol};
+use crate::runtime_adapter::tool_call::{is_lfm3_template, tool_names_rendered, ToolCallProtocol};
 use crate::runtime_adapter::{AdapterError, ChatMessage};
 use xybrid_llama::LlamaError;
 
@@ -169,29 +171,9 @@ fn render_with_tools(
     };
 
     // The tool shape is template-dependent, keyed on the template's own
-    // protocol markers:
-    //
-    // - Structured Gemma templates index `tool['function']['name']` — they
-    //   need the FULL OpenAI wrapper
-    //   ({"type": "function", "function": {...}}).
-    // - LFM2-family (and HF-generic `tojson`-the-entry) templates get the
-    //   BARE function objects ({name, description, parameters}): they inline
-    //   each entry verbatim into their system-prompt tool list, and the
-    //   wrapper shape is not what those models were trained on (verified
-    //   against the LFM2.5-230M/350M GGUF templates).
-    // - LFM3's template unwraps `tool.function` when present and lists the
-    //   function object either way, so it takes the bare shape too.
+    // protocol markers: see `ToolCallProtocol::template_tool_entries`.
     let protocol = ToolCallProtocol::detect_from_template(&template);
-    let entries = match protocol {
-        ToolCallProtocol::Gemma | ToolCallProtocol::FunctionGemma => tools
-            .iter()
-            .map(serde_json::to_value)
-            .collect::<Result<Vec<_>, _>>(),
-        ToolCallProtocol::Lfm2 | ToolCallProtocol::Lfm3 => tools
-            .iter()
-            .map(|tool| serde_json::to_value(&tool.function))
-            .collect::<Result<Vec<_>, _>>(),
-    };
+    let entries = protocol.template_tool_entries(tools);
     let entries = entries.map_err(|e| {
         AdapterError::InvalidInput(format!("tool definition failed to serialize: {e}"))
     })?;
@@ -214,16 +196,7 @@ fn render_with_tools(
 }
 
 fn ensure_tool_names_rendered(prompt: &str, tools: &[Tool]) -> LlmResult<()> {
-    let mut names = tools
-        .iter()
-        .map(|tool| tool.function.name.as_str())
-        .filter(|name| !name.is_empty());
-    let all_names_rendered = match names.next() {
-        Some(first_name) => prompt.contains(first_name) && names.all(|name| prompt.contains(name)),
-        None => false,
-    };
-
-    if all_names_rendered {
+    if tool_names_rendered(prompt, tools) {
         Ok(())
     } else {
         Err(AdapterError::InvalidInput(

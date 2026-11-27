@@ -18,10 +18,10 @@
 
 use crate::ir::Envelope;
 use crate::runtime_adapter::llm::GenerationOutput;
-// llamacpp-only on purpose: `streaming_postprocess` is not compiled for
-// mistral-only builds, and the mistral backend rejects tool-bearing
-// requests outright, so a continuation can never execute there.
-#[cfg(feature = "llm-llamacpp")]
+// Not for mistral-only builds on purpose: `streaming_postprocess` is not
+// compiled there, and the mistral backend rejects tool-bearing requests
+// outright, so a continuation can never execute there.
+#[cfg(any(feature = "llm-llamacpp", feature = "llm-mlx"))]
 use crate::runtime_adapter::streaming_postprocess::{
     is_reasoning_primed, strip_and_capture_thinking_tags_primed,
 };
@@ -147,7 +147,7 @@ fn finish_continuation_output(
     // After a prompt that ends inside `<think>`, a thought the budget cut
     // short has no marker at all. Priming text that is already split would
     // instead turn a truncated answer into reasoning.
-    #[cfg(feature = "llm-llamacpp")]
+    #[cfg(any(feature = "llm-llamacpp", feature = "llm-mlx"))]
     {
         let primed = raw_prompt.is_some_and(is_reasoning_primed);
         let truncated_by_budget = out.finish_reason == "length";

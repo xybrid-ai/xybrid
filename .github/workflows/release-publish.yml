@@ -318,6 +318,8 @@ jobs:
           # ggml via DEP_LLAMA_*), so it follows llama, and both precede core.
           publish_crate xybrid-whisper-sys
           publish_crate xybrid-whisper
+          publish_crate xybrid-mlx-sys
+          publish_crate xybrid-mlx
           publish_crate xybrid-zzz-sys
           publish_crate xybrid-observability
           publish_crate xybrid-core

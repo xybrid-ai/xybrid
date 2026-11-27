@@ -1,0 +1,161 @@
+# Purpose: Run the MLX backend on Apple Silicon nightly: real weights (Qwen 3 0.6B and LFM2.5 1.2B, MLX 4-bit) through chat, streaming, cancellation, two models at once, tool calling and the CLI, plus the whole MLX-linked test tier.
+name: "CI: MLX backend"
+
+# Two jobs, both on Apple Silicon, neither a required check.
+#
+# The real-weight job: ci.yml's MLX runtime job runs the backend on small
+# bundles with random weights. Those prove the plumbing; they cannot show that
+# a real model loads, that a quantized checkpoint decodes to language, or that
+# a chat template renders, or that a model offered a tool calls it. This job
+# stages two small real bundles, pinned by revision and checksum, and runs the
+# tests that otherwise skip.
+#
+# The runtime-tier job: ci.yml links MLX only for a pull request that touches
+# the MLX backend, so that the rest of the repository does not wait on a
+# macOS runner for it. A change to shared code can still compile on every
+# tier and break MLX at run time; this job runs ci.yml's MLX steps against
+# master every night to catch that within a day.
+#
+# Neither job declares a pull-request event: ci.yml validates pull requests
+# (README, "Adding CI"). ci.yml's `mlx_runtime` lane selects the MLX-linked
+# job, and this nightly is where the paths its row leaves out (`ci_gate.py`,
+# shared code) get covered anyway.
+on:
+  schedule:
+    # Nightly, off the hour and outside working hours in Europe and the US.
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+# The nightly run gets a group of its own, so a manual run and the night's
+# scheduled run never cancel each other.
+concurrency:
+  group: test-mlx-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # The steps of ci.yml's `check (llm-mlx-runtime, macos)`, from the same
+  # script, plus a release build of the two MLX benchmarks.
+  test-mlx-runtime-tier:
+    name: Test MLX runtime tier (nightly)
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+      # The cache ci.yml's `check (llm-mlx-runtime, macos)` restores: this
+      # nightly run is what keeps it warm on master. `per-image` keys it on the
+      # runner image, whose Xcode clang-runtime path the build output records.
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy
+          shared-key: mlx-runtime-tier
+          per-image: 'true'
+      - name: Materialize the MLX xcframework
+        uses: ./.github/actions/mlx-xcframework
+      - name: Lint and test the MLX runtime tier
+        env:
+          XYBRID_MLX_GPU_RETRIES: 2
+        run: bash tools/scripts/check-mlx-runtime.sh --benches
+
+  test-mlx-integration:
+    name: Test MLX (integration, real model)
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      MLX_FIXTURE: integration-tests/fixtures/models/qwen3-0.6b-4bit-mlx
+      # model.safetensors of mlx-community/Qwen3-0.6B-4bit at the revision
+      # models.json pins. The cache key and the check below both use it.
+      MLX_FIXTURE_SHA256: 392e8d466d56100ada00eb82031fb854297fc9e389b7d303eba3af114e87bce2
+      # LFM2.5 1.2B Instruct, MLX 4-bit: the bundle the tool-calling tests
+      # run on (its chat template lists tools; Qwen 3's call notation is not
+      # one the shared parser reads).
+      MLX_TOOLS_FIXTURE: integration-tests/fixtures/models/lfm2.5-1.2b-instruct-4bit-mlx
+      MLX_TOOLS_FIXTURE_SHA256: d837f243744bbdbe7dd032f90b482a1c45d5b6035b25c1d7804d0f4c74b5c004
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: macos-mlx-integration
+          per-image: 'true'
+
+      - name: Materialize the MLX xcframework
+        uses: ./.github/actions/mlx-xcframework
+
+      - name: Ensure download tooling (jq)
+        run: command -v jq >/dev/null || brew install jq
+
+      - name: Cache qwen3-0.6b-4bit-mlx
+        id: cache-fixture
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.MLX_FIXTURE }}
+          key: qwen3-0.6b-4bit-mlx-${{ env.MLX_FIXTURE_SHA256 }}-${{ hashFiles('integration-tests/fixtures/models/models.json') }}
+
+      - name: Download qwen3-0.6b-4bit-mlx
+        if: steps.cache-fixture.outputs.cache-hit != 'true'
+        run: ./integration-tests/download.sh qwen3-0.6b-4bit-mlx
+
+      - name: Cache lfm2.5-1.2b-instruct-4bit-mlx
+        id: cache-tools-fixture
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.MLX_TOOLS_FIXTURE }}
+          key: lfm2.5-1.2b-instruct-4bit-mlx-${{ env.MLX_TOOLS_FIXTURE_SHA256 }}-${{ hashFiles('integration-tests/fixtures/models/models.json') }}
+
+      - name: Download lfm2.5-1.2b-instruct-4bit-mlx
+        if: steps.cache-tools-fixture.outputs.cache-hit != 'true'
+        run: ./integration-tests/download.sh lfm2.5-1.2b-instruct-4bit-mlx
+
+      # download.sh verifies every file it fetches; this also covers a
+      # restored cache, so a mutable artifact cannot redefine the test.
+      - name: Verify the pinned weights
+        run: |
+          shasum -a 256 -c - <<EOF
+          ${MLX_FIXTURE_SHA256}  ${MLX_FIXTURE}/model.safetensors
+          ${MLX_TOOLS_FIXTURE_SHA256}  ${MLX_TOOLS_FIXTURE}/model.safetensors
+          EOF
+
+      # The Qwen bundle serves the full-precision and the quantized tests:
+      # it is a chat model, and it is 4-bit. The LFM2.5 bundle adds that
+      # architecture and the tool-calling cycle (call, tool result, answer).
+      # XYBRID_MLX_REQUIRE makes a test that cannot find its bundle fail
+      # instead of skip. The script runs each test in
+      # its own process (MLX aborts the process on some failures, and one
+      # abort must not hide the other tests or its own name), then all of
+      # them in one process, three times.
+      #
+      # A hosted runner's GPU is virtual, and now and then it rejects a
+      # command buffer; MLX returns that as an error carrying Metal's reason.
+      # The script retries that one failure, recognized by MLX's message, and
+      # prints and counts every occurrence. Any other failure or crash is
+      # final.
+      - name: Test MLX on real weights
+        env:
+          XYBRID_MLX_REQUIRE: XYBRID_MLX_QWEN_DIR,XYBRID_MLX_QWEN_4BIT_DIR,XYBRID_MLX_LFM25_DIR,XYBRID_MLX_LFM25_4BIT_DIR
+          XYBRID_MLX_TOGETHER_RUNS: 3
+          XYBRID_MLX_GPU_RETRIES: 2
+        run: |
+          export XYBRID_MLX_QWEN_DIR="${GITHUB_WORKSPACE}/${MLX_FIXTURE}"
+          export XYBRID_MLX_QWEN_4BIT_DIR="${GITHUB_WORKSPACE}/${MLX_FIXTURE}"
+          export XYBRID_MLX_LFM25_DIR="${GITHUB_WORKSPACE}/${MLX_TOOLS_FIXTURE}"
+          export XYBRID_MLX_LFM25_4BIT_DIR="${GITHUB_WORKSPACE}/${MLX_TOOLS_FIXTURE}"
+          ./tools/scripts/run-mlx-real-tests.sh llm-mlx-runtime
+
+      # The bundle through the whole stack: metadata routing, the SDK loader,
+      # the Metal library placed beside the binary, generation, CLI output.
+      - name: Run the bundle through the CLI
+        run: |
+          set -euo pipefail
+          cargo build -p xybrid-cli --no-default-features --features llm-mlx-runtime
+          ./target/debug/xybrid run --directory "${MLX_FIXTURE}" --backend mlx \
+            --input-text "What is the capital of France? Answer in one short sentence." \
+            --max-tokens 48 | tee "${RUNNER_TEMP}/mlx-cli.out"
+          grep -q "Inference completed successfully" "${RUNNER_TEMP}/mlx-cli.out"
+          grep -qi "paris" "${RUNNER_TEMP}/mlx-cli.out"

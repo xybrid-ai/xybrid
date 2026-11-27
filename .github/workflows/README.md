@@ -119,6 +119,7 @@ The pull-request pipeline (ci.yml, bazel.yml) and suites that run only on master
 | [`bazel.yml`](bazel.yml) | CI: Bazel | push to `master`, pull_request to `master`, workflow_dispatch | none | Bazel graph analysis and remote-execution targets; a required check that skips when no Bazel input changed. |
 | [`test-choice-conformance.yml`](test-choice-conformance.yml) | CI: Choice conformance | called by `ci.yml`, schedule (`23 5 * * *`), workflow_dispatch | none | Regenerate and verify choice-scoring conformance artifacts against pinned sha256s, then score FORMS through core, the Rust SDK and the CLI; daily cold rebuild. |
 | [`test-decision-conformance.yml`](test-decision-conformance.yml) | CI: Decision conformance | called by `ci.yml`, schedule (`41 5 * * *`), workflow_dispatch | none | Verify the decision corpus and run isolated preparation, finalization, matched CPU inference and SDK lifecycle checks against pinned d1 weights. |
+| [`test-mlx.yml`](test-mlx.yml) | CI: MLX backend | schedule (`23 3 * * *`), workflow_dispatch | none | Run the MLX backend on Apple Silicon nightly: real weights (Qwen 3 0.6B and LFM2.5 1.2B, MLX 4-bit) through chat, streaming, cancellation, two models at once, tool calling and the CLI, plus the whole MLX-linked test tier. |
 | [`ci.yml`](ci.yml) | CI: Workspace | push to `master`, pull_request to `master`, workflow_dispatch | checks | The pull-request pipeline: repository checks, Rust format, lint, tests and feature matrix, binding drift, API contract, observability, Python and Web SDKs, the backend lanes, and the SDK and conformance lanes it calls. Gates merges. |
 | [`test-zzz-android.yml`](test-zzz-android.yml) | CI: zzz Android AAR | push to `master`, workflow_dispatch | none | Build the arm64-v8a speech AAR on master with the pinned engine, gate it and its Gradle repackaging, then dlopen its x86_64 slice on an emulator. |
 | [`test-zzz-engine.yml`](test-zzz-engine.yml) | CI: zzz engine | push to `master`, workflow_dispatch | none | Fetch and verify the pinned Phonon/Kitten-only engine slices and link them into Rust tests on each pinned target. |
@@ -143,6 +144,7 @@ Publish reusable native artifacts and their download manifests.
 
 | File | Name | Triggers | Writes | Purpose |
 | --- | --- | --- | --- | --- |
+| [`build-mlx-xcframework.yml`](build-mlx-xcframework.yml) | Artifacts: MLX XCFramework | push to `master` of tags `mlx-v*`, workflow_dispatch | contents | Build the pinned MLX XCFramework from upstream sources and publish it on mlx-v* tags. |
 | [`build-natives.yml`](build-natives.yml) | Artifacts: Publish llama.cpp prebuilts | push to `master`, schedule (`17 6 * * 1`), workflow_dispatch | contents, packages, pull-requests | Publish prebuilt llama.cpp slices to ghcr.io and open the natives-manifest PR that lets plain cargo builds download them. |
 
 ### Release

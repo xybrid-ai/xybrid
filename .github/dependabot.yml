@@ -26,6 +26,7 @@ updates:
       - "/.github/actions/fetch-model"
       - "/.github/actions/free-disk-space"
       - "/.github/actions/install-boltffi"
+      - "/.github/actions/mlx-xcframework"
       - "/.github/actions/setup-rust"
       - "/.github/actions/setup-vulkan-sdk"
     schedule:
