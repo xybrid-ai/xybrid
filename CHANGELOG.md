@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **llama.cpp:** update to [v1.1.0](https://github.com/ggml-org/llama.cpp/releases/tag/v1.1.0) (commit `171527522610996f5f0acf12334e185156ca8f44`).
+
 - **llama.cpp:** update to [v1.0.0](https://github.com/ggml-org/llama.cpp/releases/tag/v1.0.0) (commit `b1b770d90d94cad9e9ea5b993bdbc383a522fb28`).
 
 - **llama.cpp:** update to [v0.9.0](https://github.com/ggml-org/llama.cpp/releases/tag/v0.9.0) (commit `cd959bae99ff4bed22bef2604f45241c09bbb8c8`).

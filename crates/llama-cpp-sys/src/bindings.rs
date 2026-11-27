@@ -161,7 +161,9 @@ pub const ggml_op_GGML_OP_CROSS_ENTROPY_LOSS_BACK: ggml_op = 95;
 pub const ggml_op_GGML_OP_OPT_STEP_ADAMW: ggml_op = 96;
 pub const ggml_op_GGML_OP_OPT_STEP_SGD: ggml_op = 97;
 pub const ggml_op_GGML_OP_GLU: ggml_op = 98;
-pub const ggml_op_GGML_OP_COUNT: ggml_op = 99;
+pub const ggml_op_GGML_OP_SLEEP: ggml_op = 99;
+pub const ggml_op_GGML_OP_SIGMOID_BACK: ggml_op = 100;
+pub const ggml_op_GGML_OP_COUNT: ggml_op = 101;
 pub type ggml_op = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -371,6 +373,12 @@ pub type llama_lazy_mode = ::std::os::raw::c_uint;
 pub const llama_context_type_LLAMA_CONTEXT_TYPE_DEFAULT: llama_context_type = 0;
 pub const llama_context_type_LLAMA_CONTEXT_TYPE_MTP: llama_context_type = 1;
 pub type llama_context_type = ::std::os::raw::c_uint;
+pub const llama_dflash_variant_LLAMA_DFLASH_VARIANT_NONE: llama_dflash_variant = -1;
+pub const llama_dflash_variant_LLAMA_DFLASH_VARIANT_DFLASH: llama_dflash_variant = 0;
+pub const llama_dflash_variant_LLAMA_DFLASH_VARIANT_DFLASH2: llama_dflash_variant = 1;
+pub const llama_dflash_variant_LLAMA_DFLASH_VARIANT_DSPARK: llama_dflash_variant = 2;
+pub const llama_dflash_variant_LLAMA_DFLASH_VARIANT_LILICORR: llama_dflash_variant = 3;
+pub type llama_dflash_variant = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct llama_token_data {
@@ -550,6 +558,15 @@ pub struct llama_model_quantize_params {
     pub tt_overrides: *const llama_model_tensor_override,
     pub prune_layers: *const i32,
     pub max_buf_size: usize,
+    pub activations: *const llama_model_imatrix_data,
+    pub statistics: *const llama_model_imatrix_data,
+    pub stats_schema: *const *const ::std::os::raw::c_char,
+    pub target_bpw: f32,
+    pub target_size: i64,
+    pub state_file: *const ::std::os::raw::c_char,
+    pub target_exclude: *const ggml_type,
+    pub abort_callback: ggml_abort_callback,
+    pub abort_callback_data: *mut ::std::os::raw::c_void,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -813,12 +830,21 @@ pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_SOPRANO: mtmd_gen_audio_type =
 pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_LFM3A: mtmd_gen_audio_type = 4;
 pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_CHATTERBOX: mtmd_gen_audio_type = 5;
 pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_DRAMA3: mtmd_gen_audio_type = 6;
+pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_ZONOS3: mtmd_gen_audio_type = 7;
+pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_YUE2: mtmd_gen_audio_type = 8;
+pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_MINIMAX_MUSIC3: mtmd_gen_audio_type = 9;
+pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_FISH_S2: mtmd_gen_audio_type = 10;
+pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_MOSHI: mtmd_gen_audio_type = 11;
+pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_KOKORO: mtmd_gen_audio_type = 12;
+pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_TINY_VOCA: mtmd_gen_audio_type = 13;
+pub const mtmd_gen_audio_type_MTMD_GEN_AUDIO_TYPE_VOXCPM2: mtmd_gen_audio_type = 14;
 pub type mtmd_gen_audio_type = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mtmd_gen_audio_info {
     pub type_: mtmd_gen_audio_type,
     pub sample_rate: i32,
+    pub n_channels: i32,
     pub model_variant: *const ::std::os::raw::c_char,
     pub n_voices: i32,
 }
@@ -840,6 +866,12 @@ pub struct mtmd_gen_inp {
     pub n_codes: usize,
     pub feats: *const f32,
     pub n_feats: usize,
+    pub speed: f32,
+    pub backbone_state: *const u8,
+    pub backbone_state_size: usize,
+    pub backbone_n_past: i32,
+    pub n_steps: i32,
+    pub cfg_scale: f32,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -865,11 +897,60 @@ pub struct mtmd_helper_video {
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_video_stream_info {
+    pub width: u32,
+    pub height: u32,
+    pub fps: f32,
+    pub n_frames: i32,
+    pub duration: f32,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_video_decoder {
+    pub open: ::std::option::Option<
+        unsafe extern "C" fn(
+            user_data: *mut ::std::os::raw::c_void,
+            path: *const ::std::os::raw::c_char,
+            buf: *const ::std::os::raw::c_uchar,
+            len: usize,
+            info: *mut mtmd_helper_video_stream_info,
+        ) -> *mut ::std::os::raw::c_void,
+    >,
+    pub start: ::std::option::Option<
+        unsafe extern "C" fn(
+            state: *mut ::std::os::raw::c_void,
+            width: u32,
+            height: u32,
+            fps: f32,
+            fps_picked: *mut bool,
+        ) -> bool,
+    >,
+    pub read_frame: ::std::option::Option<
+        unsafe extern "C" fn(
+            state: *mut ::std::os::raw::c_void,
+            rgb: *mut ::std::os::raw::c_uchar,
+            width: u32,
+            height: u32,
+        ) -> bool,
+    >,
+    pub read_audio: ::std::option::Option<
+        unsafe extern "C" fn(
+            state: *mut ::std::os::raw::c_void,
+            sample_rate: ::std::os::raw::c_int,
+            n_samples: *mut usize,
+        ) -> *const f32,
+    >,
+    pub close: ::std::option::Option<unsafe extern "C" fn(state: *mut ::std::os::raw::c_void)>,
+    pub user_data: *mut ::std::os::raw::c_void,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct mtmd_helper_video_init_params {
     pub fps_target: f32,
     pub ffmpeg_bin_dir: *const ::std::os::raw::c_char,
     pub timestamp_interval_ms: i64,
     pub no_soundtrack: bool,
+    pub decoder: *const mtmd_helper_video_decoder,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -881,6 +962,21 @@ pub struct mtmd_helper_init_opt {
 pub struct mtmd_helper_bitmap_wrapper {
     pub bitmap: *mut mtmd_bitmap,
     pub video_ctx: *mut mtmd_helper_video,
+}
+pub const mtmd_helper_media_type_MTMD_HELPER_MEDIA_TYPE_UNKNOWN: mtmd_helper_media_type = 0;
+pub const mtmd_helper_media_type_MTMD_HELPER_MEDIA_TYPE_IMAGE: mtmd_helper_media_type = 1;
+pub const mtmd_helper_media_type_MTMD_HELPER_MEDIA_TYPE_AUDIO: mtmd_helper_media_type = 2;
+pub const mtmd_helper_media_type_MTMD_HELPER_MEDIA_TYPE_VIDEO: mtmd_helper_media_type = 3;
+pub type mtmd_helper_media_type = ::std::os::raw::c_uint;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_media_meta {
+    pub type_: mtmd_helper_media_type,
+    pub width: u32,
+    pub height: u32,
+    pub sample_rate: i32,
+    pub duration: f32,
+    pub n_frames: i32,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -919,6 +1015,7 @@ pub struct mtmd_helper_cap {
     pub audio: bool,
     pub video: bool,
     pub audio_stream: bool,
+    pub audio_duplex: bool,
     pub text_gen: bool,
     pub audio_gen: bool,
     pub audio_gen_spk_ref: bool,
@@ -952,11 +1049,16 @@ pub struct mtmd_helper_gen_audio_inp {
     pub n_past: i32,
     pub out_mode: mtmd_helper_gen_audio_out_mode,
     pub speaker_ref: *mut mtmd_bitmap,
+    pub speaker_ref_text: *const ::std::os::raw::c_char,
     pub lang: *const ::std::os::raw::c_char,
     pub top_k: i32,
     pub top_p: f32,
     pub temp: f32,
     pub seed: u32,
+    pub speed: f32,
+    pub loudness: f32,
+    pub cfg_scale: f32,
+    pub flow_steps: i32,
     pub out_type: mtmd_helper_gen_audio_outtype,
 }
 unsafe extern "C" {
